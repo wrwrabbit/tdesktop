@@ -61,6 +61,7 @@ struct StateRequest;
 struct TextState;
 class Media;
 class Reply;
+struct HistoryMessageRichPage;
 
 enum class Context : char {
 	History,
@@ -723,6 +724,8 @@ protected:
 	virtual void refreshDataIdHook();
 
 	[[nodiscard]] const Ui::Text::String &text() const;
+	[[nodiscard]] HistoryMessageRichPage *richpage();
+	[[nodiscard]] const HistoryMessageRichPage *richpage() const;
 	[[nodiscard]] int textHeightFor(int textWidth) const;
 	[[nodiscard]] int textRealWidth() const { return _textRealWidth; }
 	void validateText();

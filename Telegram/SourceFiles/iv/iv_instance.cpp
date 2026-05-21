@@ -181,44 +181,13 @@ struct LocalMarkdownTarget {
 }
 
 [[nodiscard]] QString RichMessageKey(FullMsgId itemId) {
-	return u"internal://rich_text?peer=%1&msg=%2"_q
+	return u"rich-message:%1:%2"_q
 		.arg(itemId.peer.value)
 		.arg(itemId.msg.bare);
 }
 
 [[nodiscard]] uint64 RichMessagePageId(FullMsgId itemId) {
 	return uint64(itemId.peer.value) ^ (uint64(itemId.msg.bare) << 1);
-}
-
-[[nodiscard]] MTPPage RichMessagePage(
-		const QString &url,
-		const MTPDrichMessage &data) {
-	auto flags = MTPDpage::Flags();
-	flags |= MTPDpage::Flag::f_v2;
-	if (data.is_part()) {
-		flags |= MTPDpage::Flag::f_part;
-	}
-	if (data.is_rtl()) {
-		flags |= MTPDpage::Flag::f_rtl;
-	}
-	return MTP_page(
-		MTP_flags(flags),
-		MTP_string(url),
-		MTP_vector<MTPPageBlock>(data.vblocks().v),
-		MTP_vector<MTPPhoto>(data.vphotos().v),
-		MTP_vector<MTPDocument>(data.vdocuments().v),
-		MTP_int(0));
-}
-
-void ProcessRichMessageMedia(
-		not_null<Main::Session*> session,
-		const MTPDrichMessage &data) {
-	for (const auto &photo : data.vphotos().v) {
-		session->data().processPhoto(photo);
-	}
-	for (const auto &document : data.vdocuments().v) {
-		session->data().processDocument(document);
-	}
 }
 
 void OpenRichMessageChannel(
@@ -407,7 +376,11 @@ private:
 		QString initialFragment,
 		not_null<WebPageData*> page);
 
-	void showWindowed(Prepared result, Source source, bool refresh);
+	void showWindowed(
+		Prepared result,
+		std::shared_ptr<const RichPage> richPage,
+		std::optional<Source> sourceFallback,
+		bool refresh);
 	void showHtmlWindowed(Prepared result, bool refresh);
 	void showMarkdownWindowed(
 		Markdown::MarkdownArticleContent content,
@@ -591,13 +564,18 @@ Shown::Shown(
 
 void Shown::prepare(not_null<Data*> data, const QString &hash) {
 	const auto weak = base::make_weak(this);
-	const auto source = data->source();
+	const auto richPage = data->richPage();
+	const auto sourceFallback = data->sourceFallback();
 
 	_preparing = true;
 	const auto id = _id = data->id();
-	data->prepare({}, [=, source = source](Prepared result) {
+	data->prepare({}, [=, richPage = richPage, sourceFallback = sourceFallback](
+			Prepared result) {
 		result.hash = hash;
-		crl::on_main(weak, [=, source = source, result = std::move(result)]() mutable {
+		crl::on_main(weak, [=,
+				richPage = richPage,
+				sourceFallback = sourceFallback,
+				result = std::move(result)]() mutable {
 			result.url = id;
 			if (_id != id || !_preparing) {
 				return;
@@ -605,7 +583,11 @@ void Shown::prepare(not_null<Data*> data, const QString &hash) {
 			_preparing = false;
 			fillChannelJoinedValues(result);
 			fillEmbeds(std::move(result.embeds));
-			showWindowed(std::move(result), source, false);
+			showWindowed(
+				std::move(result),
+				richPage,
+				sourceFallback,
+				false);
 		});
 	});
 }
@@ -823,11 +805,16 @@ void Shown::createMarkdownController(
 	}, _markdownController->lifetime());
 }
 
-void Shown::showWindowed(Prepared result, Source source, bool refresh) {
+void Shown::showWindowed(
+		Prepared result,
+		std::shared_ptr<const RichPage> richPage,
+		std::optional<Source> sourceFallback,
+		bool refresh) {
 	if constexpr (true) {
 		const auto page = _session->data().webpage(result.pageId);
 		auto native = Markdown::TryPrepareNativeInstantView({
-			.source = &source,
+			.source = sourceFallback ? &*sourceFallback : nullptr,
+			.richPage = std::move(richPage),
 			.mediaRuntime = createMediaRuntime(page),
 		});
 		showMarkdownWindowed(
@@ -837,7 +824,8 @@ void Shown::showWindowed(Prepared result, Source source, bool refresh) {
 			page,
 			refresh);
 	} else {
-		Q_UNUSED(source);
+		Q_UNUSED(richPage);
+		Q_UNUSED(sourceFallback);
 		showHtmlWindowed(std::move(result), refresh);
 	}
 }
@@ -1282,15 +1270,24 @@ void Shown::moveTo(not_null<Data*> data, QString hash) {
 
 void Shown::update(not_null<Data*> data) {
 	const auto weak = base::make_weak(this);
-	const auto source = data->source();
+	const auto richPage = data->richPage();
+	const auto sourceFallback = data->sourceFallback();
 
 	const auto id = data->id();
-	data->prepare({}, [=, source = source](Prepared result) {
-		crl::on_main(weak, [=, source = source, result = std::move(result)]() mutable {
+	data->prepare({}, [=, richPage = richPage, sourceFallback = sourceFallback](
+			Prepared result) {
+		crl::on_main(weak, [=,
+				richPage = richPage,
+				sourceFallback = sourceFallback,
+				result = std::move(result)]() mutable {
 			result.url = id;
 			fillChannelJoinedValues(result);
 			fillEmbeds(std::move(result.embeds));
-			showWindowed(std::move(result), source, true);
+			showWindowed(
+				std::move(result),
+				richPage,
+				sourceFallback,
+				true);
 		});
 	});
 }
@@ -1740,8 +1737,8 @@ void Instance::showTonSite(
 void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
-	const auto richMessage = item->Get<HistoryMessageRichTextSource>();
-	if (!richMessage) {
+	const auto richPage = item->richPage();
+	if (!richPage) {
 		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
 		return;
 	} else if (Platform::IsMac()) {
@@ -1751,14 +1748,6 @@ void Instance::showRichMessage(
 	const auto itemId = item->fullId();
 	const auto key = RichMessageKey(itemId);
 	const auto title = item->history()->peer->name();
-	const auto &data = richMessage->data.data();
-	ProcessRichMessageMedia(session, data);
-
-	auto source = Source{
-		.pageId = RichMessagePageId(itemId),
-		.page = RichMessagePage(key, data),
-		.name = title,
-	};
 	auto clickHandlerContext = ClickHandlerContext();
 	clickHandlerContext.sessionWindow = controller;
 	clickHandlerContext.itemId = itemId;
@@ -1773,7 +1762,7 @@ void Instance::showRichMessage(
 			JoinRichMessageChannel(session, context);
 		});
 	auto prepared = Markdown::TryPrepareNativeInstantView({
-		.source = &source,
+		.richPage = richPage,
 		.mediaRuntime = std::move(mediaRuntime),
 	});
 	if (!prepared.supported()) {
@@ -1782,7 +1771,7 @@ void Instance::showRichMessage(
 	}
 	auto options = Markdown::OpenOptions{
 		.sourceName = title,
-		.currentPageId = source.pageId,
+		.currentPageId = RichMessagePageId(itemId),
 		.viewerKind = Markdown::ViewerKind::InstantView,
 		.clickHandlerContext = context,
 		.activateMedia = [=](

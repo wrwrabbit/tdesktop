@@ -460,6 +460,7 @@ public:
 	void setContent(MarkdownArticleContent content);
 
 	[[nodiscard]] int maxWidth();
+	[[nodiscard]] int lastLayoutWidth() const;
 
 	[[nodiscard]] int resizeGetHeight(int width);
 
@@ -583,6 +584,7 @@ private:
 	Fn<void()> _textRepaint;
 	Fn<void(QRect)> _textRepaintRect;
 	int _width = -1;
+	int _laidOutWidth = 0;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
 	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
@@ -648,6 +650,10 @@ int MarkdownArticle::Impl::maxWidth() {
 		markdown.pagePadding.left()
 			+ markdown.pagePadding.right()
 			+ 1);
+}
+
+int MarkdownArticle::Impl::lastLayoutWidth() const {
+	return _laidOutWidth;
 }
 
 int MarkdownArticle::Impl::resizeGetHeight(int width) {
@@ -926,6 +932,7 @@ void MarkdownArticle::Impl::stopPlaceholderRipple(
 
 void MarkdownArticle::Impl::invalidateLayout() {
 	_width = -1;
+	_laidOutWidth = 0;
 	_height = 0;
 	clearPendingHighlightBlockPointers();
 	_blocks.clear();
@@ -1239,6 +1246,11 @@ void MarkdownArticle::Impl::relayout(int width) {
 		page.top(),
 		innerWidth,
 		context);
+	_laidOutWidth = std::min(
+		width,
+		std::max(
+			BlockMaxRight(_blocks) + page.right(),
+			page.left() + page.right() + 1));
 	prunePlaceholderRuntimes();
 	RestoreRelatedArticleThumbnailStates(
 		&_blocks,
@@ -1284,6 +1296,10 @@ void MarkdownArticle::invalidateLayout() {
 
 int MarkdownArticle::maxWidth() const {
 	return const_cast<Impl*>(_impl.get())->maxWidth();
+}
+
+int MarkdownArticle::lastLayoutWidth() const {
+	return _impl->lastLayoutWidth();
 }
 
 int MarkdownArticle::resizeGetHeight(int width) {

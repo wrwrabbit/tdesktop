@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_data.h"
 
 #include "iv/iv_prepare.h"
+#include "iv/iv_rich_page.h"
 #include "core/cached_webview_availability.h"
 
 #include <QtCore/QRegularExpression>
@@ -45,44 +46,79 @@ Geo GeoPointFromId(QByteArray data) {
 	};
 }
 
-Data::Data(const MTPDwebPage &webpage, const MTPPage &page)
-: _source(std::make_unique<Source>(Source{
-	.pageId = webpage.vid().v,
-	.page = page,
-	.webpagePhoto = (webpage.vphoto()
-		? *webpage.vphoto()
-		: std::optional<MTPPhoto>()),
-	.webpageDocument = (webpage.vdocument()
-		? *webpage.vdocument()
-		: std::optional<MTPDocument>()),
-	.name = (webpage.vsite_name()
-		? qs(*webpage.vsite_name())
-		: SiteNameFromUrl(qs(webpage.vurl())))
-})) {
+Data::Data(
+	const MTPDwebPage &webpage,
+	const MTPPage &page,
+	std::shared_ptr<const RichPage> richPage,
+	const PhotoData *webpagePhoto,
+	const DocumentData *webpageDocument)
+: _pageId(webpage.vid().v)
+, _url(qs(webpage.vurl()))
+, _name(webpage.vsite_name()
+	? qs(*webpage.vsite_name())
+	: SiteNameFromUrl(_url))
+, _partial(page.match([](const MTPDpage &data) {
+		return data.is_part();
+	}, [](const auto &) {
+		return false;
+	}))
+, _richPage(std::move(richPage))
+, _webpagePhoto(webpagePhoto)
+, _webpageDocument(webpageDocument)
+, _pageFallback(page)
+, _webpagePhotoFallback(webpage.vphoto()
+	? std::optional<MTPPhoto>(*webpage.vphoto())
+	: std::optional<MTPPhoto>())
+, _webpageDocumentFallback(webpage.vdocument()
+	? std::optional<MTPDocument>(*webpage.vdocument())
+	: std::optional<MTPDocument>()) {
 }
 
 QString Data::id() const {
-	return qs(_source->page.data().vurl());
+	return _url;
 }
 
 bool Data::partial() const {
-	return _source->page.data().is_part();
+	return _partial;
 }
 
 Data::~Data() = default;
 
-const Source &Data::source() const {
-	return *_source;
+auto Data::richPage() const -> const std::shared_ptr<const RichPage> & {
+	return _richPage;
+}
+
+auto Data::sourceFallback() const -> std::optional<Source> {
+	if (!_pageFallback) {
+		return std::nullopt;
+	}
+	return Source{
+		.pageId = _pageId,
+		.richPage = _richPage,
+		.hasRawPage = true,
+		.page = *_pageFallback,
+		.webpagePhoto = _webpagePhotoFallback,
+		.webpageDocument = _webpageDocumentFallback,
+		.name = _name,
+		.updatedCachedViews = _updatedCachedViews,
+	};
 }
 
 void Data::updateCachedViews(int cachedViews) {
-	_source->updatedCachedViews = std::max(
-		_source->updatedCachedViews,
-		cachedViews);
+	_updatedCachedViews = std::max(_updatedCachedViews, cachedViews);
 }
 
 void Data::prepare(const Options &options, Fn<void(Prepared)> done) const {
-	crl::async([source = *_source, options, done = std::move(done)] {
+	crl::async([source = Source{
+			.pageId = _pageId,
+			.richPage = _richPage,
+			.hasRawPage = _pageFallback.has_value(),
+			.page = _pageFallback.value_or(MTPPage()),
+			.webpagePhoto = _webpagePhotoFallback,
+			.webpageDocument = _webpageDocumentFallback,
+			.name = _name,
+			.updatedCachedViews = _updatedCachedViews,
+		}, options, done = std::move(done)]() mutable {
 		done(Prepare(source, options));
 	});
 }

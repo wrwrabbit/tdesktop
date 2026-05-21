@@ -60,6 +60,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_download_manager.h"
 #include "data/data_web_page.h"
+#include "iv/iv_rich_page.h"
 #include "data/data_game.h"
 #include "data/data_poll.h"
 #include "data/data_replies_list.h"
@@ -4236,55 +4237,27 @@ void Session::webpageApplyFields(
 			}, [](const auto &) {});
 		}
 	}
-	if (const auto page = data.vcached_page()) {
-		for (const auto &photo : page->data().vphotos().v) {
-			processPhoto(photo);
-		}
-		for (const auto &document : page->data().vdocuments().v) {
-			processDocument(document);
-		}
-		const auto process = [&](
-				const MTPPageBlock &block,
-				const auto &self) -> void {
-			block.match([&](const MTPDpageBlockChannel &data) {
-				processChat(data.vchannel());
-			}, [&](const MTPDpageBlockCover &data) {
-				self(data.vcover(), self);
-			}, [&](const MTPDpageBlockEmbedPost &data) {
-				for (const auto &block : data.vblocks().v) {
-					self(block, self);
-				}
-			}, [&](const MTPDpageBlockCollage &data) {
-				for (const auto &block : data.vitems().v) {
-					self(block, self);
-				}
-			}, [&](const MTPDpageBlockSlideshow &data) {
-				for (const auto &block : data.vitems().v) {
-					self(block, self);
-				}
-			}, [&](const MTPDpageBlockDetails &data) {
-				for (const auto &block : data.vblocks().v) {
-					self(block, self);
-				}
-			}, [](const auto &) {});
-		};
-		for (const auto &block : page->data().vblocks().v) {
-			process(block, process);
-		}
-	}
 	const auto type = story ? WebPageType::Story : ParseWebPageType(data);
-	auto iv = (data.vcached_page() && !IgnoreIv(type))
-		? std::make_unique<Iv::Data>(data, *data.vcached_page())
+	const auto cachedPage = data.vcached_page();
+	const auto ivPhoto = photo ? processPhoto(*photo).get() : nullptr;
+	const auto ivDocument = document ? processDocument(*document).get() : nullptr;
+	auto iv = (cachedPage && !IgnoreIv(type))
+		? std::make_unique<Iv::Data>(
+			data,
+			*cachedPage,
+			Iv::ParseRichPage(_session, *cachedPage),
+			ivPhoto,
+			ivDocument)
 		: nullptr;
 	const auto resolvedPhoto = story
 		? story->photo()
 		: photo
-		? processPhoto(*photo).get()
+		? ivPhoto
 		: nullptr;
 	const auto resolvedDocument = story
 		? story->document()
 		: document
-		? processDocument(*document).get()
+		? ivDocument
 		: lookupThemeDocument();
 	const auto photoIsVideoCover = data.is_video_cover_photo()
 		|| (resolvedDocument

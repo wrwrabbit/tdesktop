@@ -11,6 +11,7 @@ struct GeoPointLocation;
 
 #include "data/data_location.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/text/text_utilities.h"
 #include "history/history_location_manager.h"
@@ -134,6 +135,79 @@ void MergeNativeIvDocumentInfo(
 	});
 }
 
+[[nodiscard]] uint64 CanonicalPhotoId(const Iv::RichPage::Block &data) {
+	return data.photoId;
+}
+
+[[nodiscard]] uint64 CanonicalPhotoId(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.photoId;
+}
+
+[[nodiscard]] uint64 CanonicalDocumentId(const Iv::RichPage::Block &data) {
+	return data.documentId;
+}
+
+[[nodiscard]] uint64 CanonicalDocumentId(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.documentId;
+}
+
+[[nodiscard]] int CanonicalWidth(const Iv::RichPage::Block &data) {
+	return data.width;
+}
+
+[[nodiscard]] int CanonicalWidth(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.width;
+}
+
+[[nodiscard]] int CanonicalHeight(const Iv::RichPage::Block &data) {
+	return data.height;
+}
+
+[[nodiscard]] int CanonicalHeight(
+		const Iv::RichPage::GroupedMediaItem &data) {
+	return data.height;
+}
+
+[[nodiscard]] bool PrepareNativeIvGroupedMediaItem(
+		const Iv::RichPage::GroupedMediaItem &item,
+		PreparedGroupedMediaItemData *result) {
+	switch (item.kind) {
+	case Iv::RichPage::BlockKind::Photo: {
+		const auto photoId = CanonicalPhotoId(item);
+		const auto width = CanonicalWidth(item);
+		const auto height = CanonicalHeight(item);
+		if (!photoId || width <= 0 || height <= 0) {
+			return false;
+		}
+		result->media.kind = PreparedMediaItemKind::Photo;
+		result->media.id = photoId;
+		result->media.width = width;
+		result->media.height = height;
+		result->media.spoiler = item.spoiler;
+		return true;
+	}
+	case Iv::RichPage::BlockKind::Video: {
+		const auto documentId = CanonicalDocumentId(item);
+		const auto width = CanonicalWidth(item);
+		const auto height = CanonicalHeight(item);
+		if (!documentId || width <= 0 || height <= 0) {
+			return false;
+		}
+		result->media.kind = PreparedMediaItemKind::Document;
+		result->media.id = documentId;
+		result->media.width = width;
+		result->media.height = height;
+		result->media.spoiler = item.spoiler;
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
 void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
@@ -212,6 +286,68 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	}
 	text->entities.push_back(EntityInText(type, from, length, data));
 	return true;
+}
+
+void RememberCanonicalInlineFormula(
+		const EntityInText &entity,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	if (entity.type() != EntityType::CustomEmoji) {
+		return;
+	}
+	const auto parsed = ParseInlineTextObjectEntity(entity.data());
+	if (!parsed || parsed->kind != InlineTextObjectKind::Formula) {
+		return;
+	}
+	const auto formula = std::get_if<InlineTextObjectFormulaData>(&parsed->data);
+	if (!formula) {
+		return;
+	}
+	(void)state->rememberFormula(
+		MathKind::Inline,
+		formula->copySource,
+		context.textSize,
+		context.renderWidthCap,
+		context.renderHeightCap);
+}
+
+void AppendCanonicalNativeIvRichText(
+		const Iv::RichPage::RichText &text,
+		PreparedIvRichText *result,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	const auto shift = result->text.text.size();
+	result->text.text.append(text.text.text);
+	result->text.entities.reserve(
+		result->text.entities.size() + text.text.entities.size());
+	for (const auto &entity : text.text.entities) {
+		if (entity.type() == EntityType::CustomUrl) {
+			continue;
+		}
+		RememberCanonicalInlineFormula(entity, state, context);
+		result->text.entities.push_back(EntityInText(
+			entity.type(),
+			entity.offset() + shift,
+			entity.length(),
+			entity.data()));
+	}
+	for (const auto &link : text.links) {
+		if (link.offset < 0
+			|| link.length <= 0
+			|| link.offset >= text.text.text.size()) {
+			continue;
+		}
+		const auto length = std::min(
+			link.length,
+			text.text.text.size() - link.offset);
+		(void)AddNativeIvPreparedLink(
+			&result->text,
+			&result->links,
+			shift + link.offset,
+			length,
+			link.target,
+			link.webpageId);
+	}
 }
 
 [[nodiscard]] int ScaleNativeIvFormulaCap(
@@ -718,6 +854,18 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return true;
 }
 
+[[nodiscard]] bool PrepareNativeIvCaption(
+		const Iv::RichPage::RichText &caption,
+		PreparedIvRichText *result,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state) {
+	return PrepareNativeIvRichText(
+		caption,
+		result,
+		blockAnchorId,
+		state);
+}
+
 } // namespace
 
 void RememberNativeIvPhoto(
@@ -844,6 +992,20 @@ bool PrepareNativeIvRichText(
 		blockAnchorId,
 		state,
 		context);
+}
+
+bool PrepareNativeIvRichText(
+		const Iv::RichPage::RichText &text,
+		PreparedIvRichText *result,
+		QString *blockAnchorId,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context) {
+	context = ResolveNativeIvRichTextContext(state, context);
+	if (blockAnchorId && blockAnchorId->isEmpty() && !text.anchorId.isEmpty()) {
+		*blockAnchorId = text.anchorId;
+	}
+	AppendCanonicalNativeIvRichText(text, result, state, context);
+	return true;
 }
 
 bool AppendPreparedIvRichBlock(
@@ -1086,6 +1248,192 @@ bool PrepareNativeIvGroupedMediaBlock(
 	SortPreparedIvRichText(&preparedCaption);
 	block.text = std::move(preparedCaption.text);
 	block.links = std::move(preparedCaption.links);
+	block.supplementary = true;
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvPhotoBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (!CanonicalPhotoId(data)
+		|| CanonicalWidth(data) <= 0
+		|| CanonicalHeight(data) <= 0) {
+		return true;
+	}
+	auto caption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Photo;
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.supplementary = true;
+	block.photo.id = GeneratePreparedMediaBlockId(state);
+	block.photo.photoId = CanonicalPhotoId(data);
+	block.photo.width = CanonicalWidth(data);
+	block.photo.height = CanonicalHeight(data);
+	block.photo.urlOverride = data.url;
+	block.photo.spoiler = data.spoiler;
+	block.photo.viewerOpen = true;
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvVideoBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (!CanonicalDocumentId(data)
+		|| CanonicalWidth(data) <= 0
+		|| CanonicalHeight(data) <= 0) {
+		return true;
+	}
+	auto caption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Video;
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.supplementary = true;
+	block.video.id = GeneratePreparedMediaBlockId(state);
+	block.video.media.kind = PreparedMediaItemKind::Document;
+	block.video.media.id = CanonicalDocumentId(data);
+	block.video.media.width = CanonicalWidth(data);
+	block.video.media.height = CanonicalHeight(data);
+	block.video.media.spoiler = data.spoiler;
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvAudioBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (!CanonicalDocumentId(data)) {
+		return true;
+	}
+	auto caption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Audio;
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.supplementary = true;
+	block.audio.id = GeneratePreparedMediaBlockId(state);
+	block.audio.documentId = CanonicalDocumentId(data);
+	block.audio.title = data.audioTitle;
+	block.audio.performer = data.audioPerformer;
+	block.audio.fileName = data.audioFileName;
+	block.audio.duration = data.audioDuration;
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvMapBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (!data.accessHash || data.width <= 0 || data.height <= 0) {
+		return true;
+	}
+	auto caption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(data.caption, &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Map;
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.supplementary = true;
+	block.map.id = GeneratePreparedMediaBlockId(state);
+	block.map.latitude = data.latitude;
+	block.map.longitude = data.longitude;
+	block.map.accessHash = data.accessHash;
+	block.map.width = data.width;
+	block.map.height = data.height;
+	block.map.zoom = data.zoom;
+	block.map.url = LocationClickHandler::Url(Data::LocationPoint(
+		data.latitude,
+		data.longitude,
+		Data::LocationPoint::NoAccessHash));
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvChannelBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto prepared = PreparedChannelBlockData();
+	prepared.channelId = data.channelId;
+	prepared.title = data.channelTitle;
+	prepared.username = data.username;
+	if (!prepared.channelId || prepared.title.isEmpty()) {
+		return true;
+	}
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Channel;
+	prepared.id = GeneratePreparedMediaBlockId(state);
+	block.channel = std::move(prepared);
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvGroupedMediaBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::GroupedMedia;
+	block.groupedMedia.id = GeneratePreparedMediaBlockId(state);
+	block.groupedMedia.intent = (data.mediaIntent
+		== Iv::RichPage::GroupedMediaIntent::Slideshow)
+		? PreparedGroupedMediaIntent::Slideshow
+		: PreparedGroupedMediaIntent::Collage;
+	block.groupedMedia.items.reserve(data.mediaItems.size());
+	for (const auto &item : data.mediaItems) {
+		auto prepared = PreparedGroupedMediaItemData();
+		prepared.id = GeneratePreparedMediaBlockId(state);
+		if (!PrepareNativeIvGroupedMediaItem(item, &prepared)) {
+			continue;
+		}
+		block.groupedMedia.items.push_back(std::move(prepared));
+	}
+	if (block.groupedMedia.items.empty()) {
+		return true;
+	}
+	auto preparedCaption = PreparedIvRichText();
+	auto anchorId = QString();
+	if (!PrepareNativeIvCaption(
+			data.caption,
+			&preparedCaption,
+			&anchorId,
+			state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&preparedCaption);
+	block.text = std::move(preparedCaption.text);
+	block.links = std::move(preparedCaption.links);
+	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.supplementary = true;
 	result->push_back(std::move(block));
 	return true;

@@ -7,9 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-namespace Iv {
+#include "iv/iv_prepare.h"
 
-struct Source;
+#include <memory>
+#include <optional>
+
+class DocumentData;
+class PhotoData;
+
+namespace Iv {
+struct RichPage;
 
 struct Options {
 };
@@ -39,19 +46,36 @@ struct Geo {
 
 class Data final {
 public:
-	Data(const MTPDwebPage &webpage, const MTPPage &page);
+	Data(
+		const MTPDwebPage &webpage,
+		const MTPPage &page,
+		std::shared_ptr<const RichPage> richPage,
+		const PhotoData *webpagePhoto,
+		const DocumentData *webpageDocument);
 	~Data();
 
 	[[nodiscard]] QString id() const;
 	[[nodiscard]] bool partial() const;
-	[[nodiscard]] const Source &source() const;
+	[[nodiscard]] auto richPage() const
+		-> const std::shared_ptr<const RichPage> &;
+	[[nodiscard]] auto sourceFallback() const -> std::optional<Source>;
 
 	void updateCachedViews(int cachedViews);
 
 	void prepare(const Options &options, Fn<void(Prepared)> done) const;
 
 private:
-	const std::unique_ptr<Source> _source;
+	const uint64 _pageId = 0;
+	const QString _url;
+	const QString _name;
+	const bool _partial = false;
+	const std::shared_ptr<const RichPage> _richPage;
+	const PhotoData *_webpagePhoto = nullptr;
+	const DocumentData *_webpageDocument = nullptr;
+	const std::optional<MTPPage> _pageFallback;
+	const std::optional<MTPPhoto> _webpagePhotoFallback;
+	const std::optional<MTPDocument> _webpageDocumentFallback;
+	int _updatedCachedViews = 0;
 
 };
 

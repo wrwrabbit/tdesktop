@@ -9,6 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/history_item_reply_markup.h"
 
+#include <memory>
+
+namespace Iv {
+struct RichPage;
+} // namespace Iv
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -34,12 +40,11 @@ struct HistoryMessageEdition {
 	bool useSameSuggest = false;
 	bool savePreviousMedia = false;
 	bool invertMedia = false;
-	bool hasRichMessage = false;
 	TextWithEntities textWithEntities;
 	HistoryMessageMarkupData replyMarkup;
 	HistoryMessageRepliesData replies;
 	HistoryMessageSuggestInfo suggest;
-	MTPRichMessage richMessage;
+	std::shared_ptr<const Iv::RichPage> richPage;
 	const MTPMessageMedia *mtpMedia = nullptr;
 	const MTPMessageReactions *mtpReactions = nullptr;
 	const MTPFactCheck *mtpFactcheck = nullptr;

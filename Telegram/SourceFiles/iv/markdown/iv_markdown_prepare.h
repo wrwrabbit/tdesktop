@@ -20,8 +20,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 namespace Iv {
+struct RichPage;
 struct Source;
 } // namespace Iv
+
+class DocumentData;
+class PhotoData;
 
 namespace Iv::Markdown {
 
@@ -327,6 +331,9 @@ struct PrepareRequest {
 
 struct NativeInstantViewPrepareRequest {
 	const Iv::Source *source = nullptr;
+	std::shared_ptr<const Iv::RichPage> richPage;
+	const PhotoData *webpagePhoto = nullptr;
+	const DocumentData *webpageDocument = nullptr;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
 };
 

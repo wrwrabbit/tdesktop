@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_state.h"
 
 namespace Iv::Markdown {
@@ -66,8 +67,38 @@ void RememberNativeIvDocument(
 	QString placeholderLabel,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvPhotoBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvVideoBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvAudioBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvMapBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvChannelBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvGroupedMediaBlock(
+	const Iv::RichPage::Block &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvRichText(
 	const MTPRichText &text,
+	PreparedIvRichText *result,
+	QString *blockAnchorId,
+	NativeIvPrepareState *state,
+	NativeIvRichTextContext context = {});
+[[nodiscard]] bool PrepareNativeIvRichText(
+	const Iv::RichPage::RichText &text,
 	PreparedIvRichText *result,
 	QString *blockAnchorId,
 	NativeIvPrepareState *state,

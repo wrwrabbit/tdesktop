@@ -77,6 +77,10 @@ class Service;
 class ServiceMessagePainter;
 } // namespace HistoryView
 
+namespace Iv {
+struct RichPage;
+} // namespace Iv
+
 namespace Ui {
 struct ColorCollectible;
 } // namespace Ui
@@ -534,11 +538,12 @@ public:
 	[[nodiscard]] Data::Media *media() const {
 		return _media.get();
 	}
+	[[nodiscard]] auto richPage() const
+		-> std::shared_ptr<const Iv::RichPage>;
 	[[nodiscard]] bool computeDropForwardedInfo() const;
 	void setText(TextWithEntities textWithEntities);
-	void setRichMessage(MTPRichMessage data);
-	void clearRichMessage();
-	[[nodiscard]] TextWithEntities richMessageLinkText() const;
+	void setRichPage(std::shared_ptr<const Iv::RichPage> page);
+	void clearRichPage();
 
 	[[nodiscard]] MsgId replyToId() const;
 	[[nodiscard]] FullMsgId replyToFullId() const;
@@ -664,6 +669,10 @@ private:
 	}
 
 	[[nodiscard]] bool checkDiscussionLink(ChannelId id) const;
+	void updateSentContent(
+		const TextWithEntities &textWithEntities,
+		const MTPMessageMedia *media,
+		std::shared_ptr<const Iv::RichPage> richPage);
 
 	void setReplyMarkup(
 		HistoryMessageMarkupData &&markup,

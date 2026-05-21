@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
+#include "core/application.h"
 #include "core/click_handler_types.h" // ClickHandlerContext
 #include "core/ui_integration.h"
 #include "history/view/history_view_cursor_state.h"
@@ -29,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_summary_header.h"
 #include "history/view/history_view_view_button.h" // ViewButton.
 #include "history/history.h"
+#include "iv/iv_instance.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/share_box.h"
 #include "boxes/peers/tag_info_box.h"
@@ -81,6 +83,167 @@ constexpr auto kFullLineAppearFinalDuration = crl::time(120);
 constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 constexpr auto kMinWidthAppearDuration = crl::time(160);
+
+using PreparedLink = Iv::Markdown::PreparedLink;
+using PreparedLinkKind = Iv::Markdown::PreparedLinkKind;
+using MediaActivation = Iv::Markdown::MediaActivation;
+using MediaActivationKind = Iv::Markdown::MediaActivationKind;
+
+[[nodiscard]] QString OpenableTargetForPreparedLink(const PreparedLink &link) {
+	return link.fragment.isEmpty()
+		? link.target
+		: (link.target + u"#"_q + link.fragment);
+}
+
+[[nodiscard]] std::optional<EntityLinkData> ExternalEntityLinkData(
+		const PreparedLink &link) {
+	if (link.kind != PreparedLinkKind::External || link.target.isEmpty()) {
+		return std::nullopt;
+	}
+	switch (link.entityType) {
+	case EntityType::Url:
+	case EntityType::CustomUrl:
+	case EntityType::Email:
+		return EntityLinkData{
+			.text = !link.copyText.isEmpty() ? link.copyText : link.target,
+			.data = link.target,
+			.type = link.entityType,
+			.shown = link.shown,
+		};
+	default:
+		return std::nullopt;
+	}
+}
+
+[[nodiscard]] ClickHandler::TextEntity TextEntityForPreparedLink(
+		const PreparedLink &link) {
+	if (const auto external = ExternalEntityLinkData(link)) {
+		return {
+			.type = external->type,
+			.data = external->data,
+		};
+	}
+	return {};
+}
+
+[[nodiscard]] QString CopyTextForPreparedLink(const PreparedLink &link) {
+	if (const auto external = ExternalEntityLinkData(link)) {
+		return external->text;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::FootnoteBacklink:
+		return link.target.isEmpty() ? QString() : (u"#"_q + link.target);
+	case PreparedLinkKind::Footnote:
+		return !link.copyText.isEmpty() ? link.copyText : link.target;
+	case PreparedLinkKind::LocalFile:
+	case PreparedLinkKind::InstantViewPage:
+		return OpenableTargetForPreparedLink(link);
+	case PreparedLinkKind::External:
+		return link.target;
+	case PreparedLinkKind::RejectedRelative:
+	case PreparedLinkKind::ToggleDetails:
+		return QString();
+	}
+	return QString();
+}
+
+[[nodiscard]] QString CopyLabelForPreparedLink(const PreparedLink &link) {
+	if (const auto external = ExternalEntityLinkData(link)) {
+		return (external->type == EntityType::Email)
+			? Ui::Integration::Instance().phraseContextCopyEmail()
+			: Ui::Integration::Instance().phraseContextCopyLink();
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::RejectedRelative:
+	case PreparedLinkKind::ToggleDetails:
+		return QString();
+	case PreparedLinkKind::External:
+	case PreparedLinkKind::InstantViewPage:
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+	case PreparedLinkKind::LocalFile:
+		return tr::lng_context_copy_link(tr::now);
+	}
+	return QString();
+}
+
+[[nodiscard]] bool SamePreparedLink(
+		const std::optional<PreparedLink> &a,
+		const std::optional<PreparedLink> &b) {
+	if (!a || !b) {
+		return !a && !b;
+	}
+	return (a->index == b->index)
+		&& (a->kind == b->kind)
+		&& (a->target == b->target)
+		&& (a->fragment == b->fragment)
+		&& (a->copyText == b->copyText)
+		&& (a->entityType == b->entityType)
+		&& (a->shown == b->shown)
+		&& (a->webpageId == b->webpageId);
+}
+
+[[nodiscard]] bool SameEmbedRequest(
+		const Iv::Markdown::EmbedRequest &a,
+		const Iv::Markdown::EmbedRequest &b) {
+	return (a.resourceId == b.resourceId)
+		&& (a.fallbackUrl == b.fallbackUrl)
+		&& (a.width == b.width)
+		&& (a.height == b.height)
+		&& (a.fullWidth == b.fullWidth)
+		&& (a.fixedHeight == b.fixedHeight)
+		&& (a.allowScrolling == b.allowScrolling);
+}
+
+[[nodiscard]] bool SameMediaActivation(
+		const MediaActivation &a,
+		const MediaActivation &b) {
+	return (a.kind == b.kind)
+		&& (a.url == b.url)
+		&& SameEmbedRequest(a.embed, b.embed)
+		&& (a.placeholderId.value == b.placeholderId.value)
+		&& (a.photo.get() == b.photo.get())
+		&& (a.document.get() == b.document.get())
+		&& (a.channel.get() == b.channel.get());
+}
+
+class RichPageActionClickHandler final : public ClickHandler {
+public:
+	RichPageActionClickHandler(
+		Fn<void(ClickContext)> callback,
+		std::optional<PreparedLink> link = std::nullopt)
+	: _callback(std::move(callback))
+	, _link(std::move(link)) {
+	}
+
+	void onClick(ClickContext context) const override {
+		if (_callback) {
+			_callback(std::move(context));
+		}
+	}
+
+	QString url() const override {
+		return _link ? _link->target : QString();
+	}
+
+	QString copyToClipboardText() const override {
+		return _link ? CopyTextForPreparedLink(*_link) : QString();
+	}
+
+	QString copyToClipboardContextItemText() const override {
+		return _link ? CopyLabelForPreparedLink(*_link) : QString();
+	}
+
+	TextEntity getTextEntity() const override {
+		return _link ? TextEntityForPreparedLink(*_link) : TextEntity();
+	}
+
+private:
+	const Fn<void(ClickContext)> _callback;
+	const std::optional<PreparedLink> _link;
+};
 
 void ApplyRevealGradient(
 		not_null<const TextAppearing*> appearing,
@@ -318,9 +481,146 @@ Message::~Message() {
 	}
 }
 
+void HistoryMessageRichPage::Host::requestRepaint(QRect articleRect) {
+	if (const auto strong = owner.get()) {
+		crl::on_main(strong, [weak = owner, articleRect] {
+			if (const auto owner = weak.get()) {
+				owner->requestRichPageRepaint(articleRect);
+			}
+		});
+	}
+}
+
+void HistoryMessageRichPage::Host::requestRelayout(QRect articleRect) {
+	if (const auto strong = owner.get()) {
+		crl::on_main(strong, [weak = owner, articleRect] {
+			if (const auto owner = weak.get()) {
+				owner->requestRichPageRelayout(articleRect);
+			}
+		});
+	}
+}
+
 void Message::setInstantViewMediaRuntime(QString pageUrl) {
 	AddComponents(InstantViewMediaRuntime::Bit());
 	Get<InstantViewMediaRuntime>()->pageUrl = std::move(pageUrl);
+}
+
+bool Message::hasRichPage() const {
+	return (richpage() != nullptr);
+}
+
+void Message::requestRichPageRepaint(QRect articleRect) const {
+	Q_UNUSED(articleRect);
+	repaint();
+}
+
+void Message::requestRichPageRelayout(QRect articleRect) {
+	Q_UNUSED(articleRect);
+	if (const auto rich = const_cast<Message*>(this)->richpage()) {
+		rich->article.invalidateLayout();
+	}
+	setPendingResize();
+	history()->owner().requestViewResize(this);
+}
+
+void Message::activateRichPagePreparedLink(
+		const PreparedLink &link,
+		ClickContext context) const {
+	if (context.button != Qt::LeftButton
+		&& context.button != Qt::MiddleButton) {
+		return;
+	}
+	switch (link.kind) {
+	case PreparedLinkKind::External:
+		if (const auto data = ExternalEntityLinkData(link)) {
+			if (const auto handler = Ui::Integration::Instance()
+					.createLinkHandler(*data, Ui::Text::MarkedContext())) {
+				handler->onClick(std::move(context));
+			}
+		}
+		break;
+	case PreparedLinkKind::InstantViewPage: {
+		const auto target = OpenableTargetForPreparedLink(link);
+		if (target.isEmpty()) {
+			return;
+		}
+		if (const auto controller = ExtractController(context)) {
+			Core::App().iv().openWithIvPreferred(
+				controller,
+				target,
+				context.other);
+		} else {
+			UrlClickHandler::Open(target, context.other);
+		}
+	} break;
+	case PreparedLinkKind::Anchor:
+	case PreparedLinkKind::Footnote:
+	case PreparedLinkKind::FootnoteBacklink:
+		if (const auto controller = ExtractController(context)) {
+			Core::App().iv().showRichMessage(controller, data());
+		}
+		break;
+	case PreparedLinkKind::LocalFile: {
+		const auto target = OpenableTargetForPreparedLink(link);
+		if (!target.isEmpty()) {
+			UrlClickHandler::Open(target, context.other);
+		}
+	} break;
+	case PreparedLinkKind::RejectedRelative:
+		break;
+	case PreparedLinkKind::ToggleDetails:
+		if (const auto rich = const_cast<Message*>(this)->richpage()
+			; rich && rich->article.toggleDetails(link.target)) {
+			const_cast<Message*>(this)->requestRichPageRelayout(QRect());
+		}
+		break;
+	}
+}
+
+void Message::activateRichPageMedia(
+		const MediaActivation &activation,
+		ClickContext context) const {
+	if (context.button != Qt::LeftButton
+		&& context.button != Qt::MiddleButton) {
+		return;
+	}
+	switch (activation.kind) {
+	case MediaActivationKind::None:
+		break;
+	case MediaActivationKind::Embed:
+		if (!activation.embed.fallbackUrl.isEmpty()) {
+			HiddenUrlClickHandler::Open(
+				activation.embed.fallbackUrl,
+				context.other);
+		}
+		break;
+	case MediaActivationKind::ExternalUrl:
+		if (!activation.url.isEmpty()) {
+			HiddenUrlClickHandler::Open(activation.url, context.other);
+		}
+		break;
+	case MediaActivationKind::Photo:
+		if (activation.photo) {
+			activation.photo->open(context.button);
+		}
+		break;
+	case MediaActivationKind::Document:
+		if (activation.document) {
+			activation.document->open(context.button);
+		}
+		break;
+	case MediaActivationKind::OpenChannel:
+		if (activation.channel) {
+			activation.channel->open(context.button);
+		}
+		break;
+	case MediaActivationKind::JoinChannel:
+		if (activation.channel) {
+			activation.channel->join(context.button);
+		}
+		break;
+	}
 }
 
 void Message::refreshSuggestedInfo(
@@ -834,7 +1134,11 @@ QSize Message::performCountOptimalSize() {
 			maxWidth = std::max(maxWidth, st::msgMaxWidth);
 			accumulate_max(nonTextMax, st::msgMaxWidth);
 		}
-		minHeight = withVisibleText ? text().minHeight() : 0;
+		minHeight = withVisibleText
+			? hasRichPage()
+				? textHeightFor(bubbleTextWidth(textualWidth))
+				: text().minHeight()
+			: 0;
 		if (reactionsInBubble) {
 			const auto reactionsMaxWidth = st::msgPadding.left()
 				+ _reactions->maxWidth()
@@ -994,13 +1298,22 @@ QSize Message::performCountOptimalSize() {
 		}
 	}
 	if (bubble && withVisibleText && maxWidth < fullTextualWidth) {
-		minHeight -= text().minHeight();
+		minHeight -= hasRichPage()
+			? textHeightFor(bubbleTextWidth(bubbleTextualWidth()))
+			: text().minHeight();
 		minHeight += textHeightFor(bubbleTextWidth(maxWidth));
 	}
 	if (const auto appearing = Get<TextAppearing>()) {
-		appearing->geometryValid = false;
-		appearing->startedForText = false;
-		appearing->finalizing = item->isRegular();
+		if (hasRichPage()) {
+			appearing->widthAnimation.stop();
+			appearing->heightAnimation.stop();
+			appearing->use = false;
+			appearing->geometryValid = false;
+		} else {
+			appearing->geometryValid = false;
+			appearing->startedForText = false;
+			appearing->finalizing = item->isRegular();
+		}
 	}
 	return QSize(maxWidth, minHeight);
 }
@@ -2297,6 +2610,37 @@ void Message::paintText(
 		&& !context.gestureHorizontal.translation) {
 		return;
 	}
+	if (const auto rich = const_cast<Message*>(this)->richpage()) {
+		const auto clip = QRect(
+			QPoint(),
+			trect.size()).intersected(
+				context.clip.translated(-trect.topLeft()));
+		rich->article.setVisibleTopBottom(
+			std::clamp(clip.top(), 0, trect.height()),
+			std::clamp(clip.bottom() + 1, 0, trect.height()));
+		p.save();
+		p.translate(trect.topLeft());
+		rich->article.paint(p, clip, {
+			.pre = stm->preCache.get(),
+			.blockquote = context.quoteCache(
+				contentColorCollectible(),
+				contentColorIndex()),
+			.colors = context.st->highlightColors(),
+			.repaint = [weak = base::make_weak(const_cast<Message*>(this))] {
+				if (const auto owner = weak.get()) {
+					owner->requestRichPageRepaint(QRect());
+				}
+			},
+			.repaintRect = [weak = base::make_weak(const_cast<Message*>(this))](
+					QRect articleRect) {
+				if (const auto owner = weak.get()) {
+					owner->requestRichPageRepaint(articleRect);
+				}
+			},
+		});
+		p.restore();
+		return;
+	}
 	prepareCustomEmojiPaint(p, context, text());
 
 	const auto rippleLinkRange = (_linkRipple && _linkRipple->link)
@@ -2577,6 +2921,17 @@ void Message::clickHandlerPressedChanged(
 		&& IsRippleLink(handler)
 		&& !text().linkRangeFor(handler).empty()) {
 		startLinkRipple();
+	} else if (const auto rich = richpage()
+		; rich && (handler == rich->handler)) {
+		if (rich->handlerPlaceholderId) {
+			if (pressed) {
+				rich->article.addPlaceholderRipple(
+					rich->handlerPlaceholderId,
+					rich->handlerPlaceholderPoint);
+			} else {
+				rich->article.stopPlaceholderRipple(rich->handlerPlaceholderId);
+			}
+		}
 	} else if (_reactions) {
 		_reactions->clickHandlerPressedChanged(
 			handler,
@@ -3711,14 +4066,64 @@ bool Message::getStateText(
 	}
 	const auto item = this->textItem();
 	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
-		*outResult = TextState(item, text().getState(
-			point - trect.topLeft(),
-			std::max(textRealWidth(), trect.width()),
-			request.forText()));
-		if (outResult->link
-			&& IsRippleLink(outResult->link)
-			&& !text().linkRangeFor(outResult->link).empty()) {
-			recordLinkRipplePoint(point, trect.topLeft());
+		if (const auto rich = richpage()) {
+			const auto local = point - trect.topLeft();
+			const auto hit = rich->article.hitTest(
+				local,
+				request.flags | Ui::Text::StateRequest::Flag::LookupSymbol);
+			if (!hit.valid()) {
+				return false;
+			}
+			*outResult = TextState(item);
+			outResult->cursor = CursorState::None;
+			outResult->symbol = FullSelection.from;
+			outResult->afterSymbol = false;
+			if (hit.preparedLink || hit.mediaActivation.kind != MediaActivationKind::None) {
+				const auto prepared = hit.preparedLink;
+				const auto activation = hit.mediaActivation;
+				const auto reuse = SamePreparedLink(
+						rich->handlerPreparedLink,
+						prepared)
+					&& SameMediaActivation(
+						rich->handlerMediaActivation,
+						activation);
+				rich->handlerPlaceholderId = hit.mediaActivation.placeholderId;
+				rich->handlerPlaceholderPoint = hit.placeholderLocalPoint;
+				if (!reuse) {
+					rich->handlerPreparedLink = prepared;
+					rich->handlerMediaActivation = activation;
+					rich->handler = std::make_shared<RichPageActionClickHandler>(
+						[weak = base::make_weak(const_cast<Message*>(this)),
+							prepared,
+							activation](ClickContext context) {
+							if (const auto owner = weak.get()) {
+								if (prepared) {
+									owner->activateRichPagePreparedLink(
+										*prepared,
+										std::move(context));
+								} else {
+									owner->activateRichPageMedia(
+										activation,
+										std::move(context));
+								}
+							}
+						},
+						prepared);
+				}
+				outResult->link = rich->handler;
+			} else {
+				outResult->link = hit.state.link;
+			}
+		} else {
+			*outResult = TextState(item, text().getState(
+				point - trect.topLeft(),
+				std::max(textRealWidth(), trect.width()),
+				request.forText()));
+			if (outResult->link
+				&& IsRippleLink(outResult->link)
+				&& !text().linkRangeFor(outResult->link).empty()) {
+				recordLinkRipplePoint(point, trect.topLeft());
+			}
 		}
 		return true;
 	}
@@ -4243,7 +4648,13 @@ void Message::refreshDataIdHook() {
 }
 
 int Message::monospaceMaxWidth() const {
-	const auto fromText = hasVisibleText()
+	const auto fromText = hasRichPage()
+		? std::max(
+			textualMaxWidth()
+				- st::msgPadding.left()
+				- st::msgPadding.right(),
+			richpage()->article.lastLayoutWidth())
+		: hasVisibleText()
 		? text().countMaxMonospaceWidth()
 		: 0;
 	const auto fromMedia = this->media()
@@ -4262,6 +4673,14 @@ int Message::bubbleTextWidth(int bubbleWidth) const {
 
 int Message::bubbleTextualWidth() const {
 	const auto full = textualMaxWidth();
+	if (hasRichPage()) {
+		const auto innerWidth = bubbleTextWidth(full);
+		[[maybe_unused]] const auto laidOutHeight = textHeightFor(innerWidth);
+		const auto laidOutWidth = richpage()->article.lastLayoutWidth();
+		return st::msgPadding.left()
+			+ std::max(laidOutWidth, 1)
+			+ st::msgPadding.right();
+	}
 	const auto media = this->media();
 	if (!hasVisibleText()
 		|| !media
@@ -5270,7 +5689,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 	if (!mediaDisplayed && bubble && hasVisibleText()) {
 		const auto probeTextWidth = bubbleTextWidth(contentWidth);
 		[[maybe_unused]] const auto probe = textHeightFor(probeTextWidth);
-		if (!Get<TextAppearing>()) {
+		if (!Get<TextAppearing>() || hasRichPage()) {
 			const auto use = textRealWidth();
 			if (use > 0) {
 				const auto shrunk = std::max(
@@ -5288,6 +5707,9 @@ int Message::resizeContentGetHeight(int newWidth) {
 		: bottomInfoWidth;
 
 	auto appearing = Get<TextAppearing>();
+	if (hasRichPage()) {
+		appearing = nullptr;
+	}
 	if (appearing) {
 		if (appearing->textWidth != textWidth) {
 			appearing->geometryValid = false;
@@ -5469,6 +5891,13 @@ void Message::invalidateTextDependentCache() {
 }
 
 bool Message::textAppearValidate(not_null<TextAppearing*> appearing) {
+	if (hasRichPage()) {
+		appearing->widthAnimation.stop();
+		appearing->heightAnimation.stop();
+		appearing->use = false;
+		RemoveComponents(TextAppearing::Bit());
+		return false;
+	}
 	while (true) {
 		if (!textAppearCheckLine(appearing)) {
 			return false;
@@ -5682,13 +6111,16 @@ bool Message::hasVisibleText() const {
 	const auto textItem = this->textItem();
 	if (!textItem) {
 		return false;
+	}
+	const auto media = this->media();
+	if (hasRichPage()) {
+		return !media || !media->hideMessageText();
 	} else if (textItem->emptyText()) {
 		if (const auto media = textItem->media()) {
 			return media->storyExpired() || media->storyUnsupported();
 		}
 		return false;
 	}
-	const auto media = this->media();
 	return !media || !media->hideMessageText();
 }
 

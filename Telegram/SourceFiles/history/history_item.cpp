@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_unread_things.h"
 #include "history/history.h"
 #include "iv/iv_data.h"
+#include "iv/iv_rich_page.h"
 #include "mtproto/mtproto_config.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_isolated_emoji.h"
@@ -81,12 +82,6 @@ constexpr auto kMinLoginCode = 5;
 
 using ItemPreview = HistoryView::ItemPreview;
 
-[[nodiscard]] QString RichMessageInternalUrl(FullMsgId itemId) {
-	return u"internal://rich_text?peer=%1&msg=%2"_q
-		.arg(itemId.peer.value)
-		.arg(itemId.msg.bare);
-}
-
 template <typename T>
 [[nodiscard]] PreparedServiceText PrepareEmptyText(const T &) {
 	return PreparedServiceText();
@@ -144,6 +139,13 @@ template <typename T>
 		}
 	}
 	return false;
+}
+
+[[nodiscard]] auto ParsedRichPage(
+		not_null<Main::Session*> session,
+		const MTPRichMessage *richMessage)
+-> std::shared_ptr<const Iv::RichPage> {
+	return richMessage ? Iv::ParseRichPage(session, *richMessage) : nullptr;
 }
 
 [[nodiscard]] HistoryItemCommonFields ForwardedFields(
@@ -450,8 +452,9 @@ HistoryItem::HistoryItem(
 		_flags |= MessageFlag::Legacy;
 		createComponents(data);
 		if (const auto richMessage = data.vrich_message()) {
-			setRichMessage(*richMessage);
-			setText(richMessageLinkText());
+			const auto richPage = Iv::ParseRichPage(&history->session(), *richMessage);
+			setRichPage(richPage);
+			setText(Iv::FlattenRichPageSummary(richPage));
 		} else {
 			setText(UnsupportedMessageText());
 		}
@@ -482,8 +485,9 @@ HistoryItem::HistoryItem(
 			setMedia(*media);
 		}
 		if (const auto richMessage = data.vrich_message()) {
-			setRichMessage(*richMessage);
-			setText(richMessageLinkText());
+			const auto richPage = Iv::ParseRichPage(&history->session(), *richMessage);
+			setRichPage(richPage);
+			setText(Iv::FlattenRichPageSummary(richPage));
 		} else {
 			auto textWithEntities = TextWithEntities{
 				qs(data.vmessage()),
@@ -2197,19 +2201,19 @@ void HistoryItem::applyEdition(HistoryMessageEdition &&edition) {
 	const auto &checkedMedia = updatingSavedLocalEdit
 		? Get<HistoryMessageSavedMediaData>()->media
 		: _media;
-	if (edition.hasRichMessage) {
-		setRichMessage(std::move(edition.richMessage));
+	if (edition.richPage) {
+		setRichPage(edition.richPage);
 	} else {
-		clearRichMessage();
+		clearRichPage();
 	}
-	auto updatedText = edition.hasRichMessage
-		? richMessageLinkText()
+	auto updatedText = edition.richPage
+		? Iv::FlattenRichPageSummary(edition.richPage)
 		: (mediaCheck == MediaCheckResult::Unsupported)
 		? UnsupportedMessageText()
 		: checkedMedia
 		? edition.textWithEntities
 		: EnsureNonEmpty(edition.textWithEntities);
-	auto serviceText = (!edition.hasRichMessage
+	auto serviceText = (!edition.richPage
 		&& !checkedMedia
 		&& edition.textWithEntities.empty()
 		&& edition.mtpMedia)
@@ -2456,15 +2460,13 @@ void HistoryItem::applySentMessage(
 		const QString &text,
 		const MTPDupdateShortSentMessage &data,
 		bool wasAlready) {
-	const auto existingRichMessage = Get<HistoryMessageRichTextSource>();
+	const auto existingRichPage = Get<HistoryMessageRichPageSource>();
 	updateSentContent({
 		text,
 		Api::EntitiesFromMTP(
 			&_history->session(),
 			data.ventities().value_or_empty())
-		}, data.vmedia(), existingRichMessage
-			? &existingRichMessage->data
-			: nullptr);
+		}, data.vmedia(), existingRichPage ? existingRichPage->page : nullptr);
 	contributeToSlowmode(data.vdate().v);
 	if (!wasAlready) {
 		addToSharedMediaIndex();
@@ -2482,6 +2484,16 @@ void HistoryItem::updateSentContent(
 		const TextWithEntities &textWithEntities,
 		const MTPMessageMedia *media,
 		const MTPRichMessage *richMessage) {
+	updateSentContent(
+		textWithEntities,
+		media,
+		ParsedRichPage(&_history->session(), richMessage));
+}
+
+void HistoryItem::updateSentContent(
+		const TextWithEntities &textWithEntities,
+		const MTPMessageMedia *media,
+		std::shared_ptr<const Iv::RichPage> richPage) {
 	if (isEditingMedia()) {
 		return;
 	}
@@ -2491,11 +2503,11 @@ void HistoryItem::updateSentContent(
 	if (mediaCheck == MediaCheckResult::Unsupported) {
 		_flags &= ~MessageFlag::HasPostAuthor;
 		_flags |= MessageFlag::Legacy;
-		if (richMessage) {
-			setRichMessage(*richMessage);
-			setText(richMessageLinkText());
+		if (richPage) {
+			setRichPage(richPage);
+			setText(Iv::FlattenRichPageSummary(richPage));
 		} else {
-			clearRichMessage();
+			clearRichPage();
 			setText(UnsupportedMessageText());
 		}
 		setReplyMarkup(UnsupportedMessageMarkup());
@@ -2503,11 +2515,11 @@ void HistoryItem::updateSentContent(
 		if (_flags & MessageFlag::Legacy) {
 			_flags &= ~MessageFlag::Legacy;
 		}
-		if (richMessage) {
-			setRichMessage(*richMessage);
-			setText(richMessageLinkText());
+		if (richPage) {
+			setRichPage(richPage);
+			setText(Iv::FlattenRichPageSummary(richPage));
 		} else {
-			clearRichMessage();
+			clearRichPage();
 			setText(textWithEntities);
 		}
 	}
@@ -4109,24 +4121,22 @@ void HistoryItem::setText(TextWithEntities textWithEntities) {
 		: std::move(textWithEntities));
 }
 
-void HistoryItem::setRichMessage(MTPRichMessage data) {
-	AddComponents(HistoryMessageRichTextSource::Bit());
-	Get<HistoryMessageRichTextSource>()->data = std::move(data);
+auto HistoryItem::richPage() const -> std::shared_ptr<const Iv::RichPage> {
+	const auto source = Get<HistoryMessageRichPageSource>();
+	return source ? source->page : nullptr;
 }
 
-void HistoryItem::clearRichMessage() {
-	RemoveComponents(HistoryMessageRichTextSource::Bit());
+void HistoryItem::setRichPage(std::shared_ptr<const Iv::RichPage> page) {
+	if (page) {
+		AddComponents(HistoryMessageRichPageSource::Bit());
+		Get<HistoryMessageRichPageSource>()->page = std::move(page);
+	} else {
+		clearRichPage();
+	}
 }
 
-TextWithEntities HistoryItem::richMessageLinkText() const {
-	auto result = TextWithEntities{ u"Click to view Rich Text"_q };
-	result.entities.push_back({
-		EntityType::CustomUrl,
-		0,
-		result.text.size(),
-		RichMessageInternalUrl(fullId()),
-	});
-	return result;
+void HistoryItem::clearRichPage() {
+	RemoveComponents(HistoryMessageRichPageSource::Bit());
 }
 
 void HistoryItem::setTextValue(TextWithEntities text, bool force) {

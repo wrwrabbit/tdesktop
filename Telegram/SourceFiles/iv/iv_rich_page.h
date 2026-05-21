@@ -1,0 +1,191 @@
+/*
+This file is part of Telegram Desktop,
+the official desktop application for the Telegram messaging service.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#pragma once
+
+#include "base/basic_types.h"
+#include "ui/text/text_entity.h"
+
+#include <memory>
+#include <vector>
+
+class DocumentData;
+class PhotoData;
+class PeerData;
+
+namespace Main {
+class Session;
+} // namespace Main
+
+namespace Iv {
+
+struct RichPage {
+	struct RichLink {
+		int offset = 0;
+		int length = 0;
+		QString target;
+		uint64 webpageId = 0;
+	};
+	struct RichText {
+		TextWithEntities text;
+		QString anchorId;
+		std::vector<RichLink> links;
+	};
+	enum class BlockKind : uchar {
+		Unsupported,
+		Heading,
+		Paragraph,
+		AuthorDate,
+		Code,
+		Divider,
+		Anchor,
+		List,
+		Quote,
+		Photo,
+		Video,
+		Embed,
+		EmbedPost,
+		GroupedMedia,
+		Channel,
+		Audio,
+		Math,
+		Table,
+		Details,
+		RelatedArticles,
+		Map,
+	};
+	enum class ListKind : uchar {
+		Bullet,
+		Ordered,
+	};
+	enum class TaskState : uchar {
+		None,
+		Unchecked,
+		Checked,
+	};
+	enum class GroupedMediaIntent : uchar {
+		Collage,
+		Slideshow,
+	};
+	enum class TableAlignment : uchar {
+		Left,
+		Center,
+		Right,
+	};
+	enum class TableVerticalAlignment : uchar {
+		Top,
+		Middle,
+		Bottom,
+	};
+	struct Block;
+	struct ListItem {
+		TaskState taskState = TaskState::None;
+		QString number;
+		QString anchorId;
+		RichText text;
+		std::vector<Block> blocks;
+	};
+	struct GroupedMediaItem {
+		BlockKind kind = BlockKind::Unsupported;
+		PhotoData *photo = nullptr;
+		DocumentData *document = nullptr;
+		uint64 photoId = 0;
+		uint64 documentId = 0;
+		int width = 0;
+		int height = 0;
+		bool autoplay = false;
+		bool loop = false;
+		bool spoiler = false;
+	};
+	struct TableCell {
+		RichText text;
+		int colspan = 1;
+		int rowspan = 1;
+		bool header = false;
+		TableAlignment alignment = TableAlignment::Left;
+		TableVerticalAlignment verticalAlignment
+			= TableVerticalAlignment::Top;
+	};
+	struct TableRow {
+		std::vector<TableCell> cells;
+	};
+	struct RelatedArticle {
+		QString url;
+		uint64 webpageId = 0;
+		PhotoData *photo = nullptr;
+		uint64 photoId = 0;
+		QString title;
+		QString description;
+		QString author;
+		TimeId publishedDate = 0;
+	};
+	struct Block {
+		BlockKind kind = BlockKind::Unsupported;
+		QString anchorId;
+		RichText text;
+		RichText caption;
+		QString language;
+		QString formula;
+		QString url;
+		QString html;
+		QString author;
+		QString username;
+		QString channelTitle;
+		QString audioTitle;
+		QString audioPerformer;
+		QString audioFileName;
+		TimeId date = 0;
+		int audioDuration = 0;
+		int headingLevel = 0;
+		int width = 0;
+		int height = 0;
+		int zoom = 0;
+		uint64 photoId = 0;
+		uint64 documentId = 0;
+		uint64 channelId = 0;
+		bool fullWidth = false;
+		bool allowScrolling = false;
+		bool autoplay = false;
+		bool loop = false;
+		bool spoiler = false;
+		bool open = false;
+		bool bordered = false;
+		bool striped = false;
+		bool pullquote = false;
+		ListKind listKind = ListKind::Bullet;
+		GroupedMediaIntent mediaIntent = GroupedMediaIntent::Collage;
+		PhotoData *photo = nullptr;
+		DocumentData *document = nullptr;
+		PeerData *peer = nullptr;
+		float64 latitude = 0.;
+		float64 longitude = 0.;
+		uint64 accessHash = 0;
+		std::vector<Block> blocks;
+		std::vector<ListItem> listItems;
+		std::vector<GroupedMediaItem> mediaItems;
+		std::vector<TableRow> tableRows;
+		std::vector<RelatedArticle> relatedArticles;
+	};
+	QString url;
+	bool rtl = false;
+	bool part = false;
+	int views = 0;
+	std::vector<Block> blocks;
+};
+
+[[nodiscard]] auto ParseRichPage(
+	not_null<Main::Session*> session,
+	const MTPRichMessage &message) -> std::shared_ptr<const RichPage>;
+[[nodiscard]] auto ParseRichPage(
+	not_null<Main::Session*> session,
+	const MTPPage &page) -> std::shared_ptr<const RichPage>;
+[[nodiscard]] auto FlattenRichPageSummary(
+	const RichPage &page) -> TextWithEntities;
+[[nodiscard]] auto FlattenRichPageSummary(
+	const std::shared_ptr<const RichPage> &page) -> TextWithEntities;
+
+} // namespace Iv

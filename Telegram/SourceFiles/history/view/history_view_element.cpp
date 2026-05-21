@@ -28,6 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
+#include "data/data_channel.h"
+#include "data/data_session.h"
+#include "iv/iv_cached_media.h"
 #include "base/unixtime.h"
 #include "boxes/premium_preview_box.h"
 #include "core/application.h"
@@ -38,8 +41,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "payments/payments_reaction_process.h" // TryAddingPaidReaction.
-#include "window/section_widget.h"
 #include "window/window_session_controller.h"
+#include "window/section_widget.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/glare.h"
 #include "ui/effects/path_shift_gradient.h"
@@ -51,9 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/round_rect.h"
 #include "data/components/sponsored_messages.h"
-#include "data/data_channel.h"
 #include "data/data_saved_sublist.h"
-#include "data/data_session.h"
 #include "data/data_todo_list.h"
 #include "data/data_forum.h"
 #include "data/data_forum_topic.h"
@@ -1616,6 +1617,14 @@ const Ui::Text::String &Element::text() const {
 	return _text;
 }
 
+HistoryMessageRichPage *Element::richpage() {
+	return Get<HistoryMessageRichPage>();
+}
+
+const HistoryMessageRichPage *Element::richpage() const {
+	return const_cast<Element*>(this)->richpage();
+}
+
 OnlyEmojiAndSpaces Element::isOnlyEmojiAndSpaces() const {
 	if (data()->Has<HistoryMessageTranslation>()) {
 		return OnlyEmojiAndSpaces::No;
@@ -1638,9 +1647,18 @@ int Element::textHeightFor(int textWidth) const {
 	const_cast<Element*>(this)->validateText();
 	if (_textWidth != textWidth) {
 		_textWidth = textWidth;
-		const auto result = _text.countSize(textWidth);
-		_textRealWidth = std::clamp(result.width(), 0, kMaxWidth);
-		_textHeight = result.height();
+		if (const auto rich = const_cast<Element*>(this)->richpage()) {
+			_textHeight = rich->article.resizeGetHeight(textWidth);
+			rich->article.setVisibleTopBottom(0, _textHeight);
+			_textRealWidth = std::clamp(
+				rich->article.lastLayoutWidth(),
+				0,
+				kMaxWidth);
+		} else {
+			const auto result = _text.countSize(textWidth);
+			_textRealWidth = std::clamp(result.width(), 0, kMaxWidth);
+			_textHeight = result.height();
+		}
 	}
 	return _textHeight;
 }
@@ -1793,6 +1811,113 @@ auto Element::contextDependentServiceText() -> TextWithLinks {
 }
 
 void Element::validateText() {
+	const auto clearRichPage = [&] {
+		if (Has<HistoryMessageRichPage>()) {
+			RemoveComponents(HistoryMessageRichPage::Bit());
+			invalidateTextSizeCache();
+		}
+	};
+	const auto ensureRichPage = [&](
+			std::shared_ptr<const Iv::RichPage> page) {
+		const auto message = dynamic_cast<Message*>(this);
+		if (!message || !page) {
+			clearRichPage();
+			return;
+		}
+		if (!Has<HistoryMessageRichPage>()) {
+			AddComponents(HistoryMessageRichPage::Bit());
+		}
+		const auto runtime = Get<HistoryMessageRichPage>();
+		runtime->host.owner = base::make_weak(message);
+		runtime->article.setMediaBlockHost(&runtime->host);
+		runtime->article.setTextRepaintCallbacks(
+			[weak = runtime->host.owner] {
+				if (const auto owner = weak.get()) {
+					owner->requestRichPageRepaint(QRect());
+				}
+			},
+			[weak = runtime->host.owner](QRect articleRect) {
+				if (const auto owner = weak.get()) {
+					owner->requestRichPageRepaint(articleRect);
+				}
+			});
+		if (runtime->page == page && runtime->mediaRuntime) {
+			return;
+		}
+		const auto session = &history()->session();
+		runtime->page = std::move(page);
+		runtime->mediaRuntime = Iv::CreateMessageMediaRuntime(
+			session,
+			data()->fullId(),
+			[session](QString context) {
+				const auto separator = context.indexOf(u'\n');
+				const auto channelId = ChannelId((separator >= 0)
+					? context.mid(0, separator).toULongLong()
+					: context.toULongLong());
+				const auto username = (separator >= 0)
+					? context.mid(separator + 1)
+					: QString();
+				if (!channelId) {
+					return;
+				}
+				const auto channel = session->data().channel(channelId);
+				const auto resolved = !channel->username().isEmpty()
+					? channel->username()
+					: username;
+				if (channel->isLoaded()) {
+					if (const auto controller = session->tryResolveWindow(channel)) {
+						controller->showPeerHistory(channel);
+					}
+				} else if (!resolved.isEmpty()) {
+					if (const auto controller = session->tryResolveWindow(channel)) {
+						controller->showPeerByLink({
+							.usernameOrId = resolved,
+						});
+					}
+				}
+			},
+			[session](QString context) {
+				const auto separator = context.indexOf(u'\n');
+				const auto channelId = ChannelId((separator >= 0)
+					? context.mid(0, separator).toULongLong()
+					: context.toULongLong());
+				const auto username = (separator >= 0)
+					? context.mid(separator + 1)
+					: QString();
+				if (!channelId) {
+					return;
+				}
+				const auto channel = session->data().channel(channelId);
+				const auto resolved = !channel->username().isEmpty()
+					? channel->username()
+					: username;
+				if (channel->isLoaded()) {
+					session->api().joinChannel(channel);
+				} else if (!resolved.isEmpty()) {
+					if (const auto controller = session->tryResolveWindow(channel)) {
+						controller->showPeerByLink({
+							.usernameOrId = resolved,
+							.joinChannel = true,
+						});
+					}
+				}
+			});
+		auto prepared = Iv::Markdown::TryPrepareNativeInstantView({
+			.richPage = runtime->page,
+			.mediaRuntime = runtime->mediaRuntime,
+		});
+		if (!prepared.supported()) {
+			clearRichPage();
+			return;
+		}
+		runtime->article.setContent(std::move(prepared.content));
+		runtime->handler = nullptr;
+		runtime->handlerPreparedLink = std::nullopt;
+		runtime->handlerMediaActivation = {};
+		runtime->handlerPlaceholderId = {};
+		runtime->handlerPlaceholderPoint = QPoint();
+		invalidateTextSizeCache();
+	};
 	const auto item = data();
 	const auto media = item->media();
 	const auto storyMention = media && media->storyMention();
@@ -1801,6 +1926,7 @@ void Element::validateText() {
 	if (storyExpired || storyUnsupported) {
 		_media = nullptr;
 		_textItem = item;
+		clearRichPage();
 		if (!storyMention) {
 			if (_text.isEmpty()) {
 				setTextWithLinks(tr::italic(storyUnsupported
@@ -1824,6 +1950,7 @@ void Element::validateText() {
 		if (summaryShownChanged) {
 			setTextWithLinks(summary.result);
 		}
+		clearRichPage();
 		return;
 	} else {
 		_flags &= ~Flag::SummaryShown;
@@ -1833,9 +1960,11 @@ void Element::validateText() {
 		if (!_text.isEmpty()) {
 			setTextWithLinks({});
 		}
+		clearRichPage();
 		return;
 	}
 	const auto &text = _textItem->_text;
+	auto richPage = std::shared_ptr<const Iv::RichPage>();
 	if (!summaryShownChanged && _text.isEmpty() == text.empty()) {
 	} else if (_flags & Flag::ServiceMessage) {
 		const auto contextDependentText = contextDependentServiceText();
@@ -1871,8 +2000,15 @@ void Element::validateText() {
 			setTextWithLinks(tr::italic(unavailable));
 		} else {
 			setTextWithLinks(_textItem->translatedTextWithLocalEntities());
+			richPage = _textItem->richPage();
 		}
 	}
+	if (!richPage
+		&& !(_flags & Flag::ServiceMessage)
+		&& item->computeUnavailableReason().isEmpty()) {
+		richPage = _textItem->richPage();
+	}
+	ensureRichPage(std::move(richPage));
 }
 
 void Element::setTextWithLinks(
@@ -2413,6 +2549,11 @@ bool Element::hasVisibleText() const {
 }
 
 int Element::textualMaxWidth() const {
+	if (const auto rich = richpage()) {
+		return st::msgPadding.left()
+			+ rich->article.maxWidth()
+			+ st::msgPadding.right();
+	}
 	return st::msgPadding.left()
 		+ (hasVisibleText() ? text().maxWidth() : 0)
 		+ st::msgPadding.right();

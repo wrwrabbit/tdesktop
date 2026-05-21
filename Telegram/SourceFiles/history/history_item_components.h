@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/chat/message_bubble.h"
 
+#include <memory>
+
 struct WebPageData;
 struct TodoListItem;
 class DocumentData;
@@ -48,6 +50,10 @@ class RoundPainter;
 namespace Images {
 struct CornersMaskRef;
 } // namespace Images
+
+namespace Iv {
+struct RichPage;
+} // namespace Iv
 
 namespace HistoryView {
 class Element;
@@ -137,9 +143,9 @@ struct HistoryMessageMediaForInstantView
 	base::flat_set<not_null<PhotoData*>> photos;
 };
 
-struct HistoryMessageRichTextSource
-: RuntimeComponent<HistoryMessageRichTextSource, HistoryItem> {
-	MTPRichMessage data;
+struct HistoryMessageRichPageSource
+: RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
+	std::shared_ptr<const Iv::RichPage> page;
 };
 
 class HiddenSenderInfo {

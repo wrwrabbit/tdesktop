@@ -133,6 +133,7 @@ public:
 	void setContent(MarkdownArticleContent content);
 	void invalidateLayout();
 	[[nodiscard]] int maxWidth() const;
+	[[nodiscard]] int lastLayoutWidth() const;
 	[[nodiscard]] int resizeGetHeight(int width);
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 	void paint(

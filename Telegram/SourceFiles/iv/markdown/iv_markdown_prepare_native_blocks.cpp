@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/openssl_help.h"
 #include "base/unixtime.h"
 #include "iv/iv_data.h"
+#include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "lang/lang_keys.h"
 
@@ -19,6 +20,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 namespace {
+
+using RichPage = Iv::RichPage;
+using RichPageBlock = Iv::RichPage::Block;
+using RichPageBlockKind = Iv::RichPage::BlockKind;
+using RichPageListItem = Iv::RichPage::ListItem;
+using RichPageRelatedArticle = Iv::RichPage::RelatedArticle;
+using RichPageTableCell = Iv::RichPage::TableCell;
+using RichPageTableRow = Iv::RichPage::TableRow;
 
 [[nodiscard]] QString NativeIvDateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
@@ -1928,6 +1937,742 @@ bool PrepareNativeIvBlocks(
 		}
 	}
 	return !state->result.failure.failed();
+}
+
+namespace {
+
+[[nodiscard]] bool PrepareNativeIvRichPlaceholderBlock(
+		QString label,
+		const RichPage::RichText &caption,
+		QString anchorId,
+		std::optional<EmbedRequest> embed,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto prepared = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(
+			caption,
+			&prepared,
+			&anchorId,
+			state)) {
+		return state->result.failure.failed()
+			? false
+			: PrepareNativeIvPlainPlaceholderBlock(std::move(label), result);
+	}
+	SortPreparedIvRichText(&prepared);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.text = std::move(prepared.text);
+	block.links = std::move(prepared.links);
+	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
+	block.placeholder.label = std::move(label);
+	block.placeholder.copyText = block.text.text.isEmpty()
+		? block.placeholder.label
+		: (block.placeholder.label + u"\n"_q + block.text.text);
+	block.placeholder.embed = std::move(embed);
+	if (block.placeholder.embed) {
+		block.placeholder.id = { .value = uint64(++state->nextGeneratedId) };
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] QByteArray RenderCanonicalNativeIvEmbedHtml(
+		const RichPageBlock &block,
+		NativeIvPrepareState *state) {
+	auto attributes = NativeIvHtmlAttributes();
+	const auto fullWidth = block.fullWidth || (block.width <= 0);
+	if (fullWidth) {
+		attributes.push_back({ "width", "100%" });
+	} else {
+		attributes.push_back({
+			"width",
+			QByteArray::number(block.width),
+		});
+	}
+	if (block.height > 0) {
+		attributes.push_back({
+			"height",
+			QByteArray::number(block.height),
+		});
+	}
+	if (!block.url.isEmpty()) {
+		attributes.push_back({ "src", NativeIvHtmlEscape(block.url) });
+	} else if (!block.html.isEmpty()) {
+		const auto resourceId = StoreNativeIvEmbedHtml(
+			block.html.toUtf8(),
+			state);
+		attributes.push_back({
+			"src",
+			NativeIvHtmlEscape(
+				QString::fromUtf8(NativeIvResourceUrl(resourceId))),
+		});
+	} else {
+		return QByteArray();
+	}
+	if (!block.allowScrolling) {
+		attributes.push_back({ "scrolling", "no" });
+	}
+	attributes.push_back({ "frameborder", "0" });
+	attributes.push_back({ "allowtransparency", "true" });
+	attributes.push_back({ "allowfullscreen", "true" });
+	auto content = NativeIvHtmlTag("iframe", attributes);
+	if (!fullWidth) {
+		auto wrapAttributes = NativeIvHtmlAttributes{
+			{ "class", "iframe-wrap" },
+		};
+		if (block.height > 0) {
+			wrapAttributes.push_back({
+				"style",
+				QByteArray("height:")
+					+ QByteArray::number(block.height)
+					+ "px",
+			});
+		}
+		content = NativeIvHtmlTag(
+			"div",
+			std::move(wrapAttributes),
+			content);
+	}
+	return NativeIvHtmlTag("figure", {}, content);
+}
+
+[[nodiscard]] auto EmbedRequestFromCanonicalBlock(
+		const RichPageBlock &block,
+		NativeIvPrepareState *state) -> std::optional<EmbedRequest> {
+	const auto html = RenderCanonicalNativeIvEmbedHtml(block, state);
+	if (html.isEmpty()) {
+		return std::nullopt;
+	}
+	return EmbedRequest{
+		.resourceId = StoreNativeIvEmbedHtml(
+			WrapNativeIvEmbedHtml(html),
+			state),
+		.fallbackUrl = block.url.isEmpty() ? QString() : block.url,
+		.width = block.width,
+		.height = block.height,
+		.fullWidth = block.fullWidth || !block.width,
+		.fixedHeight = (block.height > 0),
+		.allowScrolling = block.allowScrolling,
+	};
+}
+
+[[nodiscard]] bool AppendNativeIvFlowBlock(
+		std::vector<PreparedBlock> *result,
+		PreparedBlockKind kind,
+		int headingLevel,
+		const RichPage::RichText &text,
+		QString anchorId,
+		NativeIvPrepareState *state,
+		bool allowEmpty = false) {
+	auto prepared = PreparedIvRichText();
+	const auto context = NativeIvRichTextContextForTextSize(
+		NativeIvFlowTextSize(kind, headingLevel, state->dimensions),
+		state->dimensions);
+	if (!PrepareNativeIvRichText(
+			text,
+			&prepared,
+			&anchorId,
+			state,
+			context)) {
+		return false;
+	}
+	return AppendPreparedIvRichBlock(
+		result,
+		kind,
+		headingLevel,
+		std::move(prepared),
+		std::move(anchorId),
+		allowEmpty);
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvQuoteBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Quote;
+	block.anchorId = data.anchorId;
+	auto body = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(data.text, &body, &block.anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedIvRichBlock(
+			&block.children,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(body))) {
+		return false;
+	}
+	auto cite = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(data.caption, &cite, &block.anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedIvRichBlock(
+			&block.children,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(cite),
+			QString(),
+			false,
+			true)) {
+		return false;
+	}
+	if (block.children.empty()) {
+		block.children.push_back(EmptyParagraphBlock());
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] TaskState NativeIvTaskStateFromRichPage(
+		RichPage::TaskState state) {
+	switch (state) {
+	case RichPage::TaskState::Unchecked:
+		return TaskState::Unchecked;
+	case RichPage::TaskState::Checked:
+		return TaskState::Checked;
+	case RichPage::TaskState::None:
+		break;
+	}
+	return TaskState::None;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvList(
+		const std::vector<RichPageListItem> &items,
+		PreparedBlock *result,
+		NativeIvPrepareState *state) {
+	auto firstNumber = true;
+	for (const auto &item : items) {
+		auto block = PreparedBlock();
+		block.kind = PreparedBlockKind::ListItem;
+		block.listKind = result->listKind;
+		block.listDelimiter = result->listDelimiter;
+		block.taskState = NativeIvTaskStateFromRichPage(item.taskState);
+		if (result->listKind == ListKind::Ordered) {
+			auto orderedNumber = 0;
+			if (!ParseOrderedNumber(item.number, &orderedNumber)) {
+				orderedNumber = NextNativeIvOrderedNumber(*result);
+			}
+			block.orderedNumber = orderedNumber;
+			if (firstNumber) {
+				result->startNumber = block.orderedNumber;
+				firstNumber = false;
+			}
+		}
+		if (!item.text.text.empty()) {
+			auto prepared = PreparedIvRichText();
+			auto anchorId = item.anchorId;
+			if (!PrepareNativeIvRichText(
+					item.text,
+					&prepared,
+					&anchorId,
+					state)) {
+				return false;
+			}
+			block.anchorId = std::move(anchorId);
+			if (!AppendPreparedIvRichBlock(
+					&block.children,
+					PreparedBlockKind::Paragraph,
+					0,
+					std::move(prepared))) {
+				return false;
+			}
+		} else if (!PrepareNativeIvBlocks(
+				RichPage{
+					.blocks = item.blocks,
+				},
+				&block.children,
+				state)) {
+			return false;
+		}
+		if (block.children.empty()) {
+			block.children.push_back(EmptyParagraphBlock());
+		}
+		result->children.push_back(std::move(block));
+	}
+	return true;
+}
+
+[[nodiscard]] TableAlignment NativeIvTableAlignment(
+		const RichPageTableCell &cell) {
+	switch (cell.alignment) {
+	case RichPage::TableAlignment::Center:
+		return TableAlignment::Center;
+	case RichPage::TableAlignment::Right:
+		return TableAlignment::Right;
+	case RichPage::TableAlignment::Left:
+		break;
+	}
+	return TableAlignment::Left;
+}
+
+[[nodiscard]] PreparedTableCellVerticalAlignment NativeIvTableVerticalAlignment(
+		const RichPageTableCell &cell) {
+	switch (cell.verticalAlignment) {
+	case RichPage::TableVerticalAlignment::Middle:
+		return PreparedTableCellVerticalAlignment::Middle;
+	case RichPage::TableVerticalAlignment::Bottom:
+		return PreparedTableCellVerticalAlignment::Bottom;
+	case RichPage::TableVerticalAlignment::Top:
+		break;
+	}
+	return PreparedTableCellVerticalAlignment::Top;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvTableBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Table;
+	block.tableBordered = data.bordered;
+	block.tableStriped = data.striped;
+	auto title = PreparedIvRichText();
+	block.anchorId = data.anchorId;
+	if (!PrepareNativeIvRichText(data.text, &title, &block.anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&title);
+	block.text = std::move(title.text);
+	block.links = std::move(title.links);
+
+	const auto &limits = PrepareTableRenderLimitsForIv();
+	const auto rowCount = std::min(int(data.tableRows.size()), limits.maxRows);
+	auto occupancy = NativeIvTableOccupancyGrid(rowCount);
+	block.tableRows.reserve(rowCount);
+	auto occupiedSlotCountSoFar = int64(0);
+
+	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+		const auto &row = data.tableRows[rowIndex];
+		auto preparedRow = PreparedTableRow();
+		preparedRow.cells.reserve(std::min(int(row.cells.size()), limits.maxColumns));
+		for (const auto &cell : row.cells) {
+			auto preparedCell = PreparedTableCell();
+			const auto normalizedColspan = NormalizeNativeIvTableSpan(cell.colspan);
+			const auto rowspan = ClampNativeIvTableRowspan(
+				cell.rowspan,
+				rowIndex,
+				rowCount);
+			if (rowspan <= 0) {
+				continue;
+			}
+			const auto column = FirstAvailableNativeIvTableColumn(
+				occupancy,
+				rowIndex,
+				rowspan,
+				normalizedColspan,
+				limits.maxColumns);
+			if (column < 0) {
+				continue;
+			}
+			const auto colspan = ClampNativeIvTableColspan(
+				normalizedColspan,
+				column,
+				limits.maxColumns);
+			if (colspan <= 0) {
+				continue;
+			}
+			const auto occupiedSlotGrowth = int64(rowspan) * colspan;
+			if (occupiedSlotGrowth > limits.maxCells
+				|| (occupiedSlotCountSoFar + occupiedSlotGrowth) > limits.maxCells) {
+				continue;
+			}
+			preparedCell.column = column;
+			preparedCell.alignment = NativeIvTableAlignment(cell);
+			preparedCell.header = cell.header;
+			preparedCell.verticalAlignment = NativeIvTableVerticalAlignment(cell);
+			preparedCell.colspan = colspan;
+			preparedCell.rowspan = rowspan;
+			if (!cell.text.text.empty()) {
+				auto rich = PreparedIvRichText();
+				const auto context = NativeIvRichTextContextForTextSize(
+					cell.header
+						? state->dimensions.tableHeaderTextSize
+						: state->dimensions.tableBodyTextSize,
+					state->dimensions);
+				if (!PrepareNativeIvRichText(
+						cell.text,
+						&rich,
+						nullptr,
+						state,
+						context)) {
+					return false;
+				}
+				SortPreparedIvRichText(&rich);
+				preparedCell.text = std::move(rich.text);
+				preparedCell.links = std::move(rich.links);
+			}
+			MarkNativeIvTableSlots(
+				&occupancy,
+				rowIndex,
+				column,
+				rowspan,
+				colspan);
+			occupiedSlotCountSoFar += occupiedSlotGrowth;
+			preparedRow.cells.push_back(std::move(preparedCell));
+		}
+		preparedRow.header = !preparedRow.cells.empty()
+			&& std::all_of(
+				preparedRow.cells.begin(),
+				preparedRow.cells.end(),
+				[](const PreparedTableCell &cell) {
+					return cell.header;
+				});
+		block.tableRows.push_back(std::move(preparedRow));
+	}
+
+	block.tableColumnCount = NativeIvTableColumnCount(occupancy);
+	block.tableAlignments.resize(block.tableColumnCount, TableAlignment::Left);
+	for (const auto &preparedRow : block.tableRows) {
+		for (const auto &preparedCell : preparedRow.cells) {
+			const auto from = std::max(preparedCell.column, 0);
+			const auto to = std::min(
+				preparedCell.column + preparedCell.colspan,
+				block.tableColumnCount);
+			for (auto column = from; column != to; ++column) {
+				block.tableAlignments[column] = preparedCell.alignment;
+			}
+		}
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvDetailsBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto summary = PreparedIvRichText();
+	auto anchorId = NativeIvDetailsAnchorId(state);
+	if (!PrepareNativeIvRichText(
+			data.text,
+			&summary,
+			&anchorId,
+			state)) {
+		return false;
+	}
+	if (!summary.links.empty()) {
+		const auto from = std::remove_if(
+			summary.text.entities.begin(),
+			summary.text.entities.end(),
+			[](const EntityInText &entity) {
+				return entity.type() == EntityType::CustomUrl;
+			});
+		summary.text.entities.erase(from, summary.text.entities.end());
+		summary.links.clear();
+	}
+	SortPreparedIvRichText(&summary);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Details;
+	block.anchorId = std::move(anchorId);
+	block.collapsed = !data.open;
+	block.text = std::move(summary.text);
+	block.links = std::move(summary.links);
+	return PrepareNativeIvBlocks(
+		RichPage{
+			.blocks = data.blocks,
+		},
+		&block.children,
+		state)
+		? (result->push_back(std::move(block)), true)
+		: false;
+}
+
+[[nodiscard]] QString NativeIvRelatedArticleFooterText(
+		const RichPageRelatedArticle &article) {
+	if (article.publishedDate && !article.author.isEmpty()) {
+		return article.author + u", "_q + NativeIvDateText(article.publishedDate);
+	} else if (article.publishedDate) {
+		return NativeIvDateText(article.publishedDate);
+	}
+	return article.author;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvRelatedArticlesBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto related = std::vector<PreparedBlock>();
+	related.reserve(data.relatedArticles.size());
+	for (const auto &article : data.relatedArticles) {
+		auto prepared = PreparedBlock();
+		prepared.kind = PreparedBlockKind::RelatedArticle;
+		prepared.relatedArticle.title = article.title.trimmed();
+		prepared.relatedArticle.description = article.description.trimmed();
+		prepared.relatedArticle.footer = NativeIvRelatedArticleFooterText(article);
+		prepared.relatedArticle.photoId = article.photoId;
+		if (prepared.relatedArticle.title.isEmpty()
+			&& prepared.relatedArticle.description.isEmpty()
+			&& prepared.relatedArticle.footer.isEmpty()) {
+			prepared.relatedArticle.title = article.url.trimmed();
+		}
+		const auto linkText = !prepared.relatedArticle.title.isEmpty()
+			? prepared.relatedArticle.title
+			: !prepared.relatedArticle.description.isEmpty()
+			? prepared.relatedArticle.description
+			: prepared.relatedArticle.footer;
+		prepared.relatedArticle.link = PrepareNativeIvRelatedArticleLink(
+			article.url,
+			article.webpageId,
+			linkText);
+		const auto appendLine = [&](QString *copyText, const QString &line) {
+			if (line.isEmpty()) {
+				return;
+			} else if (!copyText->isEmpty()) {
+				copyText->append(QChar('\n'));
+			}
+			copyText->append(line);
+		};
+		appendLine(&prepared.relatedArticle.copyText, prepared.relatedArticle.title);
+		appendLine(
+			&prepared.relatedArticle.copyText,
+			prepared.relatedArticle.description);
+		appendLine(&prepared.relatedArticle.copyText, prepared.relatedArticle.footer);
+		if (prepared.relatedArticle.copyText.isEmpty()) {
+			prepared.relatedArticle.copyText = prepared.relatedArticle.link.target;
+		}
+		related.push_back(std::move(prepared));
+	}
+	if (related.empty()) {
+		return true;
+	}
+
+	auto title = PreparedIvRichText();
+	auto anchorId = data.anchorId;
+	if (!PrepareNativeIvRichText(data.text, &title, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&title);
+	if (!title.text.text.isEmpty()) {
+		if (!AppendPreparedIvRichBlock(
+				result,
+				PreparedBlockKind::Heading,
+				4,
+				std::move(title),
+				std::move(anchorId))) {
+			return false;
+		}
+	} else if (!anchorId.isEmpty() && related.front().anchorId.isEmpty()) {
+		related.front().anchorId = std::move(anchorId);
+	}
+	result->insert(
+		result->end(),
+		std::make_move_iterator(related.begin()),
+		std::make_move_iterator(related.end()));
+	return true;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvEmbedPostBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto caption = PreparedIvRichText();
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::EmbedPost;
+	block.embedPost.url = data.url.trimmed();
+	block.embedPost.authorPhotoId = data.photoId;
+	block.embedPost.author = data.author.trimmed();
+	if (data.date) {
+		block.embedPost.dateText = NativeIvDateText(data.date);
+	}
+	auto anchorId = data.anchorId;
+	if (!PrepareNativeIvRichText(data.caption, &caption, &anchorId, state)) {
+		return false;
+	}
+	SortPreparedIvRichText(&caption);
+	block.text = std::move(caption.text);
+	block.links = std::move(caption.links);
+	block.anchorId = std::move(anchorId);
+	block.supplementary = true;
+	if (data.blocks.empty()) {
+		block.children.push_back(
+			PrepareNativeIvEmbedPostFallbackParagraph(block.embedPost.url));
+	} else if (!PrepareNativeIvBlocks(
+			RichPage{
+				.blocks = data.blocks,
+			},
+			&block.children,
+			state)) {
+		return false;
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvBlock(
+		const RichPageBlock &block,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (state->blocked()) {
+		return false;
+	}
+	switch (block.kind) {
+	case RichPageBlockKind::Unsupported:
+		return PrepareNativeIvPlainPlaceholderBlock(
+			u"Unsupported Content"_q,
+			result);
+	case RichPageBlockKind::Heading:
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Heading,
+			block.headingLevel,
+			block.text,
+			block.anchorId,
+			state);
+	case RichPageBlockKind::Paragraph:
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			block.text,
+			block.anchorId,
+			state);
+	case RichPageBlockKind::AuthorDate: {
+		auto prepared = PreparedIvRichText();
+		auto anchorId = block.anchorId;
+		if (!PrepareNativeIvRichText(
+				block.text,
+				&prepared,
+				&anchorId,
+				state)) {
+			return false;
+		}
+		if (block.date) {
+			if (!prepared.text.text.isEmpty()) {
+				prepared.text.append(u" \u2022 "_q);
+			}
+			prepared.text.append(NativeIvDateText(block.date));
+		}
+		return AppendPreparedIvRichBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(prepared),
+			std::move(anchorId),
+			false,
+			true);
+	}
+	case RichPageBlockKind::Code: {
+		auto prepared = PreparedIvRichText();
+		auto anchorId = block.anchorId;
+		if (!PrepareNativeIvRichText(
+				block.text,
+				&prepared,
+				&anchorId,
+				state)) {
+			return false;
+		}
+		auto code = PreparedBlock();
+		code.kind = PreparedBlockKind::CodeBlock;
+		code.anchorId = std::move(anchorId);
+		code.codeLanguage = block.language;
+		code.text.text = StripOneTrailingNewline(prepared.text.text);
+		result->push_back(std::move(code));
+		return true;
+	}
+	case RichPageBlockKind::Divider:
+		result->push_back(PrepareRuleBlock());
+		return true;
+	case RichPageBlockKind::Anchor: {
+		auto prepared = PreparedIvRichText();
+		return AppendPreparedIvRichBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(prepared),
+			block.anchorId,
+			true);
+	}
+	case RichPageBlockKind::List: {
+		auto prepared = PreparedBlock();
+		prepared.kind = PreparedBlockKind::List;
+		prepared.listKind = (block.listKind == RichPage::ListKind::Ordered)
+			? ListKind::Ordered
+			: ListKind::Bullet;
+		if (prepared.listKind == ListKind::Ordered) {
+			prepared.listDelimiter = ListDelimiter::Period;
+			prepared.startNumber = 1;
+		}
+		return PrepareCanonicalNativeIvList(
+			block.listItems,
+			&prepared,
+			state)
+			? (result->push_back(std::move(prepared)), true)
+			: false;
+	}
+	case RichPageBlockKind::Quote:
+		return PrepareCanonicalNativeIvQuoteBlock(block, result, state);
+	case RichPageBlockKind::Photo:
+		return PrepareNativeIvPhotoBlock(block, result, state);
+	case RichPageBlockKind::Video:
+		return PrepareNativeIvVideoBlock(block, result, state);
+	case RichPageBlockKind::Embed:
+		return PrepareNativeIvRichPlaceholderBlock(
+			tr::lng_iv_click_to_view(tr::now),
+			block.caption,
+			block.anchorId,
+			EmbedRequestFromCanonicalBlock(block, state),
+			result,
+			state);
+	case RichPageBlockKind::EmbedPost:
+		return PrepareCanonicalNativeIvEmbedPostBlock(block, result, state);
+	case RichPageBlockKind::GroupedMedia:
+		return PrepareNativeIvGroupedMediaBlock(block, result, state);
+	case RichPageBlockKind::Channel:
+		return PrepareNativeIvChannelBlock(block, result, state);
+	case RichPageBlockKind::Audio:
+		return PrepareNativeIvAudioBlock(block, result, state);
+	case RichPageBlockKind::Math:
+		if (block.formula.trimmed().isEmpty()) {
+			return true;
+		} else {
+			auto prepared = PreparedBlock();
+			prepared.kind = PreparedBlockKind::DisplayMath;
+			prepared.formulaTex = block.formula;
+			prepared.mathKind = MathKind::Display;
+			prepared.formulaIndex = state->rememberFormula(prepared);
+			result->push_back(std::move(prepared));
+			return true;
+		}
+	case RichPageBlockKind::Table:
+		return PrepareCanonicalNativeIvTableBlock(block, result, state);
+	case RichPageBlockKind::Details:
+		return PrepareCanonicalNativeIvDetailsBlock(block, result, state);
+	case RichPageBlockKind::RelatedArticles:
+		return PrepareCanonicalNativeIvRelatedArticlesBlock(block, result, state);
+	case RichPageBlockKind::Map:
+		return PrepareNativeIvMapBlock(block, result, state);
+	}
+	return PrepareNativeIvPlainPlaceholderBlock(
+		u"Unsupported Content"_q,
+		result);
+}
+
+[[nodiscard]] bool PrepareCanonicalNativeIvBlocks(
+		const std::vector<RichPageBlock> &blocks,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	for (const auto &block : blocks) {
+		if (!PrepareCanonicalNativeIvBlock(block, result, state)) {
+			if (state->result.failure.failed()) {
+				return false;
+			}
+			(void)PrepareNativeIvPlainPlaceholderBlock(
+				u"Unsupported Block"_q,
+				result);
+		}
+	}
+	return !state->result.failure.failed();
+}
+
+} // namespace
+
+bool PrepareNativeIvBlocks(
+		const Iv::RichPage &page,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	return PrepareCanonicalNativeIvBlocks(page.blocks, result, state);
 }
 
 } // namespace Iv::Markdown

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/openssl_help.h"
 #include "base/unixtime.h"
 #include "iv/iv_data.h"
+#include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "ui/image/image_prepare.h"
 #include "ui/grouped_layout.h"
@@ -41,6 +42,9 @@ struct Document {
 	QByteArray minithumbnail;
 };
 
+using Block = RichPage::Block;
+using BlockKind = RichPage::BlockKind;
+
 template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
 [[nodiscard]] QByteArray Number(T value) {
 	return QByteArray::number(value);
@@ -69,6 +73,85 @@ template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
 
 [[nodiscard]] QByteArray Date(TimeId date) {
 	return Escape(langDateTimeFull(base::unixtime::parse(date)).toUtf8());
+}
+
+[[nodiscard]] QByteArray EmbedResourceId(const QByteArray &html) {
+	auto binary = std::array<uchar, SHA256_DIGEST_LENGTH>{};
+	SHA256(
+		reinterpret_cast<const unsigned char*>(html.data()),
+		html.size(),
+		binary.data());
+	const auto hex = [](uchar value) -> char {
+		return (value >= 10) ? ('a' + (value - 10)) : ('0' + value);
+	};
+	auto result = QByteArray();
+	result.reserve(binary.size() * 2);
+	for (const auto byte : binary) {
+		result.push_back(hex(byte / 16));
+		result.push_back(hex(byte % 16));
+	}
+	return result + ".html";
+}
+
+void CollectPreparedMetadata(
+		const std::vector<Block> &blocks,
+		Prepared *result) {
+	for (const auto &block : blocks) {
+		switch (block.kind) {
+		case BlockKind::Code:
+			result->hasCode = result->hasCode || !block.language.isEmpty();
+			break;
+		case BlockKind::Embed:
+			result->hasEmbeds = true;
+			if (!block.html.isEmpty()) {
+				result->embeds.emplace(
+					EmbedResourceId(block.html.toUtf8()),
+					block.html.toUtf8());
+			}
+			break;
+		case BlockKind::Channel:
+			if (block.channelId) {
+				result->channelIds.emplace(QByteArray::number(block.channelId));
+			}
+			break;
+		default:
+			break;
+		}
+		if (!block.blocks.empty()) {
+			CollectPreparedMetadata(block.blocks, result);
+		}
+		for (const auto &item : block.listItems) {
+			if (!item.blocks.empty()) {
+				CollectPreparedMetadata(item.blocks, result);
+			}
+		}
+	}
+}
+
+[[nodiscard]] QByteArray WrapSummaryContent(
+		const RichPage &page,
+		int views) {
+	const auto summary = FlattenRichPageSummary(page);
+	const auto sep = " \xE2\x80\xA2 ";
+	const auto viewsText = views
+		? (tr::lng_stories_views(tr::now, lt_count_decimal, views) + sep)
+		: QString();
+	const auto inner = summary.text.trimmed().isEmpty()
+		? QByteArray()
+		: ("<p dir=\"auto\">" + Escape(summary.text.toUtf8()) + "</p>");
+	return R"(
+<div class="page-slide">
+	<article>)"_q + inner + R"(</article>
+</div>
+<div class="page-footer">
+	<div class="content">
+		)"_q
+		+ viewsText.toUtf8()
+		+ R"(<a class="wrong" data-context="report-iv">)"_q
+		+ tr::lng_iv_wrong_layout(tr::now).toUtf8()
+		+ R"(</a>
+	</div>
+</div>)"_q;
 }
 
 class Parser final {
@@ -229,6 +312,7 @@ private:
 Parser::Parser(const Source &source, const Options &options)
 : /*_options(options)
 , */_fileOriginPostfix('/' + Number(source.pageId)) {
+	Expects(source.hasRawPage);
 	process(source);
 	_result.pageId = source.pageId;
 	_result.name = source.name;
@@ -1218,21 +1302,7 @@ QByteArray Parser::documentFullUrl(const Document &document) {
 }
 
 QByteArray Parser::embedUrl(const QByteArray &html) {
-	auto binary = std::array<uchar, SHA256_DIGEST_LENGTH>{};
-	SHA256(
-		reinterpret_cast<const unsigned char*>(html.data()),
-		html.size(),
-		binary.data());
-	const auto hex = [](uchar value) -> char {
-		return (value >= 10) ? ('a' + (value - 10)) : ('0' + value);
-	};
-	auto result = QByteArray();
-	result.reserve(binary.size() * 2);
-	for (const auto byte : binary) {
-		result.push_back(hex(byte / 16));
-		result.push_back(hex(byte % 16));
-	}
-	result += ".html";
+	auto result = EmbedResourceId(html);
 	_result.embeds.emplace(result, html);
 	return resource("html/" + result);
 }
@@ -1306,8 +1376,26 @@ QSize Parser::computeSlideshowDimensions(
 } // namespace
 
 Prepared Prepare(const Source &source, const Options &options) {
-	auto parser = Parser(source, options);
-	return parser.result();
+	auto result = source.hasRawPage
+		? Parser(source, options).result()
+		: Prepared();
+	if (source.richPage) {
+		result.pageId = source.pageId;
+		result.name = source.name;
+		result.rtl = source.richPage->rtl;
+		result.hasCode = false;
+		result.hasEmbeds = false;
+		result.embeds.clear();
+		result.channelIds.clear();
+		CollectPreparedMetadata(source.richPage->blocks, &result);
+		if (!source.hasRawPage) {
+			const auto views = std::max(
+				source.richPage->views,
+				source.updatedCachedViews);
+			result.content = WrapSummaryContent(*source.richPage, views);
+		}
+	}
+	return result;
 }
 
 } // namespace Iv

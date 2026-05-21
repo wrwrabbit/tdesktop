@@ -9,6 +9,7 @@
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "iv/markdown/iv_markdown_view.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
+#include "iv/iv_rich_page.h"
 #include "iv/iv_prepare.h"
 #include "scheme.h"
 
@@ -1434,6 +1435,33 @@ constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 		MTP_int(0));
 	result.name = u"native-iv-test"_q;
 	return result;
+}
+
+void AddCanonicalEntity(
+		TextWithEntities *text,
+		EntityType type,
+		int offset,
+		int length,
+		QString data = QString()) {
+	text->entities.push_back(EntityInText(type, offset, length, std::move(data)));
+}
+
+[[nodiscard]] Iv::RichPage::RichText CanonicalRichText(
+		TextWithEntities text,
+		std::vector<Iv::RichPage::RichLink> links = {},
+		QString anchorId = QString()) {
+	return {
+		.text = std::move(text),
+		.anchorId = std::move(anchorId),
+		.links = std::move(links),
+	};
+}
+
+[[nodiscard]] std::shared_ptr<const Iv::RichPage> CanonicalRichPage(
+		std::vector<Iv::RichPage::Block> blocks) {
+	auto page = std::make_shared<Iv::RichPage>();
+	page->blocks = std::move(blocks);
+	return page;
 }
 
 [[nodiscard]] QString FromLatin1(const char *value) {
@@ -7510,6 +7538,563 @@ void CheckNativeInstantViewLayer227SpoilerMediaCoverage(bool *ok) {
 	}
 }
 
+void CheckNativeInstantViewCanonicalRichTextCoverage(bool *ok) {
+	const auto label = u"native-iv-canonical-richtext"_q;
+	const auto formulaSource = u"x^2 + y^2"_q;
+	const auto customEmojiDocumentId = uint64(8800001);
+	const auto customEmojiAlt = u"ivemoji"_q;
+	const auto spoilerText = u"spoiler"_q;
+	const auto mentionText = u"@mention"_q;
+	const auto hashtagText = u"#hashtag"_q;
+	const auto botCommandText = u"/start"_q;
+	const auto cashtagText = u"$cash"_q;
+	const auto urlText = u"https://example.com"_q;
+	const auto emailText = u"user@example.com"_q;
+	const auto phoneText = u"+15551234567"_q;
+	const auto bankCardText = u"4242424242424242"_q;
+	const auto mentionNameText = u"Alice"_q;
+	const auto dateText = u"date"_q;
+	const auto explicitExternalText = u"external"_q;
+	const auto explicitIvText = u"instant view"_q;
+	const auto mentionNameUserId = uint64(42);
+	const auto formattedDate = 1715347200;
+	auto expectedDateFlags = FormattedDateFlags();
+	expectedDateFlags |= FormattedDateFlag::ShortTime;
+	expectedDateFlags |= FormattedDateFlag::LongDate;
+	expectedDateFlags |= FormattedDateFlag::DayOfWeek;
+	auto text = TextWithEntities();
+	text.text = QString(QChar::ObjectReplacementCharacter)
+		+ u" ivemoji spoiler @mention #hashtag /start $cash "_q
+		+ u"https://example.com user@example.com +15551234567 "_q
+		+ u"4242424242424242 Alice date external instant view"_q;
+	AddCanonicalEntity(
+		&text,
+		EntityType::CustomEmoji,
+		0,
+		1,
+		SerializeInlineTextObjectEntity({
+			.kind = InlineTextObjectKind::Formula,
+			.data = InlineTextObjectFormulaData{
+				.copySource = formulaSource,
+				.trimmedTex = formulaSource.trimmed(),
+			},
+		}));
+	const auto customEmojiOffset = text.text.indexOf(customEmojiAlt);
+	AddCanonicalEntity(
+		&text,
+		EntityType::CustomEmoji,
+		customEmojiOffset,
+		customEmojiAlt.size(),
+		Data::SerializeCustomEmojiId(customEmojiDocumentId));
+	const auto addWrappedEntity = [&](EntityType type, const QString &value) {
+		AddCanonicalEntity(
+			&text,
+			type,
+			text.text.indexOf(value),
+			value.size());
+	};
+	addWrappedEntity(EntityType::Spoiler, spoilerText);
+	addWrappedEntity(EntityType::Mention, mentionText);
+	addWrappedEntity(EntityType::Hashtag, hashtagText);
+	addWrappedEntity(EntityType::BotCommand, botCommandText);
+	addWrappedEntity(EntityType::Cashtag, cashtagText);
+	addWrappedEntity(EntityType::Url, urlText);
+	addWrappedEntity(EntityType::Email, emailText);
+	addWrappedEntity(EntityType::Phone, phoneText);
+	addWrappedEntity(EntityType::BankCard, bankCardText);
+	const auto mentionNameOffset = text.text.indexOf(mentionNameText);
+	AddCanonicalEntity(
+		&text,
+		EntityType::MentionName,
+		mentionNameOffset,
+		mentionNameText.size(),
+		TextUtilities::MentionNameDataFromFields({
+			.selfId = 1,
+			.userId = mentionNameUserId,
+			.accessHash = 2,
+		}));
+	const auto dateOffset = text.text.indexOf(dateText);
+	AddCanonicalEntity(
+		&text,
+		EntityType::FormattedDate,
+		dateOffset,
+		dateText.size(),
+		SerializeFormattedDateData(formattedDate, expectedDateFlags));
+	const auto externalOffset = text.text.indexOf(explicitExternalText);
+	const auto ivOffset = text.text.indexOf(explicitIvText);
+	AddCanonicalEntity(
+		&text,
+		EntityType::CustomUrl,
+		externalOffset,
+		explicitExternalText.size(),
+		u"https://example.com/external-link"_q);
+	AddCanonicalEntity(
+		&text,
+		EntityType::CustomUrl,
+		ivOffset,
+		explicitIvText.size(),
+		u"https://telegra.ph/instant-view"_q);
+	auto richText = CanonicalRichText(
+		std::move(text),
+		{
+			{
+				externalOffset,
+				explicitExternalText.size(),
+				u"https://example.com/external-link"_q,
+				0,
+			},
+			{
+				ivOffset,
+				explicitIvText.size(),
+				u"https://telegra.ph/instant-view"_q,
+				777,
+			},
+		});
+	auto block = Iv::RichPage::Block();
+	block.kind = Iv::RichPage::BlockKind::Paragraph;
+	block.text = std::move(richText);
+	const auto prepared = TryPrepareNativeInstantView({
+		.richPage = CanonicalRichPage({ std::move(block) }),
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto paragraph = FindPreparedParagraphContaining(
+		prepared.content,
+		mentionNameText);
+	Check(paragraph != nullptr, label + u" paragraph"_q, ok);
+	if (!paragraph) {
+		return;
+	}
+	const auto &preparedText = paragraph->text;
+	Check(
+		preparedText.text == QString(QChar::ObjectReplacementCharacter)
+			+ u" ivemoji spoiler @mention #hashtag /start $cash "_q
+			+ u"https://example.com user@example.com +15551234567 "_q
+			+ u"4242424242424242 Alice date external instant view"_q,
+		label + u" visible text"_q,
+		ok);
+	auto formulaCount = 0;
+	auto formulaDataOk = false;
+	for (const auto &match : CollectInlineTextObjectMatches(preparedText)) {
+		if (match.object.kind != InlineTextObjectKind::Formula) {
+			continue;
+		}
+		++formulaCount;
+		if (const auto formula = std::get_if<InlineTextObjectFormulaData>(
+				&match.object.data)) {
+			formulaDataOk = (formula->copySource == formulaSource)
+				&& (formula->trimmedTex == formulaSource.trimmed());
+		}
+	}
+	Check(formulaCount == 1, label + u" inline formula entity count"_q, ok);
+	Check(formulaDataOk, label + u" inline formula entity data"_q, ok);
+	auto formulaSlotFound = false;
+	for (const auto &slot : prepared.content.formulas) {
+		if (slot.present
+			&& slot.kind == MathKind::Inline
+			&& slot.trimmedTex == formulaSource.trimmed()) {
+			formulaSlotFound = true;
+			break;
+		}
+	}
+	Check(formulaSlotFound, label + u" inline formula slot"_q, ok);
+	Check(
+		FindEntityRange(
+			preparedText,
+			EntityType::CustomEmoji,
+			customEmojiOffset,
+			customEmojiAlt.size()) != nullptr,
+		label + u" custom emoji entity"_q,
+		ok);
+	Check(
+		FindEntityRange(
+			preparedText,
+			EntityType::MentionName,
+			mentionNameOffset,
+			mentionNameText.size()) != nullptr,
+		label + u" mention name entity"_q,
+		ok);
+	Check(
+		FindEntityRange(
+			preparedText,
+			EntityType::FormattedDate,
+			dateOffset,
+			dateText.size()) != nullptr,
+		label + u" formatted date entity"_q,
+		ok);
+	Check(
+		FindEntityRange(
+			preparedText,
+			EntityType::Colorized,
+			ivOffset,
+			explicitIvText.size()) != nullptr,
+		label + u" instant view colorized entity"_q,
+		ok);
+	Check(paragraph->links.size() == 2, label + u" prepared link count"_q, ok);
+	if (paragraph->links.size() == 2) {
+		Check(
+			paragraph->links[0].kind == PreparedLinkKind::External
+				&& paragraph->links[0].target
+					== u"https://example.com/external-link"_q,
+			label + u" external prepared link"_q,
+			ok);
+		Check(
+			paragraph->links[1].kind == PreparedLinkKind::InstantViewPage
+				&& paragraph->links[1].webpageId == 777,
+			label + u" instant view prepared link"_q,
+			ok);
+	}
+}
+
+void CheckNativeInstantViewCanonicalBlockCoverage(bool *ok) {
+	const auto label = u"native-iv-canonical-blocks"_q;
+	auto blocks = std::vector<Iv::RichPage::Block>();
+	for (auto i = 1; i != 7; ++i) {
+		auto heading = Iv::RichPage::Block();
+		heading.kind = Iv::RichPage::BlockKind::Heading;
+		heading.headingLevel = i;
+		heading.text = CanonicalRichText(
+			TextWithEntities::Simple(u"Heading "_q + QString::number(i)));
+		blocks.push_back(std::move(heading));
+	}
+	auto math = Iv::RichPage::Block();
+	math.kind = Iv::RichPage::BlockKind::Math;
+	math.formula = u"E = mc^2"_q;
+	blocks.push_back(std::move(math));
+
+	auto unordered = Iv::RichPage::Block();
+	unordered.kind = Iv::RichPage::BlockKind::List;
+	unordered.listKind = Iv::RichPage::ListKind::Bullet;
+	auto checkedUnordered = Iv::RichPage::ListItem();
+	checkedUnordered.taskState = Iv::RichPage::TaskState::Checked;
+	checkedUnordered.text = CanonicalRichText(
+		TextWithEntities::Simple(u"checked unordered text"_q));
+	auto uncheckedUnordered = Iv::RichPage::ListItem();
+	uncheckedUnordered.taskState = Iv::RichPage::TaskState::Unchecked;
+	auto uncheckedUnorderedBlock = Iv::RichPage::Block();
+	uncheckedUnorderedBlock.kind = Iv::RichPage::BlockKind::Paragraph;
+	uncheckedUnorderedBlock.text = CanonicalRichText(
+		TextWithEntities::Simple(u"unchecked unordered block"_q));
+	uncheckedUnordered.blocks.push_back(std::move(uncheckedUnorderedBlock));
+	unordered.listItems.push_back(std::move(checkedUnordered));
+	unordered.listItems.push_back(std::move(uncheckedUnordered));
+	blocks.push_back(std::move(unordered));
+
+	auto ordered = Iv::RichPage::Block();
+	ordered.kind = Iv::RichPage::BlockKind::List;
+	ordered.listKind = Iv::RichPage::ListKind::Ordered;
+	auto checkedOrdered = Iv::RichPage::ListItem();
+	checkedOrdered.taskState = Iv::RichPage::TaskState::Checked;
+	checkedOrdered.number = u"4"_q;
+	checkedOrdered.text = CanonicalRichText(
+		TextWithEntities::Simple(u"checked ordered text"_q));
+	auto uncheckedOrdered = Iv::RichPage::ListItem();
+	uncheckedOrdered.taskState = Iv::RichPage::TaskState::Unchecked;
+	uncheckedOrdered.number = u"fallback"_q;
+	auto uncheckedOrderedBlock = Iv::RichPage::Block();
+	uncheckedOrderedBlock.kind = Iv::RichPage::BlockKind::Paragraph;
+	uncheckedOrderedBlock.text = CanonicalRichText(
+		TextWithEntities::Simple(u"unchecked ordered block"_q));
+	uncheckedOrdered.blocks.push_back(std::move(uncheckedOrderedBlock));
+	ordered.listItems.push_back(std::move(checkedOrdered));
+	ordered.listItems.push_back(std::move(uncheckedOrdered));
+	blocks.push_back(std::move(ordered));
+
+	auto photo = Iv::RichPage::Block();
+	photo.kind = Iv::RichPage::BlockKind::Photo;
+	photo.photoId = 9701;
+	photo.width = 640;
+	photo.height = 360;
+	photo.spoiler = true;
+	photo.caption = CanonicalRichText(
+		TextWithEntities::Simple(u"Spoiler photo caption"_q));
+	blocks.push_back(std::move(photo));
+
+	auto video = Iv::RichPage::Block();
+	video.kind = Iv::RichPage::BlockKind::Video;
+	video.documentId = 9702;
+	video.width = 1280;
+	video.height = 720;
+	video.spoiler = true;
+	video.caption = CanonicalRichText(
+		TextWithEntities::Simple(u"Spoiler video caption"_q));
+	blocks.push_back(std::move(video));
+
+	const auto embedUrl = u"https://example.com/canonical-embed"_q;
+	auto embed = Iv::RichPage::Block();
+	embed.kind = Iv::RichPage::BlockKind::Embed;
+	embed.url = embedUrl;
+	embed.width = 640;
+	embed.height = 360;
+	embed.caption = CanonicalRichText(
+		TextWithEntities::Simple(u"Canonical embed caption"_q));
+	blocks.push_back(std::move(embed));
+
+	auto grouped = Iv::RichPage::Block();
+	grouped.kind = Iv::RichPage::BlockKind::GroupedMedia;
+	grouped.mediaIntent = Iv::RichPage::GroupedMediaIntent::Collage;
+	grouped.caption = CanonicalRichText(
+		TextWithEntities::Simple(u"Spoiler grouped caption"_q));
+	grouped.mediaItems.push_back({
+		.kind = Iv::RichPage::BlockKind::Photo,
+		.photoId = 9703,
+		.width = 400,
+		.height = 300,
+		.spoiler = true,
+	});
+	grouped.mediaItems.push_back({
+		.kind = Iv::RichPage::BlockKind::Video,
+		.documentId = 9704,
+		.width = 640,
+		.height = 360,
+		.spoiler = true,
+	});
+	blocks.push_back(std::move(grouped));
+
+	auto details = Iv::RichPage::Block();
+	details.kind = Iv::RichPage::BlockKind::Details;
+	details.text = CanonicalRichText(
+		TextWithEntities::Simple(u"Details title"_q));
+	details.open = false;
+	auto detailsChild = Iv::RichPage::Block();
+	detailsChild.kind = Iv::RichPage::BlockKind::Paragraph;
+	detailsChild.text = CanonicalRichText(
+		TextWithEntities::Simple(u"Details body"_q));
+	details.blocks.push_back(std::move(detailsChild));
+	blocks.push_back(std::move(details));
+
+	auto channel = Iv::RichPage::Block();
+	channel.kind = Iv::RichPage::BlockKind::Channel;
+	channel.channelId = 7006;
+	channel.channelTitle = u"Native IV Channel"_q;
+	channel.username = u"nativeiv"_q;
+	blocks.push_back(std::move(channel));
+
+	auto related = Iv::RichPage::Block();
+	related.kind = Iv::RichPage::BlockKind::RelatedArticles;
+	related.relatedArticles.push_back({
+		.url = u"https://example.com/related"_q,
+		.webpageId = 778,
+		.photoId = 9102,
+		.title = u"Related title"_q,
+		.description = u"Related description"_q,
+		.author = u"Author"_q,
+		.publishedDate = 1715347200,
+	});
+	blocks.push_back(std::move(related));
+
+	const auto prepared = TryPrepareNativeInstantView({
+		.richPage = CanonicalRichPage(std::move(blocks)),
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	const auto headings = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Heading);
+	Check(headings.size() >= 6, label + u" heading count"_q, ok);
+	for (auto i = 0; i != std::min<int>(int(headings.size()), 6); ++i) {
+		Check(
+			headings[i]->headingLevel == i + 1,
+			label + u" heading level "_q + QString::number(i + 1),
+			ok);
+	}
+	const auto displayMathBlocks = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::DisplayMath);
+	Check(displayMathBlocks.size() == 1, label + u" display math count"_q, ok);
+	if (!displayMathBlocks.empty()) {
+		Check(
+			displayMathBlocks.front()->formulaTex == u"E = mc^2"_q,
+			label + u" display math source"_q,
+			ok);
+	}
+	const auto lists = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::List);
+	Check(lists.size() == 2, label + u" list count"_q, ok);
+	if (lists.size() == 2) {
+		Check(
+			lists[0]->children.size() == 2
+				&& lists[0]->children[0].taskState == TaskState::Checked
+				&& lists[0]->children[1].taskState == TaskState::Unchecked,
+			label + u" unordered checklist state"_q,
+			ok);
+		Check(
+			lists[1]->children.size() == 2
+				&& lists[1]->children[0].orderedNumber == 4
+				&& lists[1]->children[1].orderedNumber == 5,
+			label + u" ordered numbering"_q,
+			ok);
+	}
+	const auto photos = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Photo);
+	Check(photos.size() == 1, label + u" photo block count"_q, ok);
+	if (!photos.empty()) {
+		Check(photos.front()->photo.spoiler, label + u" photo spoiler"_q, ok);
+	}
+	const auto videos = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Video);
+	Check(videos.size() == 1, label + u" video block count"_q, ok);
+	if (!videos.empty()) {
+		Check(
+			videos.front()->video.media.spoiler,
+			label + u" video spoiler"_q,
+			ok);
+	}
+	const auto placeholders = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Placeholder);
+	Check(
+		placeholders.size() == 1,
+		label + u" embed placeholder count"_q,
+		ok);
+	if (!placeholders.empty()) {
+		const auto &placeholder = placeholders.front()->placeholder;
+		Check(
+			placeholder.embed.has_value(),
+			label + u" embed placeholder activation"_q,
+			ok);
+		Check(
+			bool(placeholder.id),
+			label + u" embed placeholder id"_q,
+			ok);
+		if (placeholder.embed) {
+			const auto &embed = *placeholder.embed;
+			Check(
+				!embed.resourceId.isEmpty()
+					&& prepared.content.embedHtmlResources.find(embed.resourceId)
+						!= prepared.content.embedHtmlResources.end(),
+				label + u" embed resource stored"_q,
+				ok);
+			Check(
+				embed.fallbackUrl == embedUrl,
+				label + u" embed fallback url"_q,
+				ok);
+		}
+	}
+	const auto groupedBlocks = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::GroupedMedia);
+	Check(
+		groupedBlocks.size() == 1,
+		label + u" grouped media block count"_q,
+		ok);
+	if (!groupedBlocks.empty()) {
+		const auto &items = groupedBlocks.front()->groupedMedia.items;
+		Check(items.size() == 2, label + u" grouped media item count"_q, ok);
+		if (items.size() == 2) {
+			Check(
+				items[0].media.spoiler && items[1].media.spoiler,
+				label + u" grouped media spoiler state"_q,
+				ok);
+		}
+	}
+	const auto detailsBlocks = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Details);
+	Check(detailsBlocks.size() == 1, label + u" details block count"_q, ok);
+	if (!detailsBlocks.empty()) {
+		Check(
+			detailsBlocks.front()->collapsed,
+			label + u" details collapsed state"_q,
+			ok);
+		Check(
+			!detailsBlocks.front()->children.empty(),
+			label + u" details child count"_q,
+			ok);
+	}
+	const auto channels = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::Channel);
+	Check(channels.size() == 1, label + u" channel block count"_q, ok);
+	if (!channels.empty()) {
+		Check(
+			channels.front()->channel.channelId == 7006
+				&& channels.front()->channel.title == u"Native IV Channel"_q
+				&& channels.front()->channel.username == u"nativeiv"_q,
+			label + u" channel data"_q,
+			ok);
+	}
+	const auto relatedArticles = CollectPreparedBlocksByKind(
+		prepared.content.blocks.blocks,
+		PreparedBlockKind::RelatedArticle);
+	Check(
+		relatedArticles.size() == 1,
+		label + u" related article count"_q,
+		ok);
+	if (!relatedArticles.empty()) {
+		Check(
+			relatedArticles.front()->relatedArticle.title == u"Related title"_q
+				&& relatedArticles.front()->relatedArticle.description
+					== u"Related description"_q
+				&& relatedArticles.front()->relatedArticle.link.kind
+					== PreparedLinkKind::InstantViewPage
+				&& relatedArticles.front()->relatedArticle.link.webpageId == 778,
+			label + u" related article data"_q,
+			ok);
+	}
+}
+
+void CheckRichPageSummaryFlatteningCoverage(bool *ok) {
+	const auto label = u"rich-page-summary-flattening"_q;
+	const auto placeholder = u"Click to view Rich Text"_q;
+	const auto target = u"https://example.com/rich-link"_q;
+	const auto visibleText = u"Visible rich link"_q;
+	auto text = TextWithEntities{ visibleText };
+	const auto linkOffset = visibleText.indexOf(u"link"_q);
+	AddCanonicalEntity(
+		&text,
+		EntityType::CustomUrl,
+		linkOffset,
+		4,
+		target);
+	auto paragraph = Iv::RichPage::Block();
+	paragraph.kind = Iv::RichPage::BlockKind::Paragraph;
+	paragraph.text = CanonicalRichText(std::move(text));
+	const auto paragraphSummary = Iv::FlattenRichPageSummary(
+		CanonicalRichPage({ std::move(paragraph) }));
+	Check(
+		paragraphSummary.text == visibleText,
+		label + u" text preserved"_q,
+		ok);
+	Check(
+		paragraphSummary.text != placeholder,
+		label + u" no placeholder text"_q,
+		ok);
+	const auto entity = FindEntityRange(
+		paragraphSummary,
+		EntityType::CustomUrl,
+		linkOffset,
+		4);
+	Check(entity != nullptr, label + u" link entity preserved"_q, ok);
+	if (entity) {
+		Check(entity->data() == target, label + u" link target preserved"_q, ok);
+	}
+
+	auto photo = Iv::RichPage::Block();
+	photo.kind = Iv::RichPage::BlockKind::Photo;
+	photo.photoId = 4001;
+	photo.width = 640;
+	photo.height = 480;
+	const auto mediaOnlySummary = Iv::FlattenRichPageSummary(
+		CanonicalRichPage({ std::move(photo) }));
+	Check(mediaOnlySummary.empty(), label + u" media-only empty"_q, ok);
+	Check(
+		mediaOnlySummary.text.isEmpty(),
+		label + u" media-only text empty"_q,
+		ok);
+	Check(
+		mediaOnlySummary.text != placeholder,
+		label + u" media-only no placeholder"_q,
+		ok);
+}
+
 void CheckCodeBlockTrailingNewlineTrim(bool *ok) {
 	const auto markdownLabel = u"generated-code-block-trailing-newline"_q;
 	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp extra-token
@@ -13476,6 +14061,9 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckNativeInstantViewLayer227BlockCoverage(&ok);
 	CheckNativeInstantViewLayer227ListCoverage(&ok);
 	CheckNativeInstantViewLayer227SpoilerMediaCoverage(&ok);
+	CheckNativeInstantViewCanonicalRichTextCoverage(&ok);
+	CheckNativeInstantViewCanonicalBlockCoverage(&ok);
+	CheckRichPageSummaryFlatteningCoverage(&ok);
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckCodeBlockSelectionExportCoverage(&ok);
 	CheckCodeBlockAsyncSyntaxHighlightCoverage(&ok);

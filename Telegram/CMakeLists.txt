@@ -1302,6 +1302,8 @@ PRIVATE
     iv/iv_delegate_impl.h
     iv/iv_instance.cpp
     iv/iv_instance.h
+    iv/iv_rich_page.cpp
+    iv/iv_rich_page.h
     lang/lang_cloud_manager.cpp
     lang/lang_cloud_manager.h
     lang/lang_instance.cpp

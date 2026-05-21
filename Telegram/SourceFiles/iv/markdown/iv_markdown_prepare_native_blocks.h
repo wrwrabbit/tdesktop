@@ -17,5 +17,9 @@ namespace Iv::Markdown {
 	const QVector<MTPPageBlock> &blocks,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
+[[nodiscard]] bool PrepareNativeIvBlocks(
+	const Iv::RichPage &page,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
 
 } // namespace Iv::Markdown

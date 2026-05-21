@@ -7,13 +7,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <memory>
+#include <optional>
+
 namespace Iv {
 
 struct Options;
 struct Prepared;
+struct RichPage;
 
 struct Source {
 	uint64 pageId = 0;
+	std::shared_ptr<const RichPage> richPage;
+	bool hasRawPage = true;
 	MTPPage page;
 	std::optional<MTPPhoto> webpagePhoto;
 	std::optional<MTPDocument> webpageDocument;
