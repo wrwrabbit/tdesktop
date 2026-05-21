@@ -746,14 +746,15 @@ TextWithEntities GenerateDefaultBannedRightsChangeText(
 		not_null<ChannelData*> channel,
 		const MTPForumTopic &topic) {
 	return topic.match([&](const MTPDforumTopic &data) {
+		const auto url = u"https://t.me/c/%1/%2"_q.arg(
+			peerToChannel(channel->id).bare).arg(
+				data.vid().v);
 		return tr::link(
 			Data::ForumTopicIconWithTitle(
 				data.vid().v,
 				data.vicon_emoji_id().value_or_empty(),
 				qs(data.vtitle())),
-			u"internal:url:https://t.me/c/%1/%2"_q.arg(
-				peerToChannel(channel->id).bare).arg(
-					data.vid().v));
+			UrlClickHandler::EncodeInternalWrappedUrl(url));
 	}, [](const MTPDforumTopicDeleted &) {
 		return TextWithEntities{ u"Deleted"_q };
 	});

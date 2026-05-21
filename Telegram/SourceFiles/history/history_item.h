@@ -538,8 +538,7 @@ public:
 	[[nodiscard]] Data::Media *media() const {
 		return _media.get();
 	}
-	[[nodiscard]] auto richPage() const
-		-> std::shared_ptr<const Iv::RichPage>;
+	[[nodiscard]] std::shared_ptr<const Iv::RichPage> richPage() const;
 	[[nodiscard]] bool computeDropForwardedInfo() const;
 	void setText(TextWithEntities textWithEntities);
 	void setRichPage(std::shared_ptr<const Iv::RichPage> page);
