@@ -82,6 +82,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/ui_utility.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_variant.h"
 #include "ui/toast/toast.h"
@@ -3215,7 +3216,7 @@ object_ptr<Ui::RpWidget> SetupChannelMembersAndManage(
 		) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 			return (data == Ui::kCreditsCurrency)
 				? Ui::MakeCreditsIconEmoji(height, 1)
-				: std::make_unique<Ui::Text::ShiftedEmoji>(
+				: MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 					Ui::Earn::MakeCurrencyIconEmoji(font, color),
 					QPoint(0, st::channelEarnCurrencyCommonMargins.top()));
 		};

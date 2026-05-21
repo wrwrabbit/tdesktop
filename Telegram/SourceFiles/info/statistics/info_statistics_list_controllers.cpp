@@ -36,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/text/format_values.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
@@ -1243,7 +1244,7 @@ CreditsController::CreditsController(CreditsDescriptor d)
 			if (_iconCache.credits.isNull()) {
 				_iconCache.credits = Ui::GenerateStars(height, 1);
 			}
-			return std::make_unique<Ui::Text::ShiftedEmoji>(
+			return MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 				std::make_unique<Ui::CustomEmoji::Internal>(
 					u"credits_icon:%1:1"_q.arg(height),
 					_iconCache.credits),
@@ -1255,11 +1256,11 @@ CreditsController::CreditsController(CreditsDescriptor d)
 			if (slot.isNull()) {
 				slot = Ui::Earn::IconCurrencyColored(
 					st::tonFieldIconSize,
-					in
+					(in
 						? st::boxTextFgGood->c
-						: st::menuIconAttentionColor->c);
+						: st::menuIconAttentionColor->c));
 			}
-			return std::make_unique<Ui::Text::ShiftedEmoji>(
+			return MakeWrappedEmoji<Ui::Text::ShiftedEmoji>(
 				std::make_unique<Ui::CustomEmoji::Internal>(
 					data.toString(),
 					slot),

@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/reaction_fly_animation.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/text/text_utilities.h"
+#include "ui/text/text_custom_emoji.h"
 #include "ui/text/text_extended_data.h"
 #include "ui/power_saving.h"
 #include "ui/rect.h"
@@ -2181,7 +2182,7 @@ void Message::paintFromName(
 		if (_fromNameStatus->id != id) {
 			const auto that = const_cast<Message*>(this);
 			_fromNameStatus->custom = id
-				? std::make_unique<Ui::Text::LimitedLoopsEmoji>(
+				? MakeWrappedEmoji<Ui::Text::LimitedLoopsEmoji>(
 					history()->owner().customEmojiManager().create(
 						Data::EmojiStatusCustomId(id),
 						[=] { that->customEmojiRepaint(); }),

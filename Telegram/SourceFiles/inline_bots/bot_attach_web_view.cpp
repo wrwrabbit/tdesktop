@@ -2243,7 +2243,7 @@ void WebViewInstance::botResolveButtonEmoji(
 	_session->data().customEmojiManager().resolve(
 		request.customEmojiId
 	) | rpl::on_next_error([=](not_null<DocumentData*> document) {
-		state->emoji = std::make_unique<Ui::Text::FirstFrameEmoji>(
+		state->emoji = MakeWrappedEmoji<Ui::Text::FirstFrameEmoji>(
 			_session->data().customEmojiManager().create(
 				document,
 				[weakAttempt] {
