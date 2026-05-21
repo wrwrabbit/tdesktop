@@ -322,6 +322,22 @@ void AppendCanonicalNativeIvRichText(
 		result->text.entities.size() + text.text.entities.size());
 	for (const auto &entity : text.text.entities) {
 		if (entity.type() == EntityType::CustomUrl) {
+			if (entity.offset() < 0
+				|| entity.length() <= 0
+				|| entity.offset() >= text.text.text.size()) {
+				continue;
+			}
+			const auto length = std::min(
+				entity.length(),
+				text.text.text.size() - entity.offset());
+			const auto decoded = Iv::DecodeRichPageLinkUrl(entity.data());
+			(void)AddNativeIvPreparedLink(
+				&result->text,
+				&result->links,
+				shift + entity.offset(),
+				length,
+				decoded ? decoded->url : entity.data(),
+				decoded ? decoded->webpageId : 0);
 			continue;
 		}
 		RememberCanonicalInlineFormula(entity, state, context);
@@ -330,23 +346,6 @@ void AppendCanonicalNativeIvRichText(
 			entity.offset() + shift,
 			entity.length(),
 			entity.data()));
-	}
-	for (const auto &link : text.links) {
-		if (link.offset < 0
-			|| link.length <= 0
-			|| link.offset >= text.text.text.size()) {
-			continue;
-		}
-		const auto length = std::min(
-			link.length,
-			text.text.text.size() - link.offset);
-		(void)AddNativeIvPreparedLink(
-			&result->text,
-			&result->links,
-			shift + link.offset,
-			length,
-			link.target,
-			link.webpageId);
 	}
 }
 

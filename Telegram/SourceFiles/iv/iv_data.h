@@ -56,9 +56,8 @@ public:
 
 	[[nodiscard]] QString id() const;
 	[[nodiscard]] bool partial() const;
-	[[nodiscard]] auto richPage() const
-		-> const std::shared_ptr<const RichPage> &;
-	[[nodiscard]] auto sourceFallback() const -> std::optional<Source>;
+	[[nodiscard]] const std::shared_ptr<const RichPage> &richPage() const;
+	[[nodiscard]] std::optional<Source> sourceFallback() const;
 
 	void updateCachedViews(int cachedViews);
 

@@ -84,11 +84,11 @@ bool Data::partial() const {
 
 Data::~Data() = default;
 
-auto Data::richPage() const -> const std::shared_ptr<const RichPage> & {
+const std::shared_ptr<const RichPage> &Data::richPage() const {
 	return _richPage;
 }
 
-auto Data::sourceFallback() const -> std::optional<Source> {
+std::optional<Source> Data::sourceFallback() const {
 	if (!_pageFallback) {
 		return std::nullopt;
 	}

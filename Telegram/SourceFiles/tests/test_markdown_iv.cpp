@@ -1448,12 +1448,10 @@ void AddCanonicalEntity(
 
 [[nodiscard]] Iv::RichPage::RichText CanonicalRichText(
 		TextWithEntities text,
-		std::vector<Iv::RichPage::RichLink> links = {},
 		QString anchorId = QString()) {
 	return {
 		.text = std::move(text),
 		.anchorId = std::move(anchorId),
-		.links = std::move(links),
 	};
 }
 
@@ -7633,23 +7631,22 @@ void CheckNativeInstantViewCanonicalRichTextCoverage(bool *ok) {
 		EntityType::CustomUrl,
 		ivOffset,
 		explicitIvText.size(),
-		u"https://telegra.ph/instant-view"_q);
-	auto richText = CanonicalRichText(
-		std::move(text),
-		{
-			{
-				externalOffset,
-				explicitExternalText.size(),
-				u"https://example.com/external-link"_q,
-				0,
-			},
-			{
-				ivOffset,
-				explicitIvText.size(),
-				u"https://telegra.ph/instant-view"_q,
-				777,
-			},
-		});
+		Iv::EncodeRichPageLinkUrl(u"https://telegra.ph/instant-view"_q, 777));
+	const auto encodedUrl = u"https://example.com/path?a=1%202&b=two+words#frag"_q;
+	const auto encoded = Iv::EncodeRichPageLinkUrl(encodedUrl, 778);
+	const auto decoded = Iv::DecodeRichPageLinkUrl(encoded);
+	Check(
+		decoded
+			&& decoded->url == encodedUrl
+			&& decoded->webpageId == 778
+			&& encoded == UrlClickHandler::EncodeInternalWrappedUrl(
+				encodedUrl,
+				u"context=iv&webpage_id=778"_q)
+			&& UrlClickHandler::ExternalUrlFromInternalUrl(encoded)
+				== encodedUrl,
+		label + u" internal url roundtrip"_q,
+		ok);
+	auto richText = CanonicalRichText(std::move(text));
 	auto block = Iv::RichPage::Block();
 	block.kind = Iv::RichPage::BlockKind::Paragraph;
 	block.text = std::move(richText);

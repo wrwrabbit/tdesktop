@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_entity.h"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 class DocumentData;
@@ -24,16 +25,9 @@ class Session;
 namespace Iv {
 
 struct RichPage {
-	struct RichLink {
-		int offset = 0;
-		int length = 0;
-		QString target;
-		uint64 webpageId = 0;
-	};
 	struct RichText {
 		TextWithEntities text;
 		QString anchorId;
-		std::vector<RichLink> links;
 	};
 	enum class BlockKind : uchar {
 		Unsupported,
@@ -177,15 +171,25 @@ struct RichPage {
 	std::vector<Block> blocks;
 };
 
-[[nodiscard]] auto ParseRichPage(
+struct RichPageLinkUrl {
+	QString url;
+	uint64 webpageId = 0;
+};
+
+[[nodiscard]] QString EncodeRichPageLinkUrl(
+	const QString &url,
+	uint64 webpageId);
+[[nodiscard]] std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(
+	const QString &data);
+[[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
 	not_null<Main::Session*> session,
-	const MTPRichMessage &message) -> std::shared_ptr<const RichPage>;
-[[nodiscard]] auto ParseRichPage(
+	const MTPRichMessage &message);
+[[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
 	not_null<Main::Session*> session,
-	const MTPPage &page) -> std::shared_ptr<const RichPage>;
-[[nodiscard]] auto FlattenRichPageSummary(
-	const RichPage &page) -> TextWithEntities;
-[[nodiscard]] auto FlattenRichPageSummary(
-	const std::shared_ptr<const RichPage> &page) -> TextWithEntities;
+	const MTPPage &page);
+[[nodiscard]] TextWithEntities FlattenRichPageSummary(
+	const RichPage &page);
+[[nodiscard]] TextWithEntities FlattenRichPageSummary(
+	const std::shared_ptr<const RichPage> &page);
 
 } // namespace Iv

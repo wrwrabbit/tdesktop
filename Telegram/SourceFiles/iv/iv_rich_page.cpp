@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_rich_page.h"
 
 #include "base/flat_map.h"
+#include "base/qthelp_url.h"
 #include "base/unixtime.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
@@ -31,7 +32,6 @@ using GroupedMediaItem = RichPage::GroupedMediaItem;
 using ListItem = RichPage::ListItem;
 using ListKind = RichPage::ListKind;
 using RelatedArticle = RichPage::RelatedArticle;
-using RichLink = RichPage::RichLink;
 using RichText = RichPage::RichText;
 using TableAlignment = RichPage::TableAlignment;
 using TableCell = RichPage::TableCell;
@@ -39,13 +39,13 @@ using TableRow = RichPage::TableRow;
 using TableVerticalAlignment = RichPage::TableVerticalAlignment;
 using TaskState = RichPage::TaskState;
 
-[[nodiscard]] auto MakeBlock(BlockKind kind) -> Block {
+[[nodiscard]] Block MakeBlock(BlockKind kind) {
 	auto result = Block();
 	result.kind = kind;
 	return result;
 }
 
-[[nodiscard]] auto MakeHeadingBlock(int level) -> Block {
+[[nodiscard]] Block MakeHeadingBlock(int level) {
 	auto result = MakeBlock(BlockKind::Heading);
 	result.headingLevel = level;
 	return result;
@@ -69,15 +69,15 @@ struct ParseContext {
 	base::flat_map<uint64, DocumentInfo> documentInfos;
 };
 
-[[nodiscard]] auto DateText(TimeId date) -> QString {
+[[nodiscard]] QString DateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
 }
 
-[[nodiscard]] auto AddEntity(
+[[nodiscard]] bool AddEntity(
 		TextWithEntities *text,
 		int from,
 		EntityType type,
-		const QString &data = QString()) -> bool {
+		const QString &data = QString()) {
 	const auto length = text->text.size() - from;
 	if (length <= 0) {
 		return true;
@@ -86,46 +86,25 @@ struct ParseContext {
 	return true;
 }
 
-void AddRichLink(
-		RichText *text,
-		int from,
-		QString target,
-		uint64 webpageId = 0) {
-	const auto length = text->text.text.size() - from;
-	if (length <= 0 || target.isEmpty()) {
-		return;
-	}
-	text->links.push_back({
-		.offset = from,
-		.length = length,
-		.target = std::move(target),
-		.webpageId = webpageId,
-	});
-}
-
 void AppendRich(RichText *to, const RichText &from) {
-	const auto shift = to->text.text.size();
 	to->text.append(from.text);
-	to->links.reserve(to->links.size() + from.links.size());
-	for (auto link : from.links) {
-		link.offset += shift;
-		to->links.push_back(std::move(link));
-	}
 }
 
 void AppendRich(RichText *to, RichText &&from) {
-	const auto shift = to->text.text.size();
 	to->text.append(std::move(from.text));
-	to->links.reserve(to->links.size() + from.links.size());
-	for (auto &link : from.links) {
-		link.offset += shift;
-		to->links.push_back(std::move(link));
-	}
 }
 
-[[nodiscard]] auto MentionNameEntityData(
+[[nodiscard]] QString RichPageLinkEntityData(
+		const QString &url,
+		uint64 webpageId) {
+	return (webpageId && !url.isEmpty())
+		? EncodeRichPageLinkUrl(url, webpageId)
+		: url;
+}
+
+[[nodiscard]] QString MentionNameEntityData(
 		not_null<Main::Session*> session,
-		uint64 userId) -> QString {
+		uint64 userId) {
 	if (userId == 0) {
 		return QString();
 	}
@@ -137,28 +116,28 @@ void AppendRich(RichText *to, RichText &&from) {
 	});
 }
 
-[[nodiscard]] auto TaskStateFromFlags(
+[[nodiscard]] TaskState TaskStateFromFlags(
 		bool checkbox,
-		bool checked) -> TaskState {
+		bool checked) {
 	if (!checkbox) {
 		return TaskState::None;
 	}
 	return checked ? TaskState::Checked : TaskState::Unchecked;
 }
 
-[[nodiscard]] auto PhotoIdFromMtp(const MTPPhoto &photo) -> uint64 {
+[[nodiscard]] uint64 PhotoIdFromMtp(const MTPPhoto &photo) {
 	return photo.match([](const auto &data) {
 		return uint64(data.vid().v);
 	});
 }
 
-[[nodiscard]] auto DocumentIdFromMtp(const MTPDocument &document) -> uint64 {
+[[nodiscard]] uint64 DocumentIdFromMtp(const MTPDocument &document) {
 	return document.match([](const auto &data) {
 		return uint64(data.vid().v);
 	});
 }
 
-[[nodiscard]] auto PhotoSizeFromMtp(const MTPPhoto &photo) -> QSize {
+[[nodiscard]] QSize PhotoSizeFromMtp(const MTPPhoto &photo) {
 	auto result = QSize();
 	photo.match([](const MTPDphotoEmpty &) {
 	}, [&](const MTPDphoto &data) {
@@ -186,8 +165,8 @@ void AppendRich(RichText *to, RichText &&from) {
 	return result;
 }
 
-[[nodiscard]] auto DocumentInfoFromMtp(const MTPDocument &document)
--> ParseContext::DocumentInfo {
+[[nodiscard]] ParseContext::DocumentInfo DocumentInfoFromMtp(
+		const MTPDocument &document) {
 	auto result = ParseContext::DocumentInfo();
 	document.match([](const MTPDdocumentEmpty &) {
 	}, [&](const MTPDdocument &data) {
@@ -232,38 +211,38 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	context->documentInfos.emplace(id, DocumentInfoFromMtp(document));
 }
 
-[[nodiscard]] auto FindPhoto(
+[[nodiscard]] PhotoData *FindPhoto(
 		const ParseContext &context,
-		uint64 id) -> PhotoData* {
+		uint64 id) {
 	const auto i = context.photos.find(id);
 	return (i != end(context.photos)) ? i->second : nullptr;
 }
 
-[[nodiscard]] auto FindDocument(
+[[nodiscard]] DocumentData *FindDocument(
 		const ParseContext &context,
-		uint64 id) -> DocumentData* {
+		uint64 id) {
 	const auto i = context.documents.find(id);
 	return (i != end(context.documents)) ? i->second : nullptr;
 }
 
-[[nodiscard]] auto FindPhotoSize(
+[[nodiscard]] QSize FindPhotoSize(
 		const ParseContext &context,
-		uint64 id) -> QSize {
+		uint64 id) {
 	const auto i = context.photoSizes.find(id);
 	return (i != end(context.photoSizes)) ? i->second : QSize();
 }
 
-[[nodiscard]] auto FindDocumentInfo(
+[[nodiscard]] ParseContext::DocumentInfo FindDocumentInfo(
 		const ParseContext &context,
-		uint64 id) -> ParseContext::DocumentInfo {
+		uint64 id) {
 	const auto i = context.documentInfos.find(id);
 	return (i != end(context.documentInfos))
 		? i->second
 		: ParseContext::DocumentInfo();
 }
 
-[[nodiscard]] auto TableCellAlignment(
-		const MTPDpageTableCell &data) -> TableAlignment {
+[[nodiscard]] TableAlignment TableCellAlignment(
+		const MTPDpageTableCell &data) {
 	if (data.is_align_right()) {
 		return TableAlignment::Right;
 	} else if (data.is_align_center()) {
@@ -272,8 +251,8 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	return TableAlignment::Left;
 }
 
-[[nodiscard]] auto TableCellVerticalAlignment(
-		const MTPDpageTableCell &data) -> TableVerticalAlignment {
+[[nodiscard]] TableVerticalAlignment TableCellVerticalAlignment(
+		const MTPDpageTableCell &data) {
 	if (data.is_valign_bottom()) {
 		return TableVerticalAlignment::Bottom;
 	} else if (data.is_valign_middle()) {
@@ -282,19 +261,19 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	return TableVerticalAlignment::Top;
 }
 
-[[nodiscard]] auto ParseRichText(
+[[nodiscard]] RichText ParseRichText(
 		const MTPRichText &text,
-		ParseContext *context) -> RichText;
+		ParseContext *context);
 
-[[nodiscard]] auto ParseCaption(
+[[nodiscard]] RichText ParseCaption(
 		const MTPPageCaption &caption,
-		ParseContext *context) -> RichText;
+		ParseContext *context);
 
-[[nodiscard]] auto AppendRichText(
+[[nodiscard]] bool AppendRichText(
 		const MTPRichText &text,
 		RichText *result,
 		ParseContext *context,
-		QString *anchorId) -> bool {
+		QString *anchorId) {
 	return text.match([&](const MTPDtextEmpty &) {
 		return true;
 	}, [&](const MTPDtextPlain &data) {
@@ -389,8 +368,11 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		if (result->text.text.size() == from) {
 			result->text.append(target);
 		}
-		AddRichLink(result, from, target, uint64(data.vwebpage_id().v));
-		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
+		return AddEntity(
+			&result->text,
+			from,
+			EntityType::CustomUrl,
+			RichPageLinkEntityData(target, uint64(data.vwebpage_id().v)));
 	}, [&](const MTPDtextEmail &data) {
 		const auto from = result->text.text.size();
 		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
@@ -401,7 +383,6 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 			result->text.append(email);
 		}
 		const auto target = u"mailto:"_q + email;
-		AddRichLink(result, from, target);
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
 	}, [&](const MTPDtextSubscript &data) {
 		const auto from = result->text.text.size();
@@ -505,7 +486,6 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 			result->text.append(phone);
 		}
 		const auto target = u"tel:"_q + phone;
-		AddRichLink(result, from, target);
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
 	}, [&](const MTPDtextAnchor &data) {
 		if (anchorId && anchorId->isEmpty()) {
@@ -515,9 +495,9 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	});
 }
 
-[[nodiscard]] auto ParseRichText(
+[[nodiscard]] RichText ParseRichText(
 		const MTPRichText &text,
-		ParseContext *context) -> RichText {
+		ParseContext *context) {
 	auto result = RichText();
 	auto anchorId = QString();
 	(void)AppendRichText(text, &result, context, &anchorId);
@@ -525,9 +505,9 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	return result;
 }
 
-[[nodiscard]] auto ParseCaption(
+[[nodiscard]] RichText ParseCaption(
 		const MTPPageCaption &caption,
-		ParseContext *context) -> RichText {
+		ParseContext *context) {
 	auto result = RichText();
 	auto anchorId = QString();
 	(void)AppendRichText(caption.data().vtext(), &result, context, &anchorId);
@@ -989,7 +969,7 @@ void AppendSummaryLine(
 	AppendSummaryLine(result, line.text, prefix);
 }
 
-[[nodiscard]] auto FooterText(const RelatedArticle &article) -> QString {
+[[nodiscard]] QString FooterText(const RelatedArticle &article) {
 	if (article.publishedDate && !article.author.isEmpty()) {
 		return article.author + u", "_q + DateText(article.publishedDate);
 	} else if (article.publishedDate) {
@@ -1008,8 +988,8 @@ void AppendSummaryBlocks(
 	}
 }
 
-[[nodiscard]] auto FlattenSummaryBlocks(
-		const std::vector<Block> &blocks) -> TextWithEntities {
+[[nodiscard]] TextWithEntities FlattenSummaryBlocks(
+		const std::vector<Block> &blocks) {
 	auto result = TextWithEntities();
 	AppendSummaryBlocks(&result, blocks);
 	TextUtilities::Trim(result);
@@ -1161,9 +1141,45 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 
 } // namespace
 
-auto ParseRichPage(
+QString EncodeRichPageLinkUrl(
+		const QString &url,
+		uint64 webpageId) {
+	return u"internal:wrapped?url=%1&context=iv&webpage_id=%2"_q
+		.arg(qthelp::url_encode(url))
+		.arg(webpageId);
+}
+
+std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(const QString &data) {
+	const auto wrappedPrefix = u"internal:wrapped?"_q;
+	if (!data.startsWith(wrappedPrefix)) {
+		return std::nullopt;
+	}
+	const auto params = qthelp::url_parse_params(data.mid(wrappedPrefix.size()));
+	if (params.value(u"context"_q) != u"iv"_q) {
+		return std::nullopt;
+	}
+	const auto url = params.value(u"url"_q);
+	if (url.isEmpty()) {
+		return std::nullopt;
+	}
+	const auto webpageIdValue = params.value(u"webpage_id"_q);
+	auto webpageId = uint64();
+	if (!webpageIdValue.isEmpty()) {
+		auto ok = false;
+		webpageId = webpageIdValue.toULongLong(&ok);
+		if (!ok) {
+			return std::nullopt;
+		}
+	}
+	return RichPageLinkUrl{
+		.url = url,
+		.webpageId = webpageId,
+	};
+}
+
+std::shared_ptr<const RichPage> ParseRichPage(
 		not_null<Main::Session*> session,
-		const MTPRichMessage &message) -> std::shared_ptr<const RichPage> {
+		const MTPRichMessage &message) {
 	auto result = std::make_shared<RichPage>();
 	auto context = ParseContext{ session };
 	const auto &data = message.data();
@@ -1179,9 +1195,9 @@ auto ParseRichPage(
 	return result;
 }
 
-auto ParseRichPage(
+std::shared_ptr<const RichPage> ParseRichPage(
 		not_null<Main::Session*> session,
-		const MTPPage &page) -> std::shared_ptr<const RichPage> {
+		const MTPPage &page) {
 	return page.match([&](const MTPDpage &data) {
 		auto result = std::make_shared<RichPage>();
 		auto context = ParseContext{ session };
@@ -1202,14 +1218,14 @@ auto ParseRichPage(
 	});
 }
 
-auto FlattenRichPageSummary(const RichPage &page) -> TextWithEntities {
+TextWithEntities FlattenRichPageSummary(const RichPage &page) {
 	auto result = FlattenSummaryBlocks(page.blocks);
 	TextUtilities::Trim(result);
 	return result;
 }
 
-auto FlattenRichPageSummary(
-		const std::shared_ptr<const RichPage> &page) -> TextWithEntities {
+TextWithEntities FlattenRichPageSummary(
+		const std::shared_ptr<const RichPage> &page) {
 	return page ? FlattenRichPageSummary(*page) : TextWithEntities();
 }
 
