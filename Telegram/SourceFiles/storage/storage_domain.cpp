@@ -857,8 +857,8 @@ void Domain::SetCacheCleanedUpOnLock(bool cleanedUp) {
 }
 
 void Domain::ClearFakeState() {
-    _fakePasscodes.clear();
-    _fakePasscodeIndex = -1;
+    //_fakePasscodes.clear();
+    //_fakePasscodeIndex = -1;
     _fakePasscodeKeysEncrypted.clear();
     _isCacheCleanedUpOnLock = false;
     _isAdvancedLoggingEnabled = false;
