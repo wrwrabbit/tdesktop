@@ -294,7 +294,7 @@ rpl::producer<QString> Experimental::title() {
 void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	const auto window = &controller()->window();
 	addAction(
-		tr::lng_theme_editor_menu_export(tr::now),
+		u"Export"_q,
 		[=] {
 			TextUtilities::SetClipboardText(
 				{ EncodeOptionsToText(base::options::serialize()) });
@@ -305,7 +305,7 @@ void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		return;
 	}
 	addAction(
-		tr::lng_theme_editor_menu_import(tr::now),
+		u"Import"_q,
 		[=] {
 			const auto decoded = DecodeOptionsFromText(
 				QGuiApplication::clipboard()->text());
