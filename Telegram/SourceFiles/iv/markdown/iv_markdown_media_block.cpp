@@ -74,6 +74,12 @@ constexpr auto kMaxGroupedMediaLayoutItems = 10;
 	return paintedPreviousThumbnail || paintedPreviousFull;
 }
 
+[[nodiscard]] const style::Markdown &PaintStyle(
+		const MarkdownArticlePaintCaches &caches,
+		const style::Markdown &st) {
+	return caches.st ? *caches.st : st;
+}
+
 void PaintImageSpoiler(Painter &p, QRect rect) {
 	Ui::FillSpoilerRect(p, rect, Ui::DefaultImageSpoiler().frame());
 }
@@ -141,9 +147,9 @@ void PaintPhotoProgress(
 		size);
 	auto hq = PainterHighQualityEnabler(p);
 	p.setBrush(Qt::NoBrush);
-	p.setPen(QPen(QColor(0, 0, 0, 96), thickness));
+	p.setPen(QPen(style.progressBg->c, thickness));
 	p.drawEllipse(ring);
-	p.setPen(QPen(st::windowFg->c, thickness));
+	p.setPen(QPen(style.progressFg->c, thickness));
 	p.drawArc(
 		ring,
 		90 * 16,
@@ -541,14 +547,14 @@ void ImageBackedMediaBlock::paint(
 		Painter &p,
 		QRect clip,
 		const MarkdownArticlePaintCaches &caches) const {
-	Q_UNUSED(caches);
 	const auto visible = clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
+	const auto &st = PaintStyle(caches, layoutStyle());
 	p.save();
 	p.setClipRect(visible);
-	p.fillRect(_geometry, st::windowBgOver->c);
+	p.fillRect(_geometry, st.photo.fallbackBg->c);
 	if (!PaintResolvedImages(
 			p,
 			_geometry,
@@ -556,7 +562,7 @@ void ImageBackedMediaBlock::paint(
 			_fullImage,
 			_previousThumbnailImage,
 			_previousFullImage)) {
-		p.setPen(st::windowSubTextFg->c);
+		p.setPen(st.photo.fallbackFg->c);
 		p.drawText(
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
@@ -570,7 +576,7 @@ void ImageBackedMediaBlock::paint(
 		PaintPhotoProgress(
 			p,
 			_geometry,
-			st::defaultMarkdown.photo,
+			st.photo,
 			progress());
 	}
 	p.restore();
@@ -810,17 +816,18 @@ void AudioMediaBlock::paint(
 	if (visible.isEmpty()) {
 		return;
 	}
-	const auto &style = st::defaultMarkdown.audio;
+	const auto &layout = layoutStyle().audio;
+	const auto &paint = PaintStyle(caches, layoutStyle()).audio;
 	p.save();
 	p.setClipRect(visible);
 	PaintCardSurface(
 		p,
 		_geometry,
-		style.border,
-		style.borderFg,
-		style.bg,
-		style.radius);
-	p.setPen(style.titleFg->c);
+		layout.border,
+		paint.borderFg,
+		paint.bg,
+		layout.radius);
+	p.setPen(paint.titleFg->c);
 	PaintTextLeaf(
 		p,
 		_titleLeaf,
@@ -829,7 +836,7 @@ void AudioMediaBlock::paint(
 		_titleWidth,
 		visible);
 	if (!_subtitleRect.isEmpty()) {
-		p.setPen(style.subtitleFg->c);
+		p.setPen(paint.subtitleFg->c);
 		PaintTextLeaf(
 			p,
 			_subtitleLeaf,
@@ -857,7 +864,7 @@ MediaBlockSelectionData AudioMediaBlock::selectionData() const {
 }
 
 void AudioMediaBlock::rebuildLayout(int width) {
-	const auto &card = st::defaultMarkdown.audio;
+	const auto &card = layoutStyle().audio;
 	const auto &padding = card.padding;
 	const auto &titleStyle = card.titleStyle;
 	const auto &subtitleStyle = card.subtitleStyle;
@@ -902,7 +909,7 @@ void AudioMediaBlock::rebuildLayout(int width) {
 }
 
 void AudioMediaBlock::applyGeometry() {
-	const auto &card = st::defaultMarkdown.audio;
+	const auto &card = layoutStyle().audio;
 	const auto &padding = card.padding;
 	const auto &titleStyle = card.titleStyle;
 	const auto &subtitleStyle = card.subtitleStyle;
@@ -1054,18 +1061,20 @@ void ChannelMediaBlock::paint(
 	if (visible.isEmpty()) {
 		return;
 	}
-	const auto &style = st::defaultMarkdown.channel;
-	const auto &button = style.button;
+	const auto &layout = layoutStyle().channel;
+	const auto &paint = PaintStyle(caches, layoutStyle()).channel;
+	const auto &buttonLayout = layout.button;
+	const auto &buttonPaint = paint.button;
 	p.save();
 	p.setClipRect(visible);
 	PaintCardSurface(
 		p,
 		_geometry,
-		style.border,
-		style.borderFg,
-		style.bg,
-		style.radius);
-	p.setPen(style.titleFg->c);
+		layout.border,
+		paint.borderFg,
+		paint.bg,
+		layout.radius);
+	p.setPen(paint.titleFg->c);
 	PaintTextLeaf(
 		p,
 		_titleLeaf,
@@ -1074,19 +1083,19 @@ void ChannelMediaBlock::paint(
 		_titleWidth,
 		visible);
 	if (_joinVisible && !_actionRect.isEmpty()) {
-		const auto innerRect = _actionRect.marginsRemoved(button.padding);
+		const auto innerRect = _actionRect.marginsRemoved(buttonLayout.padding);
 		PaintCardSurface(
 			p,
 			_actionRect,
-			button.border,
-			button.borderFg,
-			button.bg,
-			button.radius);
-		p.setPen(button.textFg->c);
+			buttonLayout.border,
+			buttonPaint.borderFg,
+			buttonPaint.bg,
+			buttonLayout.radius);
+		p.setPen(buttonPaint.textFg->c);
 		p.setFont((ClickHandler::showAsActive(_joinLink)
 			|| ClickHandler::showAsPressed(_joinLink))
-			? button.textStyle.font->underline()
-			: button.textStyle.font);
+			? buttonLayout.textStyle.font->underline()
+			: buttonLayout.textStyle.font);
 		p.drawText(innerRect, Qt::AlignCenter, _actionText);
 	}
 	p.restore();
@@ -1137,7 +1146,7 @@ void ChannelMediaBlock::resolveChannel() {
 
 void ChannelMediaBlock::rebuildLayout(int width) {
 	resolveChannel();
-	const auto &card = st::defaultMarkdown.channel;
+	const auto &card = layoutStyle().channel;
 	const auto &padding = card.padding;
 	const auto &button = card.button;
 	const auto &buttonPadding = button.padding;
@@ -1202,7 +1211,7 @@ void ChannelMediaBlock::rebuildLayout(int width) {
 }
 
 void ChannelMediaBlock::applyGeometry() {
-	const auto &card = st::defaultMarkdown.channel;
+	const auto &card = layoutStyle().channel;
 	const auto &padding = card.padding;
 	const auto &titleStyle = card.titleStyle;
 	const auto contentLeft = _geometry.x() + padding.left();
@@ -1326,15 +1335,20 @@ private:
 
 	void handleImageUpdate(int index);
 
-	void paintItem(Painter &p, const ItemState &item) const;
+	void paintItem(
+		Painter &p,
+		const ItemState &item,
+		const style::Markdown &st) const;
 
 	[[nodiscard]] bool itemLoading(const ItemState &item) const;
 
 	[[nodiscard]] double itemProgress(const ItemState &item) const;
 
-	void paintActiveItem(Painter &p) const;
+	void paintActiveItem(Painter &p, const style::Markdown &st) const;
 
-	void paintNavigation(Painter &p) const;
+	void paintNavigation(
+		Painter &p,
+		const style::Markdown &st) const;
 
 	void ensureNavigationLinks();
 
@@ -1428,26 +1442,28 @@ void GroupedMediaBlock::paint(
 		Painter &p,
 		QRect clip,
 		const MarkdownArticlePaintCaches &caches) const {
-	Q_UNUSED(caches);
 	const auto visible = clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
-	const auto &style = st::defaultMarkdown.groupedMedia;
+	const auto &layout = layoutStyle();
+	const auto &st = PaintStyle(caches, layout);
+	const auto &layoutGrouped = layout.groupedMedia;
+	const auto &paintGrouped = st.groupedMedia;
 	p.save();
 	p.setClipRect(visible);
-	const auto path = RoundedRectPath(_geometry, style.radius);
+	const auto path = RoundedRectPath(_geometry, layoutGrouped.radius);
 	p.setClipPath(path, Qt::IntersectClip);
 	if (_intent == PreparedGroupedMediaIntent::Slideshow) {
-		paintActiveItem(p);
-		paintNavigation(p);
+		paintActiveItem(p, st);
+		paintNavigation(p, st);
 	} else if (_useCollageLayout) {
 		for (const auto &item : _items) {
-			paintItem(p, item);
+			paintItem(p, item, st);
 		}
 	} else {
-		p.fillRect(_geometry, st::windowBgOver->c);
-		p.setPen(st::windowSubTextFg->c);
+		p.fillRect(_geometry, paintGrouped.fallbackBg->c);
+		p.setPen(paintGrouped.fallbackFg->c);
 		p.drawText(
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
@@ -1513,7 +1529,7 @@ void GroupedMediaBlock::rebuildLayout(int width) {
 		return;
 	}
 
-	const auto spacing = st::defaultMarkdown.groupedMedia.itemSkip;
+	const auto spacing = layoutStyle().groupedMedia.itemSkip;
 	auto top = 0;
 	auto maxWidth = 0;
 	auto index = 0;
@@ -1563,7 +1579,7 @@ void GroupedMediaBlock::clearCollageLayout() {
 
 int GroupedMediaBlock::fallbackHeight(int width) const {
 	if (_fallbackSize.isEmpty()) {
-		return std::max(st::defaultMarkdown.placeholder.minHeight, 1);
+		return std::max(layoutStyle().placeholder.minHeight, 1);
 	}
 	return MediaHeightForWidth(
 		width,
@@ -1683,11 +1699,14 @@ void GroupedMediaBlock::handleImageUpdate(int index) {
 	requestRepaint(_items[index].rect);
 }
 
-void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
+void GroupedMediaBlock::paintItem(
+		Painter &p,
+		const ItemState &item,
+		const style::Markdown &st) const {
 	if (item.rect.isEmpty()) {
 		return;
 	}
-	p.fillRect(item.rect, st::windowBgOver->c);
+	p.fillRect(item.rect, st.photo.fallbackBg->c);
 	if (!PaintResolvedImages(
 			p,
 			item.rect,
@@ -1695,7 +1714,7 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 			item.fullImage,
 			item.previousThumbnailImage,
 			item.previousFullImage)) {
-		p.setPen(st::windowSubTextFg->c);
+		p.setPen(st.photo.fallbackFg->c);
 		p.drawText(
 			item.rect,
 			Qt::AlignCenter | Qt::TextWordWrap,
@@ -1708,7 +1727,7 @@ void GroupedMediaBlock::paintItem(Painter &p, const ItemState &item) const {
 		PaintPhotoProgress(
 			p,
 			item.rect,
-			st::defaultMarkdown.photo,
+			st.photo,
 			itemProgress(item));
 	}
 }
@@ -1731,18 +1750,21 @@ double GroupedMediaBlock::itemProgress(const ItemState &item) const {
 	return 0.;
 }
 
-void GroupedMediaBlock::paintActiveItem(Painter &p) const {
+void GroupedMediaBlock::paintActiveItem(
+		Painter &p,
+		const style::Markdown &st) const {
 	const auto item = activeItem();
+	const auto &grouped = st.groupedMedia;
 	if (!item) {
-		p.fillRect(_geometry, st::windowBgOver->c);
-		p.setPen(st::windowSubTextFg->c);
+		p.fillRect(_geometry, grouped.fallbackBg->c);
+		p.setPen(grouped.fallbackFg->c);
 		p.drawText(
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
 			_fallbackLabel);
 		return;
 	}
-	p.fillRect(_geometry, st::windowBgOver->c);
+	p.fillRect(_geometry, st.photo.fallbackBg->c);
 	if (!PaintResolvedImages(
 			p,
 			_geometry,
@@ -1750,7 +1772,7 @@ void GroupedMediaBlock::paintActiveItem(Painter &p) const {
 			item->fullImage,
 			item->previousThumbnailImage,
 			item->previousFullImage)) {
-		p.setPen(st::windowSubTextFg->c);
+		p.setPen(st.photo.fallbackFg->c);
 		p.drawText(
 			_geometry,
 			Qt::AlignCenter | Qt::TextWordWrap,
@@ -1763,17 +1785,19 @@ void GroupedMediaBlock::paintActiveItem(Painter &p) const {
 		PaintPhotoProgress(
 			p,
 			_geometry,
-			st::defaultMarkdown.photo,
+			st.photo,
 			itemProgress(*item));
 	}
 }
 
-void GroupedMediaBlock::paintNavigation(Painter &p) const {
+void GroupedMediaBlock::paintNavigation(
+		Painter &p,
+		const style::Markdown &st) const {
 	if ((_intent != PreparedGroupedMediaIntent::Slideshow)
 		|| (_items.size() < 2)) {
 		return;
 	}
-	const auto &style = st::defaultMarkdown.groupedMedia;
+	const auto &style = st.groupedMedia;
 	if (!_previousRect.isEmpty()) {
 		const auto active = ClickHandler::showAsActive(_previousLink)
 			|| ClickHandler::showAsPressed(_previousLink);
@@ -1820,7 +1844,7 @@ void GroupedMediaBlock::updateNavigationRects() {
 		|| _geometry.isEmpty()) {
 		return;
 	}
-	const auto &style = st::defaultMarkdown.groupedMedia;
+	const auto &style = layoutStyle().groupedMedia;
 	const auto availableWidth = std::max(
 		(_geometry.width() - 2 * style.navButtonSkip) / 2,
 		0);
@@ -1910,6 +1934,18 @@ MediaBlockHost *MediaBlock::host() const {
 	return _host;
 }
 
+void MediaBlock::setLayoutStyle(const style::Markdown &st) {
+	if (_st == &st) {
+		return;
+	}
+	_st = &st;
+	layoutStyleUpdated();
+}
+
+const style::Markdown &MediaBlock::layoutStyle() const {
+	return *_st;
+}
+
 void MediaBlock::requestRepaint(QRect articleRect) const {
 	if (_host) {
 		_host->requestRepaint(articleRect);
@@ -1922,63 +1958,87 @@ void MediaBlock::requestRelayout(QRect articleRect) const {
 	}
 }
 
+void MediaBlock::layoutStyleUpdated() {
+}
+
 std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(
 		const PreparedPhotoBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
 	if (mediaRuntime
 		&& prepared.viewerOpen
 		&& prepared.urlOverride.isEmpty()) {
 		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
 			if (const auto block = hosted->createPhoto(prepared)) {
+				block->setLayoutStyle(st);
 				return block;
 			}
 		}
 	}
-	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 std::shared_ptr<MediaBlock> CreateVideoMediaBlock(
 		const PreparedVideoBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
 	if (mediaRuntime) {
 		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
 			if (const auto block = hosted->createVideo(prepared)) {
+				block->setLayoutStyle(st);
 				return block;
 			}
 		}
 	}
-	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 std::shared_ptr<MediaBlock> CreateAudioMediaBlock(
 		const PreparedAudioBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
-	return std::make_shared<AudioMediaBlock>(prepared, mediaRuntime);
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
+	auto result = std::make_shared<AudioMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 std::shared_ptr<MediaBlock> CreateMapMediaBlock(
 		const PreparedMapBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
 	if (mediaRuntime) {
 		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
 			if (const auto block = hosted->createMap(prepared)) {
+				block->setLayoutStyle(st);
 				return block;
 			}
 		}
 	}
-	return std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 std::shared_ptr<MediaBlock> CreateChannelMediaBlock(
 		const PreparedChannelBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
-	return std::make_shared<ChannelMediaBlock>(prepared, mediaRuntime);
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
+	auto result = std::make_shared<ChannelMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 std::shared_ptr<MediaBlock> CreateGroupedMediaBlock(
 		const PreparedGroupedMediaBlockData &prepared,
-		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
-	return std::make_shared<GroupedMediaBlock>(prepared, mediaRuntime);
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st) {
+	auto result = std::make_shared<GroupedMediaBlock>(prepared, mediaRuntime);
+	result->setLayoutStyle(st);
+	return result;
 }
 
 } // namespace Iv::Markdown

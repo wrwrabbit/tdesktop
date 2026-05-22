@@ -2275,8 +2275,9 @@ void PrintPrepareSummary(
 		MarkdownArticleContent content,
 		const std::shared_ptr<MathRenderer> &renderer,
 		int width,
-		int *height = nullptr) {
-	auto article = std::make_unique<MarkdownArticle>(renderer);
+		int *height = nullptr,
+		const style::Markdown &articleSt = st::defaultMarkdown) {
+	auto article = std::make_unique<MarkdownArticle>(articleSt, renderer);
 	article->setContent(std::move(content));
 	if (height) {
 		*height = article->resizeGetHeight(width);
@@ -2291,6 +2292,7 @@ void PrintPrepareSummary(
 		MarkdownArticle *article,
 		int width,
 		int height,
+		MarkdownArticlePaintCaches caches,
 		int devicePixelRatio = 1,
 		std::optional<MarkdownArticleSelection> selection = std::nullopt) {
 	const auto previousDevicePixelRatio = style::DevicePixelRatio();
@@ -2306,12 +2308,27 @@ void PrintPrepareSummary(
 		article->paint(
 			painter,
 			QRect(0, 0, width, height),
-			MarkdownArticlePaintCaches(),
+			std::move(caches),
 			selection.value_or(MarkdownArticleSelection()));
 	}
 
 	style::SetDevicePixelRatio(previousDevicePixelRatio);
 	return image;
+}
+
+[[nodiscard]] QImage PaintArticleForTest(
+		MarkdownArticle *article,
+		int width,
+		int height,
+		int devicePixelRatio = 1,
+		std::optional<MarkdownArticleSelection> selection = std::nullopt) {
+	return PaintArticleForTest(
+		article,
+		width,
+		height,
+		MarkdownArticlePaintCaches(),
+		devicePixelRatio,
+		std::move(selection));
 }
 
 [[nodiscard]] QImage PaintArticleForSyntaxHighlightTest(
@@ -11525,6 +11542,304 @@ void CheckTableFormulaTextSizeCoverage(bool *ok) {
 	}
 }
 
+void CheckMessageMarkdownPrepareAndLayoutCoverage(bool *ok) {
+	const auto label = u"message-markdown-prepare-layout"_q;
+	const auto defaultDimensions = CaptureMarkdownPrepareDimensions();
+	const auto messageDimensions = CaptureMarkdownPrepareDimensions(
+		st::messageMarkdown);
+	Check(
+		defaultDimensions.bodyTextSize != messageDimensions.bodyTextSize,
+		label + u" body size differs"_q,
+		ok);
+	Check(
+		defaultDimensions.headingTextSizes[0]
+			!= messageDimensions.headingTextSizes[0],
+		label + u" heading size differs"_q,
+		ok);
+	Check(
+		defaultDimensions.displayMathTextSize
+			!= messageDimensions.displayMathTextSize,
+		label + u" display math size differs"_q,
+		ok);
+
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockHeading1(NativeIvConcat({
+			NativeIvText(u"Heading "_q),
+			MTP_textMath(MTP_string("h")),
+		})),
+		MTP_pageBlockParagraph(NativeIvConcat({
+			NativeIvText(u"Body "_q),
+			MTP_textMath(MTP_string("b")),
+		})),
+		MTP_pageBlockMath(MTP_string("d")),
+	});
+	auto defaultPrepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	auto messagePrepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.dimensionsOverride = messageDimensions,
+	});
+	Check(
+		defaultPrepared.supported(),
+		label + u" default prepare supported"_q,
+		ok);
+	Check(
+		messagePrepared.supported(),
+		label + u" message prepare supported"_q,
+		ok);
+	if (defaultPrepared.supported() && messagePrepared.supported()) {
+		const auto defaultHeading = FindPreparedFormulaSlot(
+			defaultPrepared.content,
+			u"h"_q,
+			MathKind::Inline);
+		const auto defaultBody = FindPreparedFormulaSlot(
+			defaultPrepared.content,
+			u"b"_q,
+			MathKind::Inline);
+		const auto defaultDisplay = FindPreparedFormulaSlot(
+			defaultPrepared.content,
+			u"d"_q,
+			MathKind::Display);
+		const auto messageHeading = FindPreparedFormulaSlot(
+			messagePrepared.content,
+			u"h"_q,
+			MathKind::Inline);
+		const auto messageBody = FindPreparedFormulaSlot(
+			messagePrepared.content,
+			u"b"_q,
+			MathKind::Inline);
+		const auto messageDisplay = FindPreparedFormulaSlot(
+			messagePrepared.content,
+			u"d"_q,
+			MathKind::Display);
+		Check(defaultHeading != nullptr, label + u" default heading formula"_q, ok);
+		Check(defaultBody != nullptr, label + u" default body formula"_q, ok);
+		Check(
+			defaultDisplay != nullptr,
+			label + u" default display formula"_q,
+			ok);
+		Check(messageHeading != nullptr, label + u" message heading formula"_q, ok);
+		Check(messageBody != nullptr, label + u" message body formula"_q, ok);
+		Check(
+			messageDisplay != nullptr,
+			label + u" message display formula"_q,
+			ok);
+		if (defaultHeading && messageHeading) {
+			Check(
+				defaultHeading->textSize == defaultDimensions.headingTextSizes[0],
+				label + u" default heading size applied"_q,
+				ok);
+			Check(
+				messageHeading->textSize == messageDimensions.headingTextSizes[0],
+				label + u" message heading size applied"_q,
+				ok);
+			Check(
+				defaultHeading->textSize != messageHeading->textSize,
+				label + u" heading override changes native prepare"_q,
+				ok);
+		}
+		if (defaultBody && messageBody) {
+			Check(
+				defaultBody->textSize == defaultDimensions.bodyTextSize,
+				label + u" default body size applied"_q,
+				ok);
+			Check(
+				messageBody->textSize == messageDimensions.bodyTextSize,
+				label + u" message body size applied"_q,
+				ok);
+			Check(
+				defaultBody->textSize != messageBody->textSize,
+				label + u" body override changes native prepare"_q,
+				ok);
+		}
+		if (defaultDisplay && messageDisplay) {
+			Check(
+				defaultDisplay->textSize == defaultDimensions.displayMathTextSize,
+				label + u" default display size applied"_q,
+				ok);
+			Check(
+				messageDisplay->textSize == messageDimensions.displayMathTextSize,
+				label + u" message display size applied"_q,
+				ok);
+			Check(
+				defaultDisplay->textSize != messageDisplay->textSize,
+				label + u" display override changes native prepare"_q,
+				ok);
+		}
+	}
+
+	const auto layoutLabel = label + u"-article"_q;
+	const auto parsed = ParseMarkdownForIv(
+		QByteArray(
+			"# Message layout heading that should wrap\n\n"
+			"This body paragraph is intentionally long enough to reflow when "
+			"message markdown metrics replace the standalone article defaults.\n"),
+		ParseOptions{ layoutLabel });
+	Check(
+		parsed.ok,
+		layoutLabel + u" parse failed: "_q + parsed.error,
+		ok);
+	if (!parsed.ok) {
+		return;
+	}
+	auto renderer = std::make_shared<MathRenderer>();
+	auto prepared = PrepareParsedDocumentForTest(
+		parsed.document,
+		layoutLabel,
+		renderer);
+	Check(
+		!prepared.failure.failed(),
+		layoutLabel + u" prepare failure: "_q
+			+ PrepareFailureReason(prepared.failure),
+		ok);
+	if (prepared.failure.failed()) {
+		return;
+	}
+	const auto width = 280;
+	auto defaultHeight = 0;
+	auto defaultArticle = BuildArticleForTest(
+		prepared,
+		renderer,
+		width,
+		&defaultHeight,
+		st::defaultMarkdown);
+	const auto expectedMaxWidth = [](const style::Markdown &st) {
+		return std::max(
+			st.pageMaxWidth,
+			st.pagePadding.left()
+				+ st.pagePadding.right()
+				+ 1);
+	};
+	Check(
+		defaultArticle->maxWidth() == expectedMaxWidth(st::defaultMarkdown),
+		layoutLabel + u" default max width"_q,
+		ok);
+	const auto defaultParagraphBounds = SegmentHitBounds(
+		defaultArticle.get(),
+		width,
+		defaultHeight,
+		1);
+	Check(
+		defaultParagraphBounds.has_value(),
+		layoutLabel + u" default paragraph bounds"_q,
+		ok);
+	auto messageHeight = 0;
+	auto messageArticle = BuildArticleForTest(
+		std::move(prepared),
+		renderer,
+		width,
+		&messageHeight,
+		st::messageMarkdown);
+	Check(
+		messageArticle->maxWidth() == expectedMaxWidth(st::messageMarkdown),
+		layoutLabel + u" message max width"_q,
+		ok);
+	const auto messageParagraphBounds = SegmentHitBounds(
+		messageArticle.get(),
+		width,
+		messageHeight,
+		1);
+	Check(
+		messageParagraphBounds.has_value(),
+		layoutLabel + u" message paragraph bounds"_q,
+		ok);
+	Check(
+		messageHeight < defaultHeight,
+		layoutLabel + u" relayout shrinks height"_q,
+		ok);
+	if (defaultParagraphBounds && messageParagraphBounds) {
+		Check(
+			messageParagraphBounds->left() <= defaultParagraphBounds->left(),
+			layoutLabel + u" message layout tightens inset"_q,
+			ok);
+		Check(
+			messageParagraphBounds->bottom() < defaultParagraphBounds->bottom(),
+			layoutLabel + u" message layout updates geometry"_q,
+			ok);
+	}
+}
+
+void CheckPaintTimeMarkdownInjectionCoverage(bool *ok) {
+	const auto label = u"message-style-paint-photo"_q;
+	const auto defaultBg = st::defaultMarkdown.photo.fallbackBg->c.rgba();
+	const auto messageBg = st::messageMarkdown.photo.fallbackBg->c.rgba();
+	Check(
+		defaultBg != messageBg,
+		label + u" photo fallback bg colors differ"_q,
+		ok);
+	const auto photoId = uint64(9901);
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvPhotoBlock(photoId, u"Photo caption"_q),
+	}, QVector<MTPPhoto>{
+		NativeIvPhoto(photoId, 320, 180),
+	});
+	auto prepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	Check(prepared.supported(), label + u" prepare supported"_q, ok);
+	if (!prepared.supported()) {
+		return;
+	}
+	auto renderer = std::make_shared<MathRenderer>();
+	auto height = 0;
+	auto article = BuildArticleForTest(
+		std::move(prepared.content),
+		renderer,
+		360,
+		&height);
+	const auto anyPixelInImage = [](
+			const QImage &image,
+			auto &&predicate) {
+		for (auto y = 0; y != image.height(); ++y) {
+			for (auto x = 0; x != image.width(); ++x) {
+				if (predicate(image.pixel(x, y))) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	const auto defaultImage = PaintArticleForTest(
+		article.get(),
+		360,
+		height);
+	const auto messageImage = PaintArticleForTest(
+		article.get(),
+		360,
+		height,
+		MarkdownArticlePaintCaches{
+			.st = &st::messageMarkdown,
+		});
+	Check(
+		HasPaintedPixels(defaultImage),
+		label + u" default paint produced pixels"_q,
+		ok);
+	Check(
+		HasPaintedPixels(messageImage),
+		label + u" message paint produced pixels"_q,
+		ok);
+	Check(
+		PixelsDifferInRect(
+			defaultImage,
+			messageImage,
+			QRect(QPoint(), defaultImage.size())),
+		label + u" injected style changes photo surface"_q,
+		ok);
+	Check(
+		anyPixelInImage(
+			defaultImage,
+			[&](QRgb pixel) { return pixel == defaultBg; }),
+		label + u" default photo bg paint"_q,
+		ok);
+	Check(
+		anyPixelInImage(
+			messageImage,
+			[&](QRgb pixel) { return pixel == messageBg; }),
+		label + u" message photo bg paint"_q,
+		ok);
+}
+
 void CheckInlineTextObjectArticleCoverage(bool *ok) {
 	const auto selectionLabel = FromLatin1("generated-inline-selection.md");
 	const auto selectionParsed = ParseMarkdownForIv(
@@ -11964,6 +12279,7 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 		SetTextLeaf(
 			&leaf,
 			st::defaultMarkdown.body,
+			st::defaultMarkdown,
 			probe.segment,
 			&prepared.formulas,
 			cache.get(),
@@ -14069,6 +14385,8 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckPreparedExternalLinkCoverage(&ok);
 	CheckDetailsSummaryHitCoverage(&ok);
 	CheckTableFormulaTextSizeCoverage(&ok);
+	CheckMessageMarkdownPrepareAndLayoutCoverage(&ok);
+	CheckPaintTimeMarkdownInjectionCoverage(&ok);
 	CheckArticleRenderSmoke(markdownFixture, latexFixture, &ok);
 	CheckInlineTextObjectArticleCoverage(&ok);
 	CheckArticleRasterRegressionCoverage(&ok);

@@ -191,8 +191,9 @@ ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
 }
 
 [[nodiscard]] PreparedFormulaMeasurementSignature FormulaRenderSignature(
-		const PreparedFormulaSlot &slot) {
-	const auto &displayMath = st::defaultMarkdown.displayMath;
+		const PreparedFormulaSlot &slot,
+		const style::Markdown &st) {
+	const auto &displayMath = st.displayMath;
 	return {
 		.trimmedTex = slot.trimmedTex.trimmed(),
 		.kind = slot.kind,
@@ -208,8 +209,9 @@ ClickHandler::TextEntity PreparedLinkClickHandler::getTextEntity() const {
 
 [[nodiscard]] PreparedFormulaMeasurementSignature InlineFormulaSignature(
 		QString trimmedTex,
-		const style::TextStyle &textStyle) {
-	const auto &displayMath = st::defaultMarkdown.displayMath;
+		const style::TextStyle &textStyle,
+		const style::Markdown &st) {
+	const auto &displayMath = st.displayMath;
 	const auto textSize = FormulaTextSize(textStyle);
 	return {
 		.trimmedTex = std::move(trimmedTex).trimmed(),
@@ -501,12 +503,14 @@ thread_local auto CurrentInlineIvImageRepaintCallbacks
 FindInlineFormulaMeasuredData(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		const PreparedFormulaMeasurementSignature &signature,
+		const style::Markdown &st,
 		MeasuredFormula *measured) {
 	if (!formulas) {
 		return nullptr;
 	}
 	for (const auto &slot : *formulas) {
-		if (!slot.present || FormulaRenderSignature(slot) != signature) {
+		if (!slot.present
+			|| (FormulaRenderSignature(slot, st) != signature)) {
 			continue;
 		}
 		if (measured) {
@@ -642,12 +646,13 @@ RenderedFormula EnsureFormulaRendered(
 		const PreparedFormulaSlot *slot,
 		RenderedFormula *rendered,
 		MathRenderer *renderer,
-		int devicePixelRatio) {
+		int devicePixelRatio,
+		const style::Markdown &st) {
 	if (!slot) {
 		return RenderedFormula();
 	}
 	return EnsureFormulaRendered(
-		FormulaRenderSignature(*slot),
+		FormulaRenderSignature(*slot, st),
 		slot->measured,
 		rendered,
 		renderer,
@@ -665,12 +670,14 @@ public:
 	[[nodiscard]] std::unique_ptr<Ui::Text::CustomEmoji> create(
 		const InlineTextObjectFormulaData &data,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas);
 
 private:
 	[[nodiscard]] std::shared_ptr<InlineFormulaSharedState> lookupOrCreate(
 		const PreparedFormulaMeasurementSignature &signature,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas);
 
 	std::shared_ptr<MathRenderer> _renderer;
@@ -1046,14 +1053,16 @@ bool InlineIvImageObject::readyInDefaultState() {
 std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 		const InlineTextObjectFormulaData &data,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas) {
 	auto replacementText = data.copySource;
 	if (replacementText.isEmpty()) {
 		replacementText = u"$"_q + data.trimmedTex + u"$"_q;
 	}
 	auto state = lookupOrCreate(
-		InlineFormulaSignature(data.trimmedTex, textStyle),
+		InlineFormulaSignature(data.trimmedTex, textStyle, st),
 		textStyle,
+		st,
 		formulas);
 	if (!state) {
 		return nullptr;
@@ -1070,6 +1079,7 @@ std::unique_ptr<Ui::Text::CustomEmoji> InlineFormulaObjectCache::create(
 auto InlineFormulaObjectCache::lookupOrCreate(
 		const PreparedFormulaMeasurementSignature &signature,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const std::vector<PreparedFormulaSlot> *formulas)
 -> std::shared_ptr<InlineFormulaSharedState> {
 	if (const auto i = _states.find(signature); i != end(_states)) {
@@ -1079,6 +1089,7 @@ auto InlineFormulaObjectCache::lookupOrCreate(
 	auto measuredData = FindInlineFormulaMeasuredData(
 		formulas,
 		signature,
+		st,
 		&measured);
 	if (measuredData) {
 		measured = *measuredData;
@@ -1150,6 +1161,7 @@ void InvalidateInlineFormulaRasterCache(
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
+		const style::Markdown &st,
 		const TextWithEntities &text,
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
@@ -1165,6 +1177,8 @@ void SetTextLeaf(
 		context.repaint = callbacks.repaint;
 		repaintRect = callbacks.repaintRect;
 	}
+	const auto textStylePtr = &textStyle;
+	const auto stPtr = &st;
 	auto originalCustomEmojiFactory = std::move(context.customEmojiFactory);
 	context.customEmojiFactory = [
 		formulas,
@@ -1172,7 +1186,8 @@ void SetTextLeaf(
 		mediaRuntime,
 		repaintRect = std::move(repaintRect),
 		originalCustomEmojiFactory = std::move(originalCustomEmojiFactory),
-		&textStyle
+		textStyle = textStylePtr,
+		st = stPtr
 	](
 			QStringView data,
 			const Ui::Text::MarkedContext &context
@@ -1191,7 +1206,11 @@ void SetTextLeaf(
 			const auto formula = std::get_if<InlineTextObjectFormulaData>(
 				&parsed->data);
 			return formula
-				? inlineFormulaObjects->create(*formula, textStyle, formulas)
+				? inlineFormulaObjects->create(
+					*formula,
+					*textStyle,
+					*st,
+					formulas)
 				: std::unique_ptr<Ui::Text::CustomEmoji>();
 		} break;
 		case InlineTextObjectKind::IvImage: {

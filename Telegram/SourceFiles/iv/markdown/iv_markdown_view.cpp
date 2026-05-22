@@ -626,7 +626,9 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		return;
 	}
 
-	auto article = std::make_shared<MarkdownArticle>(_renderer);
+	auto article = std::make_shared<MarkdownArticle>(
+		st::defaultMarkdown,
+		_renderer);
 	article->setContent(std::move(prepared));
 	_article = article;
 	updateChildrenGeometry(size());
@@ -749,8 +751,7 @@ void MarkdownPreviewRoot::updateScrollToTopVisibility() {
 	}
 	startScrollToTopButtonAnimation(
 		!_scroll->isHidden()
-		&& (_scroll->scrollTop() > (st::historyToDownShownAfter / 2))
-		&& (_scroll->scrollTop() < _scroll->scrollTopMax()));
+		&& (_scroll->scrollTop() > (st::historyToDownShownAfter / 2)));
 }
 
 void MarkdownPreviewRoot::startScrollToTopButtonAnimation(bool shown) {

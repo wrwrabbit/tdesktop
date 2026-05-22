@@ -46,26 +46,26 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 
 [[nodiscard]] const style::TextStyle &TableCellTextStyle(
 		const PreparedTableCell &prepared,
-		const style::Markdown &) {
+		const style::Markdown &st) {
 	if (prepared.header) {
-		return st::defaultTable.defaultLabel.style;
+		return st.table.headerStyle;
 	}
-	return st::defaultTable.defaultValue.style;
+	return st.table.bodyStyle;
 }
 
 [[nodiscard]] const style::TextStyle &TableCellTextStyle(
 		const LaidOutTableCell &cell,
-		const style::Markdown &) {
+		const style::Markdown &st) {
 	if (cell.header) {
-		return st::defaultTable.defaultLabel.style;
+		return st.table.headerStyle;
 	}
-	return st::defaultTable.defaultValue.style;
+	return st.table.bodyStyle;
 }
 
 [[nodiscard]] int TableBorder(
 		bool bordered,
-		const style::Markdown &markdown) {
-	return bordered ? markdown.table.border : 0;
+		const style::Markdown &st) {
+	return bordered ? st.table.border : 0;
 }
 
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
@@ -73,9 +73,9 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	auto result = TableCellLayoutData();
-	const auto &textStyle = TableCellTextStyle(prepared, markdown);
+	const auto &textStyle = TableCellTextStyle(prepared, st);
 	result.cell.header = prepared.header;
 	result.cell.verticalAlignment = prepared.verticalAlignment;
 	result.cell.align = CellAlign(prepared.alignment);
@@ -85,11 +85,12 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	SetTextLeaf(
 		&result.cell.leaf,
 		textStyle,
+		st,
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		TableCellTextMinResizeWidth(textStyle, markdown));
+		TableCellTextMinResizeWidth(textStyle, st));
 	BindLinks(&result.cell.leaf, prepared.links);
 	result.preferredWidth = result.cell.leaf.maxWidth();
 	result.preferredHeight = std::max(
@@ -191,12 +192,12 @@ struct TableSpannedCellLayout {
 		const std::vector<TableRowLayoutData> &rows,
 		int columnCount,
 		int width,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		bool bordered,
 		bool *overflowed) {
-	const auto &padding = markdown.table.cellPadding;
-	const auto border = TableBorder(bordered, markdown);
-	const auto minimum = markdown.table.minColumnWidth;
+	const auto &padding = st.table.cellPadding;
+	const auto border = TableBorder(bordered, st);
+	const auto minimum = st.table.minColumnWidth;
 	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
 	auto singleColumnDeficits = std::vector<int>(std::max(columnCount, 0), 0);
 	auto spannedCells = std::vector<TableSpannedCellLayout>();
@@ -331,13 +332,13 @@ void SetPlainTextLeaf(
 [[nodiscard]] QRect ArticleTextBand(
 		int fallbackLeft,
 		int fallbackWidth,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		const LayoutContext &context) {
 	return context.useArticleBands
 		? PaddedBand(
 			context.articleLeft,
 			context.articleWidth,
-			markdown.textPadding)
+			st.textPadding)
 		: QRect(fallbackLeft, 0, std::max(fallbackWidth, 1), 0);
 }
 
@@ -374,6 +375,7 @@ void LayoutMediaCaptionText(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st,
 		const style::TextStyle &textStyle,
 		int left,
 		int top,
@@ -382,6 +384,7 @@ void LayoutMediaCaptionText(
 	SetTextLeaf(
 		&block->leaf,
 		textStyle,
+		st,
 		text,
 		formulas,
 		inlineFormulaObjects,
@@ -405,7 +408,7 @@ void LayoutMediaCaption(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -416,7 +419,7 @@ void LayoutMediaCaption(
 		return;
 	}
 	block->supplementary = prepared.supplementary;
-	const auto textBand = ArticleTextBand(left, width, markdown, context);
+	const auto textBand = ArticleTextBand(left, width, st, context);
 	LayoutMediaCaptionText(
 		block,
 		prepared.text,
@@ -424,7 +427,8 @@ void LayoutMediaCaption(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown.body,
+		st,
+		st.body,
 		textBand.x(),
 		top + skip,
 		textBand.width());
@@ -432,10 +436,10 @@ void LayoutMediaCaption(
 }
 
 [[nodiscard]] int SingleDigitOrderedMarkerWidth(
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	return std::max(
-		markdown.body.font->width(u"8."_q),
-		markdown.body.font->width(u"8)"_q));
+		st.body.font->width(u"8."_q),
+		st.body.font->width(u"8)"_q));
 }
 
 QString CodeBlockDisplayText(const QString &text) {
@@ -516,11 +520,11 @@ int TextLineHeight(const style::TextStyle &style) {
 QPoint BulletMarkerCenter(
 		int left,
 		int baseline,
-		const style::Markdown &markdown) {
-	const auto &list = markdown.list;
-	const auto lineHeight = TextLineHeight(markdown.body);
-	const auto markerWidth = SingleDigitOrderedMarkerWidth(markdown);
-	const auto nominalBaseline = NominalTextBaseline(markdown.body, 0);
+		const style::Markdown &st) {
+	const auto &list = st.list;
+	const auto lineHeight = TextLineHeight(st.body);
+	const auto markerWidth = SingleDigitOrderedMarkerWidth(st);
+	const auto nominalBaseline = NominalTextBaseline(st.body, 0);
 	return QPoint(
 		left + list.markerWidth - list.bulletLeftShift - ((markerWidth + 1) / 2),
 		baseline + (lineHeight / 2) - nominalBaseline);
@@ -543,10 +547,10 @@ int TextMinResizeWidth(int width) {
 
 int TableCellTextMinResizeWidth(
 		const style::TextStyle &textStyle,
-		const style::Markdown &markdown) {
-	const auto &padding = markdown.table.cellPadding;
+		const style::Markdown &st) {
+	const auto &padding = st.table.cellPadding;
 	return std::max({
-		markdown.table.minColumnWidth - padding.left() - padding.right(),
+		st.table.minColumnWidth - padding.left() - padding.right(),
 		textStyle.font->spacew,
 		1,
 	});
@@ -554,11 +558,11 @@ int TableCellTextMinResizeWidth(
 
 int BlockSkip(
 		const PreparedBlock &block,
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	if (IsAnchorOnlyBlock(block)) {
 		return 0;
 	}
-	const auto &skips = markdown.blockSkips;
+	const auto &skips = st.blockSkips;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
 		return skips.paragraph;
@@ -605,32 +609,32 @@ int BlockSkip(
 		const PreparedBlock &previous,
 		const PreparedBlock &block,
 		LayoutContext context,
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	if (context.tightList
 		&& IsFlowKind(previous.kind)
 		&& IsFlowKind(block.kind)) {
 		return 0;
 	}
-	return BlockSkip(block, markdown);
+	return BlockSkip(block, st);
 }
 
 const style::TextStyle &TextStyleFor(
 		const PreparedBlock &block,
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	if (block.kind == PreparedBlockKind::CodeBlock) {
-		return markdown.code;
+		return st.code;
 	} else if (block.kind != PreparedBlockKind::Heading) {
-		return markdown.body;
+		return st.body;
 	}
 	switch (std::clamp(block.headingLevel, 1, 6)) {
-	case 1: return markdown.heading1;
-	case 2: return markdown.heading2;
-	case 3: return markdown.heading3;
-	case 4: return markdown.heading4;
-	case 5: return markdown.heading5;
-	case 6: return markdown.heading6;
+	case 1: return st.heading1;
+	case 2: return st.heading2;
+	case 3: return st.heading3;
+	case 4: return st.heading4;
+	case 5: return st.heading5;
+	case 6: return st.heading6;
 	}
-	return markdown.heading6;
+	return st.heading6;
 }
 
 int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
@@ -644,7 +648,7 @@ int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
 
 void RepopulateCodeBlockLeaf(
 		LaidOutBlock &block,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		bool allowAsyncSyntaxHighlighting,
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
 	auto marked = tr::marked(CodeBlockDisplayText(block.copyText));
@@ -664,7 +668,7 @@ void RepopulateCodeBlockLeaf(
 			: Spellchecker::TryHighlightSyntax(marked))
 		: 0;
 	block.leaf.setMarkedText(
-		markdown.code,
+		st.code,
 		std::move(marked),
 		kIvMarkedTextOptions);
 }
@@ -674,7 +678,7 @@ LaidOutBlock LayoutFlowBlock(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -691,10 +695,11 @@ LaidOutBlock LayoutFlowBlock(
 		return block;
 	}
 
-	const auto &textStyle = TextStyleFor(prepared, markdown);
+	const auto &textStyle = TextStyleFor(prepared, st);
 	SetTextLeaf(
 		&block.leaf,
 		textStyle,
+		st,
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
@@ -716,7 +721,7 @@ LaidOutBlock LayoutFlowBlock(
 
 LaidOutBlock LayoutCodeBlock(
 		const PreparedBlock &prepared,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -730,23 +735,23 @@ LaidOutBlock LayoutCodeBlock(
 	block.leaf = Ui::Text::String(TextMinResizeWidth(block.textWidth));
 	RepopulateCodeBlockLeaf(
 		block,
-		markdown,
+		st,
 		allowAsyncSyntaxHighlighting,
 		syntaxHighlightTracker);
 	const auto height = std::max(
 		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(markdown.code));
+		TextLineHeight(st.code));
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = block.textRect;
 	block.firstLineBaseline = LeafFirstLineBaseline(
 		block.leaf,
 		block.textRect,
-		markdown.code);
+		st.code);
 	return block;
 }
 
 LaidOutBlock LayoutRuleBlock(
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width) {
@@ -756,7 +761,7 @@ LaidOutBlock LayoutRuleBlock(
 		left,
 		top,
 		std::max(width, 1),
-		markdown.rule.height);
+		st.rule.height);
 	block.textRect = block.outer;
 	return block;
 }
@@ -764,7 +769,7 @@ LaidOutBlock LayoutRuleBlock(
 LaidOutBlock LayoutDisplayMathBlock(
 		const PreparedBlock &prepared,
 		const std::vector<PreparedFormulaSlot> &formulas,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width) {
@@ -773,7 +778,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 	block.formulaIndex = prepared.formulaIndex;
 	block.copyText = prepared.formulaTex;
 
-	const auto &padding = markdown.displayMath.padding;
+	const auto &padding = st.displayMath.padding;
 	const auto contentLeft = left + padding.left();
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
@@ -787,7 +792,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 		formulaWidth = std::max(formula->measured.logicalSize.width(), 1);
 		formulaHeight = std::max(formula->measured.logicalSize.height(), 1);
 	} else {
-		const auto &fallbackPadding = markdown.displayMath.fallbackPadding;
+		const auto &fallbackPadding = st.displayMath.fallbackPadding;
 		const auto fallbackPaddingWidth = fallbackPadding.left()
 			+ fallbackPadding.right();
 		const auto fallbackText = formula
@@ -797,7 +802,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 		block.fallbackLeaf = Ui::Text::String(
 			TextMinResizeWidth(block.textWidth));
 		block.fallbackLeaf.setMarkedText(
-			markdown.displayMath.fallbackStyle,
+			st.displayMath.fallbackStyle,
 			TextWithEntities::Simple(fallbackText),
 			kIvMarkedTextOptions);
 		block.textWidth = std::min(
@@ -805,21 +810,21 @@ LaidOutBlock LayoutDisplayMathBlock(
 			std::max(block.fallbackLeaf.maxWidth(), 1));
 		auto textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(markdown.displayMath.fallbackStyle));
+			TextLineHeight(st.displayMath.fallbackStyle));
 		formulaWidth = std::min(
 			block.textWidth + fallbackPaddingWidth,
 			contentWidth);
 		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
 		textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(markdown.displayMath.fallbackStyle));
+			TextLineHeight(st.displayMath.fallbackStyle));
 		formulaHeight = fallbackPadding.top()
 			+ textHeight
 			+ fallbackPadding.bottom();
 		block.textRect.setSize(QSize(block.textWidth, textHeight));
 	}
 
-	const auto centered = (markdown.displayMath.align == ::style::al_center)
+	const auto centered = (st.displayMath.align == ::style::al_center)
 		&& (formulaWidth <= contentWidth);
 	block.formulaAlign = centered ? ::style::al_center : ::style::al_left;
 
@@ -846,14 +851,14 @@ LaidOutBlock LayoutDisplayMathBlock(
 		&& (block.formulaRect.width() > block.visibleFormulaRect.width());
 
 	if (!(formula && formula->measured.success)) {
-		const auto &fallbackPadding = markdown.displayMath.fallbackPadding;
+		const auto &fallbackPadding = st.displayMath.fallbackPadding;
 		block.textRect.moveTo(
 			block.formulaRect.x() + fallbackPadding.left(),
 			block.formulaRect.y() + fallbackPadding.top());
 		block.firstLineBaseline = LeafFirstLineBaseline(
 			block.fallbackLeaf,
 			block.textRect,
-			markdown.displayMath.fallbackStyle);
+			st.displayMath.fallbackStyle);
 	}
 	return block;
 }
@@ -863,7 +868,7 @@ LaidOutBlock LayoutTableBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width) {
@@ -883,17 +888,18 @@ LaidOutBlock LayoutTableBlock(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown.body,
+			st,
+			st.body,
 			left,
 			top,
 			width);
 		block.firstLineBaseline = LeafFirstLineBaseline(
 			block.leaf,
 			block.textRect,
-			markdown.body);
+			st.body);
 		tableTop = block.textRect.y()
 			+ block.textRect.height()
-			+ markdown.table.captionSkip;
+			+ st.table.captionSkip;
 	}
 
 	const auto columnCount = prepared.tableColumnCount;
@@ -919,7 +925,7 @@ LaidOutBlock LayoutTableBlock(
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
-				markdown));
+				st));
 		}
 		rows.push_back(std::move(row));
 	}
@@ -928,12 +934,12 @@ LaidOutBlock LayoutTableBlock(
 		rows,
 		columnCount,
 		width,
-		markdown,
+		st,
 		block.tableBordered,
 		&block.overflowed);
 
-	const auto &padding = markdown.table.cellPadding;
-	const auto border = TableBorder(block.tableBordered, markdown);
+	const auto &padding = st.table.cellPadding;
+	const auto border = TableBorder(block.tableBordered, st);
 	auto tableWidth = border;
 	for (const auto columnWidth : block.tableColumnWidths) {
 		tableWidth += columnWidth + border;
@@ -957,7 +963,7 @@ LaidOutBlock LayoutTableBlock(
 			cellData.cell.textWidth = std::max(
 				spanWidth - padding.left() - padding.right(),
 				1);
-			const auto &textStyle = TableCellTextStyle(cellData.cell, markdown);
+			const auto &textStyle = TableCellTextStyle(cellData.cell, st);
 			cellData.textHeight = (cellData.cell.textWidth >= cellData.preferredWidth)
 				? cellData.preferredHeight
 				: std::max(
@@ -1093,7 +1099,7 @@ LaidOutBlock LayoutTableBlock(
 			block.firstLineBaseline = LeafFirstLineBaseline(
 				cell.leaf,
 				cell.textRect,
-				TableCellTextStyle(cell, markdown));
+				TableCellTextStyle(cell, st));
 			return block;
 		}
 	}
@@ -1105,7 +1111,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1122,7 +1128,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 	}
 	block.supplementary = prepared.supplementary;
 
-	const auto &style = markdown.placeholder;
+	const auto &style = st.placeholder;
 	const auto blockWidth = std::max(width, 1);
 	const auto contentLeft = left + style.padding.left();
 	const auto contentWidth = std::max(
@@ -1170,7 +1176,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		contentLeft,
 		bottom,
 			contentWidth,
@@ -1189,7 +1195,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 
 LaidOutBlock LayoutRelatedArticleBlock(
 		const PreparedBlock &prepared,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1207,7 +1213,7 @@ LaidOutBlock LayoutRelatedArticleBlock(
 			prepared.relatedArticle.photoId);
 	}
 
-	const auto &card = markdown.relatedArticle;
+	const auto &card = st.relatedArticle;
 	const auto blockWidth = std::max(width, 1);
 	const auto hasThumbnail = (prepared.relatedArticle.photoId != 0);
 	block.thumbnailPhotoId = prepared.relatedArticle.photoId;
@@ -1357,7 +1363,7 @@ LaidOutBlock LayoutPhotoBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1373,7 +1379,7 @@ LaidOutBlock LayoutPhotoBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &style = markdown.photo;
+	const auto &style = st.photo;
 	const auto blockWidth = std::max(width, 1);
 	const auto availableLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
@@ -1402,7 +1408,7 @@ LaidOutBlock LayoutPhotoBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		block.mediaRect.x(),
 		bottom,
 		std::max(block.mediaRect.width(), 1),
@@ -1428,7 +1434,7 @@ LaidOutBlock LayoutVideoBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1444,7 +1450,7 @@ LaidOutBlock LayoutVideoBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &style = markdown.photo;
+	const auto &style = st.photo;
 	const auto blockWidth = std::max(width, 1);
 	const auto availableLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
@@ -1473,7 +1479,7 @@ LaidOutBlock LayoutVideoBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		block.mediaRect.x(),
 		bottom,
 		std::max(block.mediaRect.width(), 1),
@@ -1499,7 +1505,7 @@ LaidOutBlock LayoutAudioBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1515,7 +1521,7 @@ LaidOutBlock LayoutAudioBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &card = markdown.audio;
+	const auto &card = st.audio;
 	const auto blockWidth = std::max(width, 1);
 	const auto cardHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(blockWidth)
@@ -1533,13 +1539,13 @@ LaidOutBlock LayoutAudioBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		left + card.padding.left(),
 		bottom,
 		std::max(
 			blockWidth - card.padding.left() - card.padding.right(),
 			1),
-		markdown.audio.captionSkip,
+		st.audio.captionSkip,
 		&bottom,
 		context);
 	block.contentRect = QRect(
@@ -1556,7 +1562,7 @@ LaidOutBlock LayoutMapBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1572,7 +1578,7 @@ LaidOutBlock LayoutMapBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &style = markdown.photo;
+	const auto &style = st.photo;
 	const auto blockWidth = std::max(width, 1);
 	const auto mediaLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
@@ -1596,7 +1602,7 @@ LaidOutBlock LayoutMapBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		block.mediaRect.x(),
 		bottom,
 		std::max(block.mediaRect.width(), 1),
@@ -1622,7 +1628,7 @@ LaidOutBlock LayoutChannelBlock(
 		std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1638,7 +1644,7 @@ LaidOutBlock LayoutChannelBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &card = markdown.channel;
+	const auto &card = st.channel;
 	const auto blockWidth = std::max(width, 1);
 	const auto cardHeight = block.mediaBlock
 		? block.mediaBlock->resizeGetHeight(blockWidth)
@@ -1656,11 +1662,11 @@ LaidOutBlock LayoutChannelBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		left + card.padding.left(),
 		bottom,
 		std::max(blockWidth - card.padding.left() - card.padding.right(), 1),
-		markdown.audio.captionSkip,
+		st.audio.captionSkip,
 		&bottom,
 		context);
 	block.contentRect = QRect(
@@ -1677,7 +1683,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -1693,7 +1699,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		block.copyText = block.mediaBlock->selectionData().copyText;
 	}
 
-	const auto &style = markdown.groupedMedia;
+	const auto &style = st.groupedMedia;
 	const auto blockWidth = std::max(width, 1);
 	const auto mediaLeft = left + style.padding.left();
 	const auto mediaTop = top + style.padding.top();
@@ -1717,7 +1723,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		mediaLeft,
 		bottom,
 		std::max(block.mediaRect.width(), 1),

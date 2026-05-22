@@ -726,6 +726,7 @@ protected:
 	[[nodiscard]] const Ui::Text::String &text() const;
 	[[nodiscard]] HistoryMessageRichPage *richpage();
 	[[nodiscard]] const HistoryMessageRichPage *richpage() const;
+	[[nodiscard]] int richPageWidthFor(int textWidth) const;
 	[[nodiscard]] int textHeightFor(int textWidth) const;
 	[[nodiscard]] int textRealWidth() const { return _textRealWidth; }
 	void validateText();

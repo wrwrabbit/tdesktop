@@ -132,7 +132,8 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
-	state.dimensions = CaptureMarkdownPrepareDimensions();
+	state.dimensions = request.dimensionsOverride.value_or(
+		CaptureMarkdownPrepareDimensions());
 	const auto finish = [&](NativeInstantViewPrepareResultKind kind, QString reason) {
 		state.result.debug.prepareMs = int(timer.elapsed());
 		return NativeInstantViewPrepareResult{

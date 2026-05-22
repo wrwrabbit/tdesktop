@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 using "chat_helpers/chat_helpers.style";
+using "ui/chat/chat.style";
 using "ui/basic.style";
 using "ui/layers/layers.style";
 using "ui/widgets/widgets.style";
@@ -128,8 +129,11 @@ MarkdownTable {
 	cellPadding: margins;
 	border: pixels;
 	borderFg: color;
+	radius: pixels;
 	headerBg: color;
+	headerBgOpacity: double;
 	headerStyle: TextStyle;
+	bodyStyle: TextStyle;
 	captionSkip: pixels;
 	minColumnWidth: pixels;
 	overflowWidth: pixels;
@@ -168,16 +172,27 @@ MarkdownPlaceholder {
 	minHeight: pixels;
 	border: pixels;
 	radius: pixels;
+	bg: color;
+	bgActive: color;
+	rippleBg: color;
+	borderFg: color;
 	spinnerWidth: pixels;
 	spinnerSize: pixels;
+	spinnerFg: color;
 	captionSkip: pixels;
 	labelStyle: TextStyle;
+	labelFg: color;
+	labelFgActive: color;
 }
 MarkdownPhoto {
 	padding: margins;
 	captionSkip: pixels;
 	progressSize: pixels;
 	progressWidth: pixels;
+	progressBg: color;
+	progressFg: color;
+	fallbackBg: color;
+	fallbackFg: color;
 }
 MarkdownAudio {
 	padding: margins;
@@ -246,6 +261,8 @@ MarkdownGroupedMedia {
 	itemSkip: pixels;
 	radius: pixels;
 	overlayOpacity: double;
+	fallbackBg: color;
+	fallbackFg: color;
 	navButtonSize: pixels;
 	navButtonSkip: pixels;
 	navButtonBg: color;
@@ -272,6 +289,7 @@ MarkdownEmbedOverlay {
 }
 Markdown {
 	textPalette: TextPalette;
+	markBgOpacity: double;
 	textColor: color;
 	supplementaryTextColor: color;
 	body: TextStyle;
@@ -375,8 +393,11 @@ defaultMarkdownTable: MarkdownTable {
 	cellPadding: margins(8px, 10px, 8px, 10px);
 	border: 1px;
 	borderFg: inputBorderFg;
+	radius: defaultTable.radius;
 	headerBg: windowBgOver;
+	headerBgOpacity: 1.0;
 	headerStyle: defaultMarkdownTableHeaderStyle;
+	bodyStyle: defaultMarkdownBodyStyle;
 	captionSkip: 7px;
 	minColumnWidth: 96px;
 	overflowWidth: 4px;
@@ -426,18 +447,29 @@ defaultMarkdownPlaceholder: MarkdownPlaceholder {
 	minHeight: 48px;
 	border: defaultMarkdownEmbedPostAccentWidth;
 	radius: 16px;
+	bg: windowBgOver;
+	bgActive: windowBgOver;
+	rippleBg: windowBgRipple;
+	borderFg: windowActiveTextFg;
 	spinnerWidth: 4px;
 	spinnerSize: 24px;
+	spinnerFg: windowActiveTextFg;
 	captionSkip: 14px;
 	labelStyle: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(16px semibold);
 	}
+	labelFg: windowSubTextFg;
+	labelFgActive: windowActiveTextFg;
 }
 defaultMarkdownPhoto: MarkdownPhoto {
 	padding: margins(0px, 0px, 0px, 0px);
 	captionSkip: 12px;
 	progressSize: 36px;
 	progressWidth: 3px;
+	progressBg: windowSubTextFg;
+	progressFg: windowFg;
+	fallbackBg: windowBgOver;
+	fallbackFg: windowSubTextFg;
 }
 defaultMarkdownAudioTitleStyle: TextStyle(defaultMarkdownBodyStyle) {
 	font: font(16px semibold);
@@ -528,6 +560,8 @@ defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
 	itemSkip: 3px;
 	radius: 0px;
 	overlayOpacity: 0.2;
+	fallbackBg: windowBgOver;
+	fallbackFg: windowSubTextFg;
 	navButtonSize: 36px;
 	navButtonSkip: 12px;
 	navButtonBg: windowBg;
@@ -587,6 +621,7 @@ markdownEmbedOverlayClose: IconButton(boxTitleClose) {
 }
 defaultMarkdown: Markdown {
 	textPalette: defaultMarkdownTextPalette;
+	markBgOpacity: 1.0;
 	textColor: windowFg;
 	supplementaryTextColor: windowSubTextFg;
 	body: defaultMarkdownBodyStyle;
@@ -635,4 +670,429 @@ defaultMarkdown: Markdown {
 	relatedArticle: defaultMarkdownRelatedArticle;
 	groupedMedia: defaultMarkdownGroupedMedia;
 	failure: defaultMarkdownFailure;
+}
+messageMarkdownBodyStyle: TextStyle(messageTextStyle) {
+	font: font(13px);
+	lineHeight: 20px;
+}
+messageMarkdownCodeStyle: TextStyle(defaultMarkdownCodeStyle) {
+	font: font(13px);
+	lineHeight: 20px;
+}
+messageMarkdownTableHeaderStyle: TextStyle(messageMarkdownBodyStyle) {
+	font: font(13px semibold);
+	lineHeight: 20px;
+}
+messageMarkdownDisplayMathFallbackStyle: TextStyle(messageMarkdownCodeStyle) {
+}
+messageMarkdownHeading1Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(19px semibold);
+	lineHeight: 24px;
+}
+messageMarkdownHeading2Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(18px semibold);
+	lineHeight: 23px;
+}
+messageMarkdownHeading3Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(17px semibold);
+	lineHeight: 22px;
+}
+messageMarkdownHeading4Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(16px semibold);
+	lineHeight: 21px;
+}
+messageMarkdownHeading5Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(15px semibold);
+	lineHeight: 20px;
+}
+messageMarkdownHeading6Style: TextStyle(messageMarkdownBodyStyle) {
+	font: font(14px semibold);
+	lineHeight: 19px;
+}
+messageMarkdownDetailsSummaryStyle: TextStyle(defaultTextStyle) {
+	font: font(11px);
+	linkUnderline: kLinkUnderlineNever;
+	lineHeight: 16px;
+}
+messageMarkdownAudioTitleStyle: TextStyle(messageMarkdownBodyStyle) {
+	font: font(14px semibold);
+	lineHeight: 18px;
+}
+messageMarkdownAudioSubtitleStyle: TextStyle(messageMarkdownDetailsSummaryStyle) {
+}
+messageMarkdownBlockSkips: MarkdownBlockSkips {
+	paragraph: 8px;
+	heading: 10px;
+	code: 8px;
+	rule: 8px;
+	quote: 8px;
+	displayMath: 8px;
+	table: 8px;
+	photo: 8px;
+	video: 8px;
+	audio: 8px;
+	map: 8px;
+	channel: 6px;
+	groupedMedia: 8px;
+	relatedArticle: 0px;
+	embedPost: 8px;
+	placeholder: 8px;
+}
+messageMarkdownQuoteBgOpacity: 0.12;
+messageMarkdownDetailsIcon: icon{{ "history_comments_open", msgInReplyBarColor }};
+messageMarkdownDetailsIconSelected: icon{{
+	"history_comments_open",
+	msgInReplyBarSelColor
+}};
+messageMarkdownDetailsIconOut: icon{{ "history_comments_open", msgOutReplyBarColor }};
+messageMarkdownDetailsIconOutSelected: icon{{
+	"history_comments_open",
+	msgOutReplyBarSelColor
+}};
+messageMarkdownNavPreviousIcon: icon{{ "box_button_back", msgInDateFg }};
+messageMarkdownNavPreviousIconSelected: icon{{
+	"box_button_back",
+	msgInDateFgSelected
+}};
+messageMarkdownNavPreviousIconOut: icon{{ "box_button_back", msgOutDateFg }};
+messageMarkdownNavPreviousIconOutSelected: icon{{
+	"box_button_back",
+	msgOutDateFgSelected
+}};
+messageMarkdownNavNextIcon: icon{{
+	"box_button_back-flip_horizontal",
+	msgInDateFg
+}};
+messageMarkdownNavNextIconSelected: icon{{
+	"box_button_back-flip_horizontal",
+	msgInDateFgSelected
+}};
+messageMarkdownNavNextIconOut: icon{{
+	"box_button_back-flip_horizontal",
+	msgOutDateFg
+}};
+messageMarkdownNavNextIconOutSelected: icon{{
+	"box_button_back-flip_horizontal",
+	msgOutDateFgSelected
+}};
+messageMarkdownList: MarkdownList(defaultMarkdownList) {
+	bulletFg: historyTextInFg;
+}
+messageMarkdownQuotePaintColors: MarkdownQuotePaintColors(
+	defaultMarkdownQuotePaintColors) {
+	blockquote: msgInReplyBarColor;
+	pre: msgInDateFg;
+	preBg: msgFileInBg;
+}
+messageMarkdownRule: MarkdownRule(defaultMarkdownRule) {
+	fg: msgInDateFg;
+}
+messageMarkdownTable: MarkdownTable(defaultMarkdownTable) {
+	cellPadding: margins(6px, 8px, 6px, 8px);
+	borderFg: msgInReplyBarColor;
+	headerBg: msgInReplyBarColor;
+	headerBgOpacity: messageMarkdownQuoteBgOpacity;
+	headerStyle: messageMarkdownTableHeaderStyle;
+	bodyStyle: messageMarkdownBodyStyle;
+	captionSkip: 6px;
+	overflowWidth: 3px;
+	overflowFg: msgInDateFg;
+}
+messageMarkdownDisplayMath: MarkdownDisplayMath(defaultMarkdownDisplayMath) {
+	padding: margins(8px, 10px, 8px, 10px);
+	textSize: 16px;
+	fg: historyTextInFg;
+	fallbackStyle: messageMarkdownDisplayMathFallbackStyle;
+	fallbackBg: msgFileInBg;
+	fallbackRadius: 8px;
+	fallbackPadding: margins(8px, 10px, 8px, 10px);
+	overflowWidth: 3px;
+	overflowFg: msgInDateFg;
+}
+messageMarkdownDetails: MarkdownDetails(defaultMarkdownDetails) {
+	headerPadding: margins(6px, 8px, 6px, 8px);
+	bodyPadding: margins(8px, 8px, 8px, 8px);
+	bodyBg: msgInBg;
+	summaryFg: historyTextInFg;
+	radius: 8px;
+	summaryStyle: messageMarkdownDetailsSummaryStyle;
+	icon: messageMarkdownDetailsIcon;
+	iconSkip: 6px;
+}
+messageMarkdownPhoto: MarkdownPhoto(defaultMarkdownPhoto) {
+	captionSkip: 8px;
+	progressSize: 28px;
+	progressWidth: 2px;
+	progressBg: msgInDateFg;
+	progressFg: historyTextInFg;
+	fallbackBg: msgFileInBg;
+	fallbackFg: msgInDateFg;
+}
+messageMarkdownAudio: MarkdownAudio(defaultMarkdownAudio) {
+	padding: margins(6px, 8px, 6px, 8px);
+	captionSkip: 10px;
+	textSkip: 6px;
+	borderFg: msgInDateFg;
+	bg: msgFileInBg;
+	radius: 8px;
+	titleStyle: messageMarkdownAudioTitleStyle;
+	titleFg: historyTextInFg;
+	subtitleStyle: messageMarkdownAudioSubtitleStyle;
+	subtitleFg: msgInDateFg;
+}
+messageMarkdownGroupedMedia: MarkdownGroupedMedia(defaultMarkdownGroupedMedia) {
+	captionSkip: 8px;
+	itemSkip: 2px;
+	radius: 8px;
+	fallbackBg: msgFileInBg;
+	fallbackFg: msgInDateFg;
+	navButtonSize: 28px;
+	navButtonSkip: 8px;
+	navButtonBg: msgFileInBg;
+	navButtonBgOver: msgFileInBgSelected;
+	navPreviousIcon: messageMarkdownNavPreviousIcon;
+	navPreviousIconOver: messageMarkdownNavPreviousIcon;
+	navNextIcon: messageMarkdownNavNextIcon;
+	navNextIconOver: messageMarkdownNavNextIcon;
+}
+messageMarkdownFailureLabel: FlatLabel(defaultMarkdownFailureLabel) {
+	textFg: msgInDateFg;
+	style: messageMarkdownBodyStyle;
+	palette: inTextPalette;
+}
+messageMarkdownFailureLabelSelected: FlatLabel(messageMarkdownFailureLabel) {
+	textFg: msgInDateFgSelected;
+	palette: inTextPaletteSelected;
+}
+messageMarkdownFailureLabelOut: FlatLabel(messageMarkdownFailureLabel) {
+	textFg: msgOutDateFg;
+	palette: outTextPalette;
+}
+messageMarkdownFailureLabelOutSelected: FlatLabel(
+	messageMarkdownFailureLabelOut) {
+	textFg: msgOutDateFgSelected;
+	palette: outTextPaletteSelected;
+}
+messageMarkdownFailure: MarkdownFailure(defaultMarkdownFailure) {
+	label: messageMarkdownFailureLabel;
+	width: 280px;
+	skip: 8px;
+}
+messageMarkdown: Markdown(defaultMarkdown) {
+	textPalette: TextPalette(inTextPalette) {
+		markBg: msgInReplyBarColor;
+	}
+	markBgOpacity: messageMarkdownQuoteBgOpacity;
+	textColor: historyTextInFg;
+	supplementaryTextColor: msgInDateFg;
+	body: messageMarkdownBodyStyle;
+	heading1: messageMarkdownHeading1Style;
+	heading2: messageMarkdownHeading2Style;
+	heading3: messageMarkdownHeading3Style;
+	heading4: messageMarkdownHeading4Style;
+	heading5: messageMarkdownHeading5Style;
+	heading6: messageMarkdownHeading6Style;
+	code: messageMarkdownCodeStyle;
+	pagePadding: margins(0px, 0px, 0px, 0px);
+	pageMaxWidth: msgMaxWidth;
+	textPadding: msgPadding;
+	blockSkips: messageMarkdownBlockSkips;
+	list: MarkdownList(messageMarkdownList) {
+		taskCheck: Check(defaultCheck) {
+			toggledFg: msgFileInBg;
+		}
+	}
+	quoteIndent: 16px;
+	quotePaintColors: messageMarkdownQuotePaintColors;
+	rule: messageMarkdownRule;
+	table: messageMarkdownTable;
+	displayMath: messageMarkdownDisplayMath;
+	details: messageMarkdownDetails;
+	photo: messageMarkdownPhoto;
+	audio: messageMarkdownAudio;
+	groupedMedia: messageMarkdownGroupedMedia;
+	failure: messageMarkdownFailure;
+}
+messageMarkdownOut: Markdown(messageMarkdown) {
+	textPalette: TextPalette(outTextPalette) {
+		markBg: msgOutReplyBarColor;
+	}
+	textColor: historyTextOutFg;
+	supplementaryTextColor: msgOutDateFg;
+	list: MarkdownList(messageMarkdownList) {
+		bulletFg: historyTextOutFg;
+		taskCheck: Check(defaultCheck) {
+			toggledFg: msgFileOutBg;
+		}
+	}
+	quotePaintColors: MarkdownQuotePaintColors(messageMarkdownQuotePaintColors) {
+		blockquote: msgOutReplyBarColor;
+		pre: msgOutDateFg;
+		preBg: msgFileOutBg;
+	}
+	rule: MarkdownRule(messageMarkdownRule) {
+		fg: msgOutDateFg;
+	}
+	table: MarkdownTable(messageMarkdownTable) {
+		borderFg: msgOutReplyBarColor;
+		headerBg: msgOutReplyBarColor;
+		overflowFg: msgOutDateFg;
+	}
+	displayMath: MarkdownDisplayMath(messageMarkdownDisplayMath) {
+		fg: historyTextOutFg;
+		fallbackBg: msgFileOutBg;
+		overflowFg: msgOutDateFg;
+	}
+	details: MarkdownDetails(messageMarkdownDetails) {
+		bodyBg: msgOutBg;
+		summaryFg: historyTextOutFg;
+		icon: messageMarkdownDetailsIconOut;
+	}
+	photo: MarkdownPhoto(messageMarkdownPhoto) {
+		progressBg: msgOutDateFg;
+		progressFg: historyTextOutFg;
+		fallbackBg: msgFileOutBg;
+		fallbackFg: msgOutDateFg;
+	}
+	audio: MarkdownAudio(messageMarkdownAudio) {
+		borderFg: msgOutDateFg;
+		bg: msgFileOutBg;
+		titleFg: historyTextOutFg;
+		subtitleFg: msgOutDateFg;
+	}
+	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
+		fallbackBg: msgFileOutBg;
+		fallbackFg: msgOutDateFg;
+		navButtonBg: msgFileOutBg;
+		navButtonBgOver: msgFileOutBgSelected;
+		navPreviousIcon: messageMarkdownNavPreviousIconOut;
+		navPreviousIconOver: messageMarkdownNavPreviousIconOut;
+		navNextIcon: messageMarkdownNavNextIconOut;
+		navNextIconOver: messageMarkdownNavNextIconOut;
+	}
+	failure: MarkdownFailure(messageMarkdownFailure) {
+		label: messageMarkdownFailureLabelOut;
+	}
+}
+messageMarkdownSelected: Markdown(messageMarkdown) {
+	textPalette: TextPalette(inTextPaletteSelected) {
+		markBg: msgInReplyBarSelColor;
+	}
+	textColor: historyTextInFgSelected;
+	supplementaryTextColor: msgInDateFgSelected;
+	list: MarkdownList(messageMarkdownList) {
+		bulletFg: historyTextInFgSelected;
+		taskCheck: Check(defaultCheck) {
+			toggledFg: msgFileInBgSelected;
+		}
+	}
+	quotePaintColors: MarkdownQuotePaintColors(messageMarkdownQuotePaintColors) {
+		blockquote: msgInReplyBarSelColor;
+		pre: msgInDateFgSelected;
+		preBg: msgFileInBgSelected;
+	}
+	rule: MarkdownRule(messageMarkdownRule) {
+		fg: msgInDateFgSelected;
+	}
+	table: MarkdownTable(messageMarkdownTable) {
+		borderFg: msgInReplyBarSelColor;
+		headerBg: msgInReplyBarSelColor;
+		overflowFg: msgInDateFgSelected;
+	}
+	displayMath: MarkdownDisplayMath(messageMarkdownDisplayMath) {
+		fg: historyTextInFgSelected;
+		fallbackBg: msgFileInBgSelected;
+		overflowFg: msgInDateFgSelected;
+	}
+	details: MarkdownDetails(messageMarkdownDetails) {
+		bodyBg: msgInBgSelected;
+		summaryFg: historyTextInFgSelected;
+		icon: messageMarkdownDetailsIconSelected;
+	}
+	photo: MarkdownPhoto(messageMarkdownPhoto) {
+		progressBg: msgInDateFgSelected;
+		progressFg: historyTextInFgSelected;
+		fallbackBg: msgFileInBgSelected;
+		fallbackFg: msgInDateFgSelected;
+	}
+	audio: MarkdownAudio(messageMarkdownAudio) {
+		borderFg: msgInDateFgSelected;
+		bg: msgFileInBgSelected;
+		titleFg: historyTextInFgSelected;
+		subtitleFg: msgInDateFgSelected;
+	}
+	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
+		fallbackBg: msgFileInBgSelected;
+		fallbackFg: msgInDateFgSelected;
+		navButtonBg: msgFileInBgSelected;
+		navButtonBgOver: msgFileInBgSelected;
+		navPreviousIcon: messageMarkdownNavPreviousIconSelected;
+		navPreviousIconOver: messageMarkdownNavPreviousIconSelected;
+		navNextIcon: messageMarkdownNavNextIconSelected;
+		navNextIconOver: messageMarkdownNavNextIconSelected;
+	}
+	failure: MarkdownFailure(messageMarkdownFailure) {
+		label: messageMarkdownFailureLabelSelected;
+	}
+}
+messageMarkdownOutSelected: Markdown(messageMarkdown) {
+	textPalette: TextPalette(outTextPaletteSelected) {
+		markBg: msgOutReplyBarSelColor;
+	}
+	textColor: historyTextOutFgSelected;
+	supplementaryTextColor: msgOutDateFgSelected;
+	list: MarkdownList(messageMarkdownList) {
+		bulletFg: historyTextOutFgSelected;
+		taskCheck: Check(defaultCheck) {
+			toggledFg: msgFileOutBgSelected;
+		}
+	}
+	quotePaintColors: MarkdownQuotePaintColors(messageMarkdownQuotePaintColors) {
+		blockquote: msgOutReplyBarSelColor;
+		pre: msgOutDateFgSelected;
+		preBg: msgFileOutBgSelected;
+	}
+	rule: MarkdownRule(messageMarkdownRule) {
+		fg: msgOutDateFgSelected;
+	}
+	table: MarkdownTable(messageMarkdownTable) {
+		borderFg: msgOutReplyBarSelColor;
+		headerBg: msgOutReplyBarSelColor;
+		overflowFg: msgOutDateFgSelected;
+	}
+	displayMath: MarkdownDisplayMath(messageMarkdownDisplayMath) {
+		fg: historyTextOutFgSelected;
+		fallbackBg: msgFileOutBgSelected;
+		overflowFg: msgOutDateFgSelected;
+	}
+	details: MarkdownDetails(messageMarkdownDetails) {
+		bodyBg: msgOutBgSelected;
+		summaryFg: historyTextOutFgSelected;
+		icon: messageMarkdownDetailsIconOutSelected;
+	}
+	photo: MarkdownPhoto(messageMarkdownPhoto) {
+		progressBg: msgOutDateFgSelected;
+		progressFg: historyTextOutFgSelected;
+		fallbackBg: msgFileOutBgSelected;
+		fallbackFg: msgOutDateFgSelected;
+	}
+	audio: MarkdownAudio(messageMarkdownAudio) {
+		borderFg: msgOutDateFgSelected;
+		bg: msgFileOutBgSelected;
+		titleFg: historyTextOutFgSelected;
+		subtitleFg: msgOutDateFgSelected;
+	}
+	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
+		fallbackBg: msgFileOutBgSelected;
+		fallbackFg: msgOutDateFgSelected;
+		navButtonBg: msgFileOutBgSelected;
+		navButtonBgOver: msgFileOutBgSelected;
+		navPreviousIcon: messageMarkdownNavPreviousIconOutSelected;
+		navPreviousIconOver: messageMarkdownNavPreviousIconOutSelected;
+		navNextIcon: messageMarkdownNavNextIconOutSelected;
+		navNextIconOver: messageMarkdownNavNextIconOutSelected;
+	}
+	failure: MarkdownFailure(messageMarkdownFailure) {
+		label: messageMarkdownFailureLabelOutSelected;
+	}
 }

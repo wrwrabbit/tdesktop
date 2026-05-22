@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_selection.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "ui/style/style_core_color.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
@@ -447,7 +448,9 @@ PlaceholderBlockRuntime::PlaceholderBlockRuntime(Fn<void()> repaint)
 
 class MarkdownArticle::Impl final : public CodeBlockSyntaxHighlightTracker {
 public:
-	explicit Impl(std::shared_ptr<MathRenderer> renderer);
+	Impl(
+		const style::Markdown &st,
+		std::shared_ptr<MathRenderer> renderer);
 
 	void setRenderer(std::shared_ptr<MathRenderer> renderer);
 
@@ -574,12 +577,15 @@ private:
 		PreparedPlaceholderBlockId id,
 		bool loading);
 
+	[[nodiscard]] const style::Markdown &layoutStyle() const;
+
 	void relayout(int width);
 
 	mutable MarkdownArticleContent _content;
 	std::vector<RenderedFormula> _formulaRenders;
 	std::shared_ptr<MathRenderer> _renderer;
 	std::shared_ptr<InlineFormulaObjectCache> _inlineFormulaObjects;
+	const style::Markdown *_st = nullptr;
 	MediaBlockHost *_mediaBlockHost = nullptr;
 	Fn<void()> _textRepaint;
 	Fn<void(QRect)> _textRepaintRect;
@@ -609,9 +615,12 @@ private:
 
 };
 
-MarkdownArticle::Impl::Impl(std::shared_ptr<MathRenderer> renderer)
+MarkdownArticle::Impl::Impl(
+	const style::Markdown &st,
+	std::shared_ptr<MathRenderer> renderer)
 : _renderer(std::move(renderer))
 , _inlineFormulaObjects(CreateInlineFormulaObjectCache(_renderer)) {
+	_st = &st;
 }
 
 void MarkdownArticle::Impl::setRenderer(std::shared_ptr<MathRenderer> renderer) {
@@ -644,11 +653,11 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 }
 
 int MarkdownArticle::Impl::maxWidth() {
-	const auto &markdown = st::defaultMarkdown;
+	const auto &st = layoutStyle();
 	return std::max(
-		markdown.pageMaxWidth,
-		markdown.pagePadding.left()
-			+ markdown.pagePadding.right()
+		st.pageMaxWidth,
+		st.pagePadding.left()
+			+ st.pagePadding.right()
 			+ 1);
 }
 
@@ -680,7 +689,18 @@ void MarkdownArticle::Impl::paint(
 		MarkdownArticlePaintCaches caches,
 		MarkdownArticleSelection selection,
 		const MarkdownArticleSelectionEndpoints *endpoints) {
-	const auto &markdown = st::defaultMarkdown;
+	const auto &st = layoutStyle();
+	const auto &paintSt = caches.st ? *caches.st : st;
+	auto textPalette = paintSt.textPalette;
+	auto markBg = textPalette.markBg->c;
+	markBg.setAlphaF(markBg.alphaF() * std::clamp(
+		paintSt.markBgOpacity,
+		0.,
+		1.));
+	const auto ownedMarkBg = style::internal::OwnedColor(markBg);
+	textPalette.markBg = ownedMarkBg.color();
+	const auto &previousTextPalette = p.textPalette();
+	p.setTextPalette(textPalette);
 	const auto selectionState = PaintSelectionState{
 		.segments = &_segments,
 		.selection = selection,
@@ -694,10 +714,11 @@ void MarkdownArticle::Impl::paint(
 		_renderer.get(),
 		currentDevicePixelRatio(),
 		std::max(_width, 1),
-		markdown,
+		st,
 		caches,
 		selectionState,
 		clip);
+	p.setTextPalette(previousTextPalette);
 }
 
 MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
@@ -835,7 +856,7 @@ bool MarkdownArticle::Impl::highlightProcessDone(
 
 	auto rebuilt = false;
 	for (const auto block : entry.blocks) {
-		RepopulateCodeBlockLeaf(*block, st::defaultMarkdown, true, this);
+		RepopulateCodeBlockLeaf(*block, layoutStyle(), true, this);
 		registerPendingHighlightBlock(*block);
 		rebuilt = true;
 	}
@@ -903,7 +924,7 @@ void MarkdownArticle::Impl::addPlaceholderRipple(
 			st::defaultRippleAnimation,
 			Ui::RippleAnimation::RoundRectMask(
 				size,
-				st::defaultMarkdown.placeholder.radius),
+				layoutStyle().placeholder.radius),
 			[=] {
 				requestPlaceholderRepaint(id);
 			});
@@ -1036,7 +1057,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreatePhotoMediaBlock(
 					prepared.photo,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	case PreparedBlockKind::Video:
 		return getOrCreateMediaBlock(
@@ -1044,7 +1066,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreateVideoMediaBlock(
 					prepared.video,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	case PreparedBlockKind::Map:
 		return getOrCreateMediaBlock(
@@ -1052,7 +1075,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreateMapMediaBlock(
 					prepared.map,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	case PreparedBlockKind::Audio:
 		return getOrCreateMediaBlock(
@@ -1060,7 +1084,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreateAudioMediaBlock(
 					prepared.audio,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	case PreparedBlockKind::Channel:
 		return getOrCreateMediaBlock(
@@ -1068,7 +1093,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreateChannelMediaBlock(
 					prepared.channel,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	case PreparedBlockKind::GroupedMedia:
 		return getOrCreateMediaBlock(
@@ -1076,7 +1102,8 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 			[=] {
 				return CreateGroupedMediaBlock(
 					prepared.groupedMedia,
-					_content.mediaRuntime);
+					_content.mediaRuntime,
+					layoutStyle());
 			});
 	default:
 		return nullptr;
@@ -1198,6 +1225,10 @@ void MarkdownArticle::Impl::setPlaceholderLoadingValue(
 	requestPlaceholderRepaint(id);
 }
 
+const style::Markdown &MarkdownArticle::Impl::layoutStyle() const {
+	return *_st;
+}
+
 void MarkdownArticle::Impl::relayout(int width) {
 	width = std::max(width, 1);
 	if (_width == width) {
@@ -1215,8 +1246,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 	_segmentTops.clear();
 	_segmentBottoms.clear();
 
-	const auto &markdown = st::defaultMarkdown;
-	const auto &page = markdown.pagePadding;
+	const auto &st = layoutStyle();
+	const auto &page = st.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
 	auto repaintScope = InlineIvImageRepaintScope(
 		_textRepaint,
@@ -1241,7 +1272,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 		_inlineFormulaObjects.get(),
 		_content.mediaRuntime,
 		&_blocks,
-		markdown,
+		st,
 		page.left(),
 		page.top(),
 		innerWidth,
@@ -1262,8 +1293,10 @@ void MarkdownArticle::Impl::relayout(int width) {
 	rebuildVisibleSegmentLookup();
 }
 
-MarkdownArticle::MarkdownArticle(std::shared_ptr<MathRenderer> renderer)
-: _impl(std::make_unique<Impl>(std::move(renderer))) {
+MarkdownArticle::MarkdownArticle(
+	const style::Markdown &st,
+	std::shared_ptr<MathRenderer> renderer)
+: _impl(std::make_unique<Impl>(st, std::move(renderer))) {
 }
 
 MarkdownArticle::~MarkdownArticle() = default;

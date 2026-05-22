@@ -72,6 +72,8 @@ struct InstantViewMediaRuntime
 
 struct HistoryMessageRichPage
 : RuntimeComponent<HistoryMessageRichPage, Element> {
+	HistoryMessageRichPage();
+
 	struct Host final : Iv::Markdown::MediaBlockHost {
 		base::weak_ptr<Message> owner;
 
@@ -82,6 +84,7 @@ struct HistoryMessageRichPage
 	std::shared_ptr<const Iv::RichPage> page;
 	std::shared_ptr<Iv::Markdown::MediaRuntime> mediaRuntime;
 	Iv::Markdown::MarkdownArticle article;
+	int paletteVersion = -1;
 	Host host;
 	mutable ClickHandlerPtr handler;
 	mutable std::optional<Iv::Markdown::PreparedLink> handlerPreparedLink;
@@ -339,6 +342,11 @@ private:
 		Painter &p,
 		QRect &trect,
 		const PaintContext &context) const;
+	void paintRichText(
+		Painter &p,
+		not_null<HistoryMessageRichPage*> rich,
+		QRect rect,
+		const PaintContext &context) const;
 
 	bool getStateCommentsButton(
 		QPoint point,
@@ -419,6 +427,7 @@ private:
 
 	void updateViewButtonExistence();
 	[[nodiscard]] int viewButtonHeight() const;
+	[[nodiscard]] QRect richPageRect(QRect trect) const;
 	void activateRichPagePreparedLink(
 		const Iv::Markdown::PreparedLink &link,
 		ClickContext context) const;

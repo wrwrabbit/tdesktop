@@ -19,6 +19,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <variant>
 #include <vector>
 
+namespace style {
+struct Markdown;
+} // namespace style
+
 namespace Iv {
 struct RichPage;
 struct Source;
@@ -335,6 +339,7 @@ struct NativeInstantViewPrepareRequest {
 	const PhotoData *webpagePhoto = nullptr;
 	const DocumentData *webpageDocument = nullptr;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
+	std::optional<MarkdownPrepareDimensions> dimensionsOverride;
 };
 
 struct MarkdownArticleContent {
@@ -375,6 +380,8 @@ struct NativeInstantViewPrepareResult {
 [[nodiscard]] const MarkdownPrepareTableRenderLimits &PrepareTableRenderLimitsForIv();
 [[nodiscard]] const MarkdownPrepareLimits &PrepareLimitsForIv();
 [[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions();
+[[nodiscard]] MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions(
+	const style::Markdown &st);
 [[nodiscard]] QString SerializeInlineTextObjectEntity(
 	const InlineTextObjectEntity &object);
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);

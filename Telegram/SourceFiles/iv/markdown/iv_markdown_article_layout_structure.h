@@ -19,7 +19,7 @@ namespace Iv::Markdown {
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	std::vector<LaidOutBlock> *blocks,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,

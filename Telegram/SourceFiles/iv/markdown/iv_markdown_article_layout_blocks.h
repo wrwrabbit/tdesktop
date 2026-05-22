@@ -20,7 +20,7 @@ class DynamicImage;
 } // namespace Ui
 
 namespace style {
-struct Markdown;
+struct st;
 struct QuoteStyle;
 struct TextStyle;
 } // namespace style
@@ -165,25 +165,25 @@ struct TableRowLayoutData {
 [[nodiscard]] QPoint BulletMarkerCenter(
 	int left,
 	int baseline,
-	const style::Markdown &markdown);
+	const style::Markdown &st);
 [[nodiscard]] QMargins BlockquotePadding(const style::QuoteStyle &style);
 [[nodiscard]] Ui::Text::GeometryDescriptor TextGeometry(int width);
 [[nodiscard]] int TextMinResizeWidth(int width);
 [[nodiscard]] int TableCellTextMinResizeWidth(
 	const style::TextStyle &textStyle,
-	const style::Markdown &markdown);
+	const style::Markdown &st);
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text);
 [[nodiscard]] int BlockSkip(
 	const PreparedBlock &block,
-	const style::Markdown &markdown);
+	const style::Markdown &st);
 [[nodiscard]] int BlockSkip(
 	const PreparedBlock &previous,
 	const PreparedBlock &block,
 	LayoutContext context,
-	const style::Markdown &markdown);
+	const style::Markdown &st);
 [[nodiscard]] const style::TextStyle &TextStyleFor(
 	const PreparedBlock &block,
-	const style::Markdown &markdown);
+	const style::Markdown &st);
 [[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
 void LayoutMediaCaption(
 	LaidOutBlock *block,
@@ -191,7 +191,7 @@ void LayoutMediaCaption(
 	const std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -200,7 +200,7 @@ void LayoutMediaCaption(
 	LayoutContext context = {});
 void RepopulateCodeBlockLeaf(
 	LaidOutBlock &block,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
 
@@ -209,28 +209,28 @@ void RepopulateCodeBlockLeaf(
 	const std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutCodeBlock(
 	const PreparedBlock &prepared,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
 [[nodiscard]] LaidOutBlock LayoutRuleBlock(
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width);
 [[nodiscard]] LaidOutBlock LayoutDisplayMathBlock(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> &formulas,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width);
@@ -239,7 +239,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width);
@@ -248,14 +248,14 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutRelatedArticleBlock(
 	const PreparedBlock &prepared,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -265,7 +265,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -275,7 +275,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -285,7 +285,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -295,7 +295,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -305,7 +305,7 @@ void RepopulateCodeBlockLeaf(
 	std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -315,7 +315,7 @@ void RepopulateCodeBlockLeaf(
 	const std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,

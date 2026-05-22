@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_iv.h"
 
 namespace HistoryView {
 namespace {
@@ -1639,6 +1640,10 @@ OnlyEmojiAndSpaces Element::isOnlyEmojiAndSpaces() const {
 	}
 }
 
+int Element::richPageWidthFor(int textWidth) const {
+    return textWidth + st::msgPadding.left() + st::msgPadding.right();
+}
+
 int Element::textHeightFor(int textWidth) const {
 	constexpr auto kMaxWidth = (1 << 16) - 1;
 	if (textWidth <= 0 || textWidth > kMaxWidth) {
@@ -1648,7 +1653,7 @@ int Element::textHeightFor(int textWidth) const {
 	if (_textWidth != textWidth) {
 		_textWidth = textWidth;
 		if (const auto rich = const_cast<Element*>(this)->richpage()) {
-			_textHeight = rich->article.resizeGetHeight(textWidth);
+			_textHeight = rich->article.resizeGetHeight(richPageWidthFor(textWidth));
 			rich->article.setVisibleTopBottom(0, _textHeight);
 			_textRealWidth = std::clamp(
 				rich->article.lastLayoutWidth(),
@@ -1845,6 +1850,7 @@ void Element::validateText() {
 		if (runtime->page == page && runtime->mediaRuntime) {
 			return;
 		}
+		const auto &layoutSt = st::messageMarkdown;
 		const auto session = &history()->session();
 		runtime->page = std::move(page);
 		runtime->mediaRuntime = Iv::CreateMessageMediaRuntime(
@@ -1906,6 +1912,8 @@ void Element::validateText() {
 		auto prepared = Iv::Markdown::TryPrepareNativeInstantView({
 			.richPage = runtime->page,
 			.mediaRuntime = runtime->mediaRuntime,
+			.dimensionsOverride = Iv::Markdown::CaptureMarkdownPrepareDimensions(
+				layoutSt),
 		});
 		if (!prepared.supported()) {
 			clearRichPage();
@@ -2551,9 +2559,7 @@ bool Element::hasVisibleText() const {
 
 int Element::textualMaxWidth() const {
 	if (const auto rich = richpage()) {
-		return st::msgPadding.left()
-			+ rich->article.maxWidth()
-			+ st::msgPadding.right();
+		return rich->article.maxWidth();
 	}
 	return st::msgPadding.left()
 		+ (hasVisibleText() ? text().maxWidth() : 0)

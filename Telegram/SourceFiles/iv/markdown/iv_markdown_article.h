@@ -22,6 +22,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 #include <span>
 
+namespace style {
+struct Markdown;
+} // namespace style
+
 namespace Iv::Markdown {
 
 struct PlaceholderBlockRuntime {
@@ -38,6 +42,7 @@ struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *pre = nullptr;
 	Ui::Text::QuotePaintCache *blockquote = nullptr;
 	std::span<Ui::Text::SpecialColor> colors;
+	const style::Markdown *st = nullptr;
 	Fn<void()> repaint;
 	Fn<void(QRect)> repaintRect;
 	std::optional<QColor> supplementaryColorOverride;
@@ -119,7 +124,9 @@ struct MarkdownArticleSelectionEndpoints {
 
 class MarkdownArticle {
 public:
-	explicit MarkdownArticle(std::shared_ptr<MathRenderer> renderer = nullptr);
+	MarkdownArticle(
+		const style::Markdown &st,
+		std::shared_ptr<MathRenderer> renderer = nullptr);
 	~MarkdownArticle();
 
 	MarkdownArticle(MarkdownArticle &&) noexcept;

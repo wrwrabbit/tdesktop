@@ -62,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
+#include "styles/style_iv.h"
 #include "styles/style_polls.h"
 
 namespace HistoryView {
@@ -502,6 +503,10 @@ void HistoryMessageRichPage::Host::requestRelayout(QRect articleRect) {
 	}
 }
 
+HistoryMessageRichPage::HistoryMessageRichPage()
+: article(st::messageMarkdown) {
+}
+
 void Message::setInstantViewMediaRuntime(QString pageUrl) {
 	AddComponents(InstantViewMediaRuntime::Bit());
 	Get<InstantViewMediaRuntime>()->pageUrl = std::move(pageUrl);
@@ -577,6 +582,11 @@ void Message::activateRichPagePreparedLink(
 		}
 		break;
 	}
+}
+
+QRect Message::richPageRect(QRect trect) const {
+	return trect.marginsAdded(
+		{ st::msgPadding.left(), 0, st::msgPadding.right(), 0 });
 }
 
 void Message::activateRichPageMedia(
@@ -2606,40 +2616,14 @@ void Message::paintText(
 			width());
 		trect.setY(trect.y() + botTop->height);
 	}
+	if (const auto rich = const_cast<Message*>(this)->richpage()) {
+	    paintRichText(p, rich, richPageRect(trect), context);
+		return;
+	}
+
 	if (!context.clip.intersects(trect)
 		&& context.skipDrawingParts == PaintContext::SkipDrawingParts::None
 		&& !context.gestureHorizontal.translation) {
-		return;
-	}
-	if (const auto rich = const_cast<Message*>(this)->richpage()) {
-		const auto clip = QRect(
-			QPoint(),
-			trect.size()).intersected(
-				context.clip.translated(-trect.topLeft()));
-		rich->article.setVisibleTopBottom(
-			std::clamp(clip.top(), 0, trect.height()),
-			std::clamp(clip.bottom() + 1, 0, trect.height()));
-		p.save();
-		p.translate(trect.topLeft());
-		rich->article.paint(p, clip, {
-			.pre = stm->preCache.get(),
-			.blockquote = context.quoteCache(
-				contentColorCollectible(),
-				contentColorIndex()),
-			.colors = context.st->highlightColors(),
-			.repaint = [weak = base::make_weak(const_cast<Message*>(this))] {
-				if (const auto owner = weak.get()) {
-					owner->requestRichPageRepaint(QRect());
-				}
-			},
-			.repaintRect = [weak = base::make_weak(const_cast<Message*>(this))](
-					QRect articleRect) {
-				if (const auto owner = weak.get()) {
-					owner->requestRichPageRepaint(articleRect);
-				}
-			},
-		});
-		p.restore();
 		return;
 	}
 	prepareCustomEmojiPaint(p, context, text());
@@ -2741,6 +2725,47 @@ void Message::paintText(
 	if (appearingClip) {
 		p.restore();
 	}
+}
+
+void Message::paintRichText(
+		Painter &p,
+		not_null<HistoryMessageRichPage*> rich,
+		QRect rect,
+		const PaintContext &context) const {
+	const auto stm = context.messageStyle();
+	const auto paletteVersion = context.st->paletteVersion();
+	if (rich->paletteVersion != paletteVersion) {
+		rich->paletteVersion = paletteVersion;
+		rich->article.invalidatePaletteCache();
+	}
+	const auto clip = QRect(
+		QPoint(),
+		rect.size()
+	).intersected(context.clip.translated(-rect.topLeft()));
+	rich->article.setVisibleTopBottom(
+		std::clamp(clip.top(), 0, rect.height()),
+		std::clamp(clip.bottom() + 1, 0, rect.height()));
+	p.translate(rect.topLeft());
+	rich->article.paint(p, clip, {
+		.pre = stm->preCache.get(),
+		.blockquote = context.quoteCache(
+			contentColorCollectible(),
+			contentColorIndex()),
+		.colors = context.st->highlightColors(),
+		.st = &stm->richPageStyle,
+		.repaint = [weak = base::make_weak(const_cast<Message*>(this))] {
+			if (const auto owner = weak.get()) {
+				owner->requestRichPageRepaint(QRect());
+			}
+		},
+		.repaintRect = [weak = base::make_weak(const_cast<Message*>(this))](
+				QRect articleRect) {
+			if (const auto owner = weak.get()) {
+				owner->requestRichPageRepaint(articleRect);
+			}
+		},
+	});
+	p.translate(-rect.topLeft());
 }
 
 PointState Message::pointState(QPoint point) const {
@@ -4068,7 +4093,7 @@ bool Message::getStateText(
 	const auto item = this->textItem();
 	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
 		if (const auto rich = richpage()) {
-			const auto local = point - trect.topLeft();
+			const auto local = point - richPageRect(trect).topLeft();
 			const auto hit = rich->article.hitTest(
 				local,
 				request.flags | Ui::Text::StateRequest::Flag::LookupSymbol);

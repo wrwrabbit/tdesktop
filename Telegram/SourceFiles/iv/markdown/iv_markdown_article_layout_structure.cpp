@@ -36,8 +36,8 @@ namespace {
 
 [[nodiscard]] int MarkdownBodyBaseline(
 		int top,
-		const style::Markdown &markdown) {
-	return NominalTextBaseline(markdown.body, top);
+		const style::Markdown &st) {
+	return NominalTextBaseline(st.body, top);
 }
 
 [[nodiscard]] int BlockBottom(const LaidOutBlock &block) {
@@ -84,7 +84,7 @@ namespace {
 
 [[nodiscard]] QRect BlockBand(
 		PreparedBlockKind kind,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int width,
 		LayoutContext context) {
@@ -92,8 +92,8 @@ namespace {
 		return QRect(left, 0, std::max(width, 1), 0);
 	}
 	return UsesMediaBand(kind)
-		? PaddedBand(left, width, markdown.mediaPadding)
-		: PaddedBand(left, width, markdown.textPadding);
+		? PaddedBand(left, width, st.mediaPadding)
+		: PaddedBand(left, width, st.textPadding);
 }
 
 [[nodiscard]] bool IsRelatedArticlesHeader(
@@ -153,7 +153,7 @@ void PrepareNestedContext(
 
 [[nodiscard]] int ResolveFirstDisplayedLineBaseline(
 		const LaidOutBlock &block,
-		const style::Markdown &markdown) {
+		const style::Markdown &st) {
 	if (block.firstLineBaseline >= 0) {
 		return block.firstLineBaseline;
 	}
@@ -162,10 +162,10 @@ void PrepareNestedContext(
 			if (child.outer.height() <= 0) {
 				continue;
 			}
-			return ResolveFirstDisplayedLineBaseline(child, markdown);
+			return ResolveFirstDisplayedLineBaseline(child, st);
 		}
 	}
-	return MarkdownBodyBaseline(block.outer.y(), markdown);
+	return MarkdownBodyBaseline(block.outer.y(), st);
 }
 
 [[nodiscard]] LaidOutBlock LayoutBlock(
@@ -175,7 +175,7 @@ void PrepareNestedContext(
 	MathRenderer *renderer,
 	InlineFormulaObjectCache *inlineFormulaObjects,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const style::Markdown &markdown,
+	const style::Markdown &st,
 	int left,
 	int top,
 	int width,
@@ -188,7 +188,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -203,8 +203,8 @@ void PrepareNestedContext(
 	block.taskState = prepared.taskState;
 	block.orderedNumber = prepared.orderedNumber;
 
-	const auto &list = markdown.list;
-	const auto bodyLineHeight = TextLineHeight(markdown.body);
+	const auto &list = st.list;
+	const auto bodyLineHeight = TextLineHeight(st.body);
 	const auto task = (prepared.taskState != TaskState::None);
 	const auto ordered = !task && (prepared.listKind == ListKind::Ordered);
 	const auto markerText = ordered ? ListMarkerText(prepared) : QString();
@@ -215,7 +215,7 @@ void PrepareNestedContext(
 		markerTextHeight = list.taskCheck.diameter;
 	} else if (ordered) {
 		block.marker.setMarkedText(
-			markdown.body,
+			st.body,
 			TextWithEntities::Simple(markerText),
 			TextParseOptions{
 				TextParseMultiline,
@@ -246,7 +246,7 @@ void PrepareNestedContext(
 		inlineFormulaObjects,
 		mediaRuntime,
 		&block.children,
-		markdown,
+		st,
 		bodyLeft,
 		top,
 		bodyWidth,
@@ -256,9 +256,9 @@ void PrepareNestedContext(
 			if (child.outer.height() <= 0) {
 				continue;
 			}
-			return ResolveFirstDisplayedLineBaseline(child, markdown);
+			return ResolveFirstDisplayedLineBaseline(child, st);
 		}
-		return MarkdownBodyBaseline(top, markdown);
+		return MarkdownBodyBaseline(top, st);
 	}();
 	const auto contentHeight = childBottom - top;
 	const auto rowHeight = std::max({
@@ -281,14 +281,14 @@ void PrepareNestedContext(
 		const auto markerLeafBaseline = LeafFirstLineBaseline(
 			block.marker,
 			QRect(0, 0, markerTextWidth, markerTextHeight),
-			markdown.body);
+			st.body);
 		block.markerRect = QRect(
 			markerLeft,
 			markerBaseline - markerLeafBaseline,
 			markerTextWidth,
 			markerTextHeight);
 	} else {
-		block.markerCenter = BulletMarkerCenter(left, markerBaseline, markdown);
+		block.markerCenter = BulletMarkerCenter(left, markerBaseline, st);
 	}
 
 	block.contentRect = QRect(bodyLeft, top, bodyWidth, rowHeight);
@@ -304,7 +304,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -315,9 +315,9 @@ void PrepareNestedContext(
 	block.listDelimiter = prepared.listDelimiter;
 
 	const auto depthDelta = std::max(prepared.visualDepth - context.listDepth, 0);
-	const auto listLeft = left + depthDelta * markdown.list.indent;
+	const auto listLeft = left + depthDelta * st.list.indent;
 	const auto listWidth = std::max(
-		width - depthDelta * markdown.list.indent,
+		width - depthDelta * st.list.indent,
 		1);
 
 	auto childContext = context;
@@ -330,7 +330,7 @@ void PrepareNestedContext(
 	for (const auto &child : prepared.children) {
 		const auto anchorOnly = IsAnchorOnlyBlock(child);
 		if (previous && !anchorOnly) {
-			y += prepared.tight ? 0 : BlockSkip(child, markdown);
+			y += prepared.tight ? 0 : BlockSkip(child, st);
 		}
 
 		auto laidOut = (child.kind == PreparedBlockKind::ListItem)
@@ -341,7 +341,7 @@ void PrepareNestedContext(
 				renderer,
 				inlineFormulaObjects,
 				mediaRuntime,
-				markdown,
+				st,
 				listLeft,
 				y,
 				listWidth,
@@ -354,7 +354,7 @@ void PrepareNestedContext(
 				renderer,
 				inlineFormulaObjects,
 				mediaRuntime,
-				markdown,
+				st,
 				listLeft,
 				y,
 				listWidth,
@@ -372,7 +372,7 @@ void PrepareNestedContext(
 		listWidth,
 		std::max(y - top, 0));
 	block.contentRect = block.outer;
-	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, markdown);
+	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, st);
 	return block;
 }
 
@@ -383,7 +383,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -394,11 +394,11 @@ void PrepareNestedContext(
 	const auto depthDelta = std::max(
 		prepared.visualDepth - context.quoteDepth,
 		0);
-	const auto quoteLeft = left + depthDelta * markdown.quoteIndent;
+	const auto quoteLeft = left + depthDelta * st.quoteIndent;
 	const auto quoteWidth = std::max(
-		width - depthDelta * markdown.quoteIndent,
+		width - depthDelta * st.quoteIndent,
 		1);
-	const auto &quoteStyle = markdown.body.blockquote;
+	const auto &quoteStyle = st.body.blockquote;
 	const auto padding = BlockquotePadding(quoteStyle);
 	const auto contentLeft = quoteLeft + padding.left();
 	const auto contentTop = top + padding.top();
@@ -418,7 +418,7 @@ void PrepareNestedContext(
 		inlineFormulaObjects,
 		mediaRuntime,
 		&block.children,
-		markdown,
+		st,
 		contentLeft,
 		contentTop,
 		contentWidth,
@@ -426,7 +426,7 @@ void PrepareNestedContext(
 	const auto contentHeight = std::max(
 		childBottom - contentTop,
 		prepared.children.empty()
-			? TextLineHeight(markdown.body)
+			? TextLineHeight(st.body)
 			: 0);
 	const auto quoteHeight = padding.top() + contentHeight + padding.bottom();
 
@@ -436,7 +436,7 @@ void PrepareNestedContext(
 		contentTop,
 		contentWidth,
 		contentHeight);
-	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, markdown);
+	block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(block, st);
 	return block;
 }
 
@@ -447,7 +447,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -457,7 +457,7 @@ void PrepareNestedContext(
 	block.anchorId = prepared.anchorId;
 	block.collapsed = prepared.collapsed;
 	block.supplementary = prepared.supplementary;
-	const auto &details = markdown.details;
+	const auto &details = st.details;
 	const auto headerWidth = std::max(width, 1);
 	const auto iconWidth = details.icon.width();
 	const auto iconHeight = details.icon.height();
@@ -477,6 +477,7 @@ void PrepareNestedContext(
 	SetTextLeaf(
 		&block.leaf,
 		details.summaryStyle,
+		st,
 		prepared.text,
 		formulas,
 		inlineFormulaObjects,
@@ -529,7 +530,7 @@ void PrepareNestedContext(
 			inlineFormulaObjects,
 			mediaRuntime,
 			&block.children,
-			markdown,
+			st,
 			childLeft,
 			childTop,
 			childWidth,
@@ -561,7 +562,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -582,7 +583,7 @@ void PrepareNestedContext(
 		0,
 		Qt::LayoutDirectionAuto,
 	};
-	const auto &style = markdown.embedPost;
+	const auto &style = st.embedPost;
 	const auto blockWidth = std::max(width, 1);
 	const auto contentLeft = left
 		+ style.accentWidth
@@ -663,7 +664,7 @@ void PrepareNestedContext(
 			inlineFormulaObjects,
 			mediaRuntime,
 			&block.children,
-			markdown,
+			st,
 			contentLeft,
 			bodyTop,
 			contentWidth,
@@ -693,7 +694,7 @@ void PrepareNestedContext(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		markdown,
+		st,
 		left,
 		bottom,
 		blockWidth,
@@ -723,11 +724,11 @@ void PrepareNestedContext(
 			}
 			block.firstLineBaseline = ResolveFirstDisplayedLineBaseline(
 				child,
-				markdown);
+				st);
 			break;
 		}
 		if (block.firstLineBaseline < 0) {
-			block.firstLineBaseline = MarkdownBodyBaseline(top, markdown);
+			block.firstLineBaseline = MarkdownBodyBaseline(top, st);
 		}
 	}
 	return block;
@@ -740,7 +741,7 @@ void PrepareNestedContext(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -753,7 +754,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -761,14 +762,14 @@ void PrepareNestedContext(
 	case PreparedBlockKind::CodeBlock:
 		return LayoutCodeBlock(
 			prepared,
-			markdown,
+			st,
 			left,
 			top,
 			width,
 			context.allowAsyncSyntaxHighlighting,
 			context.syntaxHighlightTracker);
 	case PreparedBlockKind::Rule:
-		return LayoutRuleBlock(markdown, left, top, width);
+		return LayoutRuleBlock(st, left, top, width);
 	case PreparedBlockKind::List:
 		return LayoutListBlock(
 			prepared,
@@ -777,7 +778,7 @@ void PrepareNestedContext(
 			renderer,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -790,7 +791,7 @@ void PrepareNestedContext(
 			renderer,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -804,20 +805,20 @@ void PrepareNestedContext(
 			renderer,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
 			context);
 	case PreparedBlockKind::DisplayMath:
-		return LayoutDisplayMathBlock(prepared, *formulas, markdown, left, top, width);
+		return LayoutDisplayMathBlock(prepared, *formulas, st, left, top, width);
 	case PreparedBlockKind::Table:
 		return LayoutTableBlock(
 			prepared,
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width);
@@ -827,7 +828,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -838,7 +839,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -849,7 +850,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -860,7 +861,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -871,7 +872,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -882,7 +883,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -890,7 +891,7 @@ void PrepareNestedContext(
 	case PreparedBlockKind::RelatedArticle:
 		return LayoutRelatedArticleBlock(
 			prepared,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -901,7 +902,7 @@ void PrepareNestedContext(
 			formulas,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -914,7 +915,7 @@ void PrepareNestedContext(
 			renderer,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -927,7 +928,7 @@ void PrepareNestedContext(
 			renderer,
 			inlineFormulaObjects,
 			mediaRuntime,
-			markdown,
+			st,
 			left,
 			top,
 			width,
@@ -946,7 +947,7 @@ int LayoutBlocks(
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		std::vector<LaidOutBlock> *blocks,
-		const style::Markdown &markdown,
+		const style::Markdown &st,
 		int left,
 		int top,
 		int width,
@@ -958,11 +959,11 @@ int LayoutBlocks(
 		const auto anchorOnly = IsAnchorOnlyBlock(block);
 		const auto next = NextVisibleBlock(prepared, i);
 		if (previous && !anchorOnly) {
-			y += BlockSkip(*previous, block, context, markdown);
+			y += BlockSkip(*previous, block, context, st);
 		}
 		const auto band = BlockBand(
 			block.kind,
-			markdown,
+			st,
 			left,
 			std::max(width, 1),
 			context);
@@ -972,13 +973,13 @@ int LayoutBlocks(
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
-				markdown,
-				left + markdown.relatedArticle.headerPadding.left(),
-				y + markdown.relatedArticle.headerPadding.top(),
+				st,
+				left + st.relatedArticle.headerPadding.left(),
+				y + st.relatedArticle.headerPadding.top(),
 				std::max(
 					width
-						- markdown.relatedArticle.headerPadding.left()
-						- markdown.relatedArticle.headerPadding.right(),
+						- st.relatedArticle.headerPadding.left()
+						- st.relatedArticle.headerPadding.right(),
 					1),
 				context)
 			: LayoutBlock(
@@ -988,7 +989,7 @@ int LayoutBlocks(
 				renderer,
 				inlineFormulaObjects,
 				mediaRuntime,
-				markdown,
+				st,
 				band.x(),
 				y,
 				band.width(),
@@ -999,8 +1000,8 @@ int LayoutBlocks(
 				y,
 				std::max(width, 1),
 				laidOut.outer.height()
-					+ markdown.relatedArticle.headerPadding.top()
-					+ markdown.relatedArticle.headerPadding.bottom());
+					+ st.relatedArticle.headerPadding.top()
+					+ st.relatedArticle.headerPadding.bottom());
 			laidOut.outer = laidOut.headerRect;
 			laidOut.contentRect = laidOut.headerRect;
 		}

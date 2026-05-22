@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 
 namespace style {
+struct Markdown;
 struct TextStyle;
 } // namespace style
 
@@ -69,11 +70,13 @@ void InvalidateInlineFormulaRasterCache(
 	const PreparedFormulaSlot *slot,
 	RenderedFormula *rendered,
 	MathRenderer *renderer,
-	int devicePixelRatio);
+	int devicePixelRatio,
+	const style::Markdown &st);
 
 void SetTextLeaf(
 	Ui::Text::String *leaf,
 	const style::TextStyle &textStyle,
+	const style::Markdown &st,
 	const TextWithEntities &text,
 	const std::vector<PreparedFormulaSlot> *formulas,
 	InlineFormulaObjectCache *inlineFormulaObjects,
