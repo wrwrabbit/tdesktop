@@ -329,7 +329,7 @@ void AppendCanonicalNativeIvRichText(
 			}
 			const auto length = std::min(
 				entity.length(),
-				text.text.text.size() - entity.offset());
+				int(text.text.text.size()) - entity.offset());
 			const auto decoded = Iv::DecodeRichPageLinkUrl(entity.data());
 			(void)AddNativeIvPreparedLink(
 				&result->text,
