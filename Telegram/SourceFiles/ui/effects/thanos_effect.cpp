@@ -17,7 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "base/qt_signal_producer.h"
 
-#include <QTimer>
 #include <QtGui/QWindow>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -128,12 +127,15 @@ void ThanosEffect::WarmUp() {
 }
 
 ThanosEffect::ThanosEffect(not_null<QWidget*> parent)
-: _parent(parent) {
+: _parent(parent)
+, _animation([=] {
+	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+		w->update();
+	}
+}) {
 }
 
-ThanosEffect::~ThanosEffect() {
-	stopUpdateTimer();
-}
+ThanosEffect::~ThanosEffect() = default;
 
 void ThanosEffect::ensureSurface() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -162,6 +164,9 @@ void ThanosEffect::ensureSurface() {
 	_renderer = renderer.get();
 
 	_renderer->allDone() | rpl::on_next([weak = base::make_weak(this)] {
+		if (const auto strong = weak.get()) {
+			strong->_animation.stop();
+		}
 		crl::on_main(weak, [weak] {
 			if (const auto strong = weak.get()) {
 				strong->hideSurface();
@@ -198,12 +203,12 @@ void ThanosEffect::showSurface() {
 			w->show();
 			w->raise();
 		});
-		startUpdateTimer();
+		_animation.start();
 	}
 }
 
 void ThanosEffect::hideSurface() {
-	stopUpdateTimer();
+	_animation.stop();
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
 		w->hide();
 	}
@@ -252,28 +257,6 @@ void ThanosEffect::setGeometry(QRect rect) {
 void ThanosEffect::raise() {
 	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
 		w->raise();
-	}
-}
-
-void ThanosEffect::startUpdateTimer() {
-	if (_updateTimer) {
-		return;
-	}
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
-		_updateTimer = new QTimer(w);
-		_updateTimer->setInterval(16);
-		QObject::connect(_updateTimer, &QTimer::timeout, w, [w] {
-			w->update();
-		});
-		_updateTimer->start();
-	}
-}
-
-void ThanosEffect::stopUpdateTimer() {
-	if (_updateTimer) {
-		_updateTimer->stop();
-		delete _updateTimer;
-		_updateTimer = nullptr;
 	}
 }
 
