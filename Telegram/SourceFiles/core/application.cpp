@@ -1425,6 +1425,9 @@ Window::Controller *Application::ensureSeparateWindowFor(
 		std::make_unique<Window::Controller>(id, showAtMsgId)
 	).first->second.get();
 	processCreatedWindow(result);
+	if (passcodeLocked()) {
+		result->setupPasscodeLock();
+	}
 	result->firstShow();
 	result->finishFirstShow();
 	return activate(result);
