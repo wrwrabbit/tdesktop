@@ -291,7 +291,8 @@ void ThanosEffectRenderer::render(
 	_rhi = rhi;
 
 	const auto now = double(_elapsed.elapsed()) / 1000.0;
-	const auto dt = float(std::clamp(now - _lastFrameTime, 0.001, 0.1));
+	// Cap to ~15 FPS so a single slow frame cannot teleport particles.
+	const auto dt = float(std::clamp(now - _lastFrameTime, 0.001, 0.066));
 	_lastFrameTime = now;
 
 	addPendingItems(cb);
