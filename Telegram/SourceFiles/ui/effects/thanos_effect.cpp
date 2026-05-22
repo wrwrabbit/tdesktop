@@ -46,12 +46,14 @@ namespace {
 		rhi.reset(QRhi::create(QRhi::Metal, &params));
 	}
 	if (!rhi) {
+		LOG(("ThanosEffect: probe failed — no Metal RHI"));
 		return false;
 	}
 #elif defined(Q_OS_WIN)
 	auto params = QRhiD3D11InitParams();
 	rhi.reset(QRhi::create(QRhi::D3D11, &params));
 	if (!rhi) {
+		LOG(("ThanosEffect: probe failed — no D3D11 RHI"));
 		return false;
 	}
 #else
