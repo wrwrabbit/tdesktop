@@ -96,7 +96,8 @@ namespace {
 
 bool ThanosEffect::Supported() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (PowerSaving::On(PowerSaving::kChatEffects)) {
+	if (PowerSaving::On(PowerSaving::kChatEffects)
+		|| PowerSaving::On(PowerSaving::kAnimations)) {
 		return false;
 	}
 	if (!GL::WidgetsRhiEnabled()) {
@@ -110,6 +111,10 @@ bool ThanosEffect::Supported() {
 
 void ThanosEffect::WarmUp() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (PowerSaving::On(PowerSaving::kChatEffects)
+		|| PowerSaving::On(PowerSaving::kAnimations)) {
+		return;
+	}
 	if (!GL::WidgetsRhiEnabled()) {
 		return;
 	}
