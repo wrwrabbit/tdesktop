@@ -529,8 +529,11 @@ void PaintTableBlock(
 	if (border > 0 && !block.tableRect.isEmpty()) {
 		const auto path = TableBorderPath(block, border, shapePath);
 		auto hq = PainterHighQualityEnabler(p);
-		auto pen = paintSt.table.borderFg->p;
-		pen.setWidth(border);
+		auto pen = QPen(
+			WithOpacity(
+				paintSt.table.borderFg,
+				paintSt.table.headerBgOpacity * 3),
+			border);
 		p.setPen(pen);
 		p.setBrush(Qt::NoBrush);
 		p.drawPath(path);
@@ -1223,14 +1226,17 @@ void PaintDetailsBlock(
 		auto hq = PainterHighQualityEnabler(p);
 		p.fillPath(
 			outerPath,
-			(block.bodyRect.isEmpty()
-				? headerBg
-				: paintDetails.bodyBg->c));
+			paintDetails.bodyBg->c);
 		p.save();
 		p.setClipPath(outerPath, Qt::IntersectClip);
-		p.fillRect(block.headerRect, headerBg);
+		p.fillRect(block.headerRect, TableHeaderBg(paintSt.table));
+		auto pen = QPen(
+			WithOpacity(
+				paintSt.table.borderFg,
+				paintSt.table.headerBgOpacity * 3),
+			details.border);
 		if (!block.bodyRect.isEmpty()) {
-			p.setPen(QPen(paintSt.table.borderFg->c, details.border));
+			p.setPen(pen);
 			const auto separatorY = block.bodyRect.top() + half;
 			p.drawLine(
 				QPointF(outer.left(), separatorY),
@@ -1239,7 +1245,7 @@ void PaintDetailsBlock(
 		p.restore();
 
 		p.setBrush(Qt::NoBrush);
-		p.setPen(QPen(paintSt.table.borderFg->c, details.border));
+		p.setPen(pen);
 		p.drawPath(outerPath);
 	}
 	if (!block.iconRect.isEmpty()) {
