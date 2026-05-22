@@ -24,7 +24,6 @@ namespace HistoryView {
 class Element;
 } // namespace HistoryView
 
-class History;
 class HistoryItem;
 
 namespace Ui {
@@ -99,8 +98,8 @@ private:
 	std::vector<CollapseGapState> _collapseGaps;
 	Animations::Simple _collapseAnimation;
 
-	History *_capturedHistory = nullptr;
 	int _savedScrollTop = 0;
+	int _expectedScrollTop = 0;
 	bool _restoreScrollPending = false;
 };
 
