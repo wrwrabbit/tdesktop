@@ -553,7 +553,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 	auto *tex = _rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(item.snapshot.width(), item.snapshot.height()));
-	tex->create();
+	if (!tex->create()) {
+		delete tex;
+		return result;
+	}
 	result.texture = tex;
 
 	result.uploadImage = item.snapshot.convertToFormat(
@@ -565,28 +568,44 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		QRhiSampler::None,
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
-	sampler->create();
+	if (!sampler->create()) {
+		delete sampler;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.sampler = sampler;
 
 	auto *particleBuf = _rhi->newBuffer(
 		QRhiBuffer::Static,
 		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
 		particleCount * kParticleStride);
-	particleBuf->create();
+	if (!particleBuf->create()) {
+		delete particleBuf;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.particleBuffer = particleBuf;
 
 	auto *initUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(ComputeInitUniforms));
-	initUbo->create();
+	if (!initUbo->create()) {
+		delete initUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.computeInitUniformBuffer = initUbo;
 
 	auto *updateUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(ComputeUpdateUniforms));
-	updateUbo->create();
+	if (!updateUbo->create()) {
+		delete updateUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.computeUpdateUniformBuffer = updateUbo;
 
 	result.computeInitSrb = _rhi->newShaderResourceBindings();
@@ -600,7 +619,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::ComputeStage,
 			initUbo),
 	});
-	result.computeInitSrb->create();
+	if (!result.computeInitSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	result.computeUpdateSrb = _rhi->newShaderResourceBindings();
 	result.computeUpdateSrb->setBindings({
@@ -613,13 +635,20 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::ComputeStage,
 			updateUbo),
 	});
-	result.computeUpdateSrb->create();
+	if (!result.computeUpdateSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	auto *renderUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
 		QRhiBuffer::UniformBuffer,
 		sizeof(RenderUniforms));
-	renderUbo->create();
+	if (!renderUbo->create()) {
+		delete renderUbo;
+		destroyAnimatingItem(result);
+		return result;
+	}
 	result.renderUniformBuffer = renderUbo;
 
 	result.renderSrb = _rhi->newShaderResourceBindings();
@@ -634,7 +663,10 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			tex,
 			sampler),
 	});
-	result.renderSrb->create();
+	if (!result.renderSrb->create()) {
+		destroyAnimatingItem(result);
+		return result;
+	}
 
 	return result;
 }
