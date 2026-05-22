@@ -641,6 +641,9 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_chromaSize = QSize();
 	_trackFrameIndex = 0;
 	_streamedIndex = 0;
+#ifdef Q_OS_MAC
+	_metalTextureCache.flush();
+#endif // Q_OS_MAC
 
 	delete _placeholderTexture;
 	_placeholderTexture = nullptr;
