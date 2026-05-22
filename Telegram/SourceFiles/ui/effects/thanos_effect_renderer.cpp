@@ -34,6 +34,7 @@ constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15f;
 constexpr auto kDisappearDuration
 	= kMaxPhaseDuration - kDisappearStartPhase;
 constexpr auto kMaxParticleCount = uint32_t(120000);
+static_assert(kMaxParticleCount < (1u << 30));
 
 const float kQuadVertices[kQuadVertexCount * 2] = {
 	0.f, 0.f,
