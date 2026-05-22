@@ -90,9 +90,7 @@ private:
 	const Delegate _delegate;
 
 	std::unique_ptr<ThanosEffect> _thanosEffect;
-	base::flat_map<
-		not_null<const HistoryView::Element*>,
-		PreCapturedView> _preCaptured;
+	base::flat_map<FullMsgId, PreCapturedView> _preCaptured;
 	std::vector<CollapseGap> _renderGaps;
 
 	std::vector<CollapseGapState> _collapseGaps;

@@ -67,7 +67,7 @@ void ThanosEffectController::captureItemsBatch(
 			const auto top = _delegate.itemTop(view);
 			const auto height = view->height();
 			if (captureView(view, height, top)) {
-				_preCaptured.emplace(view, PreCapturedView{
+				_preCaptured.emplace(item->fullId(), PreCapturedView{
 					.height = height,
 					.top = top,
 				});
@@ -89,7 +89,7 @@ void ThanosEffectController::captureOnRemoval(
 	if (!view) {
 		return;
 	}
-	if (const auto it = _preCaptured.find(view);
+	if (const auto it = _preCaptured.find(item->fullId());
 		it != end(_preCaptured)) {
 		const auto saved = it->second;
 		_preCaptured.erase(it);
