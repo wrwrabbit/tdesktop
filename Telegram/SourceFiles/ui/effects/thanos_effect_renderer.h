@@ -82,7 +82,7 @@ private:
 		bool particlesInitialized = false;
 	};
 
-	void createPipelines(QRhiRenderTarget *rt);
+	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt);
 	void addPendingItems(QRhiCommandBuffer *cb);
 	AnimatingItem createAnimatingItem(ThanosItem &&item);
 	void destroyAnimatingItem(AnimatingItem &item);
@@ -113,6 +113,7 @@ private:
 	QElapsedTimer _elapsed;
 	double _lastFrameTime = 0.;
 	bool _initialized = false;
+	bool _creationFailed = false;
 	uint32_t _seedCounter = 0;
 
 	rpl::event_stream<> _allDone;

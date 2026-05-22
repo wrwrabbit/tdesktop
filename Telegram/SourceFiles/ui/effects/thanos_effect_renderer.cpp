@@ -117,7 +117,16 @@ void ThanosEffectRenderer::initialize(
 	if (_initialized && _rhi == rhi) {
 		return;
 	}
+	// A different rhi instance (fresh setup or post device-lost recovery)
+	// is a chance to retry pipeline creation; only an in-place repeat with
+	// the same instance keeps the sticky failure.
+	if (_rhi != rhi) {
+		_creationFailed = false;
+	}
 	releaseResources();
+	if (_creationFailed) {
+		return;
+	}
 	_rhi = rhi;
 
 	if (!rhi->isFeatureSupported(QRhi::Compute)) {
@@ -168,7 +177,12 @@ void ThanosEffectRenderer::initialize(
 		QRhiSampler::ClampToEdge);
 	_placeholderSampler->create();
 
-	createPipelines(rt);
+	if (!createPipelines(rt)) {
+		LOG(("ThanosEffect: pipeline creation failed, disabling effect"));
+		_creationFailed = true;
+		releaseResources();
+		return;
+	}
 
 	auto *rub = rhi->nextResourceUpdateBatch();
 	rub->uploadStaticBuffer(_quadVertexBuffer, kQuadVertices);
@@ -182,7 +196,7 @@ void ThanosEffectRenderer::initialize(
 		.arg(rhi->driverInfo().deviceName));
 }
 
-void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
+bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	const auto initShader = LoadShader(u"thanos_init.comp"_q);
 	const auto updateShader = LoadShader(u"thanos_update.comp"_q);
 	const auto vertShader = LoadShader(u"thanos.vert"_q);
@@ -205,7 +219,9 @@ void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	_computeInitPipeline->setShaderStage(
 		{ QRhiShaderStage::Compute, initShader });
 	_computeInitPipeline->setShaderResourceBindings(_computeInitSrbLayout);
-	_computeInitPipeline->create();
+	if (!_computeInitPipeline->create()) {
+		return false;
+	}
 
 	_computeUpdateSrbLayout = _rhi->newShaderResourceBindings();
 	_computeUpdateSrbLayout->setBindings({
@@ -225,7 +241,9 @@ void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 		{ QRhiShaderStage::Compute, updateShader });
 	_computeUpdatePipeline->setShaderResourceBindings(
 		_computeUpdateSrbLayout);
-	_computeUpdatePipeline->create();
+	if (!_computeUpdatePipeline->create()) {
+		return false;
+	}
 
 	_renderSrbLayout = _rhi->newShaderResourceBindings();
 	_renderSrbLayout->setBindings({
@@ -272,7 +290,10 @@ void ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	_renderPipeline->setShaderResourceBindings(_renderSrbLayout);
 	_renderPipeline->setRenderPassDescriptor(
 		rt->renderPassDescriptor());
-	_renderPipeline->create();
+	if (!_renderPipeline->create()) {
+		return false;
+	}
+	return true;
 }
 
 void ThanosEffectRenderer::render(
