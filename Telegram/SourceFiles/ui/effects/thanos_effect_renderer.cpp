@@ -462,22 +462,11 @@ void ThanosEffectRenderer::render(
 		cb->endPass();
 	}
 
-	// Remove finished items using deleteLater() so QRhi resources
-	// survive until the command buffer is fully submitted.
 	auto hadItems = !_items.empty();
 	_items.erase(
 		std::remove_if(_items.begin(), _items.end(), [&](auto &item) {
 			if (item.phase >= kMaxPhaseDuration) {
-				if (item.renderSrb) item.renderSrb->deleteLater();
-				if (item.computeUpdateSrb) item.computeUpdateSrb->deleteLater();
-				if (item.computeInitSrb) item.computeInitSrb->deleteLater();
-				if (item.renderUniformBuffer) item.renderUniformBuffer->deleteLater();
-				if (item.computeUpdateUniformBuffer) item.computeUpdateUniformBuffer->deleteLater();
-				if (item.computeInitUniformBuffer) item.computeInitUniformBuffer->deleteLater();
-				if (item.particleBuffer) item.particleBuffer->deleteLater();
-				if (item.sampler) item.sampler->deleteLater();
-				if (item.texture) item.texture->deleteLater();
-				item = {};
+				destroyAnimatingItem(item);
 				return true;
 			}
 			return false;
@@ -680,15 +669,21 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 }
 
 void ThanosEffectRenderer::destroyAnimatingItem(AnimatingItem &item) {
-	delete item.renderSrb;
-	delete item.computeUpdateSrb;
-	delete item.computeInitSrb;
-	delete item.renderUniformBuffer;
-	delete item.computeUpdateUniformBuffer;
-	delete item.computeInitUniformBuffer;
-	delete item.particleBuffer;
-	delete item.sampler;
-	delete item.texture;
+	const auto deferDelete = [](auto *&resource) {
+		if (resource) {
+			resource->deleteLater();
+			resource = nullptr;
+		}
+	};
+	deferDelete(item.renderSrb);
+	deferDelete(item.computeUpdateSrb);
+	deferDelete(item.computeInitSrb);
+	deferDelete(item.renderUniformBuffer);
+	deferDelete(item.computeUpdateUniformBuffer);
+	deferDelete(item.computeInitUniformBuffer);
+	deferDelete(item.particleBuffer);
+	deferDelete(item.sampler);
+	deferDelete(item.texture);
 	item = {};
 }
 
