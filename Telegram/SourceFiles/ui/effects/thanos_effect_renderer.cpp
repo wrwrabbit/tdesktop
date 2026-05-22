@@ -367,9 +367,9 @@ void ThanosEffectRenderer::render(
 				&updateUni);
 		}
 
-		cb->beginComputePass(rub);
-
 		if (needsInit) {
+			cb->beginComputePass(rub);
+			rub = nullptr;
 			for (auto &item : _items) {
 				if (!item.needsInitDispatch) {
 					continue;
@@ -384,8 +384,10 @@ void ThanosEffectRenderer::render(
 					/ kComputeWorkgroupSize;
 				cb->dispatch(int(groups), 1, 1);
 			}
+			cb->endComputePass();
 		}
 
+		cb->beginComputePass(rub);
 		for (auto &item : _items) {
 			if (item.phase >= kMaxPhaseDuration) {
 				continue;
@@ -397,7 +399,6 @@ void ThanosEffectRenderer::render(
 				/ kComputeWorkgroupSize;
 			cb->dispatch(int(groups), 1, 1);
 		}
-
 		cb->endComputePass();
 	}
 
