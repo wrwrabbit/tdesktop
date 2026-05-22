@@ -10,6 +10,7 @@ using "ui/basic.style";
 using "ui/widgets/widgets.style";
 using "boxes/boxes.style";
 using "chat_helpers/chat_helpers.style";
+using "dialogs/dialogs.style";
 using "ui/chat/chat.style";
 
 historyPollQuestionFont: semiboldFont;
@@ -151,6 +152,7 @@ historyPollAnswerThumbRadius: 9px;
 pollAttachProgressMargin: 4px;
 pollAttachCancel: icon {{ "history_audio_cancel", historyFileThumbIconFg }};
 pollAttachView: icon {{ "mediaview/views", historyFileThumbIconFg }};
+pollAttachLink: icon {{ "menu/link", historyFileThumbIconFg }};
 
 createPollField: InputField(defaultInputField) {
 	textMargins: margins(0px, 4px, 0px, 4px);
@@ -215,6 +217,13 @@ createPollWarning: FlatLabel(defaultFlatLabel) {
 createPollWarningPosition: point(16px, 6px);
 createPollCheckboxMargin: margins(22px, 10px, 22px, 10px);
 createPollFieldTitlePadding: margins(22px, 7px, 10px, 6px);
+
+createPollLinkUrlField: InputField(dialogsFilter) {
+	textBgActive: filterInputInactiveBg;
+	textMargins: margins(14px, 8px, 14px, 5px);
+	placeholderMargins: margins(0px, 0px, 2px, 0px);
+	heightMin: 36px;
+}
 
 createTodoOptionField: InputField(createPollOptionField) {
 	textMargins: margins(22px, 11px, 68px, 11px);
