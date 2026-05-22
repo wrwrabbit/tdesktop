@@ -209,6 +209,248 @@ void CountNicePercent(
 	return uint32(base::crc32(hash.constData(), hash.size()));
 }
 
+[[nodiscard]] bool WebPageHasRichPreview(WebPageData *webpage) {
+	return webpage
+		&& (!webpage->title.isEmpty()
+			|| !webpage->description.text.isEmpty()
+			|| webpage->photo
+			|| !webpage->siteName.isEmpty());
+}
+
+class OpenLinkPreviewDelegate final
+	: public HistoryView::SimpleElementDelegate {
+public:
+	using HistoryView::SimpleElementDelegate::SimpleElementDelegate;
+
+	HistoryView::Context elementContext() override {
+		return HistoryView::Context::History;
+	}
+};
+
+class OpenLinkPreviewWidget final : public Ui::RpWidget {
+public:
+	OpenLinkPreviewWidget(
+		not_null<QWidget*> parent,
+		not_null<Window::SessionController*> controller,
+		not_null<WebPageData*> webpage,
+		Fn<void()> openAndClose);
+	~OpenLinkPreviewWidget();
+
+private:
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
+	void mouseReleaseEvent(QMouseEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
+	void resizeMedia(int width);
+	void updateActiveLink(QPoint point);
+
+	const Fn<void()> _openAndClose;
+	const std::unique_ptr<Ui::ChatTheme> _theme;
+	const std::unique_ptr<Ui::ChatStyle> _style;
+	const std::unique_ptr<OpenLinkPreviewDelegate> _delegate;
+	const not_null<History*> _history;
+	AdminLog::OwnedItem _item;
+
+};
+
+OpenLinkPreviewWidget::OpenLinkPreviewWidget(
+	not_null<QWidget*> parent,
+	not_null<Window::SessionController*> controller,
+	not_null<WebPageData*> webpage,
+	Fn<void()> openAndClose)
+: RpWidget(parent)
+, _openAndClose(std::move(openAndClose))
+, _theme(Window::Theme::DefaultChatThemeOn(lifetime()))
+, _style(std::make_unique<Ui::ChatStyle>(
+	controller->session().colorIndicesValue()))
+, _delegate(std::make_unique<OpenLinkPreviewDelegate>(
+	controller,
+	[=] { update(); }))
+, _history(controller->session().data().history(
+	controller->session().userPeerId())) {
+	_style->apply(_theme.get());
+	setMouseTracking(true);
+
+	const auto item = _history->makeMessage({
+		.id = _history->nextNonHistoryEntryId(),
+		.flags = (MessageFlag::FakeHistoryItem | MessageFlag::Local),
+		.from = _history->peer->id,
+	}, TextWithEntities(), MTP_messageMediaEmpty());
+	auto owned = AdminLog::OwnedItem(_delegate.get(), item);
+	owned->overrideMedia(std::make_unique<HistoryView::WebPage>(
+		owned.get(),
+		webpage,
+		MediaWebPageFlags{}));
+	_item = std::move(owned);
+	if (const auto media = _item->media()) {
+		media->setInBubbleState(MediaInBubbleState::Middle);
+		media->initDimensions();
+	}
+
+	_history->session().downloaderTaskFinished(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+
+	_history->owner().viewRepaintRequest(
+	) | rpl::on_next([=](Data::RequestViewRepaint data) {
+		if (data.view == _item.get()) {
+			update();
+		}
+	}, lifetime());
+
+	widthValue(
+	) | rpl::filter([=](int w) {
+		return w > 0;
+	}) | rpl::on_next([=](int w) {
+		resizeMedia(w);
+	}, lifetime());
+}
+
+OpenLinkPreviewWidget::~OpenLinkPreviewWidget() {
+	const auto raw = _item.get();
+	if (Element::Pressed() == raw) {
+		Element::Pressed(nullptr);
+	}
+	if (Element::Hovered() == raw) {
+		Element::Hovered(nullptr);
+	}
+	if (Element::PressedLink() == raw) {
+		Element::PressedLink(nullptr);
+	}
+	if (Element::HoveredLink() == raw) {
+		Element::HoveredLink(nullptr);
+	}
+	if (Element::Moused() == raw) {
+		Element::Moused(nullptr);
+	}
+}
+
+void OpenLinkPreviewWidget::resizeMedia(int width) {
+	if (const auto media = _item->media()) {
+		const auto height = media->resizeGetHeight(width);
+		resize(width, height);
+	}
+}
+
+void OpenLinkPreviewWidget::paintEvent(QPaintEvent *e) {
+	const auto media = _item->media();
+	if (!media) {
+		return;
+	}
+	auto p = Painter(this);
+	auto context = _theme->preparePaintContext(
+		_style.get(),
+		rect(),
+		rect(),
+		e->rect(),
+		!window()->isActiveWindow());
+	media->draw(p, context);
+}
+
+void OpenLinkPreviewWidget::updateActiveLink(QPoint point) {
+	const auto media = _item->media();
+	if (!media) {
+		return;
+	}
+	const auto state = media->textState(point, StateRequest());
+	ClickHandler::setActive(state.link, _item.get());
+	setCursor(state.link ? style::cur_pointer : style::cur_default);
+}
+
+void OpenLinkPreviewWidget::mouseMoveEvent(QMouseEvent *e) {
+	updateActiveLink(e->pos());
+}
+
+void OpenLinkPreviewWidget::mousePressEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		return;
+	}
+	updateActiveLink(e->pos());
+	Element::Pressed(_item.get());
+	ClickHandler::pressed();
+}
+
+void OpenLinkPreviewWidget::mouseReleaseEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		return;
+	}
+	const auto activated = ClickHandler::unpressed();
+	if (Element::Pressed() == _item.get()) {
+		Element::Pressed(nullptr);
+	}
+	if (activated && _openAndClose) {
+		_openAndClose();
+	}
+}
+
+void OpenLinkPreviewWidget::leaveEventHook(QEvent *e) {
+	ClickHandler::clearActive(_item.get());
+	setCursor(style::cur_default);
+	RpWidget::leaveEventHook(e);
+}
+
+void OpenPollOptionLinkBox(
+		not_null<Ui::GenericBox*> box,
+		not_null<Window::SessionController*> controller,
+		QString url,
+		WebPageData *webpage) {
+	box->setTitle(tr::lng_polls_option_open_link_title());
+	const auto content = box->verticalLayout();
+
+	const auto openAndClose = [=] {
+		UrlClickHandler::Open(url);
+		box->closeBox();
+	};
+
+	const auto urlContainer = content->add(
+		object_ptr<Ui::RpWidget>(content),
+		st::pollOpenLinkUrlOuterPadding);
+	const auto urlLabel = Ui::CreateChild<Ui::FlatLabel>(
+		urlContainer,
+		rpl::single(url),
+		st::pollOpenLinkUrlLabel);
+	urlLabel->setBreakEverywhere(true);
+	urlLabel->setSelectable(true);
+	const auto inner = st::pollOpenLinkUrlInnerPadding;
+	urlContainer->widthValue(
+	) | rpl::on_next([=](int width) {
+		urlLabel->resizeToWidth(
+			std::max(width - inner.left() - inner.right(), 1));
+		urlLabel->moveToLeft(inner.left(), inner.top());
+	}, urlContainer->lifetime());
+	urlLabel->heightValue(
+	) | rpl::on_next([=](int height) {
+		urlContainer->resize(
+			urlContainer->width(),
+			height + inner.top() + inner.bottom());
+	}, urlContainer->lifetime());
+	urlContainer->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(urlContainer);
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(
+			urlContainer->rect(),
+			st::pollOpenLinkUrlRadius,
+			st::pollOpenLinkUrlRadius);
+	}, urlContainer->lifetime());
+
+	if (webpage && !webpage->failed && WebPageHasRichPreview(webpage)) {
+		content->add(
+			object_ptr<OpenLinkPreviewWidget>(
+				content,
+				controller,
+				webpage,
+				openAndClose),
+			st::pollOpenLinkPreviewOuterPadding);
+	}
+
+	box->addButton(tr::lng_open_link(), openAndClose);
+	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+}
 
 struct PollThumbnailData {
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
@@ -330,9 +572,25 @@ struct PollThumbnailData {
 		const auto url = !media.url.isEmpty()
 			? media.url
 			: (media.webpage ? media.webpage->url : QString());
+		const auto webpage = media.webpage;
+		const auto session = &poll->session();
 		if (!url.isEmpty()) {
 			result.handler = std::make_shared<LambdaClickHandler>(
-				[=] { UrlClickHandler::Open(url); });
+				[=](ClickContext clickContext) {
+					const auto my = clickContext.other.value<
+						ClickHandlerContext>();
+					const auto controller = my.sessionWindow.get();
+					if (!controller
+						|| (&controller->session() != session)) {
+						UrlClickHandler::Open(url);
+						return;
+					}
+					controller->show(Box(
+						OpenPollOptionLinkBox,
+						controller,
+						url,
+						webpage));
+				});
 		}
 	}
 	return result;

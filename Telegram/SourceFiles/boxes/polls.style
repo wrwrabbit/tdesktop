@@ -149,6 +149,19 @@ pollBoxFilledPollCountryIcon: icon{{ "poll/filled/filled_poll_country-20x20", ac
 pollAttachTextSkip: 28px;
 pollAttachRadius: 7px;
 historyPollAnswerThumbRadius: 9px;
+
+pollOpenLinkUrlLabel: FlatLabel(defaultFlatLabel) {
+	minWidth: 1px;
+	align: align(center);
+	style: TextStyle(defaultTextStyle) {
+		font: font(15px);
+	}
+	maxHeight: 0px;
+}
+pollOpenLinkUrlInnerPadding: margins(16px, 12px, 16px, 12px);
+pollOpenLinkUrlOuterPadding: margins(22px, 4px, 22px, 14px);
+pollOpenLinkUrlRadius: 16px;
+pollOpenLinkPreviewOuterPadding: margins(11px, 0px, 11px, 5px);
 pollAttachProgressMargin: 4px;
 pollAttachCancel: icon {{ "history_audio_cancel", historyFileThumbIconFg }};
 pollAttachView: icon {{ "mediaview/views", historyFileThumbIconFg }};

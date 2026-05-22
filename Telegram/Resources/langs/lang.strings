@@ -7136,6 +7136,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_public" = "Poll";
 "lng_polls_anonymous_quiz" = "Anonymous Quiz";
 "lng_polls_public_quiz" = "Quiz";
+"lng_polls_option_open_link_title" = "Open Link";
 "lng_polls_closed" = "Final results";
 "lng_polls_votes_count#one" = "{count} vote";
 "lng_polls_votes_count#other" = "{count} votes";
