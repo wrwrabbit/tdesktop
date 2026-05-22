@@ -80,6 +80,7 @@ private:
 		uint32_t particleCountY = 0;
 		float phase = 0.f;
 		bool particlesInitialized = false;
+		bool needsInitDispatch = false;
 	};
 
 	[[nodiscard]] bool createPipelines(QRhiRenderTarget *rt);

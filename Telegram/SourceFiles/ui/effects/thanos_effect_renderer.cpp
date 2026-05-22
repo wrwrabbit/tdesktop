@@ -340,6 +340,7 @@ void ThanosEffectRenderer::render(
 			if (!item.particlesInitialized) {
 				needsInit = true;
 				item.particlesInitialized = true;
+				item.needsInitDispatch = true;
 
 				ComputeInitUniforms uni;
 				uni.particleCountX = item.particleCountX;
@@ -369,16 +370,18 @@ void ThanosEffectRenderer::render(
 
 		if (needsInit) {
 			for (auto &item : _items) {
-				if (item.phase <= dt * kPhaseSpeed * 1.1f) {
-					cb->setComputePipeline(_computeInitPipeline);
-					cb->setShaderResources(item.computeInitSrb);
-					const auto count =
-						item.particleCountX * item.particleCountY;
-					const auto groups =
-						(count + kComputeWorkgroupSize - 1)
-						/ kComputeWorkgroupSize;
-					cb->dispatch(int(groups), 1, 1);
+				if (!item.needsInitDispatch) {
+					continue;
 				}
+				item.needsInitDispatch = false;
+				cb->setComputePipeline(_computeInitPipeline);
+				cb->setShaderResources(item.computeInitSrb);
+				const auto count =
+					item.particleCountX * item.particleCountY;
+				const auto groups =
+					(count + kComputeWorkgroupSize - 1)
+					/ kComputeWorkgroupSize;
+				cb->dispatch(int(groups), 1, 1);
 			}
 		}
 
