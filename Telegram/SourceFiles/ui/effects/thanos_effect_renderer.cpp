@@ -544,13 +544,14 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 		result.particleCountX = uint32_t(w);
 		result.particleCountY = uint32_t(h);
 	} else {
-		const auto aspectRatio = float(w) / float(h);
-		result.particleCountY = uint32_t(
-			std::sqrt(float(kMaxParticleCount) / aspectRatio));
-		result.particleCountX = uint32_t(
-			float(kMaxParticleCount) / float(result.particleCountY));
-		if (result.particleCountX < 1) result.particleCountX = 1;
-		if (result.particleCountY < 1) result.particleCountY = 1;
+		const auto aspectRatio = float64(w) / float64(h);
+		const auto maxParticles = float64(kMaxParticleCount);
+		result.particleCountY = std::max(
+			uint32_t(1),
+			uint32_t(std::sqrt(maxParticles / aspectRatio)));
+		result.particleCountX = std::max(
+			uint32_t(1),
+			uint32_t(maxParticles / float64(result.particleCountY)));
 	}
 	const auto particleCount =
 		result.particleCountX * result.particleCountY;
