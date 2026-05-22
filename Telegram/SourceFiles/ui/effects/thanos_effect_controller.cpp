@@ -107,7 +107,18 @@ void ThanosEffectController::captureOnRemoval(
 	const auto top = _delegate.itemTop(view);
 	const auto height = view->height();
 	captureView(view, height, top);
-	startCollapseAnimation(height, top);
+
+	// Translate post-relayout itemTop to pre-batch coords so the merge
+	// predicates compare against _collapseGaps[].absY in one system.
+	auto preBatchTop = top;
+	for (const auto &gap : _collapseGaps) {
+		if (gap.absY <= preBatchTop) {
+			preBatchTop += gap.originalHeight;
+		} else {
+			break;
+		}
+	}
+	startCollapseAnimation(height, preBatchTop);
 }
 
 void ThanosEffectController::captureView(
