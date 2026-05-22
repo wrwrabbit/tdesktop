@@ -47,7 +47,9 @@ ThanosEffectController::ThanosEffectController(
 	}, lifetime);
 }
 
-ThanosEffectController::~ThanosEffectController() = default;
+ThanosEffectController::~ThanosEffectController() {
+	_collapseAnimation.stop();
+}
 
 void ThanosEffectController::captureItemsBatch(
 		const std::vector<not_null<HistoryItem*>> &items) {
