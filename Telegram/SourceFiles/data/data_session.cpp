@@ -4245,9 +4245,7 @@ void Session::webpageApplyFields(
 		? std::make_unique<Iv::Data>(
 			data,
 			*cachedPage,
-			Iv::ParseRichPage(_session, *cachedPage),
-			ivPhoto,
-			ivDocument)
+			Iv::ParseRichPage(_session, *cachedPage))
 		: nullptr;
 	const auto resolvedPhoto = story
 		? story->photo()

@@ -49,9 +49,7 @@ Geo GeoPointFromId(QByteArray data) {
 Data::Data(
 	const MTPDwebPage &webpage,
 	const MTPPage &page,
-	std::shared_ptr<const RichPage> richPage,
-	const PhotoData *webpagePhoto,
-	const DocumentData *webpageDocument)
+	std::shared_ptr<const RichPage> richPage)
 : _pageId(webpage.vid().v)
 , _url(qs(webpage.vurl()))
 , _name(webpage.vsite_name()
@@ -63,8 +61,6 @@ Data::Data(
 		return false;
 	}))
 , _richPage(std::move(richPage))
-, _webpagePhoto(webpagePhoto)
-, _webpageDocument(webpageDocument)
 , _pageFallback(page)
 , _webpagePhotoFallback(webpage.vphoto()
 	? std::optional<MTPPhoto>(*webpage.vphoto())

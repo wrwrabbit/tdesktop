@@ -49,9 +49,7 @@ public:
 	Data(
 		const MTPDwebPage &webpage,
 		const MTPPage &page,
-		std::shared_ptr<const RichPage> richPage,
-		const PhotoData *webpagePhoto,
-		const DocumentData *webpageDocument);
+		std::shared_ptr<const RichPage> richPage);
 	~Data();
 
 	[[nodiscard]] QString id() const;
@@ -69,8 +67,6 @@ private:
 	const QString _name;
 	const bool _partial = false;
 	const std::shared_ptr<const RichPage> _richPage;
-	const PhotoData *_webpagePhoto = nullptr;
-	const DocumentData *_webpageDocument = nullptr;
 	const std::optional<MTPPage> _pageFallback;
 	const std::optional<MTPPhoto> _webpagePhotoFallback;
 	const std::optional<MTPDocument> _webpageDocumentFallback;
