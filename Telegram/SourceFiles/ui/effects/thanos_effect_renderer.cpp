@@ -625,6 +625,9 @@ void ThanosEffectRenderer::destroyAnimatingItem(AnimatingItem &item) {
 }
 
 void ThanosEffectRenderer::releaseResources() {
+	if (!_rhi) {
+		return;
+	}
 	for (auto &item : _items) {
 		destroyAnimatingItem(item);
 	}
@@ -660,6 +663,7 @@ void ThanosEffectRenderer::releaseResources() {
 	_quadVertexBuffer = nullptr;
 
 	_initialized = false;
+	_rhi = nullptr;
 }
 
 } // namespace Ui
