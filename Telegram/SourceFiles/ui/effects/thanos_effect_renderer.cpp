@@ -279,6 +279,11 @@ void ThanosEffectRenderer::render(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
 		QRhiCommandBuffer *cb) {
+	if (rhi->isDeviceLost()) {
+		_pendingItems.clear();
+		releaseResources();
+		return;
+	}
 	if (!_initialized || !rhi->isFeatureSupported(QRhi::Compute)) {
 		return;
 	}
