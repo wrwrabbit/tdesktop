@@ -22,7 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 #include <rhi/qrhi.h>
-#ifdef Q_OS_UNIX
+#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
 #include <QOffscreenSurface>
 #include <QSurfaceFormat>
 #endif
