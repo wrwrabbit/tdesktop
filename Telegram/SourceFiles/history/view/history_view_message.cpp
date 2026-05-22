@@ -2745,8 +2745,10 @@ void Message::paintRichText(
 	rich->article.setVisibleTopBottom(
 		std::clamp(clip.top(), 0, rect.height()),
 		std::clamp(clip.bottom() + 1, 0, rect.height()));
-	p.translate(rect.topLeft());
-	rich->article.paint(p, clip, {
+	auto articleContext = Iv::Markdown::MarkdownArticlePaintContext(
+		context).translated(-rect.topLeft());
+	articleContext.clip = clip;
+	articleContext.caches = {
 		.pre = stm->preCache.get(),
 		.blockquote = context.quoteCache(
 			contentColorCollectible(),
@@ -2764,7 +2766,9 @@ void Message::paintRichText(
 				owner->requestRichPageRepaint(articleRect);
 			}
 		},
-	});
+	};
+	p.translate(rect.topLeft());
+	rich->article.paint(p, articleContext);
 	p.translate(-rect.topLeft());
 }
 

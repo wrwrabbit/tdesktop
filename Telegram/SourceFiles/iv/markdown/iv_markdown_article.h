@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare.h"
 
 #include "spellcheck/spellcheck_highlight_syntax.h"
+#include "ui/chat/chat_style.h"
 #include "ui/click_handler.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace style {
 struct Markdown;
@@ -36,30 +38,6 @@ struct PlaceholderBlockRuntime {
 	Ui::InfiniteRadialAnimation loadingAnimation;
 	std::unique_ptr<Ui::RippleAnimation> ripple;
 	QSize rippleSize;
-};
-
-struct MarkdownArticlePaintCaches {
-	Ui::Text::QuotePaintCache *pre = nullptr;
-	Ui::Text::QuotePaintCache *blockquote = nullptr;
-	std::span<Ui::Text::SpecialColor> colors;
-	const style::Markdown *st = nullptr;
-	Fn<void()> repaint;
-	Fn<void(QRect)> repaintRect;
-	std::optional<QColor> supplementaryColorOverride;
-};
-
-struct MarkdownArticleHitTestResult {
-	int segmentIndex = -1;
-	Ui::Text::StateResult state;
-	std::optional<PreparedLink> preparedLink;
-	MediaActivation mediaActivation;
-	QPoint placeholderLocalPoint;
-	int forcedOffset = -1;
-	bool direct = false;
-
-	[[nodiscard]] bool valid() const {
-		return (segmentIndex >= 0);
-	}
 };
 
 struct MarkdownArticleSelectionPosition {
@@ -122,6 +100,64 @@ struct MarkdownArticleSelectionEndpoints {
 	MarkdownArticleSelectionEndpoint to;
 };
 
+struct SelectableSegment;
+
+struct PaintSelectionState {
+	const std::vector<SelectableSegment> *segments = nullptr;
+	MarkdownArticleSelection selection;
+	const MarkdownArticleSelectionEndpoints *endpoints = nullptr;
+
+	[[nodiscard]] bool empty() const {
+		return !segments || selection.empty();
+	}
+};
+
+struct MarkdownArticlePaintCaches {
+	Ui::Text::QuotePaintCache *pre = nullptr;
+	Ui::Text::QuotePaintCache *blockquote = nullptr;
+	std::span<Ui::Text::SpecialColor> colors;
+	const style::Markdown *st = nullptr;
+	Fn<void()> repaint;
+	Fn<void(QRect)> repaintRect;
+	std::optional<QColor> supplementaryColorOverride;
+};
+
+struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {
+	explicit MarkdownArticlePaintContext(const Ui::ChatPaintContext &context)
+	: Ui::ChatPaintContext(context) {
+	}
+
+	MarkdownArticlePaintCaches caches;
+	PaintSelectionState selectionState;
+
+	[[nodiscard]] MarkdownArticlePaintContext translated(int x, int y) const {
+		auto result = *this;
+		result.translate(x, y);
+		return result;
+	}
+	[[nodiscard]] MarkdownArticlePaintContext translated(QPoint point) const {
+		return translated(point.x(), point.y());
+	}
+	[[nodiscard]] const style::Markdown &paintMarkdownStyle(
+			const style::Markdown &fallback) const {
+		return caches.st ? *caches.st : fallback;
+	}
+};
+
+struct MarkdownArticleHitTestResult {
+	int segmentIndex = -1;
+	Ui::Text::StateResult state;
+	std::optional<PreparedLink> preparedLink;
+	MediaActivation mediaActivation;
+	QPoint placeholderLocalPoint;
+	int forcedOffset = -1;
+	bool direct = false;
+
+	[[nodiscard]] bool valid() const {
+		return (segmentIndex >= 0);
+	}
+};
+
 class MarkdownArticle {
 public:
 	MarkdownArticle(
@@ -143,12 +179,7 @@ public:
 	[[nodiscard]] int lastLayoutWidth() const;
 	[[nodiscard]] int resizeGetHeight(int width);
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);
-	void paint(
-		Painter &p,
-		QRect clip,
-		MarkdownArticlePaintCaches caches,
-		MarkdownArticleSelection selection = {},
-		const MarkdownArticleSelectionEndpoints *endpoints = nullptr) const;
+	void paint(Painter &p, const MarkdownArticlePaintContext &context) const;
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;

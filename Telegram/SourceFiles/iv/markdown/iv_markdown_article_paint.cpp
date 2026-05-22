@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_paint.h"
+#include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/dynamic_image.h"
 #include "ui/widgets/checkbox.h"
@@ -89,9 +90,17 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 }
 
 [[nodiscard]] const style::Markdown &PaintStyle(
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		const style::Markdown &st) {
-	return caches.st ? *caches.st : st;
+	return context.paintMarkdownStyle(st);
+}
+
+[[nodiscard]] MarkdownArticlePaintContext ClippedContext(
+		const MarkdownArticlePaintContext &context,
+		QRect clip) {
+	auto result = context;
+	result.clip = clip;
+	return result;
 }
 
 [[nodiscard]] QColor WithOpacity(style::color color, double opacity) {
@@ -106,7 +115,7 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 
 void RefreshBlockThumbnail(
 		const LaidOutBlock &block,
-		const MarkdownArticlePaintCaches &caches) {
+		const MarkdownArticlePaintContext &context) {
 	if (!block.photoRuntime || block.thumbnailRect.isEmpty()) {
 		return;
 	}
@@ -122,8 +131,8 @@ void RefreshBlockThumbnail(
 		}
 		if (image != block.subscribedThumbnailImage) {
 			block.subscribedThumbnailImage = image;
-			const auto repaint = caches.repaint;
-			const auto repaintRect = caches.repaintRect;
+			const auto repaint = context.caches.repaint;
+			const auto repaintRect = context.caches.repaintRect;
 			const auto rect = block.mediaRect;
 			image->subscribeToUpdates([repaint, repaintRect, rect] {
 				if (repaintRect && !rect.isEmpty()) {
@@ -139,10 +148,9 @@ void RefreshBlockThumbnail(
 void PaintTextLeaf(
 		Painter &p,
 		const Ui::Text::String &leaf,
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		QRect rect,
 		int width,
-		QRect clip,
 		style::align align = style::al_left,
 		std::optional<TextSelection> selection = std::nullopt,
 		int elisionLines = 0) {
@@ -154,26 +162,26 @@ void PaintTextLeaf(
 			? Ui::Text::SimpleGeometry(availableWidth, elisionLines, 0, true)
 			: TextGeometry(availableWidth),
 		.align = align,
-		.clip = clip,
+		.clip = context.clip,
 		.palette = &p.textPalette(),
-		.pre = caches.pre,
-		.blockquote = caches.blockquote,
-		.colors = caches.colors,
+		.pre = context.caches.pre,
+		.blockquote = context.caches.blockquote,
+		.colors = context.caches.colors,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
-		.now = crl::now(),
+		.now = context.now,
 		.selection = selection.value_or(TextSelection()),
 		.elisionLines = elisionLines,
 	});
 }
 
 [[nodiscard]] std::optional<QColor> QuoteSupplementaryColor(
-		const MarkdownArticlePaintCaches &caches) {
-	if (!caches.blockquote) {
+		const MarkdownArticlePaintContext &context) {
+	if (!context.caches.blockquote) {
 		return {};
 	}
 	return anim::color(
-		caches.blockquote->bg,
-		caches.blockquote->outlines[0],
+		context.caches.blockquote->bg,
+		context.caches.blockquote->outlines[0],
 		0.9);
 }
 
@@ -181,35 +189,34 @@ void SetTextLeafPen(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches) {
-	const auto &paintSt = PaintStyle(caches, st);
+		const MarkdownArticlePaintContext &context) {
+	const auto &paintSt = PaintStyle(context, st);
 	p.setPen(!block.supplementary
 		? paintSt.textColor->c
-		: caches.supplementaryColorOverride.value_or(
+		: context.caches.supplementaryColorOverride.value_or(
 			paintSt.supplementaryTextColor->c));
 }
 
 void PaintRelatedArticleTextLeaf(
 		Painter &p,
 		const Ui::Text::String &leaf,
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		QRect rect,
 		int width,
-		QRect clip,
 		int elisionLines) {
-	const auto textClip = clip.intersected(rect);
+	const auto textClip = context.clip.intersected(rect);
 	if (textClip.isEmpty()) {
 		return;
 	}
+	const auto clipped = ClippedContext(context, textClip);
 	p.save();
 	p.setClipRect(textClip, Qt::IntersectClip);
 	PaintTextLeaf(
 		p,
 		leaf,
-		caches,
+		clipped,
 		rect,
 		width,
-		textClip,
 		style::al_left,
 		std::nullopt,
 		elisionLines);
@@ -220,13 +227,13 @@ void PaintTaskMarker(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		int outerWidth) {
 	const auto rect = block.markerRect;
 	if (rect.isEmpty()) {
 		return;
 	}
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 	auto view = Ui::CheckView(
 		paintSt.list.taskCheck,
 		block.taskState == TaskState::Checked);
@@ -238,12 +245,12 @@ void PaintBulletMarker(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches) {
+		const MarkdownArticlePaintContext &context) {
 	const auto radius = st.list.bulletRadius;
 	if (radius <= 0) {
 		return;
 	}
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 	auto hq = PainterHighQualityEnabler(p);
 	p.setPen(Qt::NoPen);
 	p.setBrush(paintSt.list.bulletFg->c);
@@ -475,33 +482,31 @@ void PaintTableBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
+		const MarkdownArticlePaintContext &context) {
 	if (!block.textRect.isEmpty()) {
-		SetTextLeafPen(p, block, st, caches);
+		SetTextLeafPen(p, block, st, context);
 		PaintTextLeaf(
 			p,
 			block.leaf,
-			caches,
+			context,
 			block.textRect,
 			block.textWidth,
-			clip,
 			style::al_left,
 			TextSelectionForSegmentIndex(
-				selectionState,
+				context.selectionState,
 				block.secondarySegmentIndex));
 	}
 
-	const auto tableClip = clip.intersected(block.visibleTableRect);
+	const auto tableClip = context.clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
 		return;
 	}
+	const auto tableContext = ClippedContext(context, tableClip);
 
 	const auto border = TableBorder(block, st);
 	const auto radius = st.table.radius;
 	const auto shapePath = TableShapePath(block, border, radius);
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 
 	p.save();
 	p.setClipRect(tableClip);
@@ -543,19 +548,20 @@ void PaintTableBlock(
 			PaintTextLeaf(
 				p,
 				cell.leaf,
-				caches,
+				tableContext,
 				cell.textRect,
 				cell.textWidth,
-				tableClip,
 				cell.align,
 				TextSelectionForSegmentIndex(
-					selectionState,
+					context.selectionState,
 					cell.segmentIndex));
 		}
 	}
 
 	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		&& WholeSegmentSelected(
+			context.selectionState,
+			block.segmentIndex)) {
 		p.save();
 		p.setClipPath(shapePath, Qt::IntersectClip);
 		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
@@ -591,18 +597,17 @@ void PaintDisplayMathBlock(
 		MathRenderer *renderer,
 		int devicePixelRatio,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto formulaClip = clip.intersected(block.visibleFormulaRect);
+		const MarkdownArticlePaintContext &context) {
+	const auto formulaClip = context.clip.intersected(block.visibleFormulaRect);
 	if (formulaClip.isEmpty()) {
 		return;
 	}
+	const auto formulaContext = ClippedContext(context, formulaClip);
 
 	p.save();
 	p.setClipRect(formulaClip);
 
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 	const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
 	p.setPen(paintSt.textColor->c);
 	const auto rendered = EnsureFormulaRendered(
@@ -633,14 +638,15 @@ void PaintDisplayMathBlock(
 		PaintTextLeaf(
 			p,
 			block.fallbackLeaf,
-			caches,
+			formulaContext,
 			block.textRect,
-			block.textWidth,
-			formulaClip);
+			block.textWidth);
 	}
 
 	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		&& WholeSegmentSelected(
+			context.selectionState,
+			block.segmentIndex)) {
 		p.fillRect(block.visibleFormulaRect, p.textPalette().selectOverlay);
 	}
 
@@ -671,30 +677,32 @@ void PaintQuoteBlock(
 		int devicePixelRatio,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto quoteClip = clip.intersected(block.outer);
+		const MarkdownArticlePaintContext &context) {
+	const auto quoteClip = context.clip.intersected(block.outer);
 	if (quoteClip.isEmpty()) {
 		return;
 	}
 
-	if (caches.blockquote) {
+	if (context.caches.blockquote) {
 		const auto &quoteStyle = st.body.blockquote;
-		Ui::Text::ValidateQuotePaintCache(*caches.blockquote, quoteStyle);
+		Ui::Text::ValidateQuotePaintCache(
+			*context.caches.blockquote,
+			quoteStyle);
 
 		p.save();
 		p.setClipRect(quoteClip);
 		Ui::Text::FillQuotePaint(
 			p,
 			block.outer,
-			*caches.blockquote,
+			*context.caches.blockquote,
 			quoteStyle);
 		p.restore();
 	}
 
-	auto overriden = caches;
-	overriden.supplementaryColorOverride = QuoteSupplementaryColor(caches);
+	auto local = ClippedContext(
+		context,
+		context.clip.intersected(block.contentRect));
+	local.caches.supplementaryColorOverride = QuoteSupplementaryColor(context);
 	PaintBlocks(
 		p,
 		block.children,
@@ -704,9 +712,7 @@ void PaintQuoteBlock(
 		devicePixelRatio,
 		outerWidth,
 		st,
-		overriden,
-		selectionState,
-		clip.intersected(block.contentRect));
+		local);
 }
 
 void PaintPlaceholderBlock(
@@ -714,11 +720,10 @@ void PaintPlaceholderBlock(
 		const LaidOutBlock &block,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto visible = clip.intersected(block.visibleMediaRect);
+		const MarkdownArticlePaintContext &context) {
+	const auto visible = context.clip.intersected(block.visibleMediaRect);
 	if (!visible.isEmpty()) {
+		const auto visibleContext = ClippedContext(context, visible);
 		p.save();
 		p.setClipRect(visible);
 		auto hq = PainterHighQualityEnabler(p);
@@ -776,10 +781,9 @@ void PaintPlaceholderBlock(
 				PaintTextLeaf(
 					p,
 					block.labelLeaf,
-					caches,
+					visibleContext,
 					block.labelRect,
 					block.labelWidth,
-					visible,
 					style::al_center);
 			}
 		} else {
@@ -800,30 +804,30 @@ void PaintPlaceholderBlock(
 			PaintTextLeaf(
 				p,
 				block.labelLeaf,
-				caches,
+				visibleContext,
 				block.labelRect,
 				block.labelWidth,
-				visible,
 				style::al_center);
 		}
 		if (block.segmentIndex >= 0
-			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+			&& WholeSegmentSelected(
+				context.selectionState,
+				block.segmentIndex)) {
 			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
 		}
 		p.restore();
 	}
 	if (!block.textRect.isEmpty()) {
-		SetTextLeafPen(p, block, st, caches);
+		SetTextLeafPen(p, block, st, context);
 		PaintTextLeaf(
 			p,
 			block.leaf,
-			caches,
+			context,
 			block.textRect,
 			block.textWidth,
-			clip,
 			style::al_left,
 			TextSelectionForSegmentIndex(
-				selectionState,
+				context.selectionState,
 				block.secondarySegmentIndex));
 	}
 }
@@ -843,13 +847,12 @@ void PaintEmbedPostBlock(
 		int devicePixelRatio,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto mediaClip = clip.intersected(block.mediaRect);
+		const MarkdownArticlePaintContext &context) {
+	const auto mediaClip = context.clip.intersected(block.mediaRect);
 	const auto &style = st.embedPost;
 	if (!mediaClip.isEmpty()) {
-		RefreshBlockThumbnail(block, caches);
+		const auto mediaContext = ClippedContext(context, mediaClip);
+		RefreshBlockThumbnail(block, context);
 
 		p.save();
 		p.setClipRect(mediaClip);
@@ -884,13 +887,12 @@ void PaintEmbedPostBlock(
 			PaintTextLeaf(
 				p,
 				block.labelLeaf,
-				caches,
+				mediaContext,
 				block.labelRect,
 				block.labelWidth,
-				mediaClip,
 				style::al_left,
 				TextSelectionForSegmentIndex(
-					selectionState,
+					context.selectionState,
 					block.segmentIndex));
 		}
 		if (!block.subtitleRect.isEmpty()) {
@@ -898,18 +900,20 @@ void PaintEmbedPostBlock(
 			PaintTextLeaf(
 				p,
 				block.subtitleLeaf,
-				caches,
+				mediaContext,
 				block.subtitleRect,
 				block.subtitleWidth,
-				mediaClip,
 				style::al_left,
 				TextSelectionForSegmentIndex(
-					selectionState,
+					context.selectionState,
 					block.secondarySegmentIndex));
 		}
 		p.restore();
 	}
 	if (!block.bodyRect.isEmpty()) {
+		const auto bodyContext = ClippedContext(
+			context,
+			context.clip.intersected(block.bodyRect));
 		PaintBlocks(
 			p,
 			block.children,
@@ -919,22 +923,19 @@ void PaintEmbedPostBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip.intersected(block.bodyRect));
+			bodyContext);
 	}
 	if (!block.textRect.isEmpty()) {
-		SetTextLeafPen(p, block, st, caches);
+		SetTextLeafPen(p, block, st, context);
 		PaintTextLeaf(
 			p,
 			block.leaf,
-			caches,
+			context,
 			block.textRect,
 			block.textWidth,
-			clip,
 			style::al_left,
 			TextSelectionForSegmentIndex(
-				selectionState,
+				context.selectionState,
 				block.tertiarySegmentIndex));
 	}
 }
@@ -943,39 +944,36 @@ void PaintMediaCaption(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
+		const MarkdownArticlePaintContext &context) {
 	if (block.textRect.isEmpty()) {
 		return;
 	}
-	SetTextLeafPen(p, block, st, caches);
+	SetTextLeafPen(p, block, st, context);
 	PaintTextLeaf(
 		p,
 		block.leaf,
-		caches,
+		context,
 		block.textRect,
 		block.textWidth,
-		clip,
 		style::al_left,
 		TextSelectionForSegmentIndex(
-			selectionState,
+			context.selectionState,
 			block.secondarySegmentIndex));
 }
 
 void PaintPersistentMediaBlock(
 		Painter &p,
 		const LaidOutBlock &block,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
+		const MarkdownArticlePaintContext &context) {
 	if (!block.mediaBlock) {
 		return;
 	}
-	block.mediaBlock->paint(p, clip, caches);
+	block.mediaBlock->paint(p, context);
 	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
-		const auto visible = clip.intersected(block.visibleMediaRect);
+		&& WholeSegmentSelected(
+			context.selectionState,
+			block.segmentIndex)) {
+		const auto visible = context.clip.intersected(block.visibleMediaRect);
 		if (!visible.isEmpty()) {
 			p.save();
 			p.setClipRect(visible);
@@ -1030,37 +1028,32 @@ void PaintAudioBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		const MarkdownArticlePaintContext &context) {
+	PaintPersistentMediaBlock(p, block, context);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintChannelBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		const MarkdownArticlePaintContext &context) {
+	PaintPersistentMediaBlock(p, block, context);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintRelatedArticleBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto visible = clip.intersected(block.visibleMediaRect);
+		const MarkdownArticlePaintContext &context) {
+	const auto visible = context.clip.intersected(block.visibleMediaRect);
 	if (visible.isEmpty()) {
 		return;
 	}
 	const auto &style = st.relatedArticle;
-	RefreshBlockThumbnail(block, caches);
+	const auto visibleContext = ClippedContext(context, visible);
+	RefreshBlockThumbnail(block, context);
 
 	p.save();
 	p.setClipRect(visible);
@@ -1097,10 +1090,9 @@ void PaintRelatedArticleBlock(
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.labelLeaf,
-			caches,
+			visibleContext,
 			block.labelRect,
 			block.labelWidth,
-			visible,
 			style.titleLines);
 	}
 	if (!block.subtitleRect.isEmpty()) {
@@ -1108,10 +1100,9 @@ void PaintRelatedArticleBlock(
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.subtitleLeaf,
-			caches,
+			visibleContext,
 			block.subtitleRect,
 			block.subtitleWidth,
-			visible,
 			style.subtitleLines);
 	}
 	if (!block.actionRect.isEmpty()) {
@@ -1119,14 +1110,15 @@ void PaintRelatedArticleBlock(
 		PaintRelatedArticleTextLeaf(
 			p,
 			block.actionLeaf,
-			caches,
+			visibleContext,
 			block.actionRect,
 			block.actionWidth,
-			visible,
 			style.footerLines);
 	}
 	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
+		&& WholeSegmentSelected(
+			context.selectionState,
+			block.segmentIndex)) {
 		p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
 	}
 	if (style.separator > 0) {
@@ -1145,49 +1137,43 @@ void PaintPhotoBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		const MarkdownArticlePaintContext &context) {
+	PaintPersistentMediaBlock(p, block, context);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintVideoBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		const MarkdownArticlePaintContext &context) {
+	PaintPersistentMediaBlock(p, block, context);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintMapBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	PaintPersistentMediaBlock(p, block, caches, selectionState, clip);
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		const MarkdownArticlePaintContext &context) {
+	PaintPersistentMediaBlock(p, block, context);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintGroupedMediaBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
+		const MarkdownArticlePaintContext &context) {
 	if (block.mediaBlock) {
-		block.mediaBlock->paint(p, clip, caches);
+		block.mediaBlock->paint(p, context);
 		if ((block.segmentIndex >= 0)
-			&& WholeSegmentSelected(selectionState, block.segmentIndex)) {
-			const auto visible = clip.intersected(block.visibleMediaRect);
+			&& WholeSegmentSelected(
+				context.selectionState,
+				block.segmentIndex)) {
+			const auto visible = context.clip.intersected(block.visibleMediaRect);
 			if (!visible.isEmpty()) {
-				const auto &style = PaintStyle(caches, st).groupedMedia;
+				const auto &style = PaintStyle(context, st).groupedMedia;
 				auto overlay = p.textPalette().selectOverlay->c;
 				overlay.setAlphaF(std::clamp(style.overlayOpacity, 0., 1.));
 				p.save();
@@ -1196,10 +1182,10 @@ void PaintGroupedMediaBlock(
 				p.restore();
 			}
 		}
-		PaintMediaCaption(p, block, st, caches, selectionState, clip);
+		PaintMediaCaption(p, block, st, context);
 		return;
 	}
-	PaintMediaCaption(p, block, st, caches, selectionState, clip);
+	PaintMediaCaption(p, block, st, context);
 }
 
 void PaintDetailsBlock(
@@ -1211,16 +1197,14 @@ void PaintDetailsBlock(
 		int devicePixelRatio,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	const auto visible = clip.intersected(block.outer);
+		const MarkdownArticlePaintContext &context) {
+	const auto visible = context.clip.intersected(block.outer);
 	if (visible.isEmpty()) {
 		return;
 	}
 
 	const auto &details = st.details;
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 	const auto &paintDetails = paintSt.details;
 	const auto headerBg = TableHeaderBg(paintSt.table);
 	const auto half = details.border / 2.;
@@ -1269,17 +1253,19 @@ void PaintDetailsBlock(
 	PaintTextLeaf(
 		p,
 		block.leaf,
-		caches,
+		context,
 		block.textRect,
 		block.textWidth,
-		clip,
 		style::al_left,
 		TextSelectionForSegmentIndex(
-			selectionState,
+			context.selectionState,
 			block.segmentIndex));
 	p.restore();
 
 	if (!block.bodyRect.isEmpty()) {
+		const auto bodyContext = ClippedContext(
+			context,
+			context.clip.intersected(block.bodyRect));
 		PaintBlocks(
 			p,
 			block.children,
@@ -1289,9 +1275,7 @@ void PaintDetailsBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip.intersected(block.bodyRect));
+			bodyContext);
 	}
 }
 
@@ -1304,13 +1288,11 @@ void PaintBlock(
 		int devicePixelRatio,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
-	if (!block.outer.intersects(clip)) {
+		const MarkdownArticlePaintContext &context) {
+	if (!block.outer.intersects(context.clip)) {
 		return;
 	}
-	const auto &paintSt = PaintStyle(caches, st);
+	const auto &paintSt = PaintStyle(context, st);
 
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
@@ -1318,17 +1300,16 @@ void PaintBlock(
 		if (!block.headerRect.isEmpty()) {
 			p.fillRect(block.headerRect, paintSt.relatedArticle.headerBg->c);
 		}
-		SetTextLeafPen(p, block, st, caches);
+		SetTextLeafPen(p, block, st, context);
 		PaintTextLeaf(
 			p,
 			block.leaf,
-			caches,
+			context,
 			block.textRect,
 			block.textWidth,
-			clip,
 			style::al_left,
 			TextSelectionForSegmentIndex(
-				selectionState,
+				context.selectionState,
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::CodeBlock:
@@ -1336,13 +1317,12 @@ void PaintBlock(
 		PaintTextLeaf(
 			p,
 			block.leaf,
-			caches,
+			context,
 			block.textRect,
 			block.textWidth,
-			clip,
 			style::al_left,
 			TextSelectionForSegmentIndex(
-				selectionState,
+				context.selectionState,
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::Rule:
@@ -1358,25 +1338,22 @@ void PaintBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	case PreparedBlockKind::ListItem:
 		if (block.taskState != TaskState::None) {
-			PaintTaskMarker(p, block, st, caches, outerWidth);
+			PaintTaskMarker(p, block, st, context, outerWidth);
 		} else if (block.listKind == ListKind::Ordered
 			&& !block.markerRect.isEmpty()) {
 			p.setPen(paintSt.textColor->c);
 			PaintTextLeaf(
 				p,
 				block.marker,
-				caches,
+				context,
 				block.markerRect,
-				block.markerWidth,
-				clip);
+				block.markerWidth);
 		} else if (block.listKind == ListKind::Bullet) {
-			PaintBulletMarker(p, block, st, caches);
+			PaintBulletMarker(p, block, st, context);
 		}
 		PaintBlocks(
 			p,
@@ -1387,9 +1364,7 @@ void PaintBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	case PreparedBlockKind::Quote:
 		PaintQuoteBlock(
@@ -1401,9 +1376,7 @@ void PaintBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	case PreparedBlockKind::DisplayMath:
 		PaintDisplayMathBlock(
@@ -1414,72 +1387,28 @@ void PaintBlock(
 			renderer,
 			devicePixelRatio,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	case PreparedBlockKind::Table:
-		PaintTableBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintTableBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Photo:
-		PaintPhotoBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintPhotoBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Video:
-		PaintVideoBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintVideoBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Audio:
-		PaintAudioBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintAudioBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Map:
-		PaintMapBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintMapBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Channel:
-		PaintChannelBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintChannelBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::RelatedArticle:
-		PaintRelatedArticleBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintRelatedArticleBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::EmbedPost:
 		PaintEmbedPostBlock(
@@ -1491,28 +1420,13 @@ void PaintBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	case PreparedBlockKind::Placeholder:
-		PaintPlaceholderBlock(
-			p,
-			block,
-			outerWidth,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintPlaceholderBlock(p, block, outerWidth, st, context);
 		break;
 	case PreparedBlockKind::GroupedMedia:
-		PaintGroupedMediaBlock(
-			p,
-			block,
-			st,
-			caches,
-			selectionState,
-			clip);
+		PaintGroupedMediaBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Details:
 		PaintDetailsBlock(
@@ -1524,9 +1438,7 @@ void PaintBlock(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 		break;
 	}
 }
@@ -1542,13 +1454,11 @@ void PaintBlocks(
 		int devicePixelRatio,
 		int outerWidth,
 		const style::Markdown &st,
-		const MarkdownArticlePaintCaches &caches,
-		const PaintSelectionState &selectionState,
-		QRect clip) {
+		const MarkdownArticlePaintContext &context) {
 	for (const auto &block : blocks) {
-		if (block.outer.bottom() < clip.top()) {
+		if (block.outer.bottom() < context.clip.top()) {
 			continue;
-		} else if (block.outer.top() > clip.bottom()) {
+		} else if (block.outer.top() > context.clip.bottom()) {
 			break;
 		}
 		PaintBlock(
@@ -1560,9 +1470,7 @@ void PaintBlocks(
 			devicePixelRatio,
 			outerWidth,
 			st,
-			caches,
-			selectionState,
-			clip);
+			context);
 	}
 }
 

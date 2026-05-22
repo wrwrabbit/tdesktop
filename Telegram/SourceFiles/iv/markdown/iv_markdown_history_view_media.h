@@ -134,7 +134,6 @@ std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::create(
 }
 
 [[nodiscard]] std::shared_ptr<MediaBlock> CreateIvHistoryViewMediaBlock(
-	Window::SessionController *controller,
 	IvHistoryViewMediaDescriptor descriptor);
 
 } // namespace Iv::Markdown

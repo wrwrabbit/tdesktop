@@ -75,9 +75,17 @@ constexpr auto kMaxGroupedMediaLayoutItems = 10;
 }
 
 [[nodiscard]] const style::Markdown &PaintStyle(
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		const style::Markdown &st) {
-	return caches.st ? *caches.st : st;
+	return context.paintMarkdownStyle(st);
+}
+
+[[nodiscard]] MarkdownArticlePaintContext ClippedContext(
+		const MarkdownArticlePaintContext &context,
+		QRect clip) {
+	auto result = context;
+	result.clip = clip;
+	return result;
 }
 
 void PaintImageSpoiler(Painter &p, QRect rect) {
@@ -202,10 +210,9 @@ void SetPlainTextLeaf(
 void PaintTextLeaf(
 		Painter &p,
 		const Ui::Text::String &leaf,
-		const MarkdownArticlePaintCaches &caches,
+		const MarkdownArticlePaintContext &context,
 		QRect rect,
 		int width,
-		QRect clip,
 		style::align align = style::al_left) {
 	const auto availableWidth = std::max(width, 1);
 	leaf.draw(p, {
@@ -213,13 +220,13 @@ void PaintTextLeaf(
 		.availableWidth = availableWidth,
 		.geometry = TextGeometry(availableWidth),
 		.align = align,
-		.clip = clip,
+		.clip = context.clip,
 		.palette = &p.textPalette(),
-		.pre = caches.pre,
-		.blockquote = caches.blockquote,
-		.colors = caches.colors,
+		.pre = context.caches.pre,
+		.blockquote = context.caches.blockquote,
+		.colors = context.caches.colors,
 		.spoiler = Ui::Text::DefaultSpoilerCache(),
-		.now = crl::now(),
+		.now = context.now,
 	});
 }
 
@@ -410,8 +417,7 @@ public:
 
 	void paint(
 			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override;
+			const MarkdownArticlePaintContext &context) const override;
 
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override;
 
@@ -545,13 +551,12 @@ int ImageBackedMediaBlock::firstLineBaseline() const {
 
 void ImageBackedMediaBlock::paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const {
-	const auto visible = clip.intersected(_geometry);
+		const MarkdownArticlePaintContext &context) const {
+	const auto visible = context.clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
-	const auto &st = PaintStyle(caches, layoutStyle());
+	const auto &st = PaintStyle(context, layoutStyle());
 	p.save();
 	p.setClipRect(visible);
 	p.fillRect(_geometry, st.photo.fallbackBg->c);
@@ -732,8 +737,7 @@ public:
 
 	void paint(
 			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override;
+			const MarkdownArticlePaintContext &context) const override;
 
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override;
 
@@ -810,14 +814,14 @@ int AudioMediaBlock::firstLineBaseline() const {
 
 void AudioMediaBlock::paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const {
-	const auto visible = clip.intersected(_geometry);
+		const MarkdownArticlePaintContext &context) const {
+	const auto visible = context.clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
+	const auto visibleContext = ClippedContext(context, visible);
 	const auto &layout = layoutStyle().audio;
-	const auto &paint = PaintStyle(caches, layoutStyle()).audio;
+	const auto &paint = PaintStyle(context, layoutStyle()).audio;
 	p.save();
 	p.setClipRect(visible);
 	PaintCardSurface(
@@ -831,19 +835,17 @@ void AudioMediaBlock::paint(
 	PaintTextLeaf(
 		p,
 		_titleLeaf,
-		caches,
+		visibleContext,
 		_titleRect,
-		_titleWidth,
-		visible);
+		_titleWidth);
 	if (!_subtitleRect.isEmpty()) {
 		p.setPen(paint.subtitleFg->c);
 		PaintTextLeaf(
 			p,
 			_subtitleLeaf,
-			caches,
+			visibleContext,
 			_subtitleRect,
-			_subtitleWidth,
-			visible);
+			_subtitleWidth);
 	}
 	p.restore();
 }
@@ -960,8 +962,7 @@ public:
 
 	void paint(
 			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override;
+			const MarkdownArticlePaintContext &context) const override;
 
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override;
 
@@ -1055,14 +1056,14 @@ int ChannelMediaBlock::firstLineBaseline() const {
 
 void ChannelMediaBlock::paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const {
-	const auto visible = clip.intersected(_geometry);
+		const MarkdownArticlePaintContext &context) const {
+	const auto visible = context.clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
+	const auto visibleContext = ClippedContext(context, visible);
 	const auto &layout = layoutStyle().channel;
-	const auto &paint = PaintStyle(caches, layoutStyle()).channel;
+	const auto &paint = PaintStyle(context, layoutStyle()).channel;
 	const auto &buttonLayout = layout.button;
 	const auto &buttonPaint = paint.button;
 	p.save();
@@ -1078,10 +1079,9 @@ void ChannelMediaBlock::paint(
 	PaintTextLeaf(
 		p,
 		_titleLeaf,
-		caches,
+		visibleContext,
 		_titleRect,
-		_titleWidth,
-		visible);
+		_titleWidth);
 	if (_joinVisible && !_actionRect.isEmpty()) {
 		const auto innerRect = _actionRect.marginsRemoved(buttonLayout.padding);
 		PaintCardSurface(
@@ -1288,8 +1288,7 @@ public:
 
 	void paint(
 			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override;
+			const MarkdownArticlePaintContext &context) const override;
 
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override;
 
@@ -1440,14 +1439,13 @@ int GroupedMediaBlock::firstLineBaseline() const {
 
 void GroupedMediaBlock::paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const {
-	const auto visible = clip.intersected(_geometry);
+		const MarkdownArticlePaintContext &context) const {
+	const auto visible = context.clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
 	const auto &layout = layoutStyle();
-	const auto &st = PaintStyle(caches, layout);
+	const auto &st = PaintStyle(context, layout);
 	const auto &layoutGrouped = layout.groupedMedia;
 	const auto &paintGrouped = st.groupedMedia;
 	p.save();

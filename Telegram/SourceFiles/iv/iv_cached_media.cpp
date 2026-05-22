@@ -1116,7 +1116,6 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 				photo,
 				origin);
 			return Markdown::CreateIvHistoryViewMediaBlock(
-				controller,
 				std::move(descriptor));
 		},
 		[session = _session, host, origin = fileOrigin()](
@@ -1162,7 +1161,6 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 				document,
 				origin);
 			return Markdown::CreateIvHistoryViewMediaBlock(
-				controller,
 				std::move(descriptor));
 		},
 		Markdown::IvHistoryViewMediaBlockFactory::AudioFactory(),
@@ -1201,7 +1199,6 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			};
 			descriptor.keepAlive.push_back(mapImage);
 			return Markdown::CreateIvHistoryViewMediaBlock(
-				controller,
 				std::move(descriptor));
 		});
 }

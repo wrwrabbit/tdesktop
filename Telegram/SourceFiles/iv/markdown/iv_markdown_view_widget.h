@@ -23,6 +23,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QVariant>
 
 namespace Ui {
+class ChatStyle;
+class ChatTheme;
 class PopupMenu;
 namespace Text {
 struct QuotePaintCache;
@@ -116,7 +118,7 @@ private:
 	[[nodiscard]] QRect articleRectToWidget(QRect articleRect) const;
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
-	[[nodiscard]] MarkdownArticlePaintCaches textPaintCaches();
+	[[nodiscard]] MarkdownArticlePaintContext textPaintContext(QRect clip);
 	void stopPressedPlaceholderRipple();
 	void dragActionStart(QPoint point, Qt::MouseButton button);
 	MarkdownArticleHitTestResult dragActionUpdate(QPoint point);
@@ -127,6 +129,8 @@ private:
 	[[nodiscard]] double zoomScale() const;
 
 	std::shared_ptr<MarkdownArticle> _article;
+	std::unique_ptr<Ui::ChatTheme> _theme;
+	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
 	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;

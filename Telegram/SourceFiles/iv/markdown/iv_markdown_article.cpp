@@ -469,12 +469,7 @@ public:
 
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 
-	void paint(
-		Painter &p,
-		QRect clip,
-		MarkdownArticlePaintCaches caches,
-		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints);
+	void paint(Painter &p, const MarkdownArticlePaintContext &context);
 
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 		QPoint point,
@@ -685,12 +680,11 @@ void MarkdownArticle::Impl::setVisibleTopBottom(int visibleTop, int visibleBotto
 
 void MarkdownArticle::Impl::paint(
 		Painter &p,
-		QRect clip,
-		MarkdownArticlePaintCaches caches,
-		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) {
+		const MarkdownArticlePaintContext &context) {
 	const auto &st = layoutStyle();
-	const auto &paintSt = caches.st ? *caches.st : st;
+	auto local = context;
+	local.selectionState.segments = &_segments;
+	const auto &paintSt = local.paintMarkdownStyle(st);
 	auto textPalette = paintSt.textPalette;
 	auto markBg = textPalette.markBg->c;
 	markBg.setAlphaF(markBg.alphaF() * std::clamp(
@@ -701,11 +695,6 @@ void MarkdownArticle::Impl::paint(
 	textPalette.markBg = ownedMarkBg.color();
 	const auto &previousTextPalette = p.textPalette();
 	p.setTextPalette(textPalette);
-	const auto selectionState = PaintSelectionState{
-		.segments = &_segments,
-		.selection = selection,
-		.endpoints = endpoints,
-	};
 	PaintBlocks(
 		p,
 		_blocks,
@@ -715,9 +704,7 @@ void MarkdownArticle::Impl::paint(
 		currentDevicePixelRatio(),
 		std::max(_width, 1),
 		st,
-		caches,
-		selectionState,
-		clip);
+		local);
 	p.setTextPalette(previousTextPalette);
 }
 
@@ -1345,16 +1332,8 @@ void MarkdownArticle::setVisibleTopBottom(int visibleTop, int visibleBottom) {
 
 void MarkdownArticle::paint(
 		Painter &p,
-		QRect clip,
-		MarkdownArticlePaintCaches caches,
-		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) const {
-	_impl->paint(
-		p,
-		clip,
-		caches,
-		selection,
-		endpoints);
+		const MarkdownArticlePaintContext &context) const {
+	_impl->paint(p, context);
 }
 
 MarkdownArticleHitTestResult MarkdownArticle::hitTest(

@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
+#include "ui/chat/chat_theme.h"
 #include "ui/layers/show.h"
 #include "ui/text/text_extended_data.h"
 #include "ui/widgets/popup_menu.h"
@@ -125,22 +126,38 @@ void EnsurePrePaintCache(
 }
 
 [[nodiscard]] std::vector<Ui::Text::SpecialColor> HighlightColors(
-		not_null<const style::palette*> palette) {
-	auto result = Ui::SyntaxHighlightColors(palette);
+		not_null<const Ui::ChatStyle*> style) {
+	auto result = Ui::SyntaxHighlightColors(style);
 
-	const auto &fg = palette->lightButtonFg();
-	const auto &bg = palette->lightButtonBgOver();
+	const auto &fg = style->lightButtonFg();
+	const auto &bg = style->lightButtonBgOver();
 	result.push_back({ &fg->p, &fg->p, &bg->b, &bg->b });
 
 	Ensures(result.size() == kNativeIvLinkSpecialColorIndex);
 	return result;
 }
 
+[[nodiscard]] std::unique_ptr<Ui::ChatTheme> CreateStandaloneChatTheme() {
+	const auto palette = style::main_palette::get();
+	return std::make_unique<Ui::ChatTheme>(Ui::ChatThemeDescriptor{
+		.preparePalette = [=](style::palette &copy) {
+			copy = *palette;
+		},
+		.backgroundData = {
+			.colors = { palette->windowBg()->c },
+		},
+	});
+}
+
 } // namespace
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
 : Ui::RpWidget(parent)
-, _highlightColors(HighlightColors(style::main_palette::get())) {
+, _theme(CreateStandaloneChatTheme())
+, _style(std::make_unique<Ui::ChatStyle>(style::main_palette::get())) {
+	_style->apply(_theme.get());
+	_highlightColors = HighlightColors(_style.get());
+
 	setMouseTracking(true);
 	setFocusPolicy(Qt::StrongFocus);
 
@@ -219,7 +236,9 @@ void MarkdownDocumentWidget::setZoom(int value) {
 void MarkdownDocumentWidget::refreshPalette() {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	_highlightColors = HighlightColors(style::main_palette::get());
+	_theme = CreateStandaloneChatTheme();
+	_style->apply(_theme.get());
+	_highlightColors = HighlightColors(_style.get());
 	resetTextPaintCaches();
 	if (_article) {
 		_article->invalidatePaletteCache();
@@ -363,30 +382,22 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 	}
 	auto p = Painter(this);
 	p.setTextPalette(st::inTextPalette);
-	const auto caches = textPaintCaches();
 	const auto scale = zoomScale();
+	const auto clip = (scale == 1.)
+		? e->rect()
+		: QRect(
+			int(std::floor(e->rect().x() / scale)),
+			int(std::floor(e->rect().y() / scale)),
+			int(std::ceil(e->rect().width() / scale)) + 1,
+			int(std::ceil(e->rect().height() / scale)) + 1);
+	auto context = textPaintContext(clip);
 	if (scale == 1.) {
-		_article->paint(
-			p,
-			e->rect(),
-			caches,
-			_selection,
-			&_selectionEndpoints);
+		_article->paint(p, context);
 		return;
 	}
-	const auto clip = QRect(
-		int(std::floor(e->rect().x() / scale)),
-		int(std::floor(e->rect().y() / scale)),
-		int(std::ceil(e->rect().width() / scale)) + 1,
-		int(std::ceil(e->rect().height() / scale)) + 1);
 	p.save();
 	p.scale(scale, scale);
-	_article->paint(
-		p,
-		clip,
-		caches,
-		_selection,
-		&_selectionEndpoints);
+	_article->paint(p, context);
 	p.restore();
 }
 
@@ -882,8 +893,19 @@ Ui::Text::QuotePaintCache *MarkdownDocumentWidget::ensureBlockquotePaintCache() 
 	return _blockquotePaintCache.get();
 }
 
-MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
-	return {
+MarkdownArticlePaintContext MarkdownDocumentWidget::textPaintContext(
+		QRect clip) {
+	const auto scale = zoomScale();
+	const auto logicalRect = QRect(QPoint(), QSize(
+		std::max(int(std::floor(width() / scale)), 1),
+		std::max(int(std::floor(height() / scale)), 1)));
+	auto context = MarkdownArticlePaintContext(_theme->preparePaintContext(
+		_style.get(),
+		logicalRect,
+		logicalRect,
+		clip,
+		!window()->isActiveWindow()));
+	context.caches = {
 		.pre = ensurePrePaintCache(),
 		.blockquote = ensureBlockquotePaintCache(),
 		.colors = _highlightColors,
@@ -902,6 +924,9 @@ MarkdownArticlePaintCaches MarkdownDocumentWidget::textPaintCaches() {
 			});
 		},
 	};
+	context.selectionState.selection = _selection;
+	context.selectionState.endpoints = &_selectionEndpoints;
+	return context;
 }
 
 void MarkdownDocumentWidget::stopPressedPlaceholderRipple() {

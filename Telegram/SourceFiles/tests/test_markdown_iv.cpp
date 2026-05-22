@@ -21,6 +21,7 @@ namespace Data {
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/chat/chat_style.h"
+#include "ui/chat/chat_theme.h"
 #include "ui/dynamic_image.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
@@ -50,6 +51,7 @@ namespace Data {
 #include <QtWidgets/QApplication>
 
 #include <rpl/event_stream.h>
+#include <rpl/lifetime.h>
 #include <rpl/never.h>
 
 #include <algorithm>
@@ -335,10 +337,9 @@ public:
 
 	void paint(
 			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override {
-		Q_UNUSED(caches);
-		const auto visible = clip.intersected(_geometry);
+			const MarkdownArticlePaintContext &context) const override {
+		paintClips.push_back(context.clip);
+		const auto visible = context.clip.intersected(_geometry);
 		if (visible.isEmpty()) {
 			return;
 		}
@@ -391,6 +392,7 @@ public:
 	std::vector<int> resizeWidths;
 	std::vector<QRect> requestedGeometries;
 	std::vector<QRect> appliedGeometries;
+	mutable std::vector<QRect> paintClips;
 
 private:
 	[[nodiscard]] QColor color() const {
@@ -2288,6 +2290,41 @@ void PrintPrepareSummary(
 	return article;
 }
 
+[[nodiscard]] std::unique_ptr<Ui::ChatTheme> CreateTestStandaloneChatTheme() {
+	const auto palette = style::main_palette::get();
+	return std::make_unique<Ui::ChatTheme>(Ui::ChatThemeDescriptor{
+		.preparePalette = [=](style::palette &copy) {
+			copy = *palette;
+		},
+		.backgroundData = {
+			.colors = { palette->windowBg()->c },
+		},
+	});
+}
+
+template <typename Callback>
+void WithStandaloneArticlePaintContext(
+		int width,
+		int height,
+		MarkdownArticlePaintCaches caches,
+		std::optional<MarkdownArticleSelection> selection,
+		Callback &&callback) {
+	auto theme = CreateTestStandaloneChatTheme();
+	auto style = Ui::ChatStyle(style::main_palette::get());
+	style.apply(theme.get());
+	const auto clip = QRect(0, 0, width, height);
+	auto context = MarkdownArticlePaintContext(theme->preparePaintContext(
+		&style,
+		clip,
+		clip,
+		clip,
+		false));
+	context.caches = std::move(caches);
+	context.selectionState.selection = selection.value_or(
+		MarkdownArticleSelection());
+	callback(context);
+}
+
 [[nodiscard]] QImage PaintArticleForTest(
 		MarkdownArticle *article,
 		int width,
@@ -2305,11 +2342,14 @@ void PrintPrepareSummary(
 	image.fill(Qt::transparent);
 	{
 		auto painter = Painter(&image);
-		article->paint(
-			painter,
-			QRect(0, 0, width, height),
+		WithStandaloneArticlePaintContext(
+			width,
+			height,
 			std::move(caches),
-			selection.value_or(MarkdownArticleSelection()));
+			std::move(selection),
+			[&](const MarkdownArticlePaintContext &context) {
+				article->paint(painter, context);
+			});
 	}
 
 	style::SetDevicePixelRatio(previousDevicePixelRatio);
@@ -2363,12 +2403,16 @@ void PrintPrepareSummary(
 	image.fill(Qt::transparent);
 	{
 		auto painter = Painter(&image);
-		article->paint(
-			painter,
-			QRect(0, 0, width, height),
+		WithStandaloneArticlePaintContext(
+			width,
+			height,
 			MarkdownArticlePaintCaches{
 				.pre = &preCache,
 				.colors = highlightColors,
+			},
+			std::nullopt,
+			[&](const MarkdownArticlePaintContext &context) {
+				article->paint(painter, context);
 			});
 	}
 
@@ -2942,7 +2986,16 @@ void CheckHostedNativeIvSingleMediaCase(
 		return;
 	}
 	const auto block = blocks.front();
+	const auto expectedClip = QRect(0, 0, 420, height);
 	Check(block->stableId() != 0, label + u" stable id"_q, ok);
+	Check(
+		!block->paintClips.empty()
+			&& std::all_of(
+				begin(block->paintClips),
+				end(block->paintClips),
+				[&](const QRect &clip) { return clip == expectedClip; }),
+		label + u" hosted block saw article clip"_q,
+		ok);
 	Check(
 		!block->requestedGeometries.empty()
 			&& (block->geometry() != block->requestedGeometries.front())

@@ -40,16 +40,6 @@ struct SelectableSegment {
 	}
 };
 
-struct PaintSelectionState {
-	const std::vector<SelectableSegment> *segments = nullptr;
-	MarkdownArticleSelection selection;
-	const MarkdownArticleSelectionEndpoints *endpoints = nullptr;
-
-	[[nodiscard]] bool empty() const {
-		return !segments || selection.empty();
-	}
-};
-
 struct LogicalVisibleRange {
 	int top = 0;
 	int bottom = 0;

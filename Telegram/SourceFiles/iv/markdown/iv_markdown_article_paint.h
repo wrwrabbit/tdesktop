@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Iv::Markdown {
 
+struct MarkdownArticlePaintContext;
+
 void PaintBlocks(
 	Painter &p,
 	const std::vector<LaidOutBlock> &blocks,
@@ -20,8 +22,6 @@ void PaintBlocks(
 	int devicePixelRatio,
 	int outerWidth,
 	const style::Markdown &st,
-	const MarkdownArticlePaintCaches &caches,
-	const PaintSelectionState &selectionState,
-	QRect clip);
+	const MarkdownArticlePaintContext &context);
 
 } // namespace Iv::Markdown

@@ -24,7 +24,7 @@ struct Markdown;
 
 namespace Iv::Markdown {
 
-struct MarkdownArticlePaintCaches;
+struct MarkdownArticlePaintContext;
 class MediaRuntime;
 struct PreparedAudioBlockData;
 struct PreparedChannelBlockData;
@@ -61,8 +61,7 @@ public:
 	void setLayoutStyle(const style::Markdown &st);
 	virtual void paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const = 0;
+		const MarkdownArticlePaintContext &context) const = 0;
 	[[nodiscard]] virtual ClickHandlerPtr linkAt(QPoint point) const = 0;
 	[[nodiscard]] virtual MediaActivation activationAt(QPoint point) const = 0;
 	[[nodiscard]] virtual MediaBlockSelectionData selectionData() const = 0;

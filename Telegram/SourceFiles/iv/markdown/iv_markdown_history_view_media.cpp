@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_history_view_media.h"
 
+#include "iv/markdown/iv_markdown_article.h"
 #include "base/unixtime.h"
 #include "iv/markdown/iv_markdown_media_block.h"
 
@@ -33,8 +34,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_message.h"
 #include "history/view/media/history_view_media.h"
 #include "ui/basic_click_handlers.h"
-#include "ui/chat/chat_style.h"
-#include "ui/chat/chat_theme.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
 
@@ -166,9 +165,7 @@ struct IvHistoryViewHit {
 
 class IvHistoryViewBlock final : public MediaBlock {
 public:
-	IvHistoryViewBlock(
-		not_null<Window::SessionController*> controller,
-		IvHistoryViewMediaDescriptor descriptor);
+	explicit IvHistoryViewBlock(IvHistoryViewMediaDescriptor descriptor);
 
 	[[nodiscard]] uint64 stableId() const override;
 
@@ -183,9 +180,8 @@ public:
 	[[nodiscard]] int firstLineBaseline() const override;
 
 	void paint(
-			Painter &p,
-			QRect clip,
-			const MarkdownArticlePaintCaches &caches) const override;
+		Painter &p,
+		const MarkdownArticlePaintContext &context) const override;
 
 	[[nodiscard]] ClickHandlerPtr linkAt(QPoint point) const override;
 
@@ -223,8 +219,6 @@ private:
 	const std::shared_ptr<IvHistoryViewMediaHost> _host;
 	const std::vector<std::shared_ptr<void>> _keepAlive;
 	const not_null<::Data::Session*> _session;
-	const not_null<Ui::ChatTheme*> _theme;
-	const not_null<const Ui::ChatStyle*> _style;
 	std::unique_ptr<HistoryView::Media> _media;
 	rpl::lifetime _lifetime;
 	QRect _geometry;
@@ -233,7 +227,6 @@ private:
 };
 
 IvHistoryViewBlock::IvHistoryViewBlock(
-	not_null<Window::SessionController*> controller,
 	IvHistoryViewMediaDescriptor descriptor)
 : _stableId(descriptor.stableId)
 , _kind(descriptor.kind)
@@ -243,9 +236,7 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 , _documentRuntime(std::move(descriptor.document))
 , _host(std::move(descriptor.host))
 , _keepAlive(std::move(descriptor.keepAlive))
-, _session(_host->session())
-, _theme(controller->currentChatTheme())
-, _style(controller->chatStyle()) {
+, _session(_host->session()) {
 	if (descriptor.mediaFactory) {
 		_media = descriptor.mediaFactory(_host->view());
 	}
@@ -318,28 +309,20 @@ int IvHistoryViewBlock::firstLineBaseline() const {
 
 void IvHistoryViewBlock::paint(
 		Painter &p,
-		QRect clip,
-		const MarkdownArticlePaintCaches &caches) const {
-	Q_UNUSED(caches);
+		const MarkdownArticlePaintContext &context) const {
 	if (!_media || _geometry.isEmpty()) {
 		return;
 	}
-	const auto visible = clip.intersected(_geometry);
+	const auto visible = context.clip.intersected(_geometry);
 	if (visible.isEmpty()) {
 		return;
 	}
 	p.save();
 	p.translate(_geometry.topLeft());
-	const auto localClip = visible.translated(-_geometry.topLeft());
-	const auto rect = QRect(QPoint(), _media->currentSize());
-	auto context = _theme->preparePaintContext(
-		_style,
-		rect,
-		rect,
-		localClip,
-		!QApplication::activeWindow());
-	context.outbg = _host->view()->hasOutLayout();
-	_media->draw(p, context);
+	auto local = context.translated(-_geometry.topLeft());
+	local.clip = visible.translated(-_geometry.topLeft());
+	local.outbg = _host->view()->hasOutLayout();
+	_media->draw(p, local);
 	p.restore();
 }
 
@@ -613,16 +596,14 @@ std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::createMap(
 }
 
 std::shared_ptr<MediaBlock> CreateIvHistoryViewMediaBlock(
-		Window::SessionController *controller,
 		IvHistoryViewMediaDescriptor descriptor) {
-	if (!controller || !descriptor.host) {
+	if (!descriptor.host) {
 		return nullptr;
 	}
 	if (!descriptor.mediaFactory) {
 		return nullptr;
 	}
 	const auto block = std::make_shared<IvHistoryViewBlock>(
-		controller,
 		std::move(descriptor));
 	return block->supported() ? block : nullptr;
 }
