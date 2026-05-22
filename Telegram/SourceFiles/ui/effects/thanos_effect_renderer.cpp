@@ -285,6 +285,7 @@ void ThanosEffectRenderer::render(
 		return;
 	}
 	if (!_initialized || !rhi->isFeatureSupported(QRhi::Compute)) {
+		_pendingItems.clear();
 		return;
 	}
 	_rhi = rhi;
