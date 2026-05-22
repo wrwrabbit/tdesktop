@@ -103,7 +103,6 @@ ThanosEffectRenderer::ThanosEffectRenderer(
 	) | rpl::on_next([=, this](float64 value) {
 		_factor = value;
 	}, _lifetime);
-	_elapsed.start();
 }
 
 ThanosEffectRenderer::~ThanosEffectRenderer() {
@@ -189,7 +188,7 @@ void ThanosEffectRenderer::initialize(
 	cb->resourceUpdate(rub);
 
 	_initialized = true;
-	_lastFrameTime = double(_elapsed.elapsed()) / 1000.0;
+	_lastFrameTime = crl::now();
 
 	LOG(("ThanosEffect: initialized, backend=%1 device=%2")
 		.arg(rhi->backendName())
@@ -311,9 +310,12 @@ void ThanosEffectRenderer::render(
 	}
 	_rhi = rhi;
 
-	const auto now = float64(_elapsed.elapsed()) / 1000.;
+	const auto now = crl::now();
 	// Cap to ~15 FPS so a single slow frame cannot teleport particles.
-	const auto dt = std::clamp(now - _lastFrameTime, 0.001, 0.066);
+	const auto dt = std::clamp(
+		now - _lastFrameTime,
+		crl::time(1),
+		crl::time(66)) / 1000.;
 	_lastFrameTime = now;
 
 	addPendingItems(cb);
