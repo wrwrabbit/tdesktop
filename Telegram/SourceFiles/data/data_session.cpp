@@ -2882,8 +2882,18 @@ void Session::unregisterMessageTTL(
 void Session::checkTTLs() {
 	_ttlCheckTimer.cancel();
 	const auto now = base::unixtime::now();
-	while (!_ttlMessages.empty() && _ttlMessages.begin()->first <= now) {
-		_ttlMessages.begin()->second.front()->destroy();
+	auto expired = std::vector<not_null<HistoryItem*>>();
+	for (const auto &[when, items] : _ttlMessages) {
+		if (when > now) {
+			break;
+		}
+		expired.insert(expired.end(), items.begin(), items.end());
+	}
+	if (!expired.empty()) {
+		notifyItemsAboutToBeDestroyed(expired);
+		for (const auto &item : expired) {
+			item->destroy();
+		}
 	}
 	scheduleNextTTLs();
 }
@@ -2940,17 +2950,24 @@ void Session::processMessagesDeleted(
 		return;
 	}
 
+	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	auto historiesToCheck = base::flat_set<not_null<History*>>();
 	for (const auto &messageId : data) {
 		const auto i = list ? list->find(messageId.v) : Messages::iterator();
 		if (list && i != list->end()) {
 			const auto history = i->second->history();
-			i->second->destroy();
+			toDestroy.push_back(i->second);
 			if (!history->chatListMessageKnown()) {
 				historiesToCheck.emplace(history);
 			}
 		} else if (affected) {
 			affected->unknownMessageDeleted(messageId.v);
+		}
+	}
+	if (!toDestroy.empty()) {
+		notifyItemsAboutToBeDestroyed(toDestroy);
+		for (const auto &item : toDestroy) {
+			item->destroy();
 		}
 	}
 	for (const auto &history : historiesToCheck) {
@@ -2959,14 +2976,21 @@ void Session::processMessagesDeleted(
 }
 
 void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
+	auto toDestroy = std::vector<not_null<HistoryItem*>>();
 	auto historiesToCheck = base::flat_set<not_null<History*>>();
 	for (const auto &messageId : data) {
 		if (const auto item = nonChannelMessage(messageId.v)) {
 			const auto history = item->history();
-			item->destroy();
+			toDestroy.push_back(item);
 			if (!history->chatListMessageKnown()) {
 				historiesToCheck.emplace(history);
 			}
+		}
+	}
+	if (!toDestroy.empty()) {
+		notifyItemsAboutToBeDestroyed(toDestroy);
+		for (const auto &item : toDestroy) {
+			item->destroy();
 		}
 	}
 	for (const auto &history : historiesToCheck) {
