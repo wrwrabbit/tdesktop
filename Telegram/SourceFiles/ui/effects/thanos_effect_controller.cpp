@@ -206,9 +206,8 @@ void ThanosEffectController::startCollapseAnimation(
 	const auto scroll = _delegate.scrollArea();
 	const auto scrollTop = scroll->scrollTop();
 	const auto scrollBottom = scrollTop + scroll->height();
-	const auto itemBottom = itemTop + height;
 
-	if (itemBottom >= scrollBottom) {
+	if (itemTop >= scrollBottom) {
 		return;
 	}
 
