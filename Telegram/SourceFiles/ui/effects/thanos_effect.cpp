@@ -64,6 +64,9 @@ namespace {
 	// driver bug), treat compute as unsupported and refuse the effect
 	// rather than show an uninitialized swap-chain.
 	auto format = QSurfaceFormat::defaultFormat();
+	// Compute shaders require OpenGL 4.3 core.
+	format.setVersion(4, 3);
+	format.setProfile(QSurfaceFormat::CoreProfile);
 	auto offscreen = std::unique_ptr<QOffscreenSurface>(
 		QRhiGles2InitParams::newFallbackSurface(format));
 	if (!offscreen) {
