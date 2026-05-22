@@ -727,6 +727,7 @@ void ThanosEffectRenderer::releaseResources() {
 	_quadVertexBuffer = nullptr;
 
 	_initialized = false;
+	_seedCounter = 0;
 	_rhi = nullptr;
 }
 
