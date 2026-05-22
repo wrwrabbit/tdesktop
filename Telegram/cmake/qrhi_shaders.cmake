@@ -17,6 +17,7 @@ find_program(QSB_EXECUTABLE qsb
         "${QT_DIR}/../../../bin"
         "${QT_DIR}/../../qt6/libexec"
         "${QT_DIR}/../../qt6/bin"
+        "${QT_DIR}/../../../opt/qtshadertools/bin"
     PATHS ENV PATH)
 
 if (NOT QSB_EXECUTABLE)
