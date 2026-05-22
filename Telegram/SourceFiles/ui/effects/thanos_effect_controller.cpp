@@ -75,11 +75,12 @@ void ThanosEffectController::captureItemsBatch(
 		if (const auto view = _delegate.viewForItem(item)) {
 			const auto top = _delegate.itemTop(view);
 			const auto height = view->height();
-			captureView(view, height, top);
-			_preCaptured.emplace(view, PreCapturedView{
-				.height = height,
-				.top = top,
-			});
+			if (captureView(view, height, top)) {
+				_preCaptured.emplace(view, PreCapturedView{
+					.height = height,
+					.top = top,
+				});
+			}
 		}
 	}
 }
@@ -108,7 +109,9 @@ void ThanosEffectController::captureOnRemoval(
 	}
 	const auto top = _delegate.itemTop(view);
 	const auto height = view->height();
-	captureView(view, height, top);
+	if (!captureView(view, height, top)) {
+		return;
+	}
 
 	// Translate post-relayout itemTop to pre-batch coords so the merge
 	// predicates compare against _collapseGaps[].absY in one system.
@@ -123,27 +126,27 @@ void ThanosEffectController::captureOnRemoval(
 	startCollapseAnimation(height, preBatchTop);
 }
 
-void ThanosEffectController::captureView(
+bool ThanosEffectController::captureView(
 		not_null<const HistoryView::Element*> view,
 		int viewHeight,
 		int viewTop) {
 	const auto item = view->data();
 	if (!item->isRegular() || item->isService()) {
-		return;
+		return false;
 	}
 	if (viewTop < 0) {
-		return;
+		return false;
 	}
 	const auto viewWidth = _delegate.contentWidth();
 	if (viewWidth <= 0 || viewHeight <= 0) {
-		return;
+		return false;
 	}
 	const auto visibleTop = _delegate.visibleAreaTop();
 	const auto visibleBottom = _delegate.visibleAreaBottom();
 	const auto visibleHeight = visibleBottom - visibleTop;
 	const auto screenTop = viewTop - visibleTop;
 	if (screenTop + viewHeight <= 0 || screenTop >= visibleHeight) {
-		return;
+		return false;
 	}
 	auto gapOffset = 0;
 	for (const auto &gap : _renderGaps) {
@@ -158,7 +161,7 @@ void ThanosEffectController::captureView(
 		0,
 		viewHeight);
 	if (captureTop >= captureBottom) {
-		return;
+		return false;
 	}
 	const auto captureHeight = captureBottom - captureTop;
 
@@ -183,7 +186,7 @@ void ThanosEffectController::captureView(
 
 	const auto topLevel = _delegate.window();
 	if (!topLevel) {
-		return;
+		return false;
 	}
 
 	if (!_thanosEffect) {
@@ -199,6 +202,7 @@ void ThanosEffectController::captureView(
 	_thanosEffect->addItem(
 		std::move(image),
 		QRect(globalPos, QSize(viewWidth, captureHeight)));
+	return true;
 }
 
 void ThanosEffectController::startCollapseAnimation(

@@ -79,7 +79,7 @@ private:
 
 	void captureItemsBatch(
 		const std::vector<not_null<HistoryItem*>> &items);
-	void captureView(
+	[[nodiscard]] bool captureView(
 		not_null<const HistoryView::Element*> view,
 		int viewHeight,
 		int viewTop);
