@@ -1709,6 +1709,9 @@ void Viewport::RendererRhi::validateDatas() {
 			delete it->yTexture;
 			delete it->uTexture;
 			delete it->vTexture;
+			delete it->convertedTexture;
+			delete it->convertedRpDesc;
+			delete it->convertedRt;
 			delete it->downscaleTexture;
 			delete it->downscaleRpDesc;
 			delete it->downscaleRt;
