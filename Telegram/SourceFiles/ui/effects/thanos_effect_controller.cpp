@@ -78,6 +78,7 @@ void ThanosEffectController::captureItemsBatch(
 
 void ThanosEffectController::clearPreCaptured() {
 	_preCaptured.clear();
+	_restoreScrollPending = false;
 }
 
 void ThanosEffectController::captureOnRemoval(
