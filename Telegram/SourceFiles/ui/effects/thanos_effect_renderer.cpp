@@ -692,6 +692,7 @@ void ThanosEffectRenderer::releaseResources() {
 		destroyAnimatingItem(item);
 	}
 	_items.clear();
+	_pendingItems.clear();
 
 	delete _renderPipeline;
 	_renderPipeline = nullptr;
