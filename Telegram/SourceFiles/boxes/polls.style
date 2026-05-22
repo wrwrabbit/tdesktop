@@ -10,6 +10,7 @@ using "ui/basic.style";
 using "ui/widgets/widgets.style";
 using "boxes/boxes.style";
 using "chat_helpers/chat_helpers.style";
+using "ui/chat/chat.style";
 
 historyPollQuestionFont: semiboldFont;
 historyPollQuestionStyle: TextStyle(defaultTextStyle) {
@@ -78,6 +79,11 @@ historyPollExplanationCloseSize: 20px;
 historyPollExplanationCloseIconSize: 8px;
 historyPollExplanationCloseStroke: 2px;
 historyPollExplanationMediaSkip: 6px;
+historyPollLinkPlaceholderIcon: icon {{ "info/edit/links_link", windowSubTextFg }};
+historyPollLinkInIcon: icon {{ "info/edit/links_link", historyFileInIconFg }};
+historyPollLinkInIconSelected: icon {{ "info/edit/links_link", historyFileInIconFgSelected }};
+historyPollLinkOutIcon: icon {{ "info/edit/links_link", historyFileOutIconFg }};
+historyPollLinkOutIconSelected: icon {{ "info/edit/links_link", historyFileOutIconFgSelected }};
 historyPollChoiceRight: icon {{ "poll_choice_right", activeButtonFg }};
 historyPollChoiceWrong: icon {{ "poll_choice_wrong", activeButtonFg }};
 historyPollOutChoiceRight: icon {{ "poll_choice_right", historyFileOutIconFg }};
@@ -140,6 +146,8 @@ pollBoxFilledPollSubscribersIcon: icon{{ "poll/filled/filled_poll_subscribers-20
 pollBoxFilledPollCountryIcon: icon{{ "poll/filled/filled_poll_country-20x20", activeButtonFg }};
 
 pollAttachTextSkip: 28px;
+pollAttachRadius: 7px;
+historyPollAnswerThumbRadius: 9px;
 pollAttachProgressMargin: 4px;
 pollAttachCancel: icon {{ "history_audio_cancel", historyFileThumbIconFg }};
 pollAttachView: icon {{ "mediaview/views", historyFileThumbIconFg }};

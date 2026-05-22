@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/dynamic_image.h"
 #include "ui/dynamic_thumbnails.h"
+#include "poll/poll_link_thumbnail.h"
+#include "poll/poll_media_upload.h"
 #include "history/view/media/history_view_location.h"
 #include "history/view/media/history_view_media_common.h"
 #include "history/view/history_view_group_call_bar.h"
@@ -52,6 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
+#include "data/data_web_page.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "base/crc32hash.h"
 #include "base/unixtime.h"
@@ -62,6 +65,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_polls.h"
 #include "window/window_session_controller.h"
+#include "ui/layers/generic_box.h"
+#include "ui/wrap/padding_wrap.h"
+#include "ui/wrap/vertical_layout.h"
+#include "ui/widgets/labels.h"
+#include "history/view/controls/history_view_webpage_processor.h"
+#include "history/view/media/history_view_web_page.h"
+#include "history/admin_log/history_admin_log_item.h"
+#include "history/history.h"
+#include "ui/chat/chat_style.h"
+#include "ui/chat/chat_theme.h"
+#include "ui/effects/path_shift_gradient.h"
+#include "window/themes/window_theme.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_dialogs.h"
@@ -104,6 +119,7 @@ enum class PollThumbnailKind {
 	Audio,
 	Emoji,
 	Geo,
+	Webpage,
 };
 
 struct PercentCounterItem {
@@ -193,6 +209,7 @@ void CountNicePercent(
 	return uint32(base::crc32(hash.constData(), hash.size()));
 }
 
+
 struct PollThumbnailData {
 	std::shared_ptr<Ui::DynamicImage> thumbnail;
 	ClickHandlerPtr handler;
@@ -257,6 +274,20 @@ struct PollThumbnailData {
 			Data::FileOrigin());
 		result.rounded = true;
 		result.kind = PollThumbnailKind::Geo;
+	} else if (media.webpage || !media.url.isEmpty()) {
+		const auto webpage = media.webpage;
+		const auto photo = webpage ? webpage->photo : nullptr;
+		if (photo) {
+			result.id = uint64(photo->id);
+			result.thumbnail = Ui::MakePhotoThumbnailCenterCrop(
+				photo,
+				messageContext.id);
+			result.rounded = true;
+		} else {
+			result.thumbnail = ::Poll::MakeLinkThumbnail();
+			result.rounded = true;
+		}
+		result.kind = PollThumbnailKind::Webpage;
 	}
 	if (result.kind == PollThumbnailKind::Photo && result.id) {
 		const auto photo = media.photo;
@@ -295,6 +326,14 @@ struct PollThumbnailData {
 				}
 				HistoryView::ShowPollGeoPreview(controller, point);
 			});
+	} else if (result.kind == PollThumbnailKind::Webpage) {
+		const auto url = !media.url.isEmpty()
+			? media.url
+			: (media.webpage ? media.webpage->url : QString());
+		if (!url.isEmpty()) {
+			result.handler = std::make_shared<LambdaClickHandler>(
+				[=] { UrlClickHandler::Open(url); });
+		}
 	}
 	return result;
 }
@@ -2196,6 +2235,7 @@ void Poll::updateTexts() {
 	_headerPart->updateAttachedMedia();
 	_headerPart->updateSolutionText();
 	_headerPart->updateSolutionMedia();
+	refreshWebpageSubscriptions();
 	updateVotes();
 
 	if (willStartAnimation) {
@@ -3524,18 +3564,46 @@ int Poll::Options::paintAnswer(
 					size.width(),
 					size.height());
 				p.save();
+				auto hq = PainterHighQualityEnabler(p);
 				if (answer.thumbnailRounded) {
 					auto path = QPainterPath();
 					path.addRoundedRect(
 						target,
-						st::roundRadiusSmall,
-						st::roundRadiusSmall);
+						st::historyPollAnswerThumbRadius,
+						st::historyPollAnswerThumbRadius);
 					p.setClipPath(path);
 				}
 				p.drawImage(geometry, image, source);
+				if (answer.thumbnailKind == PollThumbnailKind::Webpage
+					&& !answer.thumbnailId
+					&& context.selected()) {
+					p.fillRect(target, context.st->msgSelectOverlay());
+				}
 				p.restore();
 				if (answer.thumbnailIsVideo) {
 					st::dialogsMiniPlay.paintInCenter(p, target);
+				}
+				if (answer.thumbnailKind == PollThumbnailKind::Webpage
+					&& answer.thumbnailId) {
+					p.save();
+					auto hq = PainterHighQualityEnabler(p);
+					auto path = QPainterPath();
+					path.addRoundedRect(
+						target,
+						st::historyPollAnswerThumbRadius,
+						st::historyPollAnswerThumbRadius);
+					p.setClipPath(path);
+					p.fillRect(target, st::songCoverOverlayFg);
+					const auto selected = context.selected();
+					const auto &linkIcon = context.outbg
+						? (selected
+							? st::historyPollLinkOutIconSelected
+							: st::historyPollLinkOutIcon)
+						: (selected
+							? st::historyPollLinkInIconSelected
+							: st::historyPollLinkInIcon);
+					linkIcon.paintInCenter(p, target);
+					p.restore();
 				}
 			}
 		}
@@ -4184,11 +4252,36 @@ bool Poll::Footer::centeredOverlapsInfo(
 }
 
 Poll::~Poll() {
+	for (const auto webpage : _registeredWebpages) {
+		history()->owner().unregisterWebPageView(webpage, _parent);
+	}
 	history()->owner().unregisterPollView(_poll, _parent);
 	if (hasHeavyPart()) {
 		unloadHeavyPart();
 		_parent->checkHeavyPart();
 	}
+}
+
+void Poll::refreshWebpageSubscriptions() {
+	auto wanted = std::vector<WebPageData*>();
+	for (const auto &answer : _poll->answers) {
+		if (const auto webpage = answer.media.webpage) {
+			if (!ranges::contains(wanted, webpage)) {
+				wanted.push_back(webpage);
+			}
+		}
+	}
+	for (const auto webpage : _registeredWebpages) {
+		if (!ranges::contains(wanted, webpage)) {
+			history()->owner().unregisterWebPageView(webpage, _parent);
+		}
+	}
+	for (const auto webpage : wanted) {
+		if (!ranges::contains(_registeredWebpages, webpage)) {
+			history()->owner().registerWebPageView(webpage, _parent);
+		}
+	}
+	_registeredWebpages = std::move(wanted);
 }
 
 } // namespace HistoryView
