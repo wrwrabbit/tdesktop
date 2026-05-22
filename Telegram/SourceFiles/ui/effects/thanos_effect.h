@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/unique_qptr.h"
+#include "base/weak_ptr.h"
 
 #include <QImage>
 
@@ -20,7 +21,7 @@ namespace Ui {
 
 class ThanosEffectRenderer;
 
-class ThanosEffect final {
+class ThanosEffect final : public base::has_weak_ptr {
 public:
 	explicit ThanosEffect(not_null<QWidget*> parent);
 	~ThanosEffect();

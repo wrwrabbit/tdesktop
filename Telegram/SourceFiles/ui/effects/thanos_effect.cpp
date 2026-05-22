@@ -151,10 +151,12 @@ void ThanosEffect::ensureSurface() {
 		std::move(devicePixelRatio));
 	_renderer = renderer.get();
 
-	_renderer->allDone() | rpl::on_next([=] {
-		crl::on_main(_parent, [=] {
-			hideSurface();
-			_allDone.fire({});
+	_renderer->allDone() | rpl::on_next([weak = base::make_weak(this)] {
+		crl::on_main(weak, [weak] {
+			if (const auto strong = weak.get()) {
+				strong->hideSurface();
+				strong->_allDone.fire({});
+			}
 		});
 	}, _lifetime);
 
