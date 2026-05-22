@@ -639,6 +639,8 @@ void OverlayWidget::RendererRhi::releaseResources() {
 	_uvTexture = nullptr;
 	_lumaSize = QSize();
 	_chromaSize = QSize();
+	_chromaNV12 = false;
+	_usingExternalVideoTextures = false;
 	_trackFrameIndex = 0;
 	_streamedIndex = 0;
 #ifdef Q_OS_MAC
