@@ -78,7 +78,7 @@ private:
 		QRectF rect;
 		uint32_t particleCountX = 0;
 		uint32_t particleCountY = 0;
-		float phase = 0.f;
+		float64 phase = 0.;
 		bool particlesInitialized = false;
 		bool needsInitDispatch = false;
 	};

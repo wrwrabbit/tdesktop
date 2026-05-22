@@ -24,13 +24,13 @@ constexpr auto kParticleStride = int(24);
 constexpr auto kQuadVertexCount = int(6);
 constexpr auto kQuadVertexStride = int(2 * sizeof(float));
 constexpr auto kComputeWorkgroupSize = int(64);
-constexpr auto kMaxPhaseDuration = 6.0f;
-constexpr auto kPhaseSpeed = 1.65f;
-constexpr auto kTimeStepMultiplier = 1.65f;
-constexpr auto kAccelerationStartPhase = 1.0f;
-constexpr auto kAccelerationRampPhase = 2.5f;
-constexpr auto kAccelerationMaxMultiplier = 2.2f;
-constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15f;
+constexpr auto kMaxPhaseDuration = float64(6.);
+constexpr auto kPhaseSpeed = float64(1.65);
+constexpr auto kTimeStepMultiplier = float64(1.65);
+constexpr auto kAccelerationStartPhase = float64(1.);
+constexpr auto kAccelerationRampPhase = float64(2.5);
+constexpr auto kAccelerationMaxMultiplier = float64(2.2);
+constexpr auto kDisappearStartPhase = kMaxPhaseDuration * 0.15;
 constexpr auto kDisappearDuration
 	= kMaxPhaseDuration - kDisappearStartPhase;
 constexpr auto kMaxParticleCount = uint32_t(120000);
@@ -69,26 +69,25 @@ struct alignas(16) RenderUniforms {
 };
 static_assert(sizeof(RenderUniforms) % 16 == 0);
 
-[[nodiscard]] float AnimationSpeedMultiplier(float phase) {
+[[nodiscard]] float64 AnimationSpeedMultiplier(float64 phase) {
 	if (phase <= kAccelerationStartPhase) {
-		return 1.0f;
+		return 1.;
 	}
 	const auto t = std::clamp(
 		(phase - kAccelerationStartPhase) / kAccelerationRampPhase,
-		0.0f,
-		1.0f);
-	const auto smooth = t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f);
-	return 1.0f
-		+ ((kAccelerationMaxMultiplier - 1.0f) * smooth);
+		0.,
+		1.);
+	const auto smooth = t * t * t * (t * (t * 6. - 15.) + 10.);
+	return 1. + ((kAccelerationMaxMultiplier - 1.) * smooth);
 }
 
-[[nodiscard]] float DisappearProgress(float phase) {
+[[nodiscard]] float64 DisappearProgress(float64 phase) {
 	const auto t = std::clamp(
 		(phase - kDisappearStartPhase) / kDisappearDuration,
-		0.0f,
-		1.0f);
-	const auto oneMinus = 1.0f - t;
-	return 1.0f - (oneMinus * oneMinus * oneMinus);
+		0.,
+		1.);
+	const auto oneMinus = 1. - t;
+	return 1. - (oneMinus * oneMinus * oneMinus);
 }
 
 [[nodiscard]] QShader LoadShader(const QString &name) {
@@ -312,9 +311,9 @@ void ThanosEffectRenderer::render(
 	}
 	_rhi = rhi;
 
-	const auto now = double(_elapsed.elapsed()) / 1000.0;
+	const auto now = float64(_elapsed.elapsed()) / 1000.;
 	// Cap to ~15 FPS so a single slow frame cannot teleport particles.
-	const auto dt = float(std::clamp(now - _lastFrameTime, 0.001, 0.066));
+	const auto dt = std::clamp(now - _lastFrameTime, 0.001, 0.066);
 	_lastFrameTime = now;
 
 	addPendingItems(cb);
@@ -324,8 +323,8 @@ void ThanosEffectRenderer::render(
 	}
 
 	const auto pixelSize = rt->pixelSize();
-	const auto viewW = float(pixelSize.width()) / _factor;
-	const auto viewH = float(pixelSize.height()) / _factor;
+	const auto viewW = float64(pixelSize.width()) / _factor;
+	const auto viewH = float64(pixelSize.height()) / _factor;
 
 	{
 		auto *rub = rhi->nextResourceUpdateBatch();
@@ -358,8 +357,9 @@ void ThanosEffectRenderer::render(
 			ComputeUpdateUniforms updateUni;
 			updateUni.particleCountX = item.particleCountX;
 			updateUni.particleCountY = item.particleCountY;
-			updateUni.phase = item.phase;
-			updateUni.timeStep = animationTimeStep * kTimeStepMultiplier;
+			updateUni.phase = float(item.phase);
+			updateUni.timeStep = float(
+				animationTimeStep * kTimeStepMultiplier);
 			rub->updateDynamicBuffer(
 				item.computeUpdateUniformBuffer,
 				0,
@@ -409,21 +409,21 @@ void ThanosEffectRenderer::render(
 				continue;
 			}
 			RenderUniforms uni;
-			uni.rect[0] = float(item.rect.x()) / viewW;
-			uni.rect[1] = (viewH - float(item.rect.y())
-				- float(item.rect.height())) / viewH;
-			uni.rect[2] = float(item.rect.width()) / viewW;
-			uni.rect[3] = float(item.rect.height()) / viewH;
+			uni.rect[0] = float(item.rect.x() / viewW);
+			uni.rect[1] = float(
+				(viewH - item.rect.y() - item.rect.height()) / viewH);
+			uni.rect[2] = float(item.rect.width() / viewW);
+			uni.rect[3] = float(item.rect.height() / viewH);
 			uni.size[0] = float(item.rect.width());
 			uni.size[1] = float(item.rect.height());
 			uni.particleResolution[0] = item.particleCountX;
 			uni.particleResolution[1] = item.particleCountY;
-			const auto disappearProgress = DisappearProgress(item.phase);
-			const auto inverseDisappear = 1.0f - disappearProgress;
+			const auto inverseDisappear = float(
+				1. - DisappearProgress(item.phase));
 			uni.scale[0] = inverseDisappear;
-			uni.scale[1] = 0.0f;
+			uni.scale[1] = 0.;
 			uni.scale[2] = inverseDisappear;
-			uni.scale[3] = 0.0f;
+			uni.scale[3] = 0.;
 
 			renderRub->updateDynamicBuffer(
 				item.renderUniformBuffer,

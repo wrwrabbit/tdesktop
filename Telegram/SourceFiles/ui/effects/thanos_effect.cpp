@@ -38,7 +38,7 @@ namespace {
 	// guards. On older Metal-capable Macs the answer is "no", which
 	// is exactly what makes the surface render uninitialized (Y-flipped)
 	// garbage and triggers the mirror bug elsewhere.
-	auto rhi = std::unique_ptr<QRhi>(nullptr);
+	auto rhi = std::unique_ptr<QRhi>();
 #ifdef Q_OS_MAC
 	if (::Platform::MetalSupported()) {
 		auto params = QRhiMetalInitParams();
@@ -129,13 +129,17 @@ void ThanosEffect::WarmUp() {
 ThanosEffect::ThanosEffect(not_null<QWidget*> parent)
 : _parent(parent)
 , _animation([=] {
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		w->update();
 	}
 }) {
 }
 
 ThanosEffect::~ThanosEffect() = default;
+
+QWidget *ThanosEffect::surfaceWidget() const {
+	return _surface ? _surface->rpWidget() : nullptr;
+}
 
 void ThanosEffect::ensureSurface() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -182,7 +186,7 @@ void ThanosEffect::ensureSurface() {
 			.backend = GL::Backend::QRhi,
 		});
 
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		w->setAttribute(Qt::WA_TransparentForMouseEvents);
 		w->setAttribute(Qt::WA_AlwaysStackOnTop);
 		w->setGeometry(_parent->rect());
@@ -192,7 +196,7 @@ void ThanosEffect::ensureSurface() {
 }
 
 void ThanosEffect::showSurface() {
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		w->setGeometry(_parent->rect());
 		// Defer show until the current call stack returns to the event
 		// loop, so that all items from a batch deletion are added
@@ -209,7 +213,7 @@ void ThanosEffect::showSurface() {
 
 void ThanosEffect::hideSurface() {
 	_animation.stop();
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		w->hide();
 	}
 }
@@ -247,7 +251,7 @@ rpl::producer<> ThanosEffect::allDone() const {
 }
 
 void ThanosEffect::setGeometry(QRect rect) {
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		if (w->isVisible()) {
 			w->setGeometry(rect);
 		}
@@ -255,7 +259,7 @@ void ThanosEffect::setGeometry(QRect rect) {
 }
 
 void ThanosEffect::raise() {
-	if (const auto w = _surface ? _surface->rpWidget() : nullptr) {
+	if (const auto w = surfaceWidget()) {
 		w->raise();
 	}
 }

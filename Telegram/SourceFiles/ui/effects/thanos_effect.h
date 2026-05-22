@@ -48,6 +48,7 @@ private:
 	void ensureSurface();
 	void showSurface();
 	void hideSurface();
+	[[nodiscard]] QWidget *surfaceWidget() const;
 
 	const not_null<QWidget*> _parent;
 

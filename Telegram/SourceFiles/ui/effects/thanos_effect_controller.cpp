@@ -20,9 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 namespace {
 
-constexpr auto kBaseMs = 400;
-constexpr auto kPerPixelMs = 0.15;
-constexpr auto kMaxMs = 600;
+constexpr auto kBaseDuration = crl::time(400);
+constexpr auto kPerPixelDuration = float64(0.15);
+constexpr auto kMaxDuration = crl::time(600);
 
 } // namespace
 
@@ -258,10 +258,10 @@ void ThanosEffectController::startCollapseAnimation(
 	for (const auto &gap : _collapseGaps) {
 		totalHeight += gap.currentHeight;
 	}
-	const auto duration = int(std::clamp(
-		kBaseMs + totalHeight * kPerPixelMs,
-		double(kBaseMs),
-		double(kMaxMs)));
+	const auto duration = crl::time(std::clamp(
+		kBaseDuration + totalHeight * kPerPixelDuration,
+		float64(kBaseDuration),
+		float64(kMaxDuration)));
 
 	_collapseAnimation.start(
 		[=] { collapseAnimationCallback(); },
