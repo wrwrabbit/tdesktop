@@ -750,8 +750,12 @@ void Viewport::RendererRhi::paintTileOffscreen(
 	validateUserpicFrame(tile, tileData);
 	const auto frameSize = _userpicFrame
 		? tileData.userpicFrame.size()
-		: data.yuv420->size;
-	Assert(!frameSize.isEmpty());
+		: data.yuv420
+		? data.yuv420->size
+		: data.original.size();
+	if (frameSize.isEmpty()) {
+		return;
+	}
 
 	_rgbaFrame = (data.format == Webrtc::FrameFormat::ARGB32)
 		|| _userpicFrame;
@@ -788,7 +792,12 @@ void Viewport::RendererRhi::paintTileOnscreen(
 	_userpicFrame = (data.format == Webrtc::FrameFormat::None);
 	const auto frameSize = _userpicFrame
 		? tileData.userpicFrame.size()
-		: data.yuv420->size;
+		: data.yuv420
+		? data.yuv420->size
+		: data.original.size();
+	if (frameSize.isEmpty()) {
+		return;
+	}
 	const auto frameRotation = _userpicFrame ? 0 : data.rotation;
 	_rgbaFrame = (data.format == Webrtc::FrameFormat::ARGB32)
 		|| _userpicFrame;
@@ -1154,7 +1163,12 @@ void Viewport::RendererRhi::drawFramePass(
 	const auto data = tile->track()->frameWithInfo(false);
 	const auto frameSize = _userpicFrame
 		? tileData.userpicFrame.size()
-		: data.yuv420->size;
+		: data.yuv420
+		? data.yuv420->size
+		: data.original.size();
+	if (frameSize.isEmpty()) {
+		return;
+	}
 	const auto frameRotation = _userpicFrame ? 0 : data.rotation;
 	const auto unscaled = Media::View::FlipSizeByRotation(
 		frameSize,

@@ -1071,7 +1071,9 @@ void OverlayWidget::RendererRhi::paintTransformedVideoFrame(
 			_metalTextureCache.flush();
 #endif // Q_OS_MAC
 		}
-		Assert(!yuv->size.isEmpty());
+		if (!yuv || yuv->size.isEmpty()) {
+			return;
+		}
 		if (!_yTexture || _lumaSize != yuv->size) {
 			delete _yTexture;
 			_yTexture = _rhi->newTexture(QRhiTexture::R8, yuv->size);
