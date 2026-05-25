@@ -307,7 +307,7 @@ base::options::toggle OptionFractionalScalingEnabled({
 base::options::toggle OptionUseQtRhi({
 	.id = kOptionUseQtRhi,
 	.name = "Use Qt RHI renderer",
-	.defaultValue = !Platform::IsMac(),
+	.defaultValue = true,
 	.scope = [] {
 		return (!Platform::IsWindows() || Platform::IsWindowsARM64())
 			&& QLibraryInfo::version() >= QVersionNumber(6, 7);
