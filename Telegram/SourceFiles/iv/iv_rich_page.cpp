@@ -572,6 +572,11 @@ void AppendBlock(
 		parsed.text = ParseRichText(data.vtext(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
+	}, [&](const MTPDpageBlockThinking &data) {
+		auto parsed = MakeBlock(BlockKind::Paragraph);
+		parsed.text = ParseRichText(data.vtext(), context);
+		AdoptAnchor(&parsed.anchorId, &parsed.text);
+		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockPreformatted &data) {
 		auto parsed = MakeBlock(BlockKind::Code);
 		parsed.language = qs(data.vlanguage()).trimmed();

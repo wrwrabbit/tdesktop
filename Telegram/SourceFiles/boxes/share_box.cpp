@@ -424,6 +424,7 @@ bool ShareBox::searchByUsername(bool searchCache) {
 			_peopleQuery = query;
 			_peopleFull = false;
 			_peopleRequest = _api.request(MTPcontacts_Search(
+				MTP_flags(0),
 				MTP_string(_peopleQuery),
 				MTP_int(SearchPeopleLimit)
 			)).done([=](const MTPcontacts_Found &result, mtpRequestId requestId) {

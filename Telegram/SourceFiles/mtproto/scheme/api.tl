@@ -967,6 +967,7 @@ pageBlockHeading4#b532772b text:RichText = PageBlock;
 pageBlockHeading5#dbbe6c6a text:RichText = PageBlock;
 pageBlockHeading6#682a41a9 text:RichText = PageBlock;
 pageBlockMath#59080c20 source:string = PageBlock;
+pageBlockThinking#3c29a3e2 text:RichText = PageBlock;
 inputPageBlockMap#574b617f geo:InputGeoPoint zoom:int w:int h:int caption:PageCaption = PageBlock;
 inputPageBlockOrderedList#b94cb32b flags:# reversed:flags.2?true items:Vector<InputPageListOrderedItem> start:flags.0?int type:flags.1?string = PageBlock;
 
@@ -2404,7 +2405,7 @@ contacts.deleteByPhones#1013fd9e phones:Vector<string> = Bool;
 contacts.block#2e2e8734 flags:# my_stories_from:flags.0?true id:InputPeer = Bool;
 contacts.unblock#b550d328 flags:# my_stories_from:flags.0?true id:InputPeer = Bool;
 contacts.getBlocked#9a868f80 flags:# my_stories_from:flags.0?true offset:int limit:int = contacts.Blocked;
-contacts.search#11f812d8 q:string limit:int = contacts.Found;
+contacts.search#5f58d0f flags:# broadcasts:flags.0?true bots:flags.1?true q:string limit:int = contacts.Found;
 contacts.resolveUsername#725afbbc flags:# username:string referer:flags.0?string = contacts.ResolvedPeer;
 contacts.getTopPeers#973478b6 flags:# correspondents:flags.0?true bots_pm:flags.1?true bots_inline:flags.2?true phone_calls:flags.3?true forward_users:flags.4?true forward_chats:flags.5?true groups:flags.10?true channels:flags.15?true bots_app:flags.16?true bots_guestchat:flags.17?true offset:int limit:int hash:long = contacts.TopPeers;
 contacts.resetTopPeerRating#1ae373ac category:TopPeerCategory peer:InputPeer = Bool;

@@ -1752,6 +1752,13 @@ void MarkNativeIvTableSlots(
 			0,
 			data.vtext(),
 			state);
+	}, [&](const MTPDpageBlockThinking &data) {
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			data.vtext(),
+			state);
 	}, [&](const MTPDpageBlockPreformatted &data) {
 		auto prepared = PreparedIvRichText();
 		auto anchorId = QString();
