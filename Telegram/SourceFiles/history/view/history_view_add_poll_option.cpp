@@ -299,10 +299,16 @@ void AddPollOptionWidget::chooseLink() {
 			false);
 		resolveLink(url);
 	});
-	_controller->show(Box(
+	const auto box = _controller->show(Box(
 		Poll::AddPollOptionLinkBox,
 		initial,
 		callback));
+	if (const auto raw = box.get()) {
+		raw->boxClosing(
+		) | rpl::on_next(crl::guard(this, [this] {
+			_field->setFocus();
+		}), raw->lifetime());
+	}
 }
 
 void AddPollOptionWidget::applyResolvedWebPage(
