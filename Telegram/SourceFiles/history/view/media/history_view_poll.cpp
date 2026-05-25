@@ -233,7 +233,7 @@ public:
 		not_null<QWidget*> parent,
 		not_null<Window::SessionController*> controller,
 		not_null<WebPageData*> webpage,
-		Fn<void()> openAndClose);
+		Fn<void()> close);
 	~OpenLinkPreviewWidget();
 
 private:
@@ -245,7 +245,8 @@ private:
 	void resizeMedia(int width);
 	void updateActiveLink(QPoint point);
 
-	const Fn<void()> _openAndClose;
+	const base::weak_ptr<Window::SessionController> _controller;
+	const Fn<void()> _close;
 	const std::unique_ptr<Ui::ChatTheme> _theme;
 	const std::unique_ptr<Ui::ChatStyle> _style;
 	const std::unique_ptr<OpenLinkPreviewDelegate> _delegate;
@@ -258,9 +259,10 @@ OpenLinkPreviewWidget::OpenLinkPreviewWidget(
 	not_null<QWidget*> parent,
 	not_null<Window::SessionController*> controller,
 	not_null<WebPageData*> webpage,
-	Fn<void()> openAndClose)
+	Fn<void()> close)
 : RpWidget(parent)
-, _openAndClose(std::move(openAndClose))
+, _controller(base::make_weak(controller))
+, _close(std::move(close))
 , _theme(Window::Theme::DefaultChatThemeOn(lifetime()))
 , _style(std::make_unique<Ui::ChatStyle>(
 	controller->session().colorIndicesValue()))
@@ -380,8 +382,24 @@ void OpenLinkPreviewWidget::mouseReleaseEvent(QMouseEvent *e) {
 	if (Element::Pressed() == _item.get()) {
 		Element::Pressed(nullptr);
 	}
-	if (activated && _openAndClose) {
-		_openAndClose();
+	if (!activated) {
+		return;
+	}
+	const auto externalUrl = activated->url();
+	if (!externalUrl.isEmpty()) {
+		UrlClickHandler::Open(externalUrl);
+	} else if (const auto controller = _controller.get()) {
+		activated->onClick({
+			e->button(),
+			QVariant::fromValue(ClickHandlerContext{
+				.itemId = _item->data()->fullId(),
+				.sessionWindow = _controller,
+				.show = controller->uiShow(),
+			})
+		});
+	}
+	if (_close) {
+		_close();
 	}
 }
 
@@ -444,7 +462,7 @@ void OpenPollOptionLinkBox(
 				content,
 				controller,
 				webpage,
-				openAndClose),
+				[=] { box->closeBox(); }),
 			st::pollOpenLinkPreviewOuterPadding);
 	}
 
