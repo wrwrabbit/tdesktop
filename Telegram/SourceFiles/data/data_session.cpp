@@ -433,6 +433,16 @@ void Session::clear() {
 	_shortcutMessages = nullptr;
 	_session->scheduledMessages().clear();
 	_session->sponsoredMessages().clear();
+
+	// Items are gone now, so HistoryMessageReply::resolvedStory raw
+	// pointers no longer linger. Tear stories down here so their
+	// shared_ptr<GroupCall> drops while Main::Session::_data still
+	// holds a live pointer to us; otherwise the GroupCall destructor
+	// would run inside ~Data::Session and find data() returning a
+	// null reference (the parent unique_ptr resets its stored pointer
+	// before invoking the deleter).
+	_stories->clear();
+
 	_dependentMessages.clear();
 	base::take(_messages);
 	base::take(_nonChannelMessages);
