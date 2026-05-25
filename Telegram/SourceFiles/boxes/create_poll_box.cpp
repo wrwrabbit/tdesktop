@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/create_poll_box.h"
 
+#include "poll/poll_link_box.h"
 #include "poll/poll_link_thumbnail.h"
 #include "poll/poll_media_upload.h"
 #include "base/call_delayed.h"
@@ -342,51 +343,6 @@ void FocusAtEnd(not_null<Ui::InputField*> field) {
 	field->setFocus();
 	field->setCursorPosition(field->getLastText().size());
 	field->ensureCursorVisible();
-}
-
-void AddPollOptionLinkBox(
-		not_null<Ui::GenericBox*> box,
-		const QString &initial,
-		Fn<void(QString)> callback) {
-	box->setTitle(tr::lng_polls_create_option_link_title());
-
-	const auto content = box->verticalLayout();
-	content->add(
-		object_ptr<Ui::FlatLabel>(
-			content,
-			tr::lng_polls_create_option_link_description(),
-			st::defaultFlatLabel),
-		st::boxRowPadding);
-	Ui::AddSkip(content);
-	Ui::AddSkip(content);
-
-	const auto field = content->add(
-		object_ptr<Ui::InputField>(
-			content,
-			st::createPollLinkUrlField,
-			Ui::InputField::Mode::SingleLine,
-			tr::lng_polls_create_option_link_placeholder(),
-			initial),
-		st::boxRowPadding);
-
-	const auto submit = [=] {
-		const auto url = field->getLastText().trimmed();
-		if (url.isEmpty()) {
-			field->showError();
-			return;
-		}
-		const auto weak = base::make_weak(box);
-		callback(url);
-		if (weak) {
-			box->closeBox();
-		}
-	};
-	field->submits(
-	) | rpl::on_next(submit, field->lifetime());
-
-	box->addButton(tr::lng_box_done(), submit);
-	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
-	box->setFocusCallback([=] { field->setFocusFast(); });
 }
 
 [[nodiscard]] QStringList ParsePastedList(const QString &text) {
@@ -2594,7 +2550,7 @@ object_ptr<Ui::RpWidget> CreatePollBox::setupContent() {
 			resolveLink(media, url);
 		});
 		_controller->show(Box(
-			AddPollOptionLinkBox,
+			Poll::AddPollOptionLinkBox,
 			initial,
 			callback));
 	};
