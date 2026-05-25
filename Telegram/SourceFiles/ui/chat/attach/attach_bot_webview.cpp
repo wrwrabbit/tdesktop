@@ -1226,7 +1226,7 @@ Panel::Panel(Args &&args)
 			return;
 		}
 	}, _widget->lifetime());
-	_externalTitleBadgeVisible = (args.titleBadge != nullptr);
+	_externalTitleBadgeVisible = (args.titleBadge.paint != nullptr);
 	_widget->setTitleBadge(std::move(args.titleBadge));
 
 	if (!showWebview(std::move(args), params)) {
