@@ -3807,61 +3807,83 @@ int Poll::Options::paintAnswer(
 			media,
 			media);
 		if (!target.isEmpty()) {
-			const auto image = answer.thumbnail->image(media);
-			if (!image.isNull()) {
-				const auto source = QRectF(QPointF(), QSizeF(image.size()));
-				const auto kx = target.width() / source.width();
-				const auto ky = target.height() / source.height();
-				const auto scale = std::max(kx, ky);
-				const auto size = QSizeF(
-					source.width() * scale,
-					source.height() * scale);
-				const auto geometry = QRectF(
-					target.x() + (target.width() - size.width()) / 2.,
-					target.y() + (target.height() - size.height()) / 2.,
-					size.width(),
-					size.height());
+			const auto webpagePlaceholder
+				= (answer.thumbnailKind == PollThumbnailKind::Webpage)
+					&& !answer.thumbnailId;
+			const auto selected = context.selected();
+			const auto &linkIcon = context.outbg
+				? (selected
+					? st::historyPollLinkOutIconSelected
+					: st::historyPollLinkOutIcon)
+				: (selected
+					? st::historyPollLinkInIconSelected
+					: st::historyPollLinkInIcon);
+			if (webpagePlaceholder) {
+				const auto cache = stm->replyCache[0].get();
 				p.save();
 				auto hq = PainterHighQualityEnabler(p);
-				if (answer.thumbnailRounded) {
-					auto path = QPainterPath();
-					path.addRoundedRect(
-						target,
-						st::historyPollAnswerThumbRadius,
-						st::historyPollAnswerThumbRadius);
+				auto path = QPainterPath();
+				path.addRoundedRect(
+					target,
+					st::historyPollAnswerThumbRadius,
+					st::historyPollAnswerThumbRadius);
+				p.fillPath(path, cache->bg);
+				if (selected) {
 					p.setClipPath(path);
-				}
-				p.drawImage(geometry, image, source);
-				if (answer.thumbnailKind == PollThumbnailKind::Webpage
-					&& !answer.thumbnailId
-					&& context.selected()) {
 					p.fillRect(target, context.st->msgSelectOverlay());
 				}
 				p.restore();
-				if (answer.thumbnailIsVideo) {
-					st::dialogsMiniPlay.paintInCenter(p, target);
-				}
-				if (answer.thumbnailKind == PollThumbnailKind::Webpage
-					&& answer.thumbnailId) {
+				const auto iconX = target.x()
+					+ (target.width() - linkIcon.width()) / 2;
+				const auto iconY = target.y()
+					+ (target.height() - linkIcon.height()) / 2;
+				linkIcon.paint(p, iconX, iconY, outerWidth, cache->icon);
+			} else {
+				const auto image = answer.thumbnail->image(media);
+				if (!image.isNull()) {
+					const auto source = QRectF(
+						QPointF(),
+						QSizeF(image.size()));
+					const auto kx = target.width() / source.width();
+					const auto ky = target.height() / source.height();
+					const auto scale = std::max(kx, ky);
+					const auto size = QSizeF(
+						source.width() * scale,
+						source.height() * scale);
+					const auto geometry = QRectF(
+						target.x() + (target.width() - size.width()) / 2.,
+						target.y() + (target.height() - size.height()) / 2.,
+						size.width(),
+						size.height());
 					p.save();
 					auto hq = PainterHighQualityEnabler(p);
-					auto path = QPainterPath();
-					path.addRoundedRect(
-						target,
-						st::historyPollAnswerThumbRadius,
-						st::historyPollAnswerThumbRadius);
-					p.setClipPath(path);
-					p.fillRect(target, st::songCoverOverlayFg);
-					const auto selected = context.selected();
-					const auto &linkIcon = context.outbg
-						? (selected
-							? st::historyPollLinkOutIconSelected
-							: st::historyPollLinkOutIcon)
-						: (selected
-							? st::historyPollLinkInIconSelected
-							: st::historyPollLinkInIcon);
-					linkIcon.paintInCenter(p, target);
+					if (answer.thumbnailRounded) {
+						auto path = QPainterPath();
+						path.addRoundedRect(
+							target,
+							st::historyPollAnswerThumbRadius,
+							st::historyPollAnswerThumbRadius);
+						p.setClipPath(path);
+					}
+					p.drawImage(geometry, image, source);
 					p.restore();
+					if (answer.thumbnailIsVideo) {
+						st::dialogsMiniPlay.paintInCenter(p, target);
+					}
+					if (answer.thumbnailKind
+						== PollThumbnailKind::Webpage) {
+						p.save();
+						auto hq = PainterHighQualityEnabler(p);
+						auto path = QPainterPath();
+						path.addRoundedRect(
+							target,
+							st::historyPollAnswerThumbRadius,
+							st::historyPollAnswerThumbRadius);
+						p.setClipPath(path);
+						p.fillRect(target, st::songCoverOverlayFg);
+						linkIcon.paintInCenter(p, target);
+						p.restore();
+					}
 				}
 			}
 		}
