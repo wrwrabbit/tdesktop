@@ -170,7 +170,8 @@ rpl::producer<bool> SectionStack::firstVisibleAttachesToCover() const {
 	}
 	return rpl::combine(
 		std::move(producers),
-		[attaches = std::move(attaches)](const std::vector<bool> &values) {
+		[attaches = std::move(attaches)](
+				const std::vector<bool> &values) -> bool {
 			for (auto k = 0; k != int(values.size()); ++k) {
 				if (values[k]) {
 					return attaches[k];
