@@ -68,6 +68,25 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace HistoryView {
 namespace {
 
+[[nodiscard]] auto FlatSelectionEndpointFromState(const TextState &state)
+-> MessageSelectionFlatEndpoint {
+	if (state.selectionCursor.isFlat()) {
+		return state.selectionCursor.flat;
+	}
+	return {
+		.symbol = state.symbol,
+		.afterSymbol = state.afterSymbol,
+	};
+}
+
+[[nodiscard]] auto FlatSelectionEndpointFromOffset(uint16 offset)
+-> MessageSelectionFlatEndpoint {
+	return {
+		.symbol = offset,
+		.afterSymbol = false,
+	};
+}
+
 // A new message from the same sender is attached to previous within 15 minutes.
 constexpr int kAttachMessageToPreviousSecondsDelta = 900;
 constexpr auto kMaxShownLine = 1024 * 1024;
@@ -2546,7 +2565,7 @@ bool Element::allowTextSelectionByHandler(
 }
 
 bool Element::usesBubblePattern(const PaintContext &context) const {
-	return (context.selection != FullSelection)
+	return !context.selected()
 		&& hasOutLayout()
 		&& context.bubblesPattern
 		&& !context.viewport.isEmpty()
@@ -2860,10 +2879,78 @@ TextState Element::bottomInfoTextState(
 	return TextState();
 }
 
+MessageSelection Element::selectionFromStates(
+		const TextState &anchor,
+		const TextState &current,
+		TextSelectType type) const {
+	if (anchor.selectionCursor.isRichPage()
+		|| current.selectionCursor.isRichPage()) {
+		return {};
+	}
+	return adjustSelection(
+		MessageSelection::Flat(
+			FlatSelectionEndpointFromState(anchor),
+			FlatSelectionEndpointFromState(current)),
+		type);
+}
+
+TextForMimeData Element::selectedText(
+		const MessageSelection &selection) const {
+	if (const auto flat = selection.flatSelection(); !flat.empty()) {
+		return selectedText(flat);
+	}
+	return {};
+}
+
+SelectedQuote Element::selectedQuote(
+		const MessageSelection &selection) const {
+	if (const auto flat = selection.flatSelection(); !flat.empty()) {
+		return selectedQuote(flat);
+	}
+	return {};
+}
+
 TextSelection Element::adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const {
 	return selection;
+}
+
+MessageSelection Element::adjustSelection(
+		const MessageSelection &selection,
+		TextSelectType type) const {
+	if (!selection.isFlat()) {
+		return {};
+	}
+	const auto adjusted = adjustSelection(selection.flatSelection(), type);
+	if (adjusted.empty() || (adjusted == FullSelection)) {
+		return {};
+	}
+	const auto anchorOffset = selection.anchor.isFlat()
+		? selection.anchor.flat.offset()
+		: adjusted.from;
+	const auto focusOffset = selection.focus.isFlat()
+		? selection.focus.flat.offset()
+		: adjusted.to;
+	return MessageSelection::Flat(
+		(anchorOffset <= focusOffset)
+			? FlatSelectionEndpointFromOffset(adjusted.from)
+			: FlatSelectionEndpointFromOffset(adjusted.to),
+		(anchorOffset <= focusOffset)
+			? FlatSelectionEndpointFromOffset(adjusted.to)
+			: FlatSelectionEndpointFromOffset(adjusted.from));
+}
+
+TextSelection Element::selectionForEdit(
+		const MessageSelection &selection) const {
+	return selection.flatRangeForEdit();
+}
+
+bool Element::selectionContains(
+		const MessageSelection &selection,
+		const TextState &state) const {
+	return (state.cursor == CursorState::Text)
+		&& selection.contains(state.selectionCursor);
 }
 
 SelectedQuote Element::FindSelectedQuote(

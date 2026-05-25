@@ -20,6 +20,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 enum class ImageRoundRadius;
 
+namespace HistoryView {
+struct MessageSelection;
+} // namespace HistoryView
+
 namespace style {
 struct TwoIconButton;
 struct ScrollArea;
@@ -198,6 +202,8 @@ struct ChatPaintContext {
 	QRect area;
 	QRect clip;
 	TextSelection selection;
+	bool fullMessageSelected = false;
+	const HistoryView::MessageSelection *messageSelection = nullptr;
 	ChatPaintHighlight highlight;
 	QPainterPath *highlightPathCache = nullptr;
 	mutable QRect highlightInterpolateTo;
@@ -215,7 +221,7 @@ struct ChatPaintContext {
 	}
 
 	[[nodiscard]] bool selected() const {
-		return (selection == FullSelection);
+		return fullMessageSelected;
 	}
 	[[nodiscard]] not_null<const MessageStyle*> messageStyle() const;
 	[[nodiscard]] not_null<const MessageImageStyle*> imageStyle() const;
@@ -233,8 +239,19 @@ struct ChatPaintContext {
 	}
 	[[nodiscard]] ChatPaintContext withSelection(
 			TextSelection selection) const {
+		return withSelectionState(
+			selection,
+			(selection == FullSelection),
+			nullptr);
+	}
+	[[nodiscard]] ChatPaintContext withSelectionState(
+			TextSelection selection,
+			bool fullMessageSelected,
+			const HistoryView::MessageSelection *messageSelection) const {
 		auto result = *this;
 		result.selection = selection;
+		result.fullMessageSelected = fullMessageSelected;
+		result.messageSelection = messageSelection;
 		return result;
 	}
 	[[nodiscard]] auto computeHighlightCache() const

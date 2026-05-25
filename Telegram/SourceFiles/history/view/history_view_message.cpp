@@ -90,6 +90,58 @@ using PreparedLink = Iv::Markdown::PreparedLink;
 using PreparedLinkKind = Iv::Markdown::PreparedLinkKind;
 using MediaActivation = Iv::Markdown::MediaActivation;
 using MediaActivationKind = Iv::Markdown::MediaActivationKind;
+using MarkdownArticleSelection = Iv::Markdown::MarkdownArticleSelection;
+using MarkdownArticleSelectionEndpoint = Iv::Markdown::MarkdownArticleSelectionEndpoint;
+using MarkdownArticleSelectionEndpoints = Iv::Markdown::MarkdownArticleSelectionEndpoints;
+
+[[nodiscard]] auto FlatSelectionEndpointFromState(const TextState &state)
+-> MessageSelectionFlatEndpoint {
+	return state.selectionCursor.isFlat()
+		? state.selectionCursor.flat
+		: MessageSelectionFlatEndpoint{
+			.symbol = state.symbol,
+			.afterSymbol = state.afterSymbol,
+		};
+}
+
+void SyncFlatSelectionCursor(not_null<TextState*> state) {
+	if (!state->selectionCursor.isRichPage()) {
+		state->selectionCursor = MessageSelectionEndpoint::Flat({
+			state->symbol,
+			state->afterSymbol,
+		});
+	}
+}
+
+void SetTextStatePosition(
+		not_null<TextState*> state,
+		uint16 symbol,
+		bool afterSymbol) {
+	state->symbol = symbol;
+	state->afterSymbol = afterSymbol;
+	SyncFlatSelectionCursor(state);
+}
+
+void AddTextStateOffset(not_null<TextState*> state, uint16 offset) {
+	state->symbol = uint16(state->symbol + offset);
+	SyncFlatSelectionCursor(state);
+}
+
+void SetRichPageSelectionCursor(
+		not_null<TextState*> state,
+		int segment,
+		int offset,
+		bool direct) {
+	state->selectionCursor = MessageSelectionEndpoint::RichPage(
+		{
+			.segment = segment,
+			.offset = offset,
+		},
+		MarkdownArticleSelectionEndpoint{
+			.segment = segment,
+			.direct = direct,
+		});
+}
 
 [[nodiscard]] QString OpenableTargetForPreparedLink(const PreparedLink &link) {
 	return link.fragment.isEmpty()
@@ -2747,6 +2799,12 @@ void Message::paintRichText(
 		std::clamp(clip.bottom() + 1, 0, rect.height()));
 	auto articleContext = Iv::Markdown::MarkdownArticlePaintContext(
 		context).translated(-rect.topLeft());
+	if (context.messageSelection && context.messageSelection->isRichPage()) {
+		articleContext.selectionState.selection
+			= context.messageSelection->richPage.selection;
+		articleContext.selectionState.endpoints
+			= &context.messageSelection->richPage.endpoints;
+	}
 	articleContext.clip = clip;
 	articleContext.caches = {
 		.pre = stm->preCache.get(),
@@ -3385,7 +3443,7 @@ TextState Message::textState(
 	const auto minSymbol = (_invertMedia && request.onlyMessageText)
 		? visibleMediaTextLen
 		: 0;
-	result.symbol = minSymbol;
+	SetTextStatePosition(&result, minSymbol, false);
 
 	auto g = countGeometry();
 	if (g.width() < 1 || isHidden()) {
@@ -3411,7 +3469,7 @@ TextState Message::textState(
 		g.setHeight(g.height() - reactionsHeight);
 		const auto reactionsPosition = QPoint(reactionsLeft + g.left(), g.top() + g.height() + st::mediaInBubbleSkip);
 		if (_reactions->getState(point - reactionsPosition, &result)) {
-			result.symbol += visibleMediaTextLen + visibleTextLen;
+			AddTextStateOffset(&result, visibleMediaTextLen + visibleTextLen);
 			return result;
 		}
 	}
@@ -3425,7 +3483,7 @@ TextState Message::textState(
 		if (item->isHistoryEntry() || item->isAdminLogEntry()) {
 			const auto keyboardPosition = QPoint(g.left(), g.top() + g.height() + st::msgBotKbButton.margin);
 			if (QRect(keyboardPosition, QSize(g.width(), keyboardHeight)).contains(point)) {
-				result.symbol += visibleMediaTextLen + visibleTextLen;
+				AddTextStateOffset(&result, visibleMediaTextLen + visibleTextLen);
 				result.link = keyboard->getLink(point - keyboardPosition);
 				return result;
 			}
@@ -3443,7 +3501,7 @@ TextState Message::textState(
 
 		auto inner = g;
 		if (getStateCommentsButton(point, inner, &result)) {
-			result.symbol += visibleMediaTextLen + visibleTextLen;
+			AddTextStateOffset(&result, visibleMediaTextLen + visibleTextLen);
 			return result;
 		}
 		auto trect = inner.marginsRemoved(st::msgPadding);
@@ -3461,7 +3519,7 @@ TextState Message::textState(
 			trect.setHeight(trect.height() - reactionsHeight);
 			const auto reactionsPosition = QPoint(trect.left(), trect.top() + trect.height() + reactionsTop);
 			if (_reactions->getState(point - reactionsPosition, &result)) {
-				result.symbol += visibleMediaTextLen + visibleTextLen;
+				AddTextStateOffset(&result, visibleMediaTextLen + visibleTextLen);
 				return result;
 			}
 		}
@@ -3477,7 +3535,7 @@ TextState Message::textState(
 						? inner
 						: inner - heightMargins),
 					&result)) {
-				result.symbol += visibleMediaTextLen + visibleTextLen;
+				AddTextStateOffset(&result, visibleMediaTextLen + visibleTextLen);
 				return result;
 			}
 			if (belowInfo) {
@@ -3524,8 +3582,9 @@ TextState Message::textState(
 				result = entry->textState(
 					point - QPoint(entryLeft, entryTop),
 					request);
-				result.symbol += visibleTextLength()
-					+ visibleMediaTextLength();
+				AddTextStateOffset(
+					&result,
+					visibleTextLength() + visibleMediaTextLength());
 			}
 		}
 		if (check) {
@@ -3537,8 +3596,9 @@ TextState Message::textState(
 				result = check->textState(
 					point - QPoint(checkLeft, checkTop),
 					request);
-				result.symbol += visibleTextLength()
-					+ visibleMediaTextLength();
+				AddTextStateOffset(
+					&result,
+					visibleTextLength() + visibleMediaTextLength());
 			}
 		}
 
@@ -3560,7 +3620,7 @@ TextState Message::textState(
 		};
 		if (!inBubble) {
 			if (point.y() >= g.y() + g.height()) {
-				result.symbol += visibleTextLen + visibleMediaTextLen;
+				AddTextStateOffset(&result, visibleTextLen + visibleMediaTextLen);
 			}
 		} else if (result.symbol <= minSymbol) {
 			const auto mediaHeight = mediaDisplayed ? media->height() : 0;
@@ -3580,20 +3640,18 @@ TextState Message::textState(
 					request);
 				if (_invertMedia) {
 					if (request.onlyMessageText) {
-						result.symbol = minSymbol;
-						result.afterSymbol = false;
+						SetTextStatePosition(&result, minSymbol, false);
 						result.cursor = CursorState::None;
 					}
 				} else if (request.onlyMessageText) {
-					result.symbol = visibleTextLen;
-					result.afterSymbol = false;
+					SetTextStatePosition(&result, visibleTextLen, false);
 					result.cursor = CursorState::None;
 				} else {
-					result.symbol += visibleTextLen;
+					AddTextStateOffset(&result, visibleTextLen);
 				}
 			} else if (getStateText(point, trect, &result, request)) {
 				if (_invertMedia) {
-					result.symbol += visibleMediaTextLen;
+					AddTextStateOffset(&result, visibleMediaTextLen);
 				}
 				result.overMessageText = true;
 				checkBottomInfoState();
@@ -3630,11 +3688,10 @@ TextState Message::textState(
 	} else if (media && media->isDisplayed()) {
 		result = media->textState(point - g.topLeft(), request);
 		if (request.onlyMessageText) {
-			result.symbol = 0;
-			result.afterSymbol = false;
+			SetTextStatePosition(&result, 0, false);
 			result.cursor = CursorState::None;
 		}
-		result.symbol += visibleTextLength();
+		AddTextStateOffset(&result, visibleTextLength());
 	}
 
 	return result;
@@ -3959,8 +4016,7 @@ bool Message::getStateForwardedInfo(
 		if (outResult->link) {
 			recordLinkRipplePoint(point, trect.topLeft());
 		}
-		outResult->symbol = 0;
-		outResult->afterSymbol = false;
+		SetTextStatePosition(outResult, 0, false);
 		if (breakEverywhere) {
 			outResult->cursor = CursorState::Forwarded;
 		} else {
@@ -4104,10 +4160,15 @@ bool Message::getStateText(
 			if (!hit.valid()) {
 				return false;
 			}
+			const auto offset = rich->article.selectionOffsetFromHit(
+				hit,
+				TextSelectType::Letters);
 			*outResult = TextState(item);
-			outResult->cursor = CursorState::None;
-			outResult->symbol = FullSelection.from;
-			outResult->afterSymbol = false;
+			SetRichPageSelectionCursor(
+				outResult,
+				hit.segmentIndex,
+				offset,
+				hit.direct);
 			if (hit.preparedLink || hit.mediaActivation.kind != MediaActivationKind::None) {
 				const auto prepared = hit.preparedLink;
 				const auto activation = hit.mediaActivation;
@@ -4144,6 +4205,9 @@ bool Message::getStateText(
 			} else {
 				outResult->link = hit.state.link;
 			}
+			outResult->cursor = (!outResult->link && hit.direct)
+				? CursorState::Text
+				: CursorState::None;
 		} else {
 			*outResult = TextState(item, text().getState(
 				point - trect.topLeft(),
@@ -4231,6 +4295,74 @@ void Message::updatePressed(QPoint point) {
 	}
 }
 
+MessageSelection Message::selectionFromStates(
+		const TextState &anchor,
+		const TextState &current,
+		TextSelectType type) const {
+	if (anchor.selectionCursor.isRichPage()
+		|| current.selectionCursor.isRichPage()) {
+		if (!anchor.selectionCursor.valid()
+			|| !current.selectionCursor.valid()
+			|| !anchor.selectionCursor.isRichPage()
+			|| !current.selectionCursor.isRichPage()) {
+			return {};
+		}
+		auto selection = MarkdownArticleSelection{
+			.from = anchor.selectionCursor.richPagePosition,
+			.to = current.selectionCursor.richPagePosition,
+		};
+		const auto endpoints = MarkdownArticleSelectionEndpoints{
+			.from = anchor.selectionCursor.richPage,
+			.to = current.selectionCursor.richPage,
+		};
+		if (type != TextSelectType::Letters
+			&& (selection.from.segment == selection.to.segment)) {
+			const auto rich = richpage();
+			if (!rich) {
+				return {};
+			}
+			const auto adjusted = rich->article.adjustSelection(
+				selection.from.segment,
+				TextSelection(
+					uint16(std::min(selection.from.offset, selection.to.offset)),
+					uint16(std::max(selection.from.offset, selection.to.offset))),
+				type);
+			if (adjusted.empty()) {
+				return {};
+			}
+			selection = {
+				.from = {
+					.segment = selection.from.segment,
+					.offset = adjusted.from,
+				},
+				.to = {
+					.segment = selection.from.segment,
+					.offset = adjusted.to,
+				},
+			};
+		}
+		return MessageSelection::RichPage(
+			selection,
+			endpoints,
+			anchor.selectionCursor.richPagePosition,
+			current.selectionCursor.richPagePosition,
+			anchor.selectionCursor.richPage,
+			current.selectionCursor.richPage);
+	}
+	const auto anchorEndpoint = FlatSelectionEndpointFromState(anchor);
+	const auto currentEndpoint = FlatSelectionEndpointFromState(current);
+	auto selection = TextSelection(
+		uint16(std::min(anchorEndpoint.offset(), currentEndpoint.offset())),
+		uint16(std::max(anchorEndpoint.offset(), currentEndpoint.offset())));
+	if (type != TextSelectType::Letters) {
+		selection = adjustSelection(selection, type);
+	}
+	return MessageSelection::Flat(
+		selection,
+		anchorEndpoint,
+		currentEndpoint);
+}
+
 TextForMimeData Message::selectedText(TextSelection selection) const {
 	const auto media = this->media();
 	auto logEntryOriginalResult = TextForMimeData();
@@ -4286,6 +4418,20 @@ TextForMimeData Message::selectedText(TextSelection selection) const {
 	return result;
 }
 
+TextForMimeData Message::selectedText(
+		const MessageSelection &selection) const {
+	if (const auto flat = selection.flatSelection(); !flat.empty()) {
+		return selectedText(flat);
+	} else if (selection.isRichPage()) {
+		if (const auto rich = richpage()) {
+			return rich->article.textForSelection(
+				selection.richPage.selection,
+				&selection.richPage.endpoints);
+		}
+	}
+	return {};
+}
+
 SelectedQuote Message::selectedQuote(TextSelection selection) const {
 	const auto textItem = this->textItem();
 	const auto item = textItem ? textItem : data().get();
@@ -4307,6 +4453,14 @@ SelectedQuote Message::selectedQuote(TextSelection selection) const {
 		if (media->isDisplayed() || isHiddenByGroup()) {
 			return media->selectedQuote(selection);
 		}
+	}
+	return {};
+}
+
+SelectedQuote Message::selectedQuote(
+		const MessageSelection &selection) const {
+	if (const auto flat = selection.flatSelection(); !flat.empty()) {
+		return selectedQuote(flat);
 	}
 	return {};
 }
@@ -4418,6 +4572,105 @@ TextSelection Message::adjustSelection(
 		};
 	}
 	return result;
+}
+
+MessageSelection Message::adjustSelection(
+		const MessageSelection &selection,
+		TextSelectType type) const {
+	if (selection.isFlat()) {
+		const auto adjusted = adjustSelection(selection.flatSelection(), type);
+		if (adjusted.empty() || (adjusted == FullSelection)) {
+			return {};
+		}
+		return MessageSelection::Flat(
+			adjusted,
+			selection.anchor.isFlat()
+				? selection.anchor.flat
+				: MessageSelectionFlatEndpoint{
+					.symbol = adjusted.from,
+					.afterSymbol = false,
+				},
+			selection.focus.isFlat()
+				? selection.focus.flat
+				: MessageSelectionFlatEndpoint{
+					.symbol = adjusted.to,
+					.afterSymbol = false,
+				});
+	} else if (selection.isRichPage()) {
+		if (type == TextSelectType::Letters
+			|| !selection.anchor.valid()
+			|| !selection.focus.valid()
+			|| !selection.anchor.isRichPage()
+			|| !selection.focus.isRichPage()) {
+			return selection;
+		}
+		const auto anchor = selection.anchor.richPagePosition;
+		const auto focus = selection.focus.richPagePosition;
+		if (!anchor.valid()
+			|| !focus.valid()
+			|| (anchor.segment != focus.segment)) {
+			return selection;
+		}
+		const auto rich = richpage();
+		if (!rich) {
+			return {};
+		}
+		const auto adjusted = rich->article.adjustSelection(
+			anchor.segment,
+			TextSelection(
+				uint16(std::min(anchor.offset, focus.offset)),
+				uint16(std::max(anchor.offset, focus.offset))),
+			type);
+		if (adjusted.empty()) {
+			return {};
+		}
+		return MessageSelection::RichPage(
+			{
+				.from = {
+					.segment = anchor.segment,
+					.offset = adjusted.from,
+				},
+				.to = {
+					.segment = anchor.segment,
+					.offset = adjusted.to,
+				},
+			},
+			selection.richPage.endpoints,
+			anchor,
+			focus,
+			selection.anchor.richPage,
+			selection.focus.richPage);
+	}
+	return {};
+}
+
+TextSelection Message::selectionForEdit(
+		const MessageSelection &selection) const {
+	return selection.isFlat()
+		? selection.flatRangeForEdit()
+		: TextSelection();
+}
+
+bool Message::selectionContains(
+		const MessageSelection &selection,
+		const TextState &state) const {
+	if (!selection.isRichPage()) {
+		return Element::selectionContains(selection, state);
+	}
+	const auto rich = richpage();
+	if (!rich
+		|| !state.overMessageText
+		|| !state.selectionCursor.isRichPage()) {
+		return false;
+	}
+	auto hit = Iv::Markdown::MarkdownArticleHitTestResult();
+	hit.segmentIndex = state.selectionCursor.richPagePosition.segment;
+	hit.forcedOffset = state.selectionCursor.richPagePosition.offset;
+	hit.direct = state.selectionCursor.richPage.direct;
+	return rich->article.selectionContains(
+		selection.richPage.selection,
+		&selection.richPage.endpoints,
+		hit);
 }
 
 Reactions::ButtonParameters Message::reactionButtonParameters(

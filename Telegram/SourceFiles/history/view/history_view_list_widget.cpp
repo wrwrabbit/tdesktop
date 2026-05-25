@@ -1565,11 +1565,7 @@ bool ListWidget::isInsideSelection(
 		const auto dragState = view->textState(
 			state.point,
 			stateRequest);
-		if (dragState.cursor == CursorState::Text
-			&& base::in_range(
-				dragState.symbol,
-				_selectedTextRange.from,
-				_selectedTextRange.to)) {
+		if (view->selectionContains(_selectedTextSelection, dragState)) {
 			return true;
 		}
 	}
@@ -1588,18 +1584,15 @@ bool ListWidget::requiredToStartDragging(not_null<Element*> view) const {
 	return (_mouseCursorState == CursorState::Date);
 }
 
-bool ListWidget::isPressInSelectedText(TextState state) const {
-	if (state.cursor != CursorState::Text) {
-		return false;
-	}
+bool ListWidget::isPressInSelectedText(
+		not_null<const Element*> view,
+		TextState state) const {
 	if (!hasSelectedText()
 		|| !_selectedTextItem
 		|| _selectedTextItem->fullId() != _pressState.itemId) {
 		return false;
 	}
-	auto from = _selectedTextRange.from;
-	auto to = _selectedTextRange.to;
-	return (state.symbol >= from && state.symbol < to);
+	return view->selectionContains(_selectedTextSelection, state);
 }
 
 void ListWidget::cancelSelection() {
@@ -1654,16 +1647,15 @@ void ListWidget::clearTextSelection() {
 			repaintItem(view);
 		}
 		_selectedTextItem = nullptr;
-		_selectedTextRange = TextSelection();
+		_selectedTextSelection = MessageSelection();
 		_selectedText = TextForMimeData();
 	}
 }
 
 void ListWidget::setTextSelection(
 		not_null<Element*> view,
-		TextSelection selection) {
+		MessageSelection selection) {
 	if (!selection.empty()) {
-		// We started selecting text in web page preview.
 		ClickHandler::unpressed();
 	}
 	clearSelected();
@@ -1672,8 +1664,8 @@ void ListWidget::setTextSelection(
 		clearTextSelection();
 		_selectedTextItem = view->data();
 	}
-	_selectedTextRange = selection;
-	_selectedText = (selection.from != selection.to)
+	_selectedTextSelection = selection;
+	_selectedText = !selection.empty()
 		? view->selectedText(selection)
 		: TextForMimeData();
 	repaintItem(view);
@@ -2327,60 +2319,61 @@ void ListWidget::restoreScrollPosition() {
 	_delegate->listScrollTo(newVisibleTop);
 }
 
-TextSelection ListWidget::computeRenderSelection(
+auto ListWidget::computeRenderSelection(
 		not_null<const SelectedMap*> selected,
-		not_null<const Element*> view) const {
+		not_null<const Element*> view) const -> RenderSelectionState {
+	auto result = RenderSelectionState();
 	const auto itemSelection = [&](not_null<HistoryItem*> item) {
-		auto i = selected->find(item->fullId());
-		if (i != selected->end()) {
-			return FullSelection;
-		}
-		return TextSelection();
+		return selected->contains(item->fullId());
 	};
 	const auto item = view->data();
 	if (const auto group = session().data().groups().find(item)) {
 		if (group->items.front() != item) {
-			return TextSelection();
+			return result;
 		}
-		auto result = TextSelection();
+		result.selection = TextSelection();
 		auto allFullSelected = true;
 		const auto count = int(group->items.size());
 		for (auto i = 0; i != count; ++i) {
-			if (itemSelection(group->items[i]) == FullSelection) {
-				result = AddGroupItemSelection(result, i);
+			if (itemSelection(group->items[i])) {
+				result.selection = AddGroupItemSelection(result.selection, i);
 			} else {
 				allFullSelected = false;
 			}
 		}
 		if (allFullSelected) {
-			return FullSelection;
-		}
-		const auto leaderSelection = itemSelection(item);
-		if (leaderSelection != FullSelection
-			&& leaderSelection != TextSelection()) {
-			return leaderSelection;
+			result.selection = FullSelection;
+			result.fullMessageSelected = true;
 		}
 		return result;
 	}
-	return itemSelection(item);
+	if (itemSelection(item)) {
+		result.selection = FullSelection;
+		result.fullMessageSelected = true;
+	}
+	return result;
 }
 
-TextSelection ListWidget::itemRenderSelection(
-		not_null<const Element*> view) const {
+auto ListWidget::itemRenderSelection(
+		not_null<const Element*> view) const -> RenderSelectionState {
+	auto result = RenderSelectionState();
 	if (!_dragSelected.empty()) {
 		const auto i = _dragSelected.find(view->data()->fullId());
 		if (i != _dragSelected.end()) {
-			return (_dragSelectAction == DragSelectAction::Selecting)
+			result.selection = (_dragSelectAction == DragSelectAction::Selecting)
 				? FullSelection
 				: TextSelection();
+			result.fullMessageSelected = (result.selection == FullSelection);
+			return result;
 		}
 	}
 	if (!_selected.empty() || !_dragSelected.empty()) {
 		return computeRenderSelection(&_selected, view);
 	} else if (view->data() == _selectedTextItem) {
-		return _selectedTextRange;
+		result.selection = _selectedTextSelection.flatSelection();
+		result.messageSelection = &_selectedTextSelection;
 	}
-	return TextSelection();
+	return result;
 }
 
 Ui::ChatPaintContext ListWidget::preparePaintContext(
@@ -2531,7 +2524,10 @@ void ListWidget::paintEvent(QPaintEvent *e) {
 					= _reactionsManager->currentReactionPaintInfo();
 			}
 			context.outbg = view->hasOutLayout();
-			context.selection = itemRenderSelection(view);
+			const auto selection = itemRenderSelection(view);
+			context.selection = selection.selection;
+			context.fullMessageSelected = selection.fullMessageSelected;
+			context.messageSelection = selection.messageSelection;
 			context.highlight = _highlighter.state(item);
 			view->draw(p, context);
 		}
@@ -2794,7 +2790,7 @@ TextForMimeData ListWidget::getSelectedText() const {
 
 	if (selected.empty()) {
 		if (const auto view = viewForItem(_selectedTextItem)) {
-			return view->selectedText(_selectedTextRange);
+			return view->selectedText(_selectedTextSelection);
 		}
 		return _selectedText;
 	}
@@ -2876,7 +2872,16 @@ SelectedItems ListWidget::getSelectedItems() const {
 
 TextSelection ListWidget::getSelectedTextRange(
 		not_null<HistoryItem*> item) const {
-	return (_selectedTextItem == item) ? _selectedTextRange : TextSelection();
+	return (_selectedTextItem == item)
+		? _selectedTextSelection.flatRangeForEdit()
+		: TextSelection();
+}
+
+MessageSelection ListWidget::getSelectedTextSelection(
+		not_null<HistoryItem*> item) const {
+	return (_selectedTextItem == item)
+		? _selectedTextSelection
+		: MessageSelection();
 }
 
 int ListWidget::findItemIndexByY(int y) const {
@@ -3171,14 +3176,16 @@ void ListWidget::switchToWordSelection() {
 	if (dragState.cursor != CursorState::Text) {
 		return;
 	}
-	_mouseTextSymbol = dragState.symbol;
+	_mouseTextAnchor = dragState;
 	_mouseSelectType = TextSelectType::Words;
 	if (_mouseAction == MouseAction::None) {
 		_mouseAction = MouseAction::Selecting;
-		setTextSelection(_overElement, TextSelection(
-			dragState.symbol,
-			dragState.symbol
-		));
+		setTextSelection(
+			_overElement,
+			_overElement->selectionFromStates(
+				_mouseTextAnchor,
+				dragState,
+				_mouseSelectType));
 	}
 	mouseActionUpdate();
 
@@ -3306,7 +3313,7 @@ void ListWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 	request.pointState = _overState.pointState;
 	request.quote = (_overElement
 		&& _selectedTextItem == _overElement->data())
-		? _overElement->selectedQuote(_selectedTextRange)
+		? _overElement->selectedQuote(_selectedTextSelection)
 		: SelectedQuote();
 	request.selectedText = _selectedText;
 	request.selectedItems = collectSelectedItems();
@@ -3926,47 +3933,47 @@ void ListWidget::mouseActionStart(
 	if (_mouseAction == MouseAction::None && pressElement) {
 		validateTrippleClickStartTime();
 		TextState dragState;
-		auto startDistance = (globalPosition - _trippleClickPoint).manhattanLength();
-		auto validStartPoint = startDistance < QApplication::startDragDistance();
-		if (_trippleClickStartTime != 0 && validStartPoint) {
-			StateRequest request;
-			request.flags = Ui::Text::StateRequest::Flag::LookupSymbol;
-			dragState = pressElement->textState(_pressState.point, request);
-			if (dragState.cursor == CursorState::Text) {
-				setTextSelection(pressElement, TextSelection(
-					dragState.symbol,
-					dragState.symbol
-				));
-				_mouseTextSymbol = dragState.symbol;
-				_mouseAction = MouseAction::Selecting;
-				_mouseSelectType = TextSelectType::Paragraphs;
-				mouseActionUpdate();
-				_trippleClickStartTime = crl::now();
-			}
-		} else if (pressElement) {
-			StateRequest request;
-			request.flags = Ui::Text::StateRequest::Flag::LookupSymbol;
-			dragState = pressElement->textState(_pressState.point, request);
+		const auto startDistance = (globalPosition - _trippleClickPoint)
+			.manhattanLength();
+		const auto validStartPoint = startDistance
+			< QApplication::startDragDistance();
+		StateRequest request;
+		request.flags = Ui::Text::StateRequest::Flag::LookupSymbol;
+		dragState = pressElement->textState(_pressState.point, request);
+		if (_trippleClickStartTime != 0
+			&& validStartPoint
+			&& dragState.cursor == CursorState::Text) {
+			_mouseTextAnchor = dragState;
+			_mouseSelectType = TextSelectType::Paragraphs;
+			setTextSelection(
+				pressElement,
+				pressElement->selectionFromStates(
+					_mouseTextAnchor,
+					dragState,
+					_mouseSelectType));
+			_mouseAction = MouseAction::Selecting;
+			mouseActionUpdate();
+			_trippleClickStartTime = crl::now();
 		}
 		if (_mouseSelectType != TextSelectType::Paragraphs) {
-			_mouseTextSymbol = dragState.symbol;
-			if (isPressInSelectedText(dragState)) {
-				_mouseAction = MouseAction::PrepareDrag; // start text drag
+			if (isPressInSelectedText(pressElement, dragState)) {
+				_mouseAction = MouseAction::PrepareDrag;
 			} else if (!_pressWasInactive) {
 				if (requiredToStartDragging(pressElement)
 					&& _pressState.pointState != PointState::Outside) {
 					_mouseAction = MouseAction::PrepareDrag;
-				} else {
-					if (dragState.afterSymbol) ++_mouseTextSymbol;
-					if (!hasSelectedItems()
-						&& _overState.pointState != PointState::Outside) {
-						setTextSelection(pressElement, TextSelection(
-							_mouseTextSymbol,
-							_mouseTextSymbol));
-						_mouseAction = MouseAction::Selecting;
-					} else if (!hasSelectRestriction()) {
-						_mouseAction = MouseAction::PrepareSelect;
-					}
+				} else if (!hasSelectedItems()
+					&& _overState.pointState != PointState::Outside) {
+					_mouseTextAnchor = dragState;
+					setTextSelection(
+						pressElement,
+						pressElement->selectionFromStates(
+							_mouseTextAnchor,
+							dragState,
+							_mouseSelectType));
+					_mouseAction = MouseAction::Selecting;
+				} else if (!hasSelectRestriction()) {
+					_mouseAction = MouseAction::PrepareSelect;
 				}
 			}
 		}
@@ -4034,6 +4041,7 @@ void ListWidget::mouseActionCancel() {
 	_pressState = MouseState();
 	_pressItemExact = nullptr;
 	_mouseAction = MouseAction::None;
+	_mouseTextAnchor = TextState();
 	clearDragSelection();
 	_wasSelectedText = false;
 	_selectScroll.cancel();
@@ -4116,7 +4124,7 @@ void ListWidget::mouseActionFinish(
 		if (!_dragSelected.empty()) {
 			applyDragSelection();
 		} else if (_selectedTextItem && !_pressWasInactive) {
-			if (_selectedTextRange.from == _selectedTextRange.to) {
+			if (_selectedTextSelection.empty()) {
 				clearTextSelection();
 				_delegate->listWindowSetInnerFocus();
 			}
@@ -4124,17 +4132,14 @@ void ListWidget::mouseActionFinish(
 	}
 	_mouseAction = MouseAction::None;
 	_mouseSelectType = TextSelectType::Letters;
+	_mouseTextAnchor = TextState();
 	_selectScroll.cancel();
 
 	if (QGuiApplication::clipboard()->supportsSelection()
 		&& _selectedTextItem
-		&& _selectedTextRange.from != _selectedTextRange.to
+		&& !_selectedTextSelection.empty()
 		&& !hasCopyRestriction(_selectedTextItem)) {
-		if (const auto view = viewForItem(_selectedTextItem)) {
-			TextUtilities::SetClipboardText(
-				view->selectedText(_selectedTextRange),
-				QClipboard::Selection);
-		}
+		TextUtilities::SetClipboardText(_selectedText, QClipboard::Selection);
 	}
 }
 
@@ -4368,21 +4373,12 @@ void ListWidget::mouseActionUpdate() {
 	} else if (view) {
 		if (_mouseAction == MouseAction::Selecting) {
 			if (inTextSelection) {
-				auto second = dragState.symbol;
-				if (dragState.afterSymbol
-					&& _mouseSelectType == TextSelectType::Letters) {
-					++second;
-				}
-				auto selection = TextSelection(
-					qMin(second, _mouseTextSymbol),
-					qMax(second, _mouseTextSymbol)
-				);
-				if (_mouseSelectType != TextSelectType::Letters) {
-					selection = view->adjustSelection(
-						selection,
-						_mouseSelectType);
-				}
-				setTextSelection(view, selection);
+				setTextSelection(
+					view,
+					view->selectionFromStates(
+						_mouseTextAnchor,
+						dragState,
+						_mouseSelectType));
 				clearDragSelection();
 			} else if (_pressState.itemId) {
 				updateDragSelection();
@@ -5078,6 +5074,7 @@ void ListWidget::toggleMessageSelection() {
 	}
 	const auto view = elements[elementIndex];
 	const auto item = view->data();
+	clearTextSelection();
 	changeSelectionAsGroup(_selected, item, SelectAction::Invert);
 	repaintItem(view);
 	pushSelectedItems();

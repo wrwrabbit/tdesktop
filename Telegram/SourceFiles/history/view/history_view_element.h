@@ -59,6 +59,7 @@ enum class PointState : char;
 enum class InfoDisplayType : char;
 struct StateRequest;
 struct TextState;
+struct MessageSelection;
 class Media;
 class Reply;
 struct HistoryMessageRichPage;
@@ -541,14 +542,30 @@ public:
 		int bottom,
 		QPoint point,
 		InfoDisplayType type) const;
+	[[nodiscard]] virtual MessageSelection selectionFromStates(
+		const TextState &anchor,
+		const TextState &current,
+		TextSelectType type) const;
 	virtual TextForMimeData selectedText(TextSelection selection) const = 0;
+	virtual TextForMimeData selectedText(
+		const MessageSelection &selection) const;
 	virtual SelectedQuote selectedQuote(
 		TextSelection selection) const = 0;
+	virtual SelectedQuote selectedQuote(
+		const MessageSelection &selection) const;
 	virtual TextSelection selectionFromQuote(
 		const SelectedQuote &quote) const = 0;
 	[[nodiscard]] virtual TextSelection adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const;
+	[[nodiscard]] virtual MessageSelection adjustSelection(
+		const MessageSelection &selection,
+		TextSelectType type) const;
+	[[nodiscard]] virtual TextSelection selectionForEdit(
+		const MessageSelection &selection) const;
+	[[nodiscard]] virtual bool selectionContains(
+		const MessageSelection &selection,
+		const TextState &state) const;
 
 	[[nodiscard]] static SelectedQuote FindSelectedQuote(
 		const Ui::Text::String &text,

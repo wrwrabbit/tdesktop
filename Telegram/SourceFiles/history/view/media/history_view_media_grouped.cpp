@@ -407,7 +407,7 @@ void GroupedMedia::draw(Painter &p, const PaintContext &context) const {
 	auto nowCache = false;
 	const auto groupPadding = groupedPadding();
 	auto selection = context.selection;
-	const auto fullSelection = (selection == FullSelection);
+	const auto fullSelection = context.selected();
 	const auto textSelection = (_mode == Mode::Column)
 		&& !fullSelection
 		&& !IsSubGroupSelection(selection);

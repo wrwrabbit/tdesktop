@@ -11,6 +11,7 @@
 #include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_rich_page.h"
 #include "iv/iv_prepare.h"
+#include "history/history_message_selection.h"
 #include "scheme.h"
 
 namespace Data {
@@ -8400,6 +8401,485 @@ beta
 	}
 }
 
+void CheckRichPageMessageSelectionRegressionCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	const auto buildMarkdownArticle = [&](
+			const QString &label,
+			QByteArray markdown,
+			int width = 420) -> std::unique_ptr<MarkdownArticle> {
+		auto parsed = ParseMarkdownForIv(
+			std::move(markdown),
+			ParseOptions{ label });
+		Check(
+			parsed.ok,
+			label + u" parse failed: "_q + parsed.error,
+			ok);
+		if (!parsed.ok) {
+			return {};
+		}
+		auto prepared = PrepareParsedDocumentForTest(
+			parsed.document,
+			label,
+			renderer);
+		Check(
+			!prepared.failure.failed(),
+			label + u" prepare failed: "_q
+				+ PrepareFailureReason(prepared.failure),
+			ok);
+		if (prepared.failure.failed()) {
+			return {};
+		}
+		auto height = 0;
+		return BuildArticleForTest(
+			std::move(prepared),
+			renderer,
+			width,
+			&height);
+	};
+	const auto buildNativeArticle = [&](
+			const QString &label,
+			QVector<MTPPageBlock> blocks,
+			int width = 360) -> std::unique_ptr<MarkdownArticle> {
+		auto source = NativeIvSource(std::move(blocks));
+		auto prepared = TryPrepareNativeInstantView({
+			.source = &source,
+		});
+		Check(
+			prepared.supported(),
+			label + u" prepare supported"_q,
+			ok);
+		Check(
+			!prepared.content.failure.failed(),
+			label + u" prepare failed"_q,
+			ok);
+		if (!prepared.supported() || prepared.content.failure.failed()) {
+			return {};
+		}
+		auto height = 0;
+		return BuildArticleForTest(
+			std::move(prepared.content),
+			renderer,
+			width,
+			&height);
+	};
+	const auto expandSameSegment = [&](
+			MarkdownArticle *article,
+			const HistoryView::MessageSelection &selection,
+			TextSelectType type) {
+		if (!article || !selection.isRichPage()) {
+			return HistoryView::MessageSelection();
+		}
+		const auto &range = selection.richPage.selection;
+		if (range.from.segment != range.to.segment) {
+			return HistoryView::MessageSelection();
+		}
+		const auto adjusted = article->adjustSelection(
+			range.from.segment,
+			TextSelection(
+				uint16(range.from.offset),
+				uint16(range.to.offset)),
+			type);
+		if (adjusted.empty()) {
+			return HistoryView::MessageSelection();
+		}
+		return HistoryView::MessageSelection::RichPage(
+			{
+				.from = {
+					.segment = range.from.segment,
+					.offset = adjusted.from,
+				},
+				.to = {
+					.segment = range.to.segment,
+					.offset = adjusted.to,
+				},
+			},
+			selection.richPage.endpoints,
+			selection.anchor.richPagePosition,
+			selection.focus.richPagePosition,
+			selection.anchor.richPage,
+			selection.focus.richPage);
+	};
+	const auto exportSelection = [&](
+			MarkdownArticle *article,
+			const HistoryView::MessageSelection &selection) {
+		return (article && selection.isRichPage())
+			? article->textForSelection(
+				selection.richPage.selection,
+				&selection.richPage.endpoints)
+			: TextForMimeData();
+	};
+
+	const auto directionLabel = u"message-selection-richpage-direction"_q;
+	const auto directionAnchorPosition = MarkdownArticleSelectionPosition{
+		.segment = 2,
+		.offset = 7,
+	};
+	const auto directionFocusPosition = MarkdownArticleSelectionPosition{
+		.segment = 0,
+		.offset = 3,
+	};
+	const auto directionSelection = HistoryView::MessageSelection::RichPage(
+		{
+			.from = directionAnchorPosition,
+			.to = directionFocusPosition,
+		},
+		{
+			.from = {
+				.segment = directionAnchorPosition.segment,
+				.direct = false,
+			},
+			.to = {
+				.segment = directionFocusPosition.segment,
+				.direct = true,
+			},
+		},
+		directionAnchorPosition,
+		directionFocusPosition,
+		{
+			.segment = directionAnchorPosition.segment,
+			.direct = false,
+		},
+		{
+			.segment = directionFocusPosition.segment,
+			.direct = true,
+		});
+	Check(
+		directionSelection.isRichPage(),
+		directionLabel + u" selection built"_q,
+		ok);
+	Check(
+		directionSelection.richPage.selection.from == directionFocusPosition
+			&& directionSelection.richPage.selection.to
+				== directionAnchorPosition,
+		directionLabel + u" normalizes positions"_q,
+		ok);
+	Check(
+		directionSelection.richPage.endpoints.from.segment
+			== directionFocusPosition.segment
+			&& directionSelection.richPage.endpoints.from.direct
+			&& directionSelection.richPage.endpoints.to.segment
+				== directionAnchorPosition.segment
+			&& !directionSelection.richPage.endpoints.to.direct,
+		directionLabel + u" normalized endpoints follow normalized range"_q,
+		ok);
+	Check(
+		directionSelection.anchor.isRichPage()
+			&& directionSelection.anchor.richPagePosition
+				== directionAnchorPosition
+			&& (directionSelection.anchor.richPage.segment
+				== directionAnchorPosition.segment)
+			&& !directionSelection.anchor.richPage.direct
+			&& directionSelection.focus.isRichPage()
+			&& directionSelection.focus.richPagePosition
+				== directionFocusPosition
+			&& (directionSelection.focus.richPage.segment
+				== directionFocusPosition.segment)
+			&& directionSelection.focus.richPage.direct,
+		directionLabel + u" anchor and focus direction survive normalization"_q,
+		ok);
+	Check(
+		directionSelection.flatSelection().empty(),
+		directionLabel + u" flat quote adapter stays empty"_q,
+		ok);
+	Check(
+		directionSelection.flatRangeForEdit().empty(),
+		directionLabel + u" flat edit adapter stays empty"_q,
+		ok);
+
+	const auto adjustLabel = u"message-selection-richpage-adjust"_q;
+	auto adjustArticle = buildMarkdownArticle(
+		adjustLabel,
+		QByteArray("Alpha beta gamma.\n"));
+	Check(
+		adjustArticle != nullptr,
+		adjustLabel + u" article built"_q,
+		ok);
+	if (adjustArticle) {
+		const auto fullText = u"Alpha beta gamma."_q;
+		const auto betaOffset = fullText.indexOf(u"beta"_q);
+		Check(
+			adjustArticle->segmentIsText(0),
+			adjustLabel + u" segment is text"_q,
+			ok);
+		Check(
+			betaOffset >= 0,
+			adjustLabel + u" beta offset found"_q,
+			ok);
+		if (adjustArticle->segmentIsText(0) && (betaOffset >= 0)) {
+			const auto partialSelection = HistoryView::MessageSelection::RichPage(
+				{
+					.from = {
+						.segment = 0,
+						.offset = betaOffset + 1,
+					},
+					.to = {
+						.segment = 0,
+						.offset = betaOffset + 3,
+					},
+				},
+				{
+					.from = {
+						.segment = 0,
+						.direct = true,
+					},
+					.to = {
+						.segment = 0,
+						.direct = false,
+					},
+				},
+				{
+					.segment = 0,
+					.offset = betaOffset + 1,
+				},
+				{
+					.segment = 0,
+					.offset = betaOffset + 3,
+				},
+				{
+					.segment = 0,
+					.direct = true,
+				},
+				{
+					.segment = 0,
+					.direct = false,
+				});
+			const auto wordSelection = expandSameSegment(
+				adjustArticle.get(),
+				partialSelection,
+				TextSelectType::Words);
+			Check(
+				wordSelection.isRichPage(),
+				adjustLabel + u" word selection built"_q,
+				ok);
+			Check(
+				wordSelection.richPage.selection.from
+					== MarkdownArticleSelectionPosition{
+						.segment = 0,
+						.offset = betaOffset,
+					}
+					&& wordSelection.richPage.selection.to
+						== MarkdownArticleSelectionPosition{
+							.segment = 0,
+							.offset = betaOffset + 4,
+						},
+				adjustLabel + u" words expand within one segment"_q,
+				ok);
+			Check(
+				wordSelection.anchor.richPagePosition
+					== partialSelection.anchor.richPagePosition
+					&& wordSelection.focus.richPagePosition
+						== partialSelection.focus.richPagePosition,
+				adjustLabel + u" words preserve stored endpoints"_q,
+				ok);
+			const auto paragraphSelection = expandSameSegment(
+				adjustArticle.get(),
+				partialSelection,
+				TextSelectType::Paragraphs);
+			Check(
+				paragraphSelection.isRichPage(),
+				adjustLabel + u" paragraph selection built"_q,
+				ok);
+			Check(
+				paragraphSelection.richPage.selection.from
+					== MarkdownArticleSelectionPosition{
+						.segment = 0,
+						.offset = 0,
+					}
+					&& paragraphSelection.richPage.selection.to
+						== MarkdownArticleSelectionPosition{
+							.segment = 0,
+							.offset = adjustArticle->segmentLength(0),
+						},
+				adjustLabel + u" paragraphs expand within one segment"_q,
+				ok);
+		}
+	}
+
+	const auto multiLabel = u"message-selection-richpage-multi-export"_q;
+	auto multiArticle = buildNativeArticle(
+		multiLabel,
+		QVector<MTPPageBlock>{
+			MTP_pageBlockParagraph(NativeIvText(u"Alpha"_q)),
+			MTP_pageBlockParagraph(NativeIvText(u"Beta"_q)),
+		});
+	Check(
+		multiArticle != nullptr,
+		multiLabel + u" article built"_q,
+		ok);
+	if (multiArticle) {
+		const auto multiSelection = HistoryView::MessageSelection::RichPage(
+			{
+				.from = {
+					.segment = 0,
+					.offset = 1,
+				},
+				.to = {
+					.segment = 1,
+					.offset = 2,
+				},
+			},
+			{
+				.from = {
+					.segment = 0,
+					.direct = true,
+				},
+				.to = {
+					.segment = 1,
+					.direct = true,
+				},
+			},
+			{
+				.segment = 0,
+				.offset = 1,
+			},
+			{
+				.segment = 1,
+				.offset = 2,
+			},
+			{
+				.segment = 0,
+				.direct = true,
+			},
+			{
+				.segment = 1,
+				.direct = true,
+			});
+		const auto exported = exportSelection(
+			multiArticle.get(),
+			multiSelection);
+		Check(
+			exported.expanded == u"lpha\nBe"_q,
+			multiLabel + u" wrapper exports across segments"_q,
+			ok);
+		Check(
+			exported.rich.text == exported.expanded,
+			multiLabel + u" rich export matches expanded text"_q,
+			ok);
+	}
+
+	const auto tableLabel = u"message-selection-richpage-table-export"_q;
+	enum : int {
+		kTableCaptionSegment = 0,
+		kTableWholeSegment = 1,
+		kTableStubSegment = 2,
+		kTableHeaderCenterSegment = 3,
+		kTableHeaderRightSegment = 4,
+		kTableMergedBodySegment = 5,
+		kTableTailSegment = 6,
+	};
+	auto tableArticle = buildNativeArticle(
+		tableLabel,
+		QVector<MTPPageBlock>{
+			NativeIvTableBlock(
+				u"Merged native table"_q,
+				{
+					NativeIvTableRow({
+						NativeIvTableCell(
+							u"Stub"_q,
+							1,
+							2,
+							true),
+						NativeIvTableCell(
+							u"A"_q,
+							1,
+							1,
+							true,
+							TableAlignment::Center),
+						NativeIvTableCell(
+							u"B"_q,
+							1,
+							1,
+							true,
+							TableAlignment::Right),
+					}),
+					NativeIvTableRow({
+						NativeIvTableCell(
+							u"Bottom merged"_q,
+							2,
+							2,
+							false,
+							TableAlignment::Center,
+							PreparedTableCellVerticalAlignment::Bottom),
+					}),
+					NativeIvTableRow({
+						NativeIvTableCell(u"Tail"_q),
+					}),
+				},
+				true,
+				true),
+		});
+	Check(
+		tableArticle != nullptr,
+		tableLabel + u" article built"_q,
+		ok);
+	if (tableArticle) {
+		const auto mergedLength = tableArticle->segmentLength(
+			kTableMergedBodySegment);
+		Check(
+			!tableArticle->segmentIsText(kTableWholeSegment)
+				&& tableArticle->segmentIsText(kTableMergedBodySegment)
+				&& (mergedLength > 0),
+			tableLabel + u" table segments available"_q,
+			ok);
+		if (!tableArticle->segmentIsText(kTableWholeSegment)
+			&& tableArticle->segmentIsText(kTableMergedBodySegment)
+			&& (mergedLength > 0)) {
+			const auto wrapperSelection = HistoryView::MessageSelection::RichPage(
+				{
+					.from = {
+						.segment = kTableWholeSegment,
+						.offset = 0,
+					},
+					.to = {
+						.segment = kTableMergedBodySegment,
+						.offset = mergedLength,
+					},
+				},
+				{
+					.from = {
+						.segment = kTableMergedBodySegment,
+						.direct = true,
+					},
+					.to = {
+						.segment = kTableMergedBodySegment,
+						.direct = true,
+					},
+				},
+				{
+					.segment = kTableMergedBodySegment,
+					.offset = 0,
+				},
+				{
+					.segment = kTableMergedBodySegment,
+					.offset = mergedLength,
+				},
+				{
+					.segment = kTableMergedBodySegment,
+					.direct = true,
+				},
+				{
+					.segment = kTableMergedBodySegment,
+					.direct = true,
+				});
+			const auto exported = exportSelection(
+				tableArticle.get(),
+				wrapperSelection);
+			Check(
+				exported.expanded == u"Bottom merged"_q,
+				tableLabel + u" endpoints keep single-cell export"_q,
+				ok);
+			const auto withoutEndpoints = tableArticle->textForSelection(
+				wrapperSelection.richPage.selection,
+				nullptr);
+			Check(
+				withoutEndpoints.expanded
+					== u"Stub\tA\tB\n\tBottom merged\t\nTail\t\t"_q,
+				tableLabel + u" same range exports whole table without endpoints"_q,
+				ok);
+		}
+	}
+}
+
 void CheckCodeBlockAsyncSyntaxHighlightCoverage(bool *ok) {
 	const auto label = u"generated-code-block-async-highlight"_q;
 	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp
@@ -14432,6 +14912,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckRichPageSummaryFlatteningCoverage(&ok);
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckCodeBlockSelectionExportCoverage(&ok);
+	CheckRichPageMessageSelectionRegressionCoverage(&ok);
 	CheckCodeBlockAsyncSyntaxHighlightCoverage(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);

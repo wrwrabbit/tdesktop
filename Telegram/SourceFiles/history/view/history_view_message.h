@@ -177,13 +177,29 @@ public:
 		int bottom,
 		QPoint point,
 		InfoDisplayType type) const override;
+	MessageSelection selectionFromStates(
+		const TextState &anchor,
+		const TextState &current,
+		TextSelectType type) const override;
 	TextForMimeData selectedText(TextSelection selection) const override;
+	TextForMimeData selectedText(
+		const MessageSelection &selection) const override;
 	SelectedQuote selectedQuote(TextSelection selection) const override;
+	SelectedQuote selectedQuote(
+		const MessageSelection &selection) const override;
 	TextSelection selectionFromQuote(
 		const SelectedQuote &quote) const override;
 	TextSelection adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const override;
+	MessageSelection adjustSelection(
+		const MessageSelection &selection,
+		TextSelectType type) const override;
+	TextSelection selectionForEdit(
+		const MessageSelection &selection) const override;
+	bool selectionContains(
+		const MessageSelection &selection,
+		const TextState &state) const override;
 
 	Reactions::ButtonParameters reactionButtonParameters(
 		QPoint position,
