@@ -573,7 +573,7 @@ void AppendBlock(
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockThinking &data) {
-		auto parsed = MakeBlock(BlockKind::Paragraph);
+		auto parsed = MakeBlock(BlockKind::Thinking);
 		parsed.text = ParseRichText(data.vtext(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
@@ -1006,6 +1006,7 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	case BlockKind::Unsupported:
 	case BlockKind::Divider:
 	case BlockKind::Anchor:
+	case BlockKind::Thinking:
 		return;
 	case BlockKind::Heading:
 	case BlockKind::Paragraph:

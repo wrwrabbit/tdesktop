@@ -8145,6 +8145,24 @@ void CheckRichPageSummaryFlatteningCoverage(bool *ok) {
 		Check(entity->data() == target, label + u" link target preserved"_q, ok);
 	}
 
+	auto thinking = Iv::RichPage::Block();
+	thinking.kind = Iv::RichPage::BlockKind::Thinking;
+	thinking.text = CanonicalRichText(
+		TextWithEntities::Simple(u"Thinking..."_q));
+	auto afterThinking = Iv::RichPage::Block();
+	afterThinking.kind = Iv::RichPage::BlockKind::Paragraph;
+	afterThinking.text = CanonicalRichText(
+		TextWithEntities::Simple(u"Final answer"_q));
+	const auto thinkingSummary = Iv::FlattenRichPageSummary(
+		CanonicalRichPage({
+			std::move(thinking),
+			std::move(afterThinking),
+		}));
+	Check(
+		thinkingSummary.text == u"Final answer"_q,
+		label + u" thinking skipped"_q,
+		ok);
+
 	auto photo = Iv::RichPage::Block();
 	photo.kind = Iv::RichPage::BlockKind::Photo;
 	photo.photoId = 4001;

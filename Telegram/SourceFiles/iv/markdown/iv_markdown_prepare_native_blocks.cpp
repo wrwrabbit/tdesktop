@@ -2528,6 +2528,7 @@ namespace {
 			block.anchorId,
 			state);
 	case RichPageBlockKind::Paragraph:
+	case RichPageBlockKind::Thinking:
 		return AppendNativeIvFlowBlock(
 			result,
 			PreparedBlockKind::Paragraph,

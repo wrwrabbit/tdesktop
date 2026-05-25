@@ -253,7 +253,6 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 	}
 	auto best = end(_drafts);
 	if (incomingKind == DraftKind::Rich && incomingText.isEmpty()) {
-		auto count = 0;
 		for (auto i = begin(_drafts); i != end(_drafts); ++i) {
 			const auto &draft = i->second;
 			if (draft.rootId != rootId) {
@@ -265,17 +264,16 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 			if (draft.kind != DraftKind::Rich) {
 				continue;
 			}
-			++count;
-			best = i;
-		}
-		if (count != 1) {
-			return nullptr;
+			if (best == end(_drafts) || draft.updated > best->second.updated) {
+				best = i;
+			}
 		}
 	} else {
 		auto bestSameKind = end(_drafts);
 		auto bestSameKindPrefix = 0;
 		auto bestOtherKind = end(_drafts);
 		auto bestOtherKindPrefix = 0;
+		auto newestSameThreadRich = end(_drafts);
 		for (auto i = begin(_drafts); i != end(_drafts); ++i) {
 			const auto &draft = i->second;
 			if (draft.rootId != rootId) {
@@ -283,6 +281,12 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 			}
 			if (draft.message->from()->id != fromId) {
 				continue;
+			}
+			if (incomingKind == DraftKind::Rich
+				&& draft.kind == DraftKind::Rich
+				&& (newestSameThreadRich == end(_drafts)
+					|| draft.updated > newestSameThreadRich->second.updated)) {
+				newestSameThreadRich = i;
 			}
 			const auto prefix = CommonPrefixLength(
 				draft.matchText,
@@ -302,7 +306,9 @@ HistoryItem *HistoryStreamedDrafts::adoptIncoming(
 		}
 		best = (bestSameKind != end(_drafts))
 			? bestSameKind
-			: bestOtherKind;
+			: (bestOtherKind != end(_drafts))
+			? bestOtherKind
+			: newestSameThreadRich;
 	}
 	if (best == end(_drafts)) {
 		return nullptr;

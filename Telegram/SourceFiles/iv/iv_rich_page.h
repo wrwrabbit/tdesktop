@@ -33,6 +33,7 @@ struct RichPage {
 		Unsupported,
 		Heading,
 		Paragraph,
+		Thinking,
 		AuthorDate,
 		Code,
 		Divider,
