@@ -1187,6 +1187,8 @@ PRIVATE
     info/profile/info_profile_members_controllers.h
     info/profile/info_profile_phone_menu.cpp
     info/profile/info_profile_phone_menu.h
+    info/profile/info_profile_section_stack.cpp
+    info/profile/info_profile_section_stack.h
     info/profile/info_profile_status_label.cpp
     info/profile/info_profile_status_label.h
     info/profile/info_profile_top_bar.cpp
