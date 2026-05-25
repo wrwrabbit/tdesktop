@@ -618,16 +618,17 @@ void TopBarSuggestionContent::setLeadingWidget(Ui::RpWidget *widget) {
 	widget->setParent(this);
 	widget->setAttribute(Qt::WA_TransparentForMouseEvents);
 	const auto &margins = st::dialogsTopBarSuggestionMargins;
+	const auto &row = st::defaultDialogRow;
 	sizeValue() | rpl::filter_size(
 	) | rpl::on_next([=](const QSize &s) {
 		widget->raise();
 		widget->show();
 		const auto pillHeight = s.height() - rect::m::sum::v(margins);
 		widget->moveToLeft(
-			margins.left() + basePadding,
+			row.padding.left() + (row.photoSize - widget->width()) / 2,
 			margins.top() + (pillHeight - widget->height()) / 2);
 	}, _leadingWidgetLifetime);
-	const auto padding = widget->width() + basePadding * 2;
+	const auto padding = row.nameLeft - margins.left();
 	if (_leftPadding != padding) {
 		_leftPadding = padding;
 		resizeToWidth(width());
