@@ -1111,6 +1111,10 @@ void Updates::handleSendActionUpdate(
 		const auto &data = action.c_sendMessageTextDraftAction();
 		history->streamedDrafts().apply(rootId, fromId, when, data);
 		return;
+	} else if (action.type() == mtpc_sendMessageRichMessageDraftAction) {
+		const auto &data = action.c_sendMessageRichMessageDraftAction();
+		history->streamedDrafts().apply(rootId, fromId, when, data);
+		return;
 	}
 	session().data().sendActionManager().registerFor(
 		history,

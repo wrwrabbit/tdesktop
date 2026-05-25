@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/dynamic_image.h"
+#include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
 
 #include "styles/palette.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace Iv::Markdown {
 namespace {
@@ -103,6 +105,223 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 	return result;
 }
 
+[[nodiscard]] MarkdownArticlePaintContext RevealSuppressedContext(
+		const MarkdownArticlePaintContext &context) {
+	auto result = context;
+	result.reveal = nullptr;
+	return result;
+}
+
+[[nodiscard]] std::optional<int> ConsumeRevealLine(
+		const MarkdownArticlePaintContext &context) {
+	if (!context.reveal) {
+		return std::nullopt;
+	}
+	return context.reveal->nextLine++;
+}
+
+[[nodiscard]] int CountGenericRevealBand(QRect rect) {
+	return rect.isEmpty() ? 0 : 1;
+}
+
+[[nodiscard]] int CountTextRevealLines(
+		const Ui::Text::String &leaf,
+		QRect textRect,
+		int textWidth) {
+	if (textRect.isEmpty() || (textWidth <= 0)) {
+		return 0;
+	}
+	return int(leaf.countLinesGeometry(textWidth, true).size());
+}
+
+[[nodiscard]] int CountRevealLinesForBlocks(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st);
+
+[[nodiscard]] int CountTableRevealLines(const LaidOutBlock &block) {
+	if (block.visibleTableRect.isEmpty()) {
+		return 0;
+	}
+	auto result = 0;
+	for (const auto &row : block.tableRows) {
+		if (row.outer.height() > 0) {
+			++result;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] int CountMediaRevealLines(const LaidOutBlock &block) {
+	return CountGenericRevealBand(block.visibleMediaRect)
+		+ CountTextRevealLines(block.leaf, block.textRect, block.textWidth);
+}
+
+[[nodiscard]] int CountEmbedPostRevealLines(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	auto result = 0;
+	if (!block.headerRect.isEmpty()) {
+		result += (block.mediaRect.width() > 0) ? 1 : 0;
+	} else if (block.children.empty()) {
+		result += CountGenericRevealBand(block.mediaRect);
+	}
+	result += CountRevealLinesForBlocks(block.children, st);
+	result += CountTextRevealLines(block.leaf, block.textRect, block.textWidth);
+	return result;
+}
+
+[[nodiscard]] int CountRevealLinesForBlock(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	switch (block.kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+		return CountTextRevealLines(
+			block.leaf,
+			block.textRect,
+			block.textWidth);
+	case PreparedBlockKind::Rule:
+		return CountGenericRevealBand(block.outer);
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+		return CountRevealLinesForBlocks(block.children, st);
+	case PreparedBlockKind::DisplayMath:
+		return CountGenericRevealBand(block.visibleFormulaRect);
+	case PreparedBlockKind::Table:
+		return CountTextRevealLines(
+			block.leaf,
+			block.textRect,
+			block.textWidth) + CountTableRevealLines(block);
+	case PreparedBlockKind::Details:
+		return CountTextRevealLines(
+			block.leaf,
+			block.textRect,
+			block.textWidth) + CountRevealLinesForBlocks(block.children, st);
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::Placeholder:
+		return CountMediaRevealLines(block);
+	case PreparedBlockKind::RelatedArticle:
+		return CountGenericRevealBand(block.visibleMediaRect);
+	case PreparedBlockKind::EmbedPost:
+		return CountEmbedPostRevealLines(block, st);
+	}
+	Unexpected("Prepared block kind in CountRevealLinesForBlock.");
+}
+
+[[nodiscard]] int CountRevealLinesForBlocks(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st) {
+	auto result = 0;
+	for (const auto &block : blocks) {
+		result += CountRevealLinesForBlock(block, st);
+	}
+	return result;
+}
+
+void AdvanceRevealLinesForBlock(
+		const MarkdownArticlePaintContext &context,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	if (context.reveal) {
+		context.reveal->nextLine += CountRevealLinesForBlock(block, st);
+	}
+}
+
+template <typename Callback>
+void PaintRevealBand(
+		Painter &p,
+		const MarkdownArticlePaintContext &context,
+		QRect band,
+		Callback paint) {
+	if (band.isEmpty()) {
+		return;
+	}
+	const auto lineIndex = ConsumeRevealLine(context);
+	const auto visible = context.clip.intersected(band);
+	if (visible.isEmpty()) {
+		return;
+	}
+
+	const auto paintDirect = [&] {
+		const auto local = ClippedContext(
+			RevealSuppressedContext(context),
+			visible);
+		p.save();
+		p.setClipRect(visible, Qt::IntersectClip);
+		paint(p, local);
+		p.restore();
+	};
+	if (!lineIndex) {
+		paintDirect();
+		return;
+	}
+
+	const auto reveal = context.reveal;
+	if (*lineIndex > reveal->activeLine) {
+		return;
+	} else if (*lineIndex < reveal->activeLine
+		|| !reveal->postprocess
+		|| !reveal->postprocess->method) {
+		paintDirect();
+		return;
+	}
+
+	auto postprocess = reveal->postprocess->method(*lineIndex);
+	if (!postprocess) {
+		paintDirect();
+		return;
+	}
+
+	const auto ratio = std::max(style::DevicePixelRatio(), 1);
+	const auto cacheWidth = band.width() * ratio;
+	const auto cacheHeight = band.height() * ratio;
+	auto &cache = *reveal->postprocess->cache;
+	if (cache.devicePixelRatio() != ratio
+		|| cache.width() < cacheWidth
+		|| cache.height() < cacheHeight) {
+		cache = QImage(
+			QSize(
+				std::max(cache.width(), cacheWidth),
+				std::max(cache.height(), cacheHeight)),
+			QImage::Format_ARGB32_Premultiplied);
+		cache.setDevicePixelRatio(ratio);
+	}
+	cache.fill(Qt::transparent);
+
+	{
+		auto cachePainter = Painter(&cache);
+		cachePainter.setFont(p.font());
+		cachePainter.setPen(p.pen());
+		cachePainter.setBrush(p.brush());
+		cachePainter.setRenderHints(p.renderHints());
+		cachePainter.setInactive(p.inactive());
+		cachePainter.setTextPalette(p.textPalette());
+		cachePainter.translate(-band.x(), -band.y());
+		cachePainter.setClipRect(band);
+		const auto local = ClippedContext(
+			RevealSuppressedContext(context),
+			band);
+		paint(cachePainter, local);
+	}
+
+	postprocess(cache);
+
+	p.save();
+	p.setClipRect(visible, Qt::IntersectClip);
+	p.drawImage(
+		QRectF(band),
+		cache,
+		QRectF(0, 0, cacheWidth, cacheHeight));
+	p.restore();
+}
+
 [[nodiscard]] QColor WithOpacity(style::color color, double opacity) {
 	auto result = color->c;
 	result.setAlphaF(result.alphaF() * std::clamp(opacity, 0., 1.));
@@ -155,6 +374,30 @@ void PaintTextLeaf(
 		std::optional<TextSelection> selection = std::nullopt,
 		int elisionLines = 0) {
 	const auto availableWidth = std::max(width, 1);
+	auto linePostprocess = std::optional<Ui::Text::LinePostprocess>();
+	if (context.reveal && !elisionLines) {
+		const auto lines = leaf.countLinesGeometry(availableWidth, true);
+		const auto baseLine = context.reveal->nextLine;
+		context.reveal->nextLine += int(lines.size());
+		if (const auto articlePostprocess = context.reveal->postprocess) {
+			const auto activeLine = context.reveal->activeLine;
+			linePostprocess.emplace(Ui::Text::LinePostprocess{
+				.method = [=](int lineIndex) -> Fn<void(QImage&)> {
+					const auto globalLine = baseLine + lineIndex;
+					if (globalLine != activeLine
+						|| !articlePostprocess->method) {
+						return nullptr;
+					}
+					return articlePostprocess->method(globalLine);
+				},
+				.cache = articlePostprocess->cache,
+			});
+		}
+	}
+	p.save();
+	if (!context.clip.isNull()) {
+		p.setClipRect(context.clip, Qt::IntersectClip);
+	}
 	leaf.draw(p, {
 		.position = rect.topLeft(),
 		.availableWidth = availableWidth,
@@ -171,7 +414,9 @@ void PaintTextLeaf(
 		.now = context.now,
 		.selection = selection.value_or(TextSelection()),
 		.elisionLines = elisionLines,
+		.linePostprocess = linePostprocess ? &*linePostprocess : nullptr,
 	});
+	p.restore();
 }
 
 [[nodiscard]] std::optional<QColor> QuoteSupplementaryColor(
@@ -478,7 +723,76 @@ void AddTableVerticalBorderSegments(
 	return path;
 }
 
-void PaintTableBlock(
+[[nodiscard]] QRect TableRowRevealBand(
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		int rowIndex) {
+	if (block.visibleTableRect.isEmpty()
+		|| rowIndex < 0
+		|| rowIndex >= int(block.tableRows.size())) {
+		return QRect();
+	}
+	const auto &row = block.tableRows[rowIndex];
+	if (row.outer.height() <= 0) {
+		return QRect();
+	}
+	const auto border = std::max(TableBorder(block, st), 0);
+	const auto top = (rowIndex == 0)
+		? block.visibleTableRect.y()
+		: row.outer.y();
+	const auto tableBottom = block.visibleTableRect.y()
+		+ block.visibleTableRect.height();
+	const auto bottom = std::min(
+		row.outer.y() + row.outer.height() + border,
+		tableBottom);
+	if (bottom <= top) {
+		return QRect();
+	}
+	return QRect(
+		block.visibleTableRect.x(),
+		top,
+		block.visibleTableRect.width(),
+		bottom - top);
+}
+
+[[nodiscard]] auto TableCellsForRowBand(
+		const TableOwnershipGrid &ownership,
+		int rowIndex,
+		QRect rowBand) -> std::vector<const LaidOutTableCell*> {
+	if (rowIndex < 0 || rowIndex >= int(ownership.size())) {
+		return {};
+	}
+	auto result = std::vector<const LaidOutTableCell*>();
+	result.reserve(ownership[rowIndex].size());
+	for (const auto &slot : ownership[rowIndex]) {
+		const auto cell = slot.cell;
+		if (!cell || !cell->outer.intersects(rowBand)) {
+			continue;
+		} else if (std::find(result.begin(), result.end(), cell)
+			!= result.end()) {
+			continue;
+		}
+		result.push_back(cell);
+	}
+	return result;
+}
+
+[[nodiscard]] int TableCellOriginRow(
+		const LaidOutBlock &block,
+		const LaidOutTableCell *cell) {
+	for (auto rowIndex = 0;
+		rowIndex != int(block.tableRows.size());
+		++rowIndex) {
+		for (const auto &current : block.tableRows[rowIndex].cells) {
+			if (&current == cell) {
+				return rowIndex;
+			}
+		}
+	}
+	return -1;
+}
+
+void PaintTableCaption(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
@@ -496,7 +810,13 @@ void PaintTableBlock(
 				context.selectionState,
 				block.secondarySegmentIndex));
 	}
+}
 
+void PaintWholeTable(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
 	const auto tableClip = context.clip.intersected(block.visibleTableRect);
 	if (tableClip.isEmpty()) {
 		return;
@@ -592,6 +912,138 @@ void PaintTableBlock(
 	p.restore();
 }
 
+void PaintTableRowBand(
+		Painter &p,
+		const LaidOutBlock &block,
+		const TableOwnershipGrid &ownership,
+		int rowIndex,
+		QRect rowBand,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	const auto rowClip = context.clip.intersected(rowBand);
+	if (rowClip.isEmpty()) {
+		return;
+	}
+
+	const auto border = TableBorder(block, st);
+	const auto radius = st.table.radius;
+	const auto shapePath = TableShapePath(block, border, radius);
+	const auto &paintSt = PaintStyle(context, st);
+	const auto cells = TableCellsForRowBand(ownership, rowIndex, rowBand);
+	const auto rowContext = ClippedContext(
+		RevealSuppressedContext(context),
+		rowClip);
+
+	p.save();
+	p.setClipRect(rowClip, Qt::IntersectClip);
+	p.save();
+	p.setClipPath(shapePath, Qt::IntersectClip);
+	for (const auto cell : cells) {
+		const auto originRow = TableCellOriginRow(block, cell);
+		const auto striped = block.tableStriped
+			&& (originRow >= 0)
+			&& ((originRow % 2) == 0);
+		if (!cell->header && !striped) {
+			continue;
+		}
+		p.fillRect(cell->outer, TableHeaderBg(paintSt.table));
+	}
+	p.restore();
+
+	if (border > 0 && !block.tableRect.isEmpty()) {
+		const auto path = TableBorderPath(block, border, shapePath);
+		auto hq = PainterHighQualityEnabler(p);
+		auto pen = QPen(
+			WithOpacity(
+				paintSt.table.borderFg,
+				paintSt.table.headerBgOpacity * 3),
+			border);
+		p.setPen(pen);
+		p.setBrush(Qt::NoBrush);
+		p.drawPath(path);
+	}
+
+	p.setPen(paintSt.textColor->c);
+	for (const auto cell : cells) {
+		if (!cell->textRect.intersects(rowBand)) {
+			continue;
+		}
+		PaintTextLeaf(
+			p,
+			cell->leaf,
+			rowContext,
+			cell->textRect,
+			cell->textWidth,
+			cell->align,
+			TextSelectionForSegmentIndex(
+				context.selectionState,
+				cell->segmentIndex));
+	}
+
+	if (block.segmentIndex >= 0
+		&& WholeSegmentSelected(
+			context.selectionState,
+			block.segmentIndex)) {
+		p.save();
+		p.setClipPath(shapePath, Qt::IntersectClip);
+		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
+		p.restore();
+	}
+
+	if (block.overflowed) {
+		const auto indicatorWidth = std::min(
+			std::max(st.table.overflowWidth, 1),
+			block.visibleTableRect.width());
+		p.save();
+		p.setClipPath(shapePath, Qt::IntersectClip);
+		p.fillRect(
+			QRect(
+				block.visibleTableRect.x()
+					+ block.visibleTableRect.width()
+					- indicatorWidth,
+				block.visibleTableRect.y(),
+				indicatorWidth,
+				block.visibleTableRect.height()),
+			paintSt.table.overflowFg->c);
+		p.restore();
+	}
+
+	p.restore();
+}
+
+void PaintTableBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	PaintTableCaption(p, block, st, context);
+	if (!context.reveal) {
+		PaintWholeTable(p, block, st, context);
+		return;
+	}
+
+	const auto ownership = BuildTableOwnershipGrid(block);
+	for (auto rowIndex = 0;
+		rowIndex != int(block.tableRows.size());
+		++rowIndex) {
+		const auto rowBand = TableRowRevealBand(block, st, rowIndex);
+		PaintRevealBand(
+			p,
+			context,
+			rowBand,
+			[&](Painter &p, const MarkdownArticlePaintContext &rowContext) {
+				PaintTableRowBand(
+					p,
+					block,
+					ownership,
+					rowIndex,
+					rowBand,
+					st,
+					rowContext);
+			});
+	}
+}
+
 void PaintDisplayMathBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -601,74 +1053,71 @@ void PaintDisplayMathBlock(
 		int devicePixelRatio,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	const auto formulaClip = context.clip.intersected(block.visibleFormulaRect);
-	if (formulaClip.isEmpty()) {
-		return;
-	}
-	const auto formulaContext = ClippedContext(context, formulaClip);
+	PaintRevealBand(
+		p,
+		context,
+		block.visibleFormulaRect,
+		[&](Painter &p, const MarkdownArticlePaintContext &formulaContext) {
+			const auto &paintSt = PaintStyle(formulaContext, st);
+			const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
+			p.setPen(paintSt.textColor->c);
+			const auto rendered = EnsureFormulaRendered(
+				formula,
+				FormulaRasterSlot(renderedFormulas, block.formulaIndex),
+				renderer,
+				devicePixelRatio,
+				st);
+			if (rendered.success) {
+				p.drawImage(
+					block.formulaRect.topLeft(),
+					ColorizedDisplayFormulaImage(
+						block,
+						rendered,
+						p.pen().color()));
+			}
+			if (!rendered.success) {
+				const auto radius = st.displayMath.fallbackRadius;
+				p.setPen(Qt::NoPen);
+				p.setBrush(paintSt.displayMath.fallbackBg->c);
+				if (radius > 0) {
+					auto hq = PainterHighQualityEnabler(p);
+					p.drawRoundedRect(block.formulaRect, radius, radius);
+				} else {
+					p.fillRect(block.formulaRect, paintSt.displayMath.fallbackBg->c);
+				}
+				p.setPen(paintSt.textColor->c);
+				PaintTextLeaf(
+					p,
+					block.fallbackLeaf,
+					formulaContext,
+					block.textRect,
+					block.textWidth);
+			}
 
-	p.save();
-	p.setClipRect(formulaClip);
+			if (block.segmentIndex >= 0
+				&& WholeSegmentSelected(
+					formulaContext.selectionState,
+					block.segmentIndex)) {
+				p.fillRect(
+					block.visibleFormulaRect,
+					p.textPalette().selectOverlay);
+			}
 
-	const auto &paintSt = PaintStyle(context, st);
-	const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
-	p.setPen(paintSt.textColor->c);
-	const auto rendered = EnsureFormulaRendered(
-		formula,
-		FormulaRasterSlot(renderedFormulas, block.formulaIndex),
-		renderer,
-		devicePixelRatio,
-		st);
-	if (rendered.success) {
-		p.drawImage(
-			block.formulaRect.topLeft(),
-			ColorizedDisplayFormulaImage(
-				block,
-				rendered,
-				p.pen().color()));
-	}
-	if (!rendered.success) {
-		const auto radius = st.displayMath.fallbackRadius;
-		p.setPen(Qt::NoPen);
-		p.setBrush(paintSt.displayMath.fallbackBg->c);
-		if (radius > 0) {
-			auto hq = PainterHighQualityEnabler(p);
-			p.drawRoundedRect(block.formulaRect, radius, radius);
-		} else {
-			p.fillRect(block.formulaRect, paintSt.displayMath.fallbackBg->c);
-		}
-		p.setPen(paintSt.textColor->c);
-		PaintTextLeaf(
-			p,
-			block.fallbackLeaf,
-			formulaContext,
-			block.textRect,
-			block.textWidth);
-	}
-
-	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(
-			context.selectionState,
-			block.segmentIndex)) {
-		p.fillRect(block.visibleFormulaRect, p.textPalette().selectOverlay);
-	}
-
-	if (block.overflowed) {
-		const auto indicatorWidth = std::min(
-			std::max(st.displayMath.overflowWidth, 1),
-			block.visibleFormulaRect.width());
-		p.fillRect(
-			QRect(
-				block.visibleFormulaRect.x()
-					+ block.visibleFormulaRect.width()
-					- indicatorWidth,
-				block.visibleFormulaRect.y(),
-				indicatorWidth,
-				block.visibleFormulaRect.height()),
-			paintSt.displayMath.overflowFg->c);
-	}
-
-	p.restore();
+			if (block.overflowed) {
+				const auto indicatorWidth = std::min(
+					std::max(st.displayMath.overflowWidth, 1),
+					block.visibleFormulaRect.width());
+				p.fillRect(
+					QRect(
+						block.visibleFormulaRect.x()
+							+ block.visibleFormulaRect.width()
+							- indicatorWidth,
+						block.visibleFormulaRect.y(),
+						indicatorWidth,
+						block.visibleFormulaRect.height()),
+					paintSt.displayMath.overflowFg->c);
+			}
+		});
 }
 
 void PaintQuoteBlock(
@@ -724,63 +1173,86 @@ void PaintPlaceholderBlock(
 		int outerWidth,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	const auto visible = context.clip.intersected(block.visibleMediaRect);
-	if (!visible.isEmpty()) {
-		const auto visibleContext = ClippedContext(context, visible);
-		p.save();
-		p.setClipRect(visible);
-		auto hq = PainterHighQualityEnabler(p);
-		if (block.activation.kind == MediaActivationKind::Embed
-			&& block.placeholderRuntime) {
-			const auto border = st.placeholder.border;
-			const auto radius = st.placeholder.radius;
-			const auto borderSkip = border / 2;
-			const auto borderRect = block.mediaRect.marginsRemoved(QMargins(
-				borderSkip,
-				borderSkip,
-				borderSkip,
-				borderSkip));
-			const auto active = ClickHandler::showAsActive(
-				block.placeholderRuntime->clickHandler);
-			const auto pressed = ClickHandler::showAsPressed(
-				block.placeholderRuntime->clickHandler);
-			p.setPen(Qt::NoPen);
-			p.setBrush(st.placeholder.bg);
-			p.drawRoundedRect(block.mediaRect, radius, radius);
-			if (active || pressed) {
-				p.setBrush(st.placeholder.bgActive);
+	PaintRevealBand(
+		p,
+		context,
+		block.visibleMediaRect,
+		[&](Painter &p, const MarkdownArticlePaintContext &visibleContext) {
+			auto hq = PainterHighQualityEnabler(p);
+			if (block.activation.kind == MediaActivationKind::Embed
+				&& block.placeholderRuntime) {
+				const auto border = st.placeholder.border;
+				const auto radius = st.placeholder.radius;
+				const auto borderSkip = border / 2;
+				const auto borderRect = block.mediaRect.marginsRemoved(QMargins(
+					borderSkip,
+					borderSkip,
+					borderSkip,
+					borderSkip));
+				const auto active = ClickHandler::showAsActive(
+					block.placeholderRuntime->clickHandler);
+				const auto pressed = ClickHandler::showAsPressed(
+					block.placeholderRuntime->clickHandler);
+				p.setPen(Qt::NoPen);
+				p.setBrush(st.placeholder.bg);
 				p.drawRoundedRect(block.mediaRect, radius, radius);
-			}
-			if (const auto &ripple = block.placeholderRuntime->ripple) {
-				ripple->paint(
-					p,
-					block.mediaRect.x(),
-					block.mediaRect.y(),
-					outerWidth,
-					&st.placeholder.rippleBg->c);
-			}
-			auto pen = QPen(st.placeholder.borderFg->c);
-			pen.setWidth(border);
-			p.setPen(pen);
-			p.setBrush(Qt::NoBrush);
-			p.drawRoundedRect(borderRect, radius, radius);
-			if (block.placeholderRuntime->loading) {
-				const auto size = QSize(
-					st.placeholder.spinnerSize,
-					st.placeholder.spinnerSize);
-				const auto spinner = style::centerrect(
-					block.mediaRect,
-					QRect(QPoint(), size));
-				Ui::InfiniteRadialAnimation::Draw(
-					p,
-					block.placeholderRuntime->loadingAnimation.computeState(),
-					spinner.topLeft(),
-					spinner.size(),
-					outerWidth,
-					QPen(st.placeholder.spinnerFg->c),
-					st.placeholder.spinnerWidth);
+				if (active || pressed) {
+					p.setBrush(st.placeholder.bgActive);
+					p.drawRoundedRect(block.mediaRect, radius, radius);
+				}
+				if (const auto &ripple = block.placeholderRuntime->ripple) {
+					ripple->paint(
+						p,
+						block.mediaRect.x(),
+						block.mediaRect.y(),
+						outerWidth,
+						&st.placeholder.rippleBg->c);
+				}
+				auto pen = QPen(st.placeholder.borderFg->c);
+				pen.setWidth(border);
+				p.setPen(pen);
+				p.setBrush(Qt::NoBrush);
+				p.drawRoundedRect(borderRect, radius, radius);
+				if (block.placeholderRuntime->loading) {
+					const auto size = QSize(
+						st.placeholder.spinnerSize,
+						st.placeholder.spinnerSize);
+					const auto spinner = style::centerrect(
+						block.mediaRect,
+						QRect(QPoint(), size));
+					Ui::InfiniteRadialAnimation::Draw(
+						p,
+						block.placeholderRuntime->loadingAnimation.computeState(),
+						spinner.topLeft(),
+						spinner.size(),
+						outerWidth,
+						QPen(st.placeholder.spinnerFg->c),
+						st.placeholder.spinnerWidth);
+				} else {
+					p.setPen(st.placeholder.labelFgActive->c);
+					PaintTextLeaf(
+						p,
+						block.labelLeaf,
+						visibleContext,
+						block.labelRect,
+						block.labelWidth,
+						style::al_center);
+				}
 			} else {
-				p.setPen(st.placeholder.labelFgActive->c);
+				const auto max = block.labelLeaf.maxWidth();
+				const auto radius = st.placeholder.radius;
+				p.setBrush(st.placeholder.bg);
+				p.setPen(Qt::NoPen);
+				const auto skip = (max < block.labelRect.width())
+					? ((block.labelRect.width() - max) / 2)
+					: 0;
+				p.drawRoundedRect(
+					block.labelRect.marginsRemoved(
+						{ skip, 0, skip, 0 }
+					).marginsAdded(st.placeholder.padding),
+					radius,
+					radius);
+				p.setPen(st.placeholder.labelFg->c);
 				PaintTextLeaf(
 					p,
 					block.labelLeaf,
@@ -789,37 +1261,13 @@ void PaintPlaceholderBlock(
 					block.labelWidth,
 					style::al_center);
 			}
-		} else {
-			const auto max = block.labelLeaf.maxWidth();
-			const auto radius = st.placeholder.radius;
-			p.setBrush(st.placeholder.bg);
-			p.setPen(Qt::NoPen);
-			const auto skip = (max < block.labelRect.width())
-				? ((block.labelRect.width() - max) / 2)
-				: 0;
-			p.drawRoundedRect(
-				block.labelRect.marginsRemoved(
-					{ skip, 0, skip, 0 }
-				).marginsAdded(st.placeholder.padding),
-				radius,
-				radius);
-			p.setPen(st.placeholder.labelFg->c);
-			PaintTextLeaf(
-				p,
-				block.labelLeaf,
-				visibleContext,
-				block.labelRect,
-				block.labelWidth,
-				style::al_center);
-		}
-		if (block.segmentIndex >= 0
-			&& WholeSegmentSelected(
-				context.selectionState,
-				block.segmentIndex)) {
-			p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
-		}
-		p.restore();
-	}
+			if (block.segmentIndex >= 0
+				&& WholeSegmentSelected(
+					visibleContext.selectionState,
+					block.segmentIndex)) {
+				p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
+			}
+		});
 	if (!block.textRect.isEmpty()) {
 		SetTextLeafPen(p, block, st, context);
 		PaintTextLeaf(
@@ -851,14 +1299,11 @@ void PaintEmbedPostBlock(
 		int outerWidth,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	const auto mediaClip = context.clip.intersected(block.mediaRect);
 	const auto &style = st.embedPost;
-	if (!mediaClip.isEmpty()) {
-		const auto mediaContext = ClippedContext(context, mediaClip);
-		RefreshBlockThumbnail(block, context);
-
-		p.save();
-		p.setClipRect(mediaClip);
+	const auto paintHeader = [&](
+			Painter &p,
+			const MarkdownArticlePaintContext &headerContext) {
+		RefreshBlockThumbnail(block, headerContext);
 		if (style.accentWidth > 0) {
 			p.fillRect(
 				QRect(
@@ -890,12 +1335,12 @@ void PaintEmbedPostBlock(
 			PaintTextLeaf(
 				p,
 				block.labelLeaf,
-				mediaContext,
+				headerContext,
 				block.labelRect,
 				block.labelWidth,
 				style::al_left,
 				TextSelectionForSegmentIndex(
-					context.selectionState,
+					headerContext.selectionState,
 					block.segmentIndex));
 		}
 		if (!block.subtitleRect.isEmpty()) {
@@ -903,15 +1348,60 @@ void PaintEmbedPostBlock(
 			PaintTextLeaf(
 				p,
 				block.subtitleLeaf,
-				mediaContext,
+				headerContext,
 				block.subtitleRect,
 				block.subtitleWidth,
 				style::al_left,
 				TextSelectionForSegmentIndex(
-					context.selectionState,
+					headerContext.selectionState,
 					block.secondarySegmentIndex));
 		}
-		p.restore();
+	};
+	if (context.reveal) {
+		if (!block.headerRect.isEmpty()) {
+			const auto headerBottom = block.headerRect.y()
+				+ block.headerRect.height();
+			PaintRevealBand(
+				p,
+				context,
+				QRect(
+					block.mediaRect.x(),
+					block.mediaRect.y(),
+					block.mediaRect.width(),
+					headerBottom - block.mediaRect.y()),
+				paintHeader);
+		} else if (block.children.empty()) {
+			PaintRevealBand(p, context, block.mediaRect, paintHeader);
+		}
+	} else {
+		const auto mediaClip = context.clip.intersected(block.mediaRect);
+		if (!mediaClip.isEmpty()) {
+			const auto mediaContext = ClippedContext(context, mediaClip);
+			p.save();
+			p.setClipRect(mediaClip);
+			paintHeader(p, mediaContext);
+			p.restore();
+		}
+	}
+	if (context.reveal
+		&& style.accentWidth > 0
+		&& !block.children.empty()) {
+		const auto top = !block.headerRect.isEmpty()
+			? block.headerRect.y() + block.headerRect.height()
+			: block.mediaRect.y();
+		const auto bottom = block.mediaRect.y() + block.mediaRect.height();
+		const auto accentRect = QRect(
+			block.mediaRect.x(),
+			top,
+			style.accentWidth,
+			std::max(bottom - top, 0));
+		const auto accentClip = context.clip.intersected(accentRect);
+		if (!accentClip.isEmpty()) {
+			p.save();
+			p.setClipRect(accentClip);
+			p.fillRect(accentRect, style.accentFg->c);
+			p.restore();
+		}
 	}
 	if (!block.bodyRect.isEmpty()) {
 		const auto bodyContext = ClippedContext(
@@ -968,22 +1458,21 @@ void PaintPersistentMediaBlock(
 		Painter &p,
 		const LaidOutBlock &block,
 		const MarkdownArticlePaintContext &context) {
-	if (!block.mediaBlock) {
-		return;
-	}
-	block.mediaBlock->paint(p, context);
-	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(
-			context.selectionState,
-			block.segmentIndex)) {
-		const auto visible = context.clip.intersected(block.visibleMediaRect);
-		if (!visible.isEmpty()) {
-			p.save();
-			p.setClipRect(visible);
-			p.fillRect(block.mediaRect, p.textPalette().selectOverlay);
-			p.restore();
-		}
-	}
+	PaintRevealBand(
+		p,
+		context,
+		block.visibleMediaRect,
+		[&](Painter &p, const MarkdownArticlePaintContext &mediaContext) {
+			if (block.mediaBlock) {
+				block.mediaBlock->paint(p, mediaContext);
+			}
+			if (block.segmentIndex >= 0
+				&& WholeSegmentSelected(
+					mediaContext.selectionState,
+					block.segmentIndex)) {
+				p.fillRect(block.mediaRect, p.textPalette().selectOverlay);
+			}
+		});
 }
 
 void PaintCardSurface(
@@ -1050,90 +1539,93 @@ void PaintRelatedArticleBlock(
 		const LaidOutBlock &block,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	const auto visible = context.clip.intersected(block.visibleMediaRect);
-	if (visible.isEmpty()) {
-		return;
-	}
-	const auto &style = st.relatedArticle;
-	const auto visibleContext = ClippedContext(context, visible);
-	RefreshBlockThumbnail(block, context);
-
-	p.save();
-	p.setClipRect(visible);
-	PaintCardSurface(
+	PaintRevealBand(
 		p,
-		block.mediaRect,
-		style.border,
-		style.borderFg,
-		style.bg,
-		style.radius);
-	if (!block.thumbnailRect.isEmpty()) {
-		p.fillRect(block.thumbnailRect, style.bg->c);
-		if (style.thumbnailRadius > 0) {
-			auto hq = PainterHighQualityEnabler(p);
-			auto path = RoundedRectPath(block.thumbnailRect, style.thumbnailRadius);
-			p.save();
-			p.setClipPath(path, Qt::IntersectClip);
-			(void)PaintThumbnailImage(
+		context,
+		block.visibleMediaRect,
+		[&](Painter &p, const MarkdownArticlePaintContext &visibleContext) {
+			const auto &style = st.relatedArticle;
+			RefreshBlockThumbnail(block, visibleContext);
+			PaintCardSurface(
 				p,
-				block.thumbnailRect,
-				block.thumbnailImage,
-				block.previousThumbnailImage);
-			p.restore();
-		} else {
-			(void)PaintThumbnailImage(
-				p,
-				block.thumbnailRect,
-				block.thumbnailImage,
-				block.previousThumbnailImage);
-		}
-	}
-	if (!block.labelRect.isEmpty()) {
-		p.setPen(st.textColor->c);
-		PaintRelatedArticleTextLeaf(
-			p,
-			block.labelLeaf,
-			visibleContext,
-			block.labelRect,
-			block.labelWidth,
-			style.titleLines);
-	}
-	if (!block.subtitleRect.isEmpty()) {
-		p.setPen(st.textColor->c);
-		PaintRelatedArticleTextLeaf(
-			p,
-			block.subtitleLeaf,
-			visibleContext,
-			block.subtitleRect,
-			block.subtitleWidth,
-			style.subtitleLines);
-	}
-	if (!block.actionRect.isEmpty()) {
-		p.setPen(st.supplementaryTextColor->c);
-		PaintRelatedArticleTextLeaf(
-			p,
-			block.actionLeaf,
-			visibleContext,
-			block.actionRect,
-			block.actionWidth,
-			style.footerLines);
-	}
-	if (block.segmentIndex >= 0
-		&& WholeSegmentSelected(
-			context.selectionState,
-			block.segmentIndex)) {
-		p.fillRect(block.visibleMediaRect, p.textPalette().selectOverlay);
-	}
-	if (style.separator > 0) {
-		p.fillRect(
-			QRect(
-				block.mediaRect.x(),
-				block.mediaRect.y() + block.mediaRect.height() - style.separator,
-				block.mediaRect.width(),
-				style.separator),
-			style.separatorFg->c);
-	}
-	p.restore();
+				block.mediaRect,
+				style.border,
+				style.borderFg,
+				style.bg,
+				style.radius);
+			if (!block.thumbnailRect.isEmpty()) {
+				p.fillRect(block.thumbnailRect, style.bg->c);
+				if (style.thumbnailRadius > 0) {
+					auto hq = PainterHighQualityEnabler(p);
+					auto path = RoundedRectPath(
+						block.thumbnailRect,
+						style.thumbnailRadius);
+					p.save();
+					p.setClipPath(path, Qt::IntersectClip);
+					(void)PaintThumbnailImage(
+						p,
+						block.thumbnailRect,
+						block.thumbnailImage,
+						block.previousThumbnailImage);
+					p.restore();
+				} else {
+					(void)PaintThumbnailImage(
+						p,
+						block.thumbnailRect,
+						block.thumbnailImage,
+						block.previousThumbnailImage);
+				}
+			}
+			if (!block.labelRect.isEmpty()) {
+				p.setPen(st.textColor->c);
+				PaintRelatedArticleTextLeaf(
+					p,
+					block.labelLeaf,
+					visibleContext,
+					block.labelRect,
+					block.labelWidth,
+					style.titleLines);
+			}
+			if (!block.subtitleRect.isEmpty()) {
+				p.setPen(st.textColor->c);
+				PaintRelatedArticleTextLeaf(
+					p,
+					block.subtitleLeaf,
+					visibleContext,
+					block.subtitleRect,
+					block.subtitleWidth,
+					style.subtitleLines);
+			}
+			if (!block.actionRect.isEmpty()) {
+				p.setPen(st.supplementaryTextColor->c);
+				PaintRelatedArticleTextLeaf(
+					p,
+					block.actionLeaf,
+					visibleContext,
+					block.actionRect,
+					block.actionWidth,
+					style.footerLines);
+			}
+			if (block.segmentIndex >= 0
+				&& WholeSegmentSelected(
+					visibleContext.selectionState,
+					block.segmentIndex)) {
+				p.fillRect(
+					block.visibleMediaRect,
+					p.textPalette().selectOverlay);
+			}
+			if (style.separator > 0) {
+				p.fillRect(
+					QRect(
+						block.mediaRect.x(),
+						block.mediaRect.y()
+							+ block.mediaRect.height()
+							- style.separator,
+						block.mediaRect.width(),
+						style.separator),
+					style.separatorFg->c);
+			}
+		});
 }
 
 void PaintPhotoBlock(
@@ -1168,26 +1660,31 @@ void PaintGroupedMediaBlock(
 		const LaidOutBlock &block,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	if (block.mediaBlock) {
-		block.mediaBlock->paint(p, context);
-		if ((block.segmentIndex >= 0)
-			&& WholeSegmentSelected(
-				context.selectionState,
-				block.segmentIndex)) {
-			const auto visible = context.clip.intersected(block.visibleMediaRect);
-			if (!visible.isEmpty()) {
-				const auto &style = PaintStyle(context, st).groupedMedia;
-				auto overlay = p.textPalette().selectOverlay->c;
-				overlay.setAlphaF(std::clamp(style.overlayOpacity, 0., 1.));
-				p.save();
-				p.setClipRect(visible);
-				p.fillPath(RoundedRectPath(block.mediaRect, style.radius), overlay);
-				p.restore();
+	PaintRevealBand(
+		p,
+		context,
+		block.visibleMediaRect,
+		[&](Painter &p, const MarkdownArticlePaintContext &mediaContext) {
+			if (block.mediaBlock) {
+				block.mediaBlock->paint(p, mediaContext);
+				if ((block.segmentIndex >= 0)
+					&& WholeSegmentSelected(
+						mediaContext.selectionState,
+						block.segmentIndex)) {
+					const auto &style = PaintStyle(
+						mediaContext,
+						st).groupedMedia;
+					auto overlay = p.textPalette().selectOverlay->c;
+					overlay.setAlphaF(std::clamp(
+						style.overlayOpacity,
+						0.,
+						1.));
+					p.fillPath(
+						RoundedRectPath(block.mediaRect, style.radius),
+						overlay);
+				}
 			}
-		}
-		PaintMediaCaption(p, block, st, context);
-		return;
-	}
+		});
 	PaintMediaCaption(p, block, st, context);
 }
 
@@ -1332,7 +1829,13 @@ void PaintBlock(
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::Rule:
-		p.fillRect(block.outer, paintSt.rule.fg->c);
+		PaintRevealBand(
+			p,
+			context,
+			block.outer,
+			[&](Painter &p, const MarkdownArticlePaintContext &) {
+				p.fillRect(block.outer, paintSt.rule.fg->c);
+			});
 		break;
 	case PreparedBlockKind::List:
 		PaintBlocks(
@@ -1347,19 +1850,23 @@ void PaintBlock(
 			context);
 		break;
 	case PreparedBlockKind::ListItem:
-		if (block.taskState != TaskState::None) {
-			PaintTaskMarker(p, block, st, context, outerWidth);
-		} else if (block.listKind == ListKind::Ordered
-			&& !block.markerRect.isEmpty()) {
-			p.setPen(paintSt.textColor->c);
-			PaintTextLeaf(
-				p,
-				block.marker,
-				context,
-				block.markerRect,
-				block.markerWidth);
-		} else if (block.listKind == ListKind::Bullet) {
-			PaintBulletMarker(p, block, st, context);
+		if (!context.reveal
+			|| context.reveal->activeLine >= context.reveal->nextLine) {
+			const auto markerContext = RevealSuppressedContext(context);
+			if (block.taskState != TaskState::None) {
+				PaintTaskMarker(p, block, st, markerContext, outerWidth);
+			} else if (block.listKind == ListKind::Ordered
+				&& !block.markerRect.isEmpty()) {
+				p.setPen(paintSt.textColor->c);
+				PaintTextLeaf(
+					p,
+					block.marker,
+					markerContext,
+					block.markerRect,
+					block.markerWidth);
+			} else if (block.listKind == ListKind::Bullet) {
+				PaintBulletMarker(p, block, st, markerContext);
+			}
 		}
 		PaintBlocks(
 			p,
@@ -1463,6 +1970,7 @@ void PaintBlocks(
 		const MarkdownArticlePaintContext &context) {
 	for (const auto &block : blocks) {
 		if (block.outer.bottom() < context.clip.top()) {
+			AdvanceRevealLinesForBlock(context, block, st);
 			continue;
 		} else if (block.outer.top() > context.clip.bottom()) {
 			break;

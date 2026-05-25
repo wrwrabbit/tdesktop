@@ -8880,6 +8880,349 @@ void CheckRichPageMessageSelectionRegressionCoverage(bool *ok) {
 	}
 }
 
+void CheckMarkdownArticleRevealCoverage(bool *ok) {
+	const auto renderer = std::make_shared<MathRenderer>();
+	const auto &articleSt = st::defaultMarkdown;
+	const auto mediaRuntime = std::shared_ptr<MediaRuntime>();
+	const auto textBandLeft = [&](int width) {
+		return articleSt.pagePadding.left()
+			+ articleSt.textPadding.left();
+	};
+	const auto textBandWidth = [&](int width) {
+		return std::max(
+			width
+				- articleSt.pagePadding.left()
+				- articleSt.pagePadding.right()
+				- articleSt.textPadding.left()
+				- articleSt.textPadding.right(),
+			1);
+	};
+	const auto mediaBandLeft = [&](int width) {
+		return articleSt.pagePadding.left()
+			+ articleSt.mediaPadding.left();
+	};
+	const auto mediaBandWidth = [&](int width) {
+		return std::max(
+			width
+				- articleSt.pagePadding.left()
+				- articleSt.pagePadding.right()
+				- articleSt.mediaPadding.left()
+				- articleSt.mediaPadding.right(),
+			1);
+	};
+	const auto countTextLines = [&](
+			const TextWithEntities &text,
+			const style::TextStyle &textStyle,
+			int width) {
+		auto leaf = Ui::Text::String();
+		SetTextLeaf(
+			&leaf,
+			textStyle,
+			articleSt,
+			text,
+			nullptr,
+			nullptr,
+			mediaRuntime,
+			width);
+		return leaf.countLinesGeometry(width, true);
+	};
+	const auto hasPaintedPixelsInRect = [](
+			const QImage &image,
+			QRect rect) {
+		rect = rect.intersected(QRect(QPoint(), image.size()));
+		if (rect.isEmpty()) {
+			return false;
+		}
+		for (auto y = rect.top(); y <= rect.bottom(); ++y) {
+			for (auto x = rect.left(); x <= rect.right(); ++x) {
+				if (image.pixel(x, y) & 0xFF000000U) {
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+	const auto paintRevealArticle = [&](
+			MarkdownArticle *article,
+			int width,
+			int height,
+			int activeLine,
+			int *postprocessCount) {
+		const auto previousDevicePixelRatio = style::DevicePixelRatio();
+		style::SetDevicePixelRatio(1);
+
+		auto image = QImage(
+			QSize(width, height),
+			QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::transparent);
+		auto cache = QImage();
+		auto postprocess = MarkdownArticleRevealPostprocess{
+			.method = [=](int lineIndex) -> Fn<void(QImage&)> {
+				if (lineIndex != activeLine) {
+					return nullptr;
+				}
+				return [=](QImage &) {
+					++*postprocessCount;
+				};
+			},
+			.cache = &cache,
+		};
+		auto reveal = MarkdownArticleRevealPaintState{
+			.activeLine = activeLine,
+			.nextLine = 0,
+			.postprocess = &postprocess,
+		};
+		{
+			auto painter = Painter(&image);
+			WithStandaloneArticlePaintContext(
+				width,
+				height,
+				MarkdownArticlePaintCaches(),
+				std::nullopt,
+				[&](MarkdownArticlePaintContext context) {
+					context.reveal = &reveal;
+					article->paint(painter, context);
+				});
+		}
+
+		style::SetDevicePixelRatio(previousDevicePixelRatio);
+		return image;
+	};
+
+	const auto paragraphLabel = FromLatin1("markdown-article-reveal-paragraph");
+	const auto paragraphText = TextWithEntities::Simple(FromLatin1(
+		"Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda "
+		"mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega."));
+	auto paragraphContent = MarkdownArticleContent();
+	paragraphContent.blocks.blocks.push_back(PreparedBlock{
+		.kind = PreparedBlockKind::Paragraph,
+		.text = paragraphText,
+	});
+	const auto paragraphWidth = 220;
+	auto paragraphHeight = 0;
+	auto paragraphArticle = BuildArticleForTest(
+		std::move(paragraphContent),
+		renderer,
+		paragraphWidth,
+		&paragraphHeight);
+	const auto paragraphLines = paragraphArticle->countRevealLinesGeometry(
+		paragraphWidth);
+	const auto paragraphTextWidth = textBandWidth(paragraphWidth);
+	const auto paragraphControl = countTextLines(
+		paragraphText,
+		articleSt.body,
+		paragraphTextWidth);
+	Check(
+		paragraphControl.size() > 1,
+		paragraphLabel + FromLatin1(" control wraps"),
+		ok);
+	Check(
+		paragraphLines.size() == paragraphControl.size(),
+		paragraphLabel + FromLatin1(" reveal line count"),
+		ok);
+	for (auto i = size_t(0), count = std::min(
+			paragraphLines.size(),
+			paragraphControl.size());
+		i != count;
+		++i) {
+		const auto &line = paragraphLines[i];
+		const auto &control = paragraphControl[i];
+		const auto lineNumber = QString::number(int(i));
+		Check(
+			line.left == textBandLeft(paragraphWidth) + control.left,
+			paragraphLabel + FromLatin1(" line left ") + lineNumber,
+			ok);
+		Check(
+			line.width == control.width,
+			paragraphLabel + FromLatin1(" line width ") + lineNumber,
+			ok);
+		Check(
+			line.bottom == articleSt.pagePadding.top() + control.bottom,
+			paragraphLabel + FromLatin1(" line bottom ") + lineNumber,
+			ok);
+		Check(
+			line.baseline == articleSt.pagePadding.top() + control.baseline,
+			paragraphLabel + FromLatin1(" line baseline ") + lineNumber,
+			ok);
+		Check(
+			line.rtl == control.rtl,
+			paragraphLabel + FromLatin1(" line rtl ") + lineNumber,
+			ok);
+	}
+
+	auto paragraphPostprocessCount = 0;
+	(void)paintRevealArticle(
+		paragraphArticle.get(),
+		paragraphWidth,
+		paragraphHeight,
+		0,
+		&paragraphPostprocessCount);
+	Check(
+		paragraphPostprocessCount == 1,
+		paragraphLabel + FromLatin1(" active line postprocess"),
+		ok);
+
+	const auto tableLabel = FromLatin1("markdown-article-reveal-table");
+	const auto tableCaption = FromLatin1("Reveal table caption");
+	auto tableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			tableCaption,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(FromLatin1("Span"), 1, 2),
+					NativeIvTableCell(FromLatin1("A")),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(FromLatin1("B")),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(FromLatin1("C")),
+					NativeIvTableCell(FromLatin1("D")),
+				}),
+			},
+			true,
+			true),
+	});
+	auto tablePrepared = TryPrepareNativeInstantView({
+		.source = &tableSource,
+	});
+	Check(tablePrepared.supported(), tableLabel + FromLatin1(" supported"), ok);
+	Check(
+		!tablePrepared.content.failure.failed(),
+		tableLabel + FromLatin1(" prepare failure"),
+		ok);
+	if (tablePrepared.supported()
+		&& !tablePrepared.content.failure.failed()) {
+		const auto tableWidth = 360;
+		auto tableHeight = 0;
+		auto tableArticle = BuildArticleForTest(
+			std::move(tablePrepared.content),
+			renderer,
+			tableWidth,
+			&tableHeight);
+		const auto tableLines = tableArticle->countRevealLinesGeometry(
+			tableWidth);
+		const auto tableCaptionLines = countTextLines(
+			TextWithEntities::Simple(tableCaption),
+			articleSt.body,
+			textBandWidth(tableWidth));
+		const auto rowLineStart = int(tableCaptionLines.size());
+		Check(
+			rowLineStart > 0,
+			tableLabel + FromLatin1(" caption lines"),
+			ok);
+		Check(
+			int(tableLines.size()) == rowLineStart + 3,
+			tableLabel + FromLatin1(" row-band count"),
+			ok);
+		auto previousBottom = 0;
+		for (auto i = 0; i != int(tableLines.size()); ++i) {
+			Check(
+				tableLines[i].bottom > previousBottom,
+				tableLabel + FromLatin1(" increasing bottom ")
+					+ QString::number(i),
+				ok);
+			previousBottom = tableLines[i].bottom;
+		}
+		for (auto i = 0;
+			i != std::min<int>(rowLineStart, int(tableLines.size()));
+			++i) {
+			Check(
+				tableLines[i].width == tableCaptionLines[i].width,
+				tableLabel + FromLatin1(" caption width ")
+					+ QString::number(i),
+				ok);
+		}
+		if (int(tableLines.size()) >= rowLineStart + 3) {
+			const auto rowWidth = tableLines[rowLineStart].width;
+			const auto rowLeft = tableLines[rowLineStart].left;
+			Check(
+				rowWidth > 0,
+				tableLabel + FromLatin1(" positive row width"),
+				ok);
+			for (auto i = 0; i != 3; ++i) {
+				const auto &line = tableLines[rowLineStart + i];
+				Check(
+					line.left == rowLeft && line.width == rowWidth,
+					tableLabel + FromLatin1(" matching row band ")
+						+ QString::number(i),
+					ok);
+			}
+
+			auto tablePostprocessCount = 0;
+			const auto revealedTable = paintRevealArticle(
+				tableArticle.get(),
+				tableWidth,
+				tableHeight,
+				rowLineStart,
+				&tablePostprocessCount);
+			Check(
+				tablePostprocessCount == 1,
+				tableLabel + FromLatin1(" row postprocess"),
+				ok);
+			const auto rowBottom = tableLines[rowLineStart].bottom;
+			Check(
+				rowBottom < tableHeight,
+				tableLabel + FromLatin1(" future row area"),
+				ok);
+			if (rowBottom < tableHeight) {
+				Check(
+					!hasPaintedPixelsInRect(
+						revealedTable,
+						QRect(
+							0,
+							rowBottom,
+							tableWidth,
+							tableHeight - rowBottom)),
+					tableLabel + FromLatin1(" future rows transparent"),
+					ok);
+			}
+		}
+	}
+
+	const auto mediaLabel = FromLatin1("markdown-article-reveal-placeholder");
+	const auto placeholderCaption = TextWithEntities::Simple(FromLatin1(
+		"Placeholder caption follows the media band."));
+	auto placeholder = PreparedBlock();
+	placeholder.kind = PreparedBlockKind::Placeholder;
+	placeholder.text = placeholderCaption;
+	placeholder.placeholder.label = FromLatin1("Reveal placeholder media");
+	placeholder.placeholder.copyText = placeholder.placeholder.label;
+	auto placeholderContent = MarkdownArticleContent();
+	placeholderContent.blocks.blocks.push_back(std::move(placeholder));
+	const auto mediaWidth = 320;
+	auto mediaHeight = 0;
+	auto mediaArticle = BuildArticleForTest(
+		std::move(placeholderContent),
+		renderer,
+		mediaWidth,
+		&mediaHeight);
+	const auto mediaLines = mediaArticle->countRevealLinesGeometry(mediaWidth);
+	const auto captionLines = countTextLines(
+		placeholderCaption,
+		articleSt.body,
+		textBandWidth(mediaWidth));
+	Check(
+		int(mediaLines.size()) == 1 + int(captionLines.size()),
+		mediaLabel + FromLatin1(" line count"),
+		ok);
+	if (!mediaLines.empty()) {
+		Check(
+			mediaLines.front().left == mediaBandLeft(mediaWidth)
+				&& mediaLines.front().width == mediaBandWidth(mediaWidth)
+				&& mediaLines.front().bottom > 0,
+			mediaLabel + FromLatin1(" media band geometry"),
+			ok);
+		for (auto i = 1; i != int(mediaLines.size()); ++i) {
+			Check(
+				mediaLines[i].bottom > mediaLines.front().bottom,
+				mediaLabel + FromLatin1(" caption after media ")
+					+ QString::number(i),
+				ok);
+		}
+	}
+}
+
 void CheckCodeBlockAsyncSyntaxHighlightCoverage(bool *ok) {
 	const auto label = u"generated-code-block-async-highlight"_q;
 	const auto parsed = ParseMarkdownForIv(QByteArray(R"(```cpp
@@ -14913,6 +15256,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckCodeBlockSelectionExportCoverage(&ok);
 	CheckRichPageMessageSelectionRegressionCoverage(&ok);
+	CheckMarkdownArticleRevealCoverage(&ok);
 	CheckCodeBlockAsyncSyntaxHighlightCoverage(&ok);
 	CheckPrepareCoverage(markdownFixture, latexFixture, &ok);
 	CheckPrepareLinkClassification(markdownFixture.path, &ok);

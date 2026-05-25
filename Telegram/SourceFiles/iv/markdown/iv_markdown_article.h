@@ -122,6 +122,19 @@ struct MarkdownArticlePaintCaches {
 	std::optional<QColor> supplementaryColorOverride;
 };
 
+using MarkdownArticleRevealLine = Ui::Text::LineLayoutInfo;
+
+struct MarkdownArticleRevealPostprocess {
+	Fn<Fn<void(QImage&)>(int lineIndex)> method;
+	not_null<QImage*> cache;
+};
+
+struct MarkdownArticleRevealPaintState {
+	int activeLine = -1;
+	int nextLine = 0;
+	const MarkdownArticleRevealPostprocess *postprocess = nullptr;
+};
+
 struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {
 	explicit MarkdownArticlePaintContext(const Ui::ChatPaintContext &context)
 	: Ui::ChatPaintContext(context) {
@@ -129,6 +142,7 @@ struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {
 
 	MarkdownArticlePaintCaches caches;
 	PaintSelectionState selectionState;
+	MarkdownArticleRevealPaintState *reveal = nullptr;
 
 	[[nodiscard]] MarkdownArticlePaintContext translated(int x, int y) const {
 		auto result = *this;
@@ -178,6 +192,8 @@ public:
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int lastLayoutWidth() const;
 	[[nodiscard]] int resizeGetHeight(int width);
+	[[nodiscard]] auto countRevealLinesGeometry(int width)
+	-> std::vector<MarkdownArticleRevealLine>;
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 	void paint(Painter &p, const MarkdownArticlePaintContext &context) const;
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(

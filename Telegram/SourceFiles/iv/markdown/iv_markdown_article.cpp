@@ -160,6 +160,224 @@ void CollectPlaceholderIds(
 	return nullptr;
 }
 
+void AppendRevealLine(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		int left,
+		int width,
+		int bottom,
+		int baseline,
+		bool rtl) {
+	if (width <= 0) {
+		return;
+	}
+	const auto previousBottom = lines->empty()
+		? std::numeric_limits<int>::lowest()
+		: lines->back().bottom;
+	if (bottom <= previousBottom) {
+		return;
+	}
+	lines->push_back({
+		.left = left,
+		.width = width,
+		.bottom = bottom,
+		.rtl = rtl,
+		.baseline = baseline,
+	});
+}
+
+void AppendGenericRevealBand(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		QRect rect) {
+	if (rect.isEmpty()) {
+		return;
+	}
+	const auto bottom = rect.y() + rect.height();
+	AppendRevealLine(
+		lines,
+		rect.x(),
+		rect.width(),
+		bottom,
+		bottom,
+		false);
+}
+
+void AppendTextRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const Ui::Text::String &leaf,
+		QRect textRect,
+		int textWidth) {
+	if (textRect.isEmpty() || (textWidth <= 0)) {
+		return;
+	}
+	const auto geometry = leaf.countLinesGeometry(textWidth, true);
+	for (const auto &line : geometry) {
+		AppendRevealLine(
+			lines,
+			textRect.x() + line.left,
+			line.width,
+			textRect.y() + line.bottom,
+			textRect.y() + line.baseline,
+			line.rtl);
+	}
+}
+
+void AppendBlocksRevealLines(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st,
+		std::vector<MarkdownArticleRevealLine> *lines);
+
+void AppendTableRowRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	if (block.visibleTableRect.isEmpty()) {
+		return;
+	}
+	const auto border = std::max(block.tableBordered ? st.table.border : 0, 0);
+	const auto tableBottom = block.visibleTableRect.y()
+		+ block.visibleTableRect.height();
+	for (const auto &row : block.tableRows) {
+		if (row.outer.height() <= 0) {
+			continue;
+		}
+		const auto bottom = std::min(
+			row.outer.y() + row.outer.height() + border,
+			tableBottom);
+		AppendRevealLine(
+			lines,
+			block.visibleTableRect.x(),
+			block.visibleTableRect.width(),
+			bottom,
+			bottom,
+			false);
+	}
+}
+
+void AppendTableRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	AppendTextRevealLines(
+		lines,
+		block.leaf,
+		block.textRect,
+		block.textWidth);
+	AppendTableRowRevealLines(lines, block, st);
+}
+
+void AppendMediaRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block) {
+	AppendGenericRevealBand(lines, block.visibleMediaRect);
+	AppendTextRevealLines(
+		lines,
+		block.leaf,
+		block.textRect,
+		block.textWidth);
+}
+
+void AppendEmbedPostRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	if (!block.headerRect.isEmpty()) {
+		const auto bottom = block.headerRect.y() + block.headerRect.height();
+		AppendRevealLine(
+			lines,
+			block.mediaRect.x(),
+			block.mediaRect.width(),
+			bottom,
+			bottom,
+			false);
+	} else if (block.children.empty()) {
+		AppendGenericRevealBand(lines, block.mediaRect);
+	}
+	AppendBlocksRevealLines(block.children, st, lines);
+	AppendTextRevealLines(
+		lines,
+		block.leaf,
+		block.textRect,
+		block.textWidth);
+}
+
+void AppendDetailsRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	AppendTextRevealLines(
+		lines,
+		block.leaf,
+		block.textRect,
+		block.textWidth);
+	AppendBlocksRevealLines(block.children, st, lines);
+}
+
+void AppendBlockRevealLines(
+		std::vector<MarkdownArticleRevealLine> *lines,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	switch (block.kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+		AppendTextRevealLines(
+			lines,
+			block.leaf,
+			block.textRect,
+			block.textWidth);
+		break;
+	case PreparedBlockKind::Rule:
+		AppendGenericRevealBand(lines, block.outer);
+		break;
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+		AppendBlocksRevealLines(block.children, st, lines);
+		break;
+	case PreparedBlockKind::DisplayMath:
+		AppendGenericRevealBand(lines, block.visibleFormulaRect);
+		break;
+	case PreparedBlockKind::Table:
+		AppendTableRevealLines(lines, block, st);
+		break;
+	case PreparedBlockKind::Details:
+		AppendDetailsRevealLines(lines, block, st);
+		break;
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::Placeholder:
+		AppendMediaRevealLines(lines, block);
+		break;
+	case PreparedBlockKind::RelatedArticle:
+		AppendGenericRevealBand(lines, block.visibleMediaRect);
+		break;
+	case PreparedBlockKind::EmbedPost:
+		AppendEmbedPostRevealLines(lines, block, st);
+		break;
+	}
+}
+
+void AppendBlocksRevealLines(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st,
+		std::vector<MarkdownArticleRevealLine> *lines) {
+	for (const auto &block : blocks) {
+		AppendBlockRevealLines(lines, block, st);
+	}
+}
+
+[[nodiscard]] std::vector<MarkdownArticleRevealLine> CollectRevealLines(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st) {
+	auto result = std::vector<MarkdownArticleRevealLine>();
+	AppendBlocksRevealLines(blocks, st, &result);
+	return result;
+}
+
 [[nodiscard]] PendingHighlightKey PendingHighlightKeyForBlock(
 		const LaidOutBlock &block) {
 	return {
@@ -467,6 +685,9 @@ public:
 
 	[[nodiscard]] int resizeGetHeight(int width);
 
+	[[nodiscard]] auto countRevealLinesGeometry(int width)
+	-> std::vector<MarkdownArticleRevealLine>;
+
 	void setVisibleTopBottom(int visibleTop, int visibleBottom);
 
 	void paint(Painter &p, const MarkdownArticlePaintContext &context);
@@ -663,6 +884,12 @@ int MarkdownArticle::Impl::lastLayoutWidth() const {
 int MarkdownArticle::Impl::resizeGetHeight(int width) {
 	relayout(width);
 	return std::max(_height, 1);
+}
+
+auto MarkdownArticle::Impl::countRevealLinesGeometry(int width)
+-> std::vector<MarkdownArticleRevealLine> {
+	relayout(width);
+	return CollectRevealLines(_blocks, layoutStyle());
 }
 
 void MarkdownArticle::Impl::setVisibleTopBottom(int visibleTop, int visibleBottom) {
@@ -1324,6 +1551,11 @@ int MarkdownArticle::lastLayoutWidth() const {
 
 int MarkdownArticle::resizeGetHeight(int width) {
 	return _impl->resizeGetHeight(width);
+}
+
+auto MarkdownArticle::countRevealLinesGeometry(int width)
+-> std::vector<MarkdownArticleRevealLine> {
+	return _impl->countRevealLinesGeometry(width);
 }
 
 void MarkdownArticle::setVisibleTopBottom(int visibleTop, int visibleBottom) {

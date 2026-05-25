@@ -86,6 +86,10 @@ constexpr auto kLineHeightAppearDuration = crl::time(100);
 constexpr auto kLineHeightAppearFinalDuration = crl::time(60);
 constexpr auto kMinWidthAppearDuration = crl::time(160);
 
+[[nodiscard]] int RevealLineRight(const Ui::Text::LineLayoutInfo &line) {
+	return line.left + line.width;
+}
+
 using PreparedLink = Iv::Markdown::PreparedLink;
 using PreparedLinkKind = Iv::Markdown::PreparedLinkKind;
 using MediaActivation = Iv::Markdown::MediaActivation;
@@ -335,7 +339,10 @@ void ApplyRevealGradient(
 	auto p = QPainter(&cache);
 	p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
 	if (lineRtl) {
-		const auto rightEdge = availableWidth - revealedWidth;
+		const auto clampedAvailableWidth = std::min(
+			std::max(availableWidth, 0),
+			cacheW);
+		const auto rightEdge = clampedAvailableWidth - revealedWidth;
 		p.fillRect(
 			QRect(0, 0, rightEdge, cacheH),
 			Qt::transparent);
@@ -1367,16 +1374,9 @@ QSize Message::performCountOptimalSize() {
 		minHeight += textHeightFor(bubbleTextWidth(maxWidth));
 	}
 	if (const auto appearing = Get<TextAppearing>()) {
-		if (hasRichPage()) {
-			appearing->widthAnimation.stop();
-			appearing->heightAnimation.stop();
-			appearing->use = false;
-			appearing->geometryValid = false;
-		} else {
-			appearing->geometryValid = false;
-			appearing->startedForText = false;
-			appearing->finalizing = item->isRegular();
-		}
+		appearing->geometryValid = false;
+		appearing->startedForText = false;
+		appearing->finalizing = item->isRegular();
 	}
 	return QSize(maxWidth, minHeight);
 }
@@ -2790,13 +2790,29 @@ void Message::paintRichText(
 		rich->paletteVersion = paletteVersion;
 		rich->article.invalidatePaletteCache();
 	}
-	const auto clip = QRect(
+	const auto appearing = Get<TextAppearing>();
+	const auto appearingClip = appearing
+		&& appearing->use
+		&& (appearing->shownLine < int(appearing->lines.size()));
+	const auto viewportClip = QRect(
 		QPoint(),
 		rect.size()
 	).intersected(context.clip.translated(-rect.topLeft()));
+	auto articleClip = viewportClip;
+	if (appearingClip) {
+		const auto &line = appearing->lines[appearing->shownLine];
+		const auto shownHeight = std::min(
+			std::max(appearing->shownHeight, 0),
+			std::max(line.bottom, 0));
+		articleClip = articleClip.intersected(QRect(
+			0,
+			0,
+			rect.width(),
+			shownHeight));
+	}
 	rich->article.setVisibleTopBottom(
-		std::clamp(clip.top(), 0, rect.height()),
-		std::clamp(clip.bottom() + 1, 0, rect.height()));
+		std::clamp(viewportClip.top(), 0, rect.height()),
+		std::clamp(viewportClip.bottom() + 1, 0, rect.height()));
 	auto articleContext = Iv::Markdown::MarkdownArticlePaintContext(
 		context).translated(-rect.topLeft());
 	if (context.messageSelection && context.messageSelection->isRichPage()) {
@@ -2805,7 +2821,7 @@ void Message::paintRichText(
 		articleContext.selectionState.endpoints
 			= &context.messageSelection->richPage.endpoints;
 	}
-	articleContext.clip = clip;
+	articleContext.clip = articleClip;
 	articleContext.caches = {
 		.pre = stm->preCache.get(),
 		.blockquote = context.quoteCache(
@@ -2825,9 +2841,39 @@ void Message::paintRichText(
 			}
 		},
 	};
+	auto revealPostprocess
+		= std::optional<Iv::Markdown::MarkdownArticleRevealPostprocess>();
+	auto revealState
+		= std::optional<Iv::Markdown::MarkdownArticleRevealPaintState>();
+	if (appearingClip) {
+		revealPostprocess.emplace(
+			Iv::Markdown::MarkdownArticleRevealPostprocess{
+				.method = [=](int lineIndex) -> Fn<void(QImage&)> {
+					if (lineIndex != appearing->shownLine
+						|| appearing->revealedLineWidth
+							>= appearing->lines[lineIndex].width) {
+						return nullptr;
+					}
+					return [=](QImage &cache) {
+						ApplyRevealGradient(
+							appearing,
+							cache,
+							appearing->lines[lineIndex].width);
+					};
+				},
+				.cache = &appearing->lineCache,
+			});
+		revealState.emplace(Iv::Markdown::MarkdownArticleRevealPaintState{
+			.activeLine = appearing->shownLine,
+			.nextLine = 0,
+			.postprocess = &*revealPostprocess,
+		});
+		articleContext.reveal = &*revealState;
+	}
+	p.save();
 	p.translate(rect.topLeft());
 	rich->article.paint(p, articleContext);
-	p.translate(-rect.topLeft());
+	p.restore();
 }
 
 PointState Message::pointState(QPoint point) const {
@@ -5972,7 +6018,7 @@ int Message::resizeContentGetHeight(int newWidth) {
 	if (!mediaDisplayed && bubble && hasVisibleText()) {
 		const auto probeTextWidth = bubbleTextWidth(contentWidth);
 		[[maybe_unused]] const auto probe = textHeightFor(probeTextWidth);
-		if (!Get<TextAppearing>() || hasRichPage()) {
+		if (!Get<TextAppearing>()) {
 			const auto use = textRealWidth();
 			if (use > 0) {
 				const auto shrunk = std::max(
@@ -5990,9 +6036,6 @@ int Message::resizeContentGetHeight(int newWidth) {
 		: bottomInfoWidth;
 
 	auto appearing = Get<TextAppearing>();
-	if (hasRichPage()) {
-		appearing = nullptr;
-	}
 	if (appearing) {
 		if (appearing->textWidth != textWidth) {
 			appearing->geometryValid = false;
@@ -6174,13 +6217,6 @@ void Message::invalidateTextDependentCache() {
 }
 
 bool Message::textAppearValidate(not_null<TextAppearing*> appearing) {
-	if (hasRichPage()) {
-		appearing->widthAnimation.stop();
-		appearing->heightAnimation.stop();
-		appearing->use = false;
-		RemoveComponents(TextAppearing::Bit());
-		return false;
-	}
 	while (true) {
 		if (!textAppearCheckLine(appearing)) {
 			return false;
@@ -6191,6 +6227,8 @@ bool Message::textAppearValidate(not_null<TextAppearing*> appearing) {
 		}
 		++appearing->shownLine;
 		appearing->revealedLineWidth = 0;
+		appearing->startLineWidth = 0;
+		appearing->targetLineWidth = 0;
 	}
 }
 
@@ -6198,16 +6236,36 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 	const auto recount = !appearing->geometryValid;
 	if (recount) {
 		appearing->geometryValid = true;
-		appearing->lines = text().countLinesGeometry(appearing->textWidth);
-		auto &lines = appearing->lines;
-		if (lines.size() > 1 && text().hasSkipBlock()) {
-			const auto &last = lines.back();
-			const auto &prev = lines[lines.size() - 2];
-			if (last.width == skipBlockWidth()
-				&& last.bottom - prev.bottom == skipBlockHeight()) {
-				const auto bottom = last.bottom;
-				lines.pop_back();
-				lines.back().bottom = bottom;
+		validateText();
+		if (const auto rich = richpage()) {
+			const auto articleWidth = richPageWidthFor(appearing->textWidth);
+			appearing->lines = rich->article.countRevealLinesGeometry(
+				articleWidth);
+			if (appearing->lines.empty()) {
+				const auto height = textHeightFor(appearing->textWidth);
+				if (height > 0) {
+					appearing->lines.push_back({
+						.left = 0,
+						.width = std::max(textRealWidth(), 1),
+						.bottom = height,
+						.rtl = false,
+						.baseline = height,
+					});
+				}
+			}
+		} else {
+			appearing->lines = text().countLinesGeometry(
+				appearing->textWidth);
+			auto &lines = appearing->lines;
+			if (lines.size() > 1 && text().hasSkipBlock()) {
+				const auto &last = lines.back();
+				const auto &prev = lines[lines.size() - 2];
+				if (last.width == skipBlockWidth()
+					&& last.bottom - prev.bottom == skipBlockHeight()) {
+					const auto bottom = last.bottom;
+					lines.pop_back();
+					lines.back().bottom = bottom;
+				}
 			}
 		}
 	}
@@ -6329,9 +6387,12 @@ int Message::textAppearTargetHeight(
 	}
 	const auto &line = appearing->lines[next];
 	const auto bottom = line.bottom;
-	const auto nextWidth = line.width;
+	const auto rich = hasRichPage();
+	const auto nextWidth = rich ? RevealLineRight(line) : line.width;
 	const auto available = std::max(
-		appearing->lines[appearing->shownLine].width,
+		(rich
+			? RevealLineRight(appearing->lines[appearing->shownLine])
+			: appearing->lines[appearing->shownLine].width),
 		appearing->shownWidth);
 	if (nextWidth + skipBlockWidth() <= available && !line.rtl) {
 		return bottom;
@@ -6345,13 +6406,17 @@ void Message::textAppearWidthCallback() {
 		appearing->widthAnimation.value(appearing->targetLineWidth)));
 	if (now != appearing->revealedLineWidth) {
 		appearing->revealedLineWidth = now;
-		if (appearing->lines[appearing->shownLine].rtl) {
+		const auto &line = appearing->lines[appearing->shownLine];
+		if (line.rtl) {
 			appearing->shownWidth = textRealWidth();
 		} else {
+			const auto shownWidth = hasRichPage()
+				? line.left + now + skipBlockWidth()
+				: now + skipBlockWidth();
 			appearing->shownWidth = std::min(
 				std::max(
 					appearing->shownWidth,
-					now + skipBlockWidth()),
+					shownWidth),
 				textRealWidth());
 		}
 		repaint();
