@@ -1982,7 +1982,8 @@ private:
 		not_null<Main::Session*> session,
 		Fn<void(not_null<PeerListController*>)> fill,
 		PickCallback pick,
-		rpl::producer<QString> below) {
+		rpl::producer<QString> below,
+		int topSkip = st::defaultVerticalListSkip) {
 	class CustomController final : public PeerListController {
 	public:
 		CustomController(
@@ -2038,7 +2039,7 @@ private:
 	auto result = object_ptr<Ui::VerticalLayout>((QWidget*)nullptr);
 	const auto container = result.data();
 
-	Ui::AddSkip(container);
+	Ui::AddSkip(container, topSkip);
 
 	const auto delegate = container->lifetime().make_state<
 		PeerListContentDelegateSimple
@@ -2201,7 +2202,8 @@ Controller::Controller(not_null<Main::Session*> session, PickCallback pick)
 		_pick,
 		_frequentUsers.empty()
 			? rpl::producer<QString>(nullptr)
-			: tr::lng_contacts_header())) {
+			: tr::lng_contacts_header(),
+		st::defaultVerticalListSkip / 4)) {
 	setStyleOverrides(&st::peerListSmallSkips);
 }
 
