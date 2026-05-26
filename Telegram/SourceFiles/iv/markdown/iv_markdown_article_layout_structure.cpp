@@ -53,18 +53,18 @@ namespace {
 	case PreparedBlockKind::Channel:
 	case PreparedBlockKind::GroupedMedia:
 	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::Details:
 		return true;
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::CodeBlock:
-	case PreparedBlockKind::Rule:
 	case PreparedBlockKind::List:
 	case PreparedBlockKind::ListItem:
 	case PreparedBlockKind::Quote:
 	case PreparedBlockKind::DisplayMath:
 	case PreparedBlockKind::Table:
-	case PreparedBlockKind::Details:
 	case PreparedBlockKind::Placeholder:
 	case PreparedBlockKind::EmbedPost:
 		return false;
@@ -460,18 +460,35 @@ void PrepareNestedContext(
 	block.collapsed = prepared.collapsed;
 	block.supplementary = prepared.supplementary;
 	const auto &details = st.details;
+	const auto headerPadding = context.useArticleBands
+		? QMargins(
+			st.textPadding.left(),
+			details.headerPadding.top(),
+			st.textPadding.right(),
+			details.headerPadding.bottom())
+		: details.headerPadding;
+	const auto bodyPadding = context.useArticleBands
+		? QMargins(
+			st.textPadding.left(),
+			details.bodyPadding.top(),
+			st.textPadding.right(),
+			details.bodyPadding.bottom())
+		: details.bodyPadding;
 	const auto headerWidth = std::max(width, 1);
-	const auto iconWidth = details.icon.width();
-	const auto iconHeight = details.icon.height();
+	const auto iconSize = details.icon.empty()
+		? 0
+		: TextLineHeight(details.summaryStyle);
+	const auto iconWidth = iconSize;
+	const auto iconHeight = iconSize;
 	const auto iconSkip = iconWidth ? details.iconSkip : 0;
 	const auto textLeft = left
-		+ details.headerPadding.left()
+		+ headerPadding.left()
 		+ iconWidth
 		+ iconSkip;
 	block.textWidth = std::max(
 		headerWidth
-			- details.headerPadding.left()
-			- details.headerPadding.right()
+			- headerPadding.left()
+			- headerPadding.right()
 			- iconWidth
 			- iconSkip,
 		1);
@@ -491,20 +508,20 @@ void PrepareNestedContext(
 		block.leaf.countHeight(block.textWidth, true),
 		TextLineHeight(details.summaryStyle));
 	const auto headerContentHeight = std::max(summaryHeight, iconHeight);
-	const auto headerHeight = details.headerPadding.top()
+	const auto headerHeight = headerPadding.top()
 		+ headerContentHeight
-		+ details.headerPadding.bottom();
+		+ headerPadding.bottom();
 	block.headerRect = QRect(left, top, headerWidth, headerHeight);
 	if (iconWidth > 0 && iconHeight > 0) {
 		block.iconRect = QRect(
-			left + details.headerPadding.left(),
+			left + headerPadding.left(),
 			top + (headerHeight - iconHeight) / 2,
 			iconWidth,
 			iconHeight);
 	}
 	block.textRect = QRect(
 		textLeft,
-		top + details.headerPadding.top()
+		top + headerPadding.top()
 			+ std::max((headerContentHeight - summaryHeight) / 2, 0),
 		block.textWidth,
 		summaryHeight);
@@ -515,12 +532,12 @@ void PrepareNestedContext(
 
 	auto bottom = top + headerHeight;
 	if (!prepared.collapsed) {
-		const auto childLeft = left + details.bodyPadding.left();
-		const auto childTop = bottom + details.bodyPadding.top();
+		const auto childLeft = left + bodyPadding.left();
+		const auto childTop = bottom + bodyPadding.top();
 		const auto childWidth = std::max(
 			headerWidth
-				- details.bodyPadding.left()
-				- details.bodyPadding.right(),
+				- bodyPadding.left()
+				- bodyPadding.right(),
 			1);
 		auto childContext = context;
 		PrepareNestedContext(&childContext, childLeft, childWidth);
@@ -538,9 +555,9 @@ void PrepareNestedContext(
 			childWidth,
 			childContext);
 		const auto contentHeight = std::max(childBottom - childTop, 0);
-		const auto bodyHeight = details.bodyPadding.top()
+		const auto bodyHeight = bodyPadding.top()
 			+ contentHeight
-			+ details.bodyPadding.bottom();
+			+ bodyPadding.bottom();
 		block.bodyRect = QRect(left, bottom, headerWidth, bodyHeight);
 		block.contentRect = QRect(
 			childLeft,

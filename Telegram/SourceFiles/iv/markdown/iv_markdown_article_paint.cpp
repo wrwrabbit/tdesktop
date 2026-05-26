@@ -10,11 +10,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/dynamic_image.h"
 #include "ui/effects/path_shift_gradient.h"
+#include "ui/effects/toggle_arrow.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
 
 #include "styles/palette.h"
 #include "styles/style_iv.h"
+#include "styles/style_window.h"
 #include "styles/style_widgets.h"
 
 #include <QtGui/QPainterPath>
@@ -407,6 +409,83 @@ void FillThinkingGradientImage(
 
 [[nodiscard]] QColor TableHeaderBg(const style::MarkdownTable &st) {
 	return WithOpacity(st.headerBg, st.headerBgOpacity);
+}
+
+[[nodiscard]] bool UseIncomingMessageDefaultPalette(
+		const MarkdownArticlePaintContext &context) {
+	return !context.outbg
+		&& (context.caches.st == &context.messageStyle()->richPageStyle);
+}
+
+[[nodiscard]] QColor ApplySelectedIncomingOverlay(
+		QColor base,
+		const MarkdownArticlePaintContext &context) {
+	if (!context.selected() || context.outbg) {
+		return base;
+	}
+	auto overlay = context.st->msgSelectOverlay()->c;
+	const auto alpha = overlay.alphaF();
+	overlay.setAlpha(base.alpha());
+	auto result = anim::color(base, overlay, alpha);
+	result.setAlpha(base.alpha());
+	return result;
+}
+
+[[nodiscard]] QColor EffectiveTableHeaderBg(
+		const style::Markdown &paintSt,
+		const MarkdownArticlePaintContext &context) {
+	return UseIncomingMessageDefaultPalette(context)
+		? ApplySelectedIncomingOverlay(
+			TableHeaderBg(st::defaultMarkdown.table),
+			context)
+		: TableHeaderBg(paintSt.table);
+}
+
+[[nodiscard]] QColor EffectiveTableBorderFg(
+		const style::Markdown &paintSt,
+		const MarkdownArticlePaintContext &context) {
+	const auto useIncoming = UseIncomingMessageDefaultPalette(context);
+	const auto &table = useIncoming
+		? st::defaultMarkdown.table
+		: paintSt.table;
+	auto result = WithOpacity(table.borderFg, table.headerBgOpacity * 3);
+	return useIncoming
+		? ApplySelectedIncomingOverlay(result, context)
+		: result;
+}
+
+[[nodiscard]] QColor EffectiveDividerFg(
+		const style::Markdown &paintSt,
+		const MarkdownArticlePaintContext &context) {
+	auto result = UseIncomingMessageDefaultPalette(context)
+		? ApplySelectedIncomingOverlay(
+			st::defaultMarkdown.rule.fg->c,
+			context)
+		: paintSt.rule.fg->c;
+	if (context.outbg) {
+		result.setAlphaF(result.alphaF() * 0.5);
+	}
+	return result;
+}
+
+void PaintDetailsIcon(
+		Painter &p,
+		QRect rect,
+		QColor color,
+		bool collapsed) {
+	const auto size = std::min(rect.width(), rect.height()) / 3.;
+	if (size <= 0.) {
+		return;
+	}
+	const auto center = QRectF(rect).center();
+	const auto path = Ui::ToggleUpDownArrowPath(
+		center.x(),
+		center.y(),
+		size,
+		st::mainMenuToggleFourStrokes,
+		collapsed ? 0. : 1.);
+	auto hq = PainterHighQualityEnabler(p);
+	p.fillPath(path, color);
 }
 
 void RefreshBlockThumbnail(
@@ -923,6 +1002,8 @@ void PaintWholeTable(
 	const auto radius = st.table.radius;
 	const auto shapePath = TableShapePath(block, border, radius);
 	const auto &paintSt = PaintStyle(context, st);
+	const auto headerBg = EffectiveTableHeaderBg(paintSt, context);
+	const auto borderFg = EffectiveTableBorderFg(paintSt, context);
 
 	p.save();
 	p.setClipRect(tableClip);
@@ -937,7 +1018,7 @@ void PaintWholeTable(
 			if (!cell.header && !striped) {
 				continue;
 			}
-			p.fillRect(cell.outer, TableHeaderBg(paintSt.table));
+			p.fillRect(cell.outer, headerBg);
 		}
 	}
 	p.restore();
@@ -945,11 +1026,7 @@ void PaintWholeTable(
 	if (border > 0 && !block.tableRect.isEmpty()) {
 		const auto path = TableBorderPath(block, border, shapePath);
 		auto hq = PainterHighQualityEnabler(p);
-		auto pen = QPen(
-			WithOpacity(
-				paintSt.table.borderFg,
-				paintSt.table.headerBgOpacity * 3),
-			border);
+		auto pen = QPen(borderFg, border);
 		p.setPen(pen);
 		p.setBrush(Qt::NoBrush);
 		p.drawPath(path);
@@ -1025,6 +1102,8 @@ void PaintTableRowBand(
 	const auto radius = st.table.radius;
 	const auto shapePath = TableShapePath(block, border, radius);
 	const auto &paintSt = PaintStyle(context, st);
+	const auto headerBg = EffectiveTableHeaderBg(paintSt, context);
+	const auto borderFg = EffectiveTableBorderFg(paintSt, context);
 	const auto cells = TableCellsForRowBand(ownership, rowIndex, rowBand);
 	const auto rowContext = ClippedContext(
 		RevealSuppressedContext(context),
@@ -1042,18 +1121,14 @@ void PaintTableRowBand(
 		if (!cell->header && !striped) {
 			continue;
 		}
-		p.fillRect(cell->outer, TableHeaderBg(paintSt.table));
+		p.fillRect(cell->outer, headerBg);
 	}
 	p.restore();
 
 	if (border > 0 && !block.tableRect.isEmpty()) {
 		const auto path = TableBorderPath(block, border, shapePath);
 		auto hq = PainterHighQualityEnabler(p);
-		auto pen = QPen(
-			WithOpacity(
-				paintSt.table.borderFg,
-				paintSt.table.headerBgOpacity * 3),
-			border);
+		auto pen = QPen(borderFg, border);
 		p.setPen(pen);
 		p.setBrush(Qt::NoBrush);
 		p.drawPath(path);
@@ -1792,54 +1867,27 @@ void PaintDetailsBlock(
 
 	const auto &details = st.details;
 	const auto &paintSt = PaintStyle(context, st);
-	const auto &paintDetails = paintSt.details;
-	const auto headerBg = TableHeaderBg(paintSt.table);
-	const auto half = details.border / 2.;
-	const auto outer = QRectF(block.outer).marginsRemoved({
-		half,
-		half,
-		half,
-		half,
-	});
-	auto outerPath = QPainterPath();
-	outerPath.addRoundedRect(outer, details.radius, details.radius);
+	const auto lineHeight = details.border;
+	const auto lineRect = QRect(
+		block.outer.x(),
+		block.outer.y() + block.outer.height() - lineHeight,
+		block.outer.width(),
+		lineHeight);
+	const auto lineFg = EffectiveDividerFg(paintSt, context);
 
 	p.save();
 	p.setClipRect(visible);
-	{
-		auto hq = PainterHighQualityEnabler(p);
-		p.fillPath(
-			outerPath,
-			paintDetails.bodyBg->c);
-		p.save();
-		p.setClipPath(outerPath, Qt::IntersectClip);
-		p.fillRect(block.headerRect, TableHeaderBg(paintSt.table));
-		auto pen = QPen(
-			WithOpacity(
-				paintSt.table.borderFg,
-				paintSt.table.headerBgOpacity * 3),
-			details.border);
-		if (!block.bodyRect.isEmpty()) {
-			p.setPen(pen);
-			const auto separatorY = block.bodyRect.top() + half;
-			p.drawLine(
-				QPointF(outer.left(), separatorY),
-				QPointF(outer.right(), separatorY));
-		}
-		p.restore();
-
-		p.setBrush(Qt::NoBrush);
-		p.setPen(pen);
-		p.drawPath(outerPath);
+	if (lineHeight > 0 && !lineRect.isEmpty()) {
+		p.fillRect(lineRect, lineFg);
 	}
 	if (!block.iconRect.isEmpty()) {
-		paintDetails.icon.paint(
+		PaintDetailsIcon(
 			p,
-			block.iconRect.x(),
-			block.iconRect.y(),
-			outerWidth);
+			block.iconRect,
+			paintSt.supplementaryTextColor->c,
+			block.collapsed);
 	}
-	p.setPen(paintDetails.summaryFg->c);
+	p.setPen(paintSt.textColor->c);
 	PaintTextLeaf(
 		p,
 		block.leaf,
@@ -2020,8 +2068,8 @@ void PaintBlock(
 			p,
 			context,
 			block.outer,
-			[&](Painter &p, const MarkdownArticlePaintContext &) {
-				p.fillRect(block.outer, paintSt.rule.fg->c);
+			[&](Painter &p, const MarkdownArticlePaintContext &context) {
+				p.fillRect(block.outer, EffectiveDividerFg(paintSt, context));
 			});
 		break;
 	case PreparedBlockKind::List:

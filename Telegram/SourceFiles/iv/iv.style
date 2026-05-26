@@ -418,7 +418,7 @@ defaultMarkdownDetails: MarkdownDetails {
 	summaryFg: windowFg;
 	radius: 6px;
 	summaryStyle: defaultMarkdownDetailsSummaryStyle;
-	icon: icon {{ "history_comments_open", windowSubTextFg }};
+	icon: icon {{ "history_down_arrow", windowSubTextFg }};
 	iconSkip: 8px;
 }
 defaultMarkdownEmbedPostAuthorStyle: TextStyle(defaultMarkdownBodyStyle) {
@@ -709,10 +709,8 @@ messageMarkdownHeading6Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(14px semibold);
 	lineHeight: 19px;
 }
-messageMarkdownDetailsSummaryStyle: TextStyle(defaultTextStyle) {
-	font: font(11px);
+messageMarkdownDetailsSummaryStyle: TextStyle(messageMarkdownBodyStyle) {
 	linkUnderline: kLinkUnderlineNever;
-	lineHeight: 16px;
 }
 messageMarkdownAudioTitleStyle: TextStyle(messageMarkdownBodyStyle) {
 	font: font(14px semibold);
@@ -739,15 +737,15 @@ messageMarkdownBlockSkips: MarkdownBlockSkips {
 	placeholder: 8px;
 }
 messageMarkdownQuoteBgOpacity: 0.12;
-messageMarkdownDetailsIcon: icon{{ "history_comments_open", msgInReplyBarColor }};
+messageMarkdownDetailsIcon: icon{{ "history_down_arrow", msgInDateFg }};
 messageMarkdownDetailsIconSelected: icon{{
-	"history_comments_open",
-	msgInReplyBarSelColor
+	"history_down_arrow",
+	msgInDateFgSelected
 }};
-messageMarkdownDetailsIconOut: icon{{ "history_comments_open", msgOutReplyBarColor }};
+messageMarkdownDetailsIconOut: icon{{ "history_down_arrow", msgOutDateFg }};
 messageMarkdownDetailsIconOutSelected: icon{{
-	"history_comments_open",
-	msgOutReplyBarSelColor
+	"history_down_arrow",
+	msgOutDateFgSelected
 }};
 messageMarkdownNavPreviousIcon: icon{{ "box_button_back", msgInDateFg }};
 messageMarkdownNavPreviousIconSelected: icon{{
@@ -810,14 +808,14 @@ messageMarkdownDisplayMath: MarkdownDisplayMath(defaultMarkdownDisplayMath) {
 	overflowFg: msgInDateFg;
 }
 messageMarkdownDetails: MarkdownDetails(defaultMarkdownDetails) {
-	headerPadding: margins(6px, 8px, 6px, 8px);
-	bodyPadding: margins(8px, 8px, 8px, 8px);
+	headerPadding: margins(4px, 11px, 4px, 11px);
+	bodyPadding: margins(4px, 11px, 6px, 11px);
 	bodyBg: msgInBg;
 	summaryFg: historyTextInFg;
 	radius: 8px;
 	summaryStyle: messageMarkdownDetailsSummaryStyle;
 	icon: messageMarkdownDetailsIcon;
-	iconSkip: 6px;
+	iconSkip: 8px;
 }
 messageMarkdownPhoto: MarkdownPhoto(defaultMarkdownPhoto) {
 	captionSkip: 8px;

@@ -612,6 +612,10 @@ int BlockSkip(
 		const PreparedBlock &block,
 		LayoutContext context,
 		const style::Markdown &st) {
+	if (previous.kind == PreparedBlockKind::Details
+		&& block.kind == PreparedBlockKind::Details) {
+		return 0;
+	}
 	if (context.tightList
 		&& IsFlowKind(previous.kind)
 		&& IsFlowKind(block.kind)) {
