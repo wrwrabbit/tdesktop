@@ -53,31 +53,24 @@ namespace Profile {
 
 namespace {
 
-[[nodiscard]] Section MakeSavedMusicSection(
-		not_null<QWidget*> parent,
+void AddSavedMusic(
+		not_null<Ui::VerticalLayout*> layout,
 		not_null<Controller*> controller,
 		not_null<PeerData*> peer,
 		rpl::producer<std::optional<QColor>> topBarColor) {
-	auto wrap = object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-		parent,
-		object_ptr<Ui::VerticalLayout>(parent));
-	const auto raw = wrap.data();
+	const auto wrap = layout->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			layout,
+			object_ptr<Ui::VerticalLayout>(layout)));
 	Info::Saved::SetupSavedMusic(
-		raw->entity(),
+		wrap->entity(),
 		controller,
 		peer,
 		std::move(topBarColor));
 	using namespace rpl::mappers;
-	raw->toggleOn(
-		raw->entity()->heightValue() | rpl::map(_1 > 0),
+	wrap->toggleOn(
+		wrap->entity()->heightValue() | rpl::map(_1 > 0),
 		anim::type::instant);
-	return Section{
-		.widget = std::move(wrap),
-		.shown = raw->toggledValue(),
-		.trailing = SectionSeparator::None(),
-		.embedsLeadingSeparator = false,
-		.attachesToCover = true,
-	};
 }
 
 [[nodiscard]] Section MakeSecurityRiskWarningSection(
@@ -243,16 +236,17 @@ object_ptr<Ui::RpWidget> InnerWidget::setupContent(
 	}
 
 	auto result = object_ptr<Ui::VerticalLayout>(parent);
-	auto stack = SectionStack(result.data());
 
 	const auto musicPeer = _sublist
 		? _sublist->sublistPeer().get()
 		: _peer.get();
-	stack.add(MakeSavedMusicSection(
+	AddSavedMusic(
 		result.data(),
 		_controller,
 		musicPeer,
-		_topBarColor.value()));
+		_topBarColor.value());
+
+	auto stack = SectionStack(result.data());
 	if (const auto user = _peer->asUser()) {
 		stack.add(MakeSecurityRiskWarningSection(result.data(), user));
 	}

@@ -36,7 +36,6 @@ struct Section {
 	rpl::producer<bool> shown;
 	SectionSeparator trailing;
 	bool embedsLeadingSeparator = false;
-	bool attachesToCover = false;
 };
 
 class SectionStack final {
@@ -58,7 +57,6 @@ private:
 	[[nodiscard]] rpl::producer<bool> anyShownInRange(
 		int from,
 		int toInclusive) const;
-	[[nodiscard]] rpl::producer<bool> firstVisibleAttachesToCover() const;
 	[[nodiscard]] rpl::producer<bool> computePlainMarkerCandidate(
 		int position) const;
 	void addPlainMarkerSlot(

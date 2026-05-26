@@ -154,33 +154,6 @@ rpl::producer<bool> SectionStack::nextVisibleIsNonEmbedding(
 		}) | rpl::distinct_until_changed();
 }
 
-rpl::producer<bool> SectionStack::firstVisibleAttachesToCover() const {
-	if (_sections.empty()) {
-		return rpl::single(false);
-	}
-	auto producers = std::vector<rpl::producer<bool>>();
-	auto attaches = std::vector<bool>();
-	producers.reserve(_sections.size());
-	attaches.reserve(_sections.size());
-	for (auto j = 0; j != int(_sections.size()); ++j) {
-		producers.push_back(_sections[j].shown
-			? rpl::duplicate(_sections[j].shown)
-			: rpl::single(true));
-		attaches.push_back(_sections[j].attachesToCover);
-	}
-	return rpl::combine(
-		std::move(producers),
-		[attaches = std::move(attaches)](
-				const std::vector<bool> &values) -> bool {
-			for (auto k = 0; k != int(values.size()); ++k) {
-				if (values[k]) {
-					return attaches[k];
-				}
-			}
-			return false;
-		}) | rpl::distinct_until_changed();
-}
-
 rpl::producer<bool> SectionStack::computePlainMarkerCandidate(
 		int position) const {
 	auto upper = anyShownAtOrBefore(position);
@@ -275,15 +248,7 @@ void SectionStack::finalize() {
 		}
 	}
 
-	auto leadingInner = object_ptr<Ui::VerticalLayout>(_layout);
-	Ui::AddSkip(leadingInner.data(), st::infoProfileSkip);
-	const auto leadingWrap = _layout->add(
-		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
-			_layout,
-			std::move(leadingInner)));
-	leadingWrap->setDuration(st::infoSlideDuration)->toggleOn(
-		firstVisibleAttachesToCover()
-			| rpl::map([](bool a) { return !a; }));
+	Ui::AddSkip(_layout, st::infoProfileSkip);
 
 	const auto sectionCount = int(_sections.size());
 	const auto markerCandidates = _layout->lifetime().make_state<
