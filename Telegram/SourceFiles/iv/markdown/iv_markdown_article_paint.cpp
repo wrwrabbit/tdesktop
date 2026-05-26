@@ -22,10 +22,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <algorithm>
 #include <cmath>
 #include <optional>
-#include <variant>
 
 namespace Iv::Markdown {
 namespace {
+
+constexpr auto kThinkingGradientSlideDuration = crl::time(1000);
+constexpr auto kThinkingGradientWaitDuration = crl::time(1000);
+constexpr auto kThinkingGradientFullDuration = kThinkingGradientSlideDuration
+	+ kThinkingGradientWaitDuration;
 
 [[nodiscard]] QRectF CenterCropSourceRect(QSize source, QSize target) {
 	const auto sourceWidth = std::max(source.width(), 1);
@@ -350,11 +354,20 @@ void EnsureThinkingPaintCacheImage(
 	image->setDevicePixelRatio(ratio);
 }
 
+[[nodiscard]] int ThinkingTextWidth(const LaidOutBlock &block) {
+	return std::clamp(
+		block.leaf.maxWidth(),
+		1,
+		std::max(block.textRect.width(), 1));
+}
+
 void FillThinkingGradientImage(
-		Painter &targetPainter,
 		QImage *image,
 		QRect logicalRect,
-		const Ui::PathShiftGradient::Background &background) {
+		QRect textRect,
+		int textWidth,
+		QColor baseColor,
+		QColor highlightColor) {
 	if (!image) {
 		return;
 	}
@@ -364,19 +377,26 @@ void FillThinkingGradientImage(
 	}
 	auto imagePainter = Painter(image);
 	const auto localRect = QRect(QPoint(), logicalRect.size());
-	if (const auto color = std::get_if<style::color>(&background)) {
-		imagePainter.fillRect(localRect, (*color)->c);
-	} else {
-		const auto gradient = v::get<QLinearGradient*>(background);
-		auto copy = *gradient;
-		const auto shift = targetPainter.worldTransform().dx()
-			+ logicalRect.x();
-		copy.setStart(copy.start().x() - shift, copy.start().y());
-		copy.setFinalStop(
-			copy.finalStop().x() - shift,
-			copy.finalStop().y());
-		imagePainter.fillRect(localRect, QBrush(copy));
+	const auto period = crl::now() % kThinkingGradientFullDuration;
+	if (period >= kThinkingGradientSlideDuration) {
+		imagePainter.fillRect(localRect, baseColor);
+		return;
 	}
+	const auto progress = period / float64(kThinkingGradientSlideDuration);
+	textWidth = std::max(textWidth, 1);
+	const auto gradientWidth = std::max(textWidth, 1);
+	const auto textLeft = textRect.x() - logicalRect.x();
+	const auto start = anim::interpolate(
+		textLeft - gradientWidth,
+		textLeft + textWidth,
+		progress);
+	auto gradient = QLinearGradient(start, 0, start + gradientWidth, 0);
+	gradient.setStops({
+		{ 0., baseColor },
+		{ 0.5, highlightColor },
+		{ 1., baseColor },
+	});
+	imagePainter.fillRect(localRect, QBrush(gradient));
 }
 
 [[nodiscard]] QColor WithOpacity(style::color color, double opacity) {
@@ -1921,17 +1941,21 @@ void PaintThinkingBlock(
 			TextSelection());
 	}
 
-	auto highlight = std::optional<style::owned_color>();
-	highlight.emplace(anim::color(baseColor->c, paintSt.textColor->c, 0.45));
-	pathShiftGradient->overrideColors(baseColor, highlight->color());
+	const auto textWidth = ThinkingTextWidth(block);
+	const auto highlightColor = anim::color(
+		baseColor->c,
+		::st::radialFg->c,
+		0.8);
 	const auto localRect = QRect(QPoint(), logicalRect.size());
 	const auto painted = pathShiftGradient->paint(
-		[&](const Ui::PathShiftGradient::Background &background) {
+		[&](const Ui::PathShiftGradient::Background &) {
 			FillThinkingGradientImage(
-				p,
 				&thinking->gradient,
 				logicalRect,
-				background);
+				block.textRect,
+				textWidth,
+				baseColor->c,
+				highlightColor);
 			auto gradientPainter = Painter(&thinking->gradient);
 			gradientPainter.setCompositionMode(
 				QPainter::CompositionMode_DestinationIn);
@@ -1943,7 +1967,6 @@ void PaintThinkingBlock(
 				QPainter::CompositionMode_SourceOver);
 			return true;
 		});
-	pathShiftGradient->clearOverridenColors();
 	if (!painted) {
 		return;
 	}

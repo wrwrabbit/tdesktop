@@ -7315,44 +7315,29 @@ void CheckThinkingBlockPrepareAndPaintCoverage(bool *ok) {
 		MTP_pageBlockParagraph(NativeIvText(finalText)),
 	});
 
-	const auto defaultPrepared = TryPrepareNativeInstantView({
+	const auto nativePrepared = TryPrepareNativeInstantView({
 		.source = &source,
 	});
-	Check(defaultPrepared.supported(), label + u" native default supported"_q, ok);
-	if (defaultPrepared.supported()) {
+	Check(nativePrepared.supported(), label + u" native supported"_q, ok);
+	if (nativePrepared.supported()) {
 		const auto thinking = CollectPreparedBlocksByKind(
-			defaultPrepared.content.blocks.blocks,
-			PreparedBlockKind::Thinking);
-		Check(thinking.empty(), label + u" native default thinking skipped"_q, ok);
-		const auto paragraphs = CollectPreparedBlocksByKind(
-			defaultPrepared.content.blocks.blocks,
-			PreparedBlockKind::Paragraph);
-		Check(paragraphs.size() == 1, label + u" native paragraph count"_q, ok);
-		if (!paragraphs.empty()) {
-			Check(
-				paragraphs.front()->text.text == finalText,
-				label + u" native paragraph text"_q,
-				ok);
-		}
-	}
-
-	const auto includedPrepared = TryPrepareNativeInstantView({
-		.source = &source,
-		.includeThinkingBlocks = true,
-	});
-	Check(
-		includedPrepared.supported(),
-		label + u" native included supported"_q,
-		ok);
-	if (includedPrepared.supported()) {
-		const auto thinking = CollectPreparedBlocksByKind(
-			includedPrepared.content.blocks.blocks,
+			nativePrepared.content.blocks.blocks,
 			PreparedBlockKind::Thinking);
 		Check(thinking.size() == 1, label + u" native thinking count"_q, ok);
 		if (!thinking.empty()) {
 			Check(
 				thinking.front()->text.text == thinkingText,
 				label + u" native thinking text"_q,
+				ok);
+		}
+		const auto paragraphs = CollectPreparedBlocksByKind(
+			nativePrepared.content.blocks.blocks,
+			PreparedBlockKind::Paragraph);
+		Check(paragraphs.size() == 1, label + u" native paragraph count"_q, ok);
+		if (!paragraphs.empty()) {
+			Check(
+				paragraphs.front()->text.text == finalText,
+				label + u" native paragraph text"_q,
 				ok);
 		}
 	}
@@ -7373,36 +7358,18 @@ void CheckThinkingBlockPrepareAndPaintCoverage(bool *ok) {
 		});
 	};
 
-	const auto defaultCanonical = TryPrepareNativeInstantView({
+	auto canonicalPrepared = TryPrepareNativeInstantView({
 		.richPage = makeCanonicalPage(),
 	});
 	Check(
-		defaultCanonical.supported(),
-		label + u" canonical default supported"_q,
+		canonicalPrepared.supported(),
+		label + u" canonical supported"_q,
 		ok);
-	if (defaultCanonical.supported()) {
-		const auto thinking = CollectPreparedBlocksByKind(
-			defaultCanonical.content.blocks.blocks,
-			PreparedBlockKind::Thinking);
-		Check(
-			thinking.empty(),
-			label + u" canonical default thinking skipped"_q,
-			ok);
-	}
-
-	auto includedCanonical = TryPrepareNativeInstantView({
-		.richPage = makeCanonicalPage(),
-		.includeThinkingBlocks = true,
-	});
-	Check(
-		includedCanonical.supported(),
-		label + u" canonical included supported"_q,
-		ok);
-	if (!includedCanonical.supported()) {
+	if (!canonicalPrepared.supported()) {
 		return;
 	}
 	const auto thinking = CollectPreparedBlocksByKind(
-		includedCanonical.content.blocks.blocks,
+		canonicalPrepared.content.blocks.blocks,
 		PreparedBlockKind::Thinking);
 	Check(thinking.size() == 1, label + u" canonical thinking count"_q, ok);
 	if (thinking.empty()) {
@@ -7417,7 +7384,7 @@ void CheckThinkingBlockPrepareAndPaintCoverage(bool *ok) {
 	auto articleHeight = 0;
 	auto renderer = std::make_shared<MathRenderer>();
 	auto article = BuildArticleForTest(
-		std::move(includedCanonical.content),
+		std::move(canonicalPrepared.content),
 		renderer,
 		articleWidth,
 		&articleHeight);
