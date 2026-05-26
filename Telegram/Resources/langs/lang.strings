@@ -4008,6 +4008,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_gift_availability" = "Availability";
 "lng_gift_from_hidden" = "Hidden User";
 "lng_gift_subtitle_birthdays" = "Birthdays";
+"lng_gift_recipient_search" = "Search people to send a gift to...";
 "lng_gift_list_birthday_status_today" = "{emoji} Birthday today";
 "lng_gift_list_birthday_status_yesterday" = "Birthday yesterday";
 "lng_gift_list_birthday_status_tomorrow" = "Birthday tomorrow";
