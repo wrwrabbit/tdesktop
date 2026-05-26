@@ -95,9 +95,9 @@ enum class LayoutMode {
 
 [[nodiscard]] bool ShowsCloseButton(
 		EmbedOverlay::Mode mode,
-		const EmbedRequest &request) {
+		const EmbedRequest &) {
 	return ShowsErrorSurface(mode)
-		|| ((mode == EmbedOverlay::Mode::EmbeddedVisible) && request.fullWidth);
+		|| (mode == EmbedOverlay::Mode::EmbeddedVisible);
 }
 
 [[nodiscard]] TextWithEntities AddFallbackAction(
@@ -843,6 +843,11 @@ void EmbedOverlay::updateContentGeometry() {
 	const auto available = fullWidth
 		? rect().marginsRemoved({ 0, margin.top(), 0, margin.bottom() })
 		: rect().marginsRemoved(margin);
+	const auto verticalReserve = (layout != LayoutMode::ErrorSurface)
+		? std::min(
+			CloseButtonHitHeight(),
+			std::max((available.height() - 1) / 2, 0))
+		: 0;
 	if (available.isEmpty()) {
 		_contentGeometry = QRect();
 		_content->setGeometry(_contentGeometry);
@@ -857,14 +862,6 @@ void EmbedOverlay::updateContentGeometry() {
 		return;
 	}
 	const auto showClose = ShowsCloseButton(_mode, _request);
-	if (_close) {
-		if (showClose) {
-			_close->show();
-			_close->moveToRight(0, 0);
-		} else {
-			_close->hide();
-		}
-	}
 	if ((layout == LayoutMode::ErrorSurface) && _error) {
 		const auto width = std::clamp(
 			(_contentWidth > 0)
@@ -877,15 +874,8 @@ void EmbedOverlay::updateContentGeometry() {
 			available,
 			QRect(QPoint(), _error->size()));
 	} else {
-		const auto verticalReserve = fullWidth
-			? std::min(
-				CloseButtonHitHeight(),
-				std::max((available.height() - 1) / 2, 0))
-			: 0;
-		const auto embedAvailable = fullWidth
-			? available.marginsRemoved(
-				QMargins(0, verticalReserve, 0, verticalReserve))
-			: available;
+		const auto embedAvailable = available.marginsRemoved(
+			QMargins(0, verticalReserve, 0, verticalReserve));
 		const auto padding = contentPadding();
 		const auto horizontalPadding = padding.left() + padding.right();
 		const auto verticalPadding = padding.top() + padding.bottom();
@@ -928,6 +918,24 @@ void EmbedOverlay::updateContentGeometry() {
 			QRect(0, 0, width, height));
 	}
 	_content->setGeometry(_contentGeometry);
+	if (_close) {
+		if (showClose) {
+			_close->show();
+			if (layout == LayoutMode::RoundedEmbedded) {
+				_close->move(
+					std::max(
+						_contentGeometry.x()
+							+ _contentGeometry.width()
+							- _close->width(),
+						0),
+					std::max(_contentGeometry.y() - _close->height(), 0));
+			} else {
+				_close->moveToRight(0, 0);
+			}
+		} else {
+			_close->hide();
+		}
+	}
 	updateWebviewGeometry();
 	if (_error && _errorLabel) {
 		_errorLabel->setContextCopyText(_request.fallbackUrl);

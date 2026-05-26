@@ -56,59 +56,63 @@ struct PendingHighlightEntry {
 	std::vector<LaidOutBlock*> blocks;
 };
 
-struct RelatedArticleThumbnailState {
+struct RelatedArticleImageState {
 	std::shared_ptr<Ui::DynamicImage> thumbnailImage;
 	std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
-	std::shared_ptr<Ui::DynamicImage> subscribedThumbnailImage;
-	QSize thumbnailRequestSize;
+	std::shared_ptr<Ui::DynamicImage> fullImage;
+	std::shared_ptr<Ui::DynamicImage> previousFullImage;
 };
 
-void StoreRelatedArticleThumbnailState(
+void StoreRelatedArticleImageState(
 		const LaidOutBlock &block,
-		std::unordered_map<uint64, RelatedArticleThumbnailState> *states) {
+		std::unordered_map<uint64, RelatedArticleImageState> *states) {
 	if (block.thumbnailPhotoId) {
 		(*states)[block.thumbnailPhotoId] = {
 			.thumbnailImage = block.thumbnailImage,
 			.previousThumbnailImage = block.previousThumbnailImage,
-			.subscribedThumbnailImage = block.subscribedThumbnailImage,
-			.thumbnailRequestSize = block.thumbnailRequestSize,
+			.fullImage = block.fullImage,
+			.previousFullImage = block.previousFullImage,
 		};
 	}
 	for (const auto &child : block.children) {
-		StoreRelatedArticleThumbnailState(child, states);
+		StoreRelatedArticleImageState(child, states);
 	}
 }
 
-void StoreRelatedArticleThumbnailStates(
+void StoreRelatedArticleImageStates(
 		const std::vector<LaidOutBlock> &blocks,
-		std::unordered_map<uint64, RelatedArticleThumbnailState> *states) {
+		std::unordered_map<uint64, RelatedArticleImageState> *states) {
 	for (const auto &block : blocks) {
-		StoreRelatedArticleThumbnailState(block, states);
+		StoreRelatedArticleImageState(block, states);
 	}
 }
 
-void RestoreRelatedArticleThumbnailState(
+void RestoreRelatedArticleImageState(
 		LaidOutBlock *block,
-		const std::unordered_map<uint64, RelatedArticleThumbnailState> &states) {
+		const std::unordered_map<uint64, RelatedArticleImageState> &states) {
 	if (block->thumbnailPhotoId) {
 		if (const auto i = states.find(block->thumbnailPhotoId);
 			i != end(states)) {
 			block->thumbnailImage = i->second.thumbnailImage;
 			block->previousThumbnailImage = i->second.previousThumbnailImage;
-			block->subscribedThumbnailImage = i->second.subscribedThumbnailImage;
-			block->thumbnailRequestSize = i->second.thumbnailRequestSize;
+			block->fullImage = i->second.fullImage;
+			block->previousFullImage = i->second.previousFullImage;
+			block->subscribedThumbnailImage.reset();
+			block->thumbnailRequestSize = QSize();
+			block->subscribedFullImage.reset();
+			block->fullRequestSize = QSize();
 		}
 	}
 	for (auto &child : block->children) {
-		RestoreRelatedArticleThumbnailState(&child, states);
+		RestoreRelatedArticleImageState(&child, states);
 	}
 }
 
-void RestoreRelatedArticleThumbnailStates(
+void RestoreRelatedArticleImageStates(
 		std::vector<LaidOutBlock> *blocks,
-		const std::unordered_map<uint64, RelatedArticleThumbnailState> &states) {
+		const std::unordered_map<uint64, RelatedArticleImageState> &states) {
 	for (auto &block : *blocks) {
-		RestoreRelatedArticleThumbnailState(&block, states);
+		RestoreRelatedArticleImageState(&block, states);
 	}
 }
 
@@ -817,7 +821,7 @@ private:
 		_placeholderRuntimes;
 	std::unordered_map<
 		uint64,
-		RelatedArticleThumbnailState> _relatedArticleThumbnails;
+		RelatedArticleImageState> _relatedArticleImages;
 	std::unordered_map<
 		PendingHighlightKey,
 		Spellchecker::HighlightProcessId,
@@ -865,7 +869,7 @@ void MarkdownArticle::Impl::setTextRepaintCallbacks(
 void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	clearMediaBlocks();
 	clearPlaceholderRuntimes();
-	_relatedArticleThumbnails.clear();
+	_relatedArticleImages.clear();
 	_content = std::move(content);
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 	resetFormulaRasterCache();
@@ -1467,9 +1471,9 @@ void MarkdownArticle::Impl::relayout(int width) {
 		return;
 	}
 	_width = width;
-	StoreRelatedArticleThumbnailStates(
+	StoreRelatedArticleImageStates(
 		_blocks,
-		&_relatedArticleThumbnails);
+		&_relatedArticleImages);
 	clearPendingHighlightBlockPointers();
 	retainBlocks();
 	_anchors.clear();
@@ -1515,9 +1519,9 @@ void MarkdownArticle::Impl::relayout(int width) {
 			BlockMaxRight(_blocks) + page.right(),
 			page.left() + page.right() + 1));
 	prunePlaceholderRuntimes();
-	RestoreRelatedArticleThumbnailStates(
+	RestoreRelatedArticleImageStates(
 		&_blocks,
-		_relatedArticleThumbnails);
+		_relatedArticleImages);
 	_height = y + page.bottom();
 	registerPendingHighlightBlocks(_blocks);
 	CollectAnchors(_blocks, &_anchors);

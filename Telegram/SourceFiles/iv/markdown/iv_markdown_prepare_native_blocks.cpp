@@ -1074,40 +1074,76 @@ iframe {
 		allowEmpty);
 }
 
+void WrapPreparedIvRichTextItalic(PreparedIvRichText *prepared) {
+	if (!prepared || prepared->text.text.isEmpty()) {
+		return;
+	}
+	prepared->text.entities.push_back(EntityInText(
+		EntityType::Italic,
+		0,
+		prepared->text.text.size()));
+}
+
+bool AppendPreparedQuoteParagraph(
+		std::vector<PreparedBlock> *result,
+		PreparedIvRichText prepared,
+		bool pullquote,
+		bool supplementary = false) {
+	if (pullquote) {
+		WrapPreparedIvRichTextItalic(&prepared);
+	}
+	const auto count = result->size();
+	if (!AppendPreparedIvRichBlock(
+			result,
+			PreparedBlockKind::Paragraph,
+			0,
+			std::move(prepared),
+			QString(),
+			false,
+			supplementary)) {
+		return false;
+	}
+	if (pullquote && (result->size() > count)) {
+		result->back().flowAlignment = TableAlignment::Center;
+	}
+	return true;
+}
+
 [[nodiscard]] bool PrepareNativeIvQuoteBlock(
 		const MTPRichText &text,
 		const MTPRichText &caption,
+		bool pullquote,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Quote;
+	block.pullquote = pullquote;
 	auto body = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(text, &body, &block.anchorId, state)) {
 		return false;
 	}
-	if (!AppendPreparedIvRichBlock(
-		&block.children,
-		PreparedBlockKind::Paragraph,
-		0,
-		std::move(body))) {
+	if (!AppendPreparedQuoteParagraph(
+			&block.children,
+			std::move(body),
+			pullquote)) {
 		return false;
 	}
 	auto cite = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(caption, &cite, &block.anchorId, state)) {
 		return false;
 	}
-	if (!AppendPreparedIvRichBlock(
-		&block.children,
-		PreparedBlockKind::Paragraph,
-		0,
-		std::move(cite),
-		QString(),
-		false,
-		true)) {
+	if (!AppendPreparedQuoteParagraph(
+			&block.children,
+			std::move(cite),
+			pullquote,
+			true)) {
 		return false;
 	}
 	if (block.children.empty()) {
 		block.children.push_back(EmptyParagraphBlock());
+		if (pullquote) {
+			block.children.back().flowAlignment = TableAlignment::Center;
+		}
 	}
 	result->push_back(std::move(block));
 	return true;
@@ -1810,12 +1846,14 @@ void MarkNativeIvTableSlots(
 		return PrepareNativeIvQuoteBlock(
 			data.vtext(),
 			data.vcaption(),
+			false,
 			result,
 			state);
 	}, [&](const MTPDpageBlockPullquote &data) {
 		return PrepareNativeIvQuoteBlock(
 			data.vtext(),
 			data.vcaption(),
+			true,
 			result,
 			state);
 	}, [&](const MTPDpageBlockPhoto &data) {
@@ -2100,33 +2138,33 @@ namespace {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Quote;
 	block.anchorId = data.anchorId;
+	block.pullquote = data.pullquote;
 	auto body = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(data.text, &body, &block.anchorId, state)) {
 		return false;
 	}
-	if (!AppendPreparedIvRichBlock(
+	if (!AppendPreparedQuoteParagraph(
 			&block.children,
-			PreparedBlockKind::Paragraph,
-			0,
-			std::move(body))) {
+			std::move(body),
+			data.pullquote)) {
 		return false;
 	}
 	auto cite = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(data.caption, &cite, &block.anchorId, state)) {
 		return false;
 	}
-	if (!AppendPreparedIvRichBlock(
+	if (!AppendPreparedQuoteParagraph(
 			&block.children,
-			PreparedBlockKind::Paragraph,
-			0,
 			std::move(cite),
-			QString(),
-			false,
+			data.pullquote,
 			true)) {
 		return false;
 	}
 	if (block.children.empty()) {
 		block.children.push_back(EmptyParagraphBlock());
+		if (data.pullquote) {
+			block.children.back().flowAlignment = TableAlignment::Center;
+		}
 	}
 	result->push_back(std::move(block));
 	return true;

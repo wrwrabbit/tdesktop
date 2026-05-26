@@ -226,6 +226,7 @@ struct PreparedBlock {
 	std::vector<PreparedBlock> children;
 	std::vector<PreparedTableRow> tableRows;
 	std::vector<TableAlignment> tableAlignments;
+	TableAlignment flowAlignment = TableAlignment::Left;
 	QString codeLanguage;
 	QString formulaTex;
 	QString anchorId;
@@ -255,6 +256,7 @@ struct PreparedBlock {
 	bool depthClamped = false;
 	bool tight = false;
 	bool supplementary = false;
+	bool pullquote = false;
 };
 
 struct PreparedRenderDocument {

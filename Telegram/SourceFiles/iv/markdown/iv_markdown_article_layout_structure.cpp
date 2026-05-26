@@ -392,6 +392,7 @@ void PrepareNestedContext(
 		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Quote;
+	block.pullquote = prepared.pullquote;
 
 	const auto depthDelta = std::max(
 		prepared.visualDepth - context.quoteDepth,
@@ -400,13 +401,20 @@ void PrepareNestedContext(
 	const auto quoteWidth = std::max(
 		width - depthDelta * st.quoteIndent,
 		1);
-	const auto &quoteStyle = st.body.blockquote;
-	const auto padding = BlockquotePadding(quoteStyle);
-	const auto contentLeft = quoteLeft + padding.left();
-	const auto contentTop = top + padding.top();
-	const auto contentWidth = std::max(
+	const auto pullquote = prepared.pullquote;
+	const auto padding = pullquote
+		? st.pullquote.padding
+		: BlockquotePadding(st.body.blockquote);
+	const auto availableWidth = std::max(
 		quoteWidth - padding.left() - padding.right(),
 		1);
+	const auto contentWidth = pullquote
+		? std::min(availableWidth, std::max(st.pullquote.maxWidth, 1))
+		: availableWidth;
+	const auto contentLeft = pullquote
+		? (quoteLeft + padding.left() + ((availableWidth - contentWidth) / 2))
+		: (quoteLeft + padding.left());
+	const auto contentTop = top + padding.top();
 
 	auto childContext = context;
 	childContext.quoteDepth = prepared.visualDepth;

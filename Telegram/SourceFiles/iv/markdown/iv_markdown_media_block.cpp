@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_image.h"
 #include "ui/effects/spoiler_mess.h"
 #include "ui/grouped_layout.h"
+#include "ui/image/image_prepare.h"
 
 #include "rpl/lifetime.h"
 
@@ -25,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace Iv::Markdown {
@@ -72,6 +74,69 @@ constexpr auto kMaxGroupedMediaLayoutItems = 10;
 		rect);
 	const auto paintedPreviousFull = PaintDynamicImage(p, previousFull, rect);
 	return paintedPreviousThumbnail || paintedPreviousFull;
+}
+
+[[nodiscard]] QImage ResolvedImageFrame(
+		const std::shared_ptr<Ui::DynamicImage> &current,
+		const std::shared_ptr<Ui::DynamicImage> &previous,
+		int size) {
+	if (current) {
+		if (const auto frame = current->image(size); !frame.isNull()) {
+			return frame;
+		}
+	}
+	if (previous) {
+		return previous->image(size);
+	}
+	return QImage();
+}
+
+[[nodiscard]] QImage PrepareWithBlurredBackground(
+		QSize outer,
+		QSize inner,
+		QImage large,
+		QImage blurred) {
+	const auto ratio = style::DevicePixelRatio();
+	auto background = QImage(
+		outer * ratio,
+		QImage::Format_ARGB32_Premultiplied);
+	background.setDevicePixelRatio(ratio);
+	if (blurred.isNull()) {
+		background.fill(Qt::black);
+		if (large.isNull()) {
+			return background;
+		}
+	}
+	auto p = QPainter(&background);
+	if (!blurred.isNull()) {
+		auto cover = blurred.scaled(
+			outer * ratio,
+			Qt::KeepAspectRatioByExpanding,
+			Qt::SmoothTransformation);
+		if (cover.size() != outer * ratio) {
+			cover = cover.copy(QRect(
+				QPoint(
+					(cover.width() - outer.width() * ratio) / 2,
+					(cover.height() - outer.height() * ratio) / 2),
+				outer * ratio));
+		}
+		cover = Images::Blur(std::move(cover), true);
+		cover.setDevicePixelRatio(ratio);
+		p.drawImage(QPoint(), cover);
+		p.fillRect(QRect(QPoint(), outer), QColor(0, 0, 0, 48));
+	}
+	if (!large.isNull()) {
+		auto image = large.scaled(
+			inner * ratio,
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+		image.setDevicePixelRatio(ratio);
+		p.drawImage(
+			(outer.width() - inner.width()) / 2,
+			(outer.height() - inner.height()) / 2,
+			image);
+	}
+	return background;
 }
 
 [[nodiscard]] const style::Markdown &PaintStyle(
@@ -1345,6 +1410,10 @@ private:
 
 	void paintActiveItem(Painter &p, const style::Markdown &st) const;
 
+	[[nodiscard]] bool paintActiveItemWithBlurredBackground(
+		Painter &p,
+		const ItemState &item) const;
+
 	void paintNavigation(
 		Painter &p,
 		const style::Markdown &st) const;
@@ -1355,7 +1424,11 @@ private:
 
 	void stepActiveIndex(int delta);
 
+	[[nodiscard]] int activeItemForegroundHeight(int width) const;
+
 	[[nodiscard]] int activeItemHeight(int width) const;
+
+	[[nodiscard]] int slideshowNavigationFrameHeight(int width) const;
 
 	[[nodiscard]] ItemState *activeItem();
 
@@ -1419,12 +1492,13 @@ int GroupedMediaBlock::resizeGetHeight(int width) {
 void GroupedMediaBlock::setGeometry(QRect geometry) {
 	rebuildLayout(geometry.width());
 	const auto contentWidth = std::max(_contentWidth, 1);
+	_height = std::max(_height, 1);
 	_geometry = QRect(
 		geometry.topLeft()
 			+ QPoint(
 				std::max((geometry.width() - contentWidth) / 2, 0),
 				0),
-		QSize(contentWidth, std::max(_height, 1)));
+		QSize(contentWidth, _height));
 	ensureNavigationLinks();
 	applyGeometry();
 }
@@ -1763,13 +1837,17 @@ void GroupedMediaBlock::paintActiveItem(
 		return;
 	}
 	p.fillRect(_geometry, st.photo.fallbackBg->c);
-	if (!PaintResolvedImages(
+	const auto foregroundHeight = activeItemForegroundHeight(_geometry.width());
+	const auto painted = (foregroundHeight < _geometry.height())
+		? paintActiveItemWithBlurredBackground(p, *item)
+		: PaintResolvedImages(
 			p,
 			_geometry,
 			item->thumbnailImage,
 			item->fullImage,
 			item->previousThumbnailImage,
-			item->previousFullImage)) {
+			item->previousFullImage);
+	if (!painted) {
 		p.setPen(st.photo.fallbackFg->c);
 		p.drawText(
 			_geometry,
@@ -1786,6 +1864,49 @@ void GroupedMediaBlock::paintActiveItem(
 			st.photo,
 			itemProgress(*item));
 	}
+}
+
+bool GroupedMediaBlock::paintActiveItemWithBlurredBackground(
+		Painter &p,
+		const ItemState &item) const {
+	const auto foregroundHeight = std::clamp(
+		activeItemForegroundHeight(_geometry.width()),
+		1,
+		std::max(_geometry.height(), 1));
+	if (foregroundHeight >= _geometry.height()) {
+		return false;
+	}
+	const auto size = std::max(_geometry.width(), _geometry.height());
+	auto large = ResolvedImageFrame(
+		item.fullImage,
+		item.previousFullImage,
+		size);
+	if (large.isNull()) {
+		large = ResolvedImageFrame(
+			item.thumbnailImage,
+			item.previousThumbnailImage,
+			size);
+	}
+	if (large.isNull()) {
+		return false;
+	}
+	auto blurred = ResolvedImageFrame(
+		item.thumbnailImage,
+		item.previousThumbnailImage,
+		size);
+	if (blurred.isNull()) {
+		blurred = large;
+	}
+	const auto prepared = PrepareWithBlurredBackground(
+		_geometry.size(),
+		QSize(_geometry.width(), foregroundHeight),
+		std::move(large),
+		std::move(blurred));
+	if (prepared.isNull()) {
+		return false;
+	}
+	p.drawImage(_geometry.topLeft(), prepared);
+	return true;
 }
 
 void GroupedMediaBlock::paintNavigation(
@@ -1843,18 +1964,19 @@ void GroupedMediaBlock::updateNavigationRects() {
 		return;
 	}
 	const auto &style = layoutStyle().groupedMedia;
+	const auto frameHeight = slideshowNavigationFrameHeight(_geometry.width());
 	const auto availableWidth = std::max(
 		(_geometry.width() - 2 * style.navButtonSkip) / 2,
 		0);
 	const auto size = std::min({
 		style.navButtonSize,
-		std::max(_geometry.height(), 0),
+		std::max(frameHeight, 0),
 		availableWidth,
 	});
 	if (size <= 0) {
 		return;
 	}
-	const auto top = _geometry.y() + std::max((_geometry.height() - size) / 2, 0);
+	const auto top = _geometry.y() + std::max((frameHeight - size) / 2, 0);
 	_previousRect = QRect(
 		_geometry.x() + style.navButtonSkip,
 		top,
@@ -1884,6 +2006,7 @@ void GroupedMediaBlock::stepActiveIndex(int delta) {
 	const auto previousHeight = activeItemHeight(width);
 	_activeIndex = next;
 	const auto nextHeight = activeItemHeight(width);
+	_height = nextHeight;
 	if (_geometry.isEmpty()) {
 		return;
 	} else if (previousHeight != nextHeight) {
@@ -1898,7 +2021,7 @@ void GroupedMediaBlock::stepActiveIndex(int delta) {
 	requestRepaint(previousGeometry.united(_geometry));
 }
 
-int GroupedMediaBlock::activeItemHeight(int width) const {
+int GroupedMediaBlock::activeItemForegroundHeight(int width) const {
 	if (const auto item = activeItem()) {
 		return MediaHeightForWidth(
 			width,
@@ -1906,6 +2029,30 @@ int GroupedMediaBlock::activeItemHeight(int width) const {
 			item->original.height());
 	}
 	return fallbackHeight(width);
+}
+
+int GroupedMediaBlock::activeItemHeight(int width) const {
+	return std::max(
+		activeItemForegroundHeight(width),
+		std::max(layoutStyle().groupedMedia.slideshowMinHeight, 1));
+}
+
+int GroupedMediaBlock::slideshowNavigationFrameHeight(int width) const {
+	auto result = std::numeric_limits<int>::max();
+	for (const auto &item : _items) {
+		result = std::min(
+			result,
+			MediaHeightForWidth(
+				width,
+				item.original.width(),
+				item.original.height()));
+	}
+	if (result == std::numeric_limits<int>::max()) {
+		result = fallbackHeight(width);
+	}
+	return std::max(
+		result,
+		std::max(layoutStyle().groupedMedia.slideshowMinHeight, 1));
 }
 
 GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() {

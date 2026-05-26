@@ -107,6 +107,10 @@ MarkdownQuotePaintColors {
 	pre: color;
 	preBg: color;
 }
+MarkdownPullquote {
+	padding: margins;
+	maxWidth: pixels;
+}
 MarkdownRule {
 	fg: color;
 	height: pixels;
@@ -260,6 +264,7 @@ MarkdownGroupedMedia {
 	captionSkip: pixels;
 	itemSkip: pixels;
 	radius: pixels;
+	slideshowMinHeight: pixels;
 	overlayOpacity: double;
 	fallbackBg: color;
 	fallbackFg: color;
@@ -308,6 +313,7 @@ Markdown {
 	list: MarkdownList;
 	quoteIndent: pixels;
 	quotePaintColors: MarkdownQuotePaintColors;
+	pullquote: MarkdownPullquote;
 	rule: MarkdownRule;
 	displayMath: MarkdownDisplayMath;
 	table: MarkdownTable;
@@ -370,6 +376,10 @@ defaultMarkdownQuotePaintColors: MarkdownQuotePaintColors {
 	blockquote: windowActiveTextFg;
 	pre: windowSubTextFg;
 	preBg: windowBgOver;
+}
+defaultMarkdownPullquote: MarkdownPullquote {
+	padding: margins(0px, 18px, 0px, 18px);
+	maxWidth: 420px;
 }
 defaultMarkdownRule: MarkdownRule {
 	fg: boxDividerBg;
@@ -559,6 +569,7 @@ defaultMarkdownGroupedMedia: MarkdownGroupedMedia {
 	captionSkip: 12px;
 	itemSkip: 3px;
 	radius: 0px;
+	slideshowMinHeight: 200px;
 	overlayOpacity: 0.2;
 	fallbackBg: windowBgOver;
 	fallbackFg: windowSubTextFg;
@@ -658,6 +669,7 @@ defaultMarkdown: Markdown {
 	list: defaultMarkdownList;
 	quoteIndent: 18px;
 	quotePaintColors: defaultMarkdownQuotePaintColors;
+	pullquote: defaultMarkdownPullquote;
 	rule: defaultMarkdownRule;
 	displayMath: defaultMarkdownDisplayMath;
 	table: defaultMarkdownTable;
@@ -782,6 +794,10 @@ messageMarkdownQuotePaintColors: MarkdownQuotePaintColors(
 	pre: msgInDateFg;
 	preBg: msgFileInBg;
 }
+messageMarkdownPullquote: MarkdownPullquote(defaultMarkdownPullquote) {
+	padding: margins(0px, 8px, 0px, 8px);
+	maxWidth: 280px;
+}
 messageMarkdownRule: MarkdownRule(defaultMarkdownRule) {
 	fg: msgInDateFg;
 }
@@ -842,6 +858,7 @@ messageMarkdownGroupedMedia: MarkdownGroupedMedia(defaultMarkdownGroupedMedia) {
 	captionSkip: 8px;
 	itemSkip: 2px;
 	radius: 8px;
+	slideshowMinHeight: 160px;
 	fallbackBg: msgFileInBg;
 	fallbackFg: msgInDateFg;
 	navButtonSize: 28px;
@@ -902,6 +919,7 @@ messageMarkdown: Markdown(defaultMarkdown) {
 	}
 	quoteIndent: 16px;
 	quotePaintColors: messageMarkdownQuotePaintColors;
+	pullquote: messageMarkdownPullquote;
 	rule: messageMarkdownRule;
 	table: messageMarkdownTable;
 	displayMath: messageMarkdownDisplayMath;

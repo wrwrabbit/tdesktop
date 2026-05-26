@@ -351,6 +351,7 @@ void CollectSelectableSegments(
 				: block.textRect;
 			segment.textRect = block.textRect;
 			segment.textWidth = block.textWidth;
+			segment.align = block.flowTextAlign;
 			segment.length = block.leaf.length();
 			block.segmentIndex = AddSelectableSegment(
 				segments,
@@ -388,6 +389,7 @@ void CollectSelectableSegments(
 				textSegment.outerRect = block.textRect;
 				textSegment.textRect = block.textRect;
 				textSegment.textWidth = block.textWidth;
+				textSegment.align = block.flowTextAlign;
 				textSegment.length = block.leaf.length();
 				block.secondarySegmentIndex = AddSelectableSegment(
 					segments,

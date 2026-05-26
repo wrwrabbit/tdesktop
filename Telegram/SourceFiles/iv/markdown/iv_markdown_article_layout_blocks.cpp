@@ -78,7 +78,9 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	const auto &textStyle = TableCellTextStyle(prepared, st);
 	result.cell.header = prepared.header;
 	result.cell.verticalAlignment = prepared.verticalAlignment;
-	result.cell.align = CellAlign(prepared.alignment);
+	result.cell.align = prepared.header
+		? style::al_center
+		: CellAlign(prepared.alignment);
 	result.cell.column = std::max(prepared.column, 0);
 	result.cell.colspan = std::max(prepared.colspan, 1);
 	result.cell.rowspan = std::max(prepared.rowspan, 1);
@@ -694,6 +696,8 @@ LaidOutBlock LayoutFlowBlock(
 	block.anchorId = prepared.anchorId;
 	block.headingLevel = prepared.headingLevel;
 	block.supplementary = prepared.supplementary;
+	block.pullquote = prepared.pullquote;
+	block.flowTextAlign = CellAlign(prepared.flowAlignment);
 	block.textWidth = std::max(width, 1);
 	if (IsAnchorOnlyBlock(prepared)) {
 		block.textRect = QRect(left, top, block.textWidth, 0);

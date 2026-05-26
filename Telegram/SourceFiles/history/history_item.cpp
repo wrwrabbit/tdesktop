@@ -2925,6 +2925,7 @@ bool HistoryItem::allowsEdit(TimeId now) const {
 	return !isService()
 		&& canBeEdited()
 		&& !isTooOldForEdit(now)
+		&& !richPage()
 		&& (!_media || _media->allowsEdit())
 		&& !isLegacyMessage()
 		&& !isEditingMedia()
@@ -2933,6 +2934,7 @@ bool HistoryItem::allowsEdit(TimeId now) const {
 
 bool HistoryItem::allowsEditMedia() const {
 	return !awaitingVideoProcessing()
+		&& !richPage()
 		&& (!_media || _media->allowsEditMedia() || _media->webpage());
 }
 

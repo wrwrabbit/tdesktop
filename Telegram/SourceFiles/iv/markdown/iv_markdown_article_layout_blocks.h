@@ -109,12 +109,14 @@ struct LaidOutBlock {
 	TaskState taskState = TaskState::None;
 	int formulaIndex = -1;
 	int orderedNumber = 0;
+	style::align flowTextAlign = style::al_left;
 	style::align formulaAlign = style::al_left;
 	bool collapsed = false;
 	bool overflowed = false;
 	bool tableBordered = true;
 	bool tableStriped = false;
 	bool supplementary = false;
+	bool pullquote = false;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;
@@ -127,6 +129,10 @@ struct LaidOutBlock {
 	mutable std::shared_ptr<Ui::DynamicImage> previousThumbnailImage;
 	mutable std::shared_ptr<Ui::DynamicImage> subscribedThumbnailImage;
 	mutable QSize thumbnailRequestSize;
+	mutable std::shared_ptr<Ui::DynamicImage> fullImage;
+	mutable std::shared_ptr<Ui::DynamicImage> previousFullImage;
+	mutable std::shared_ptr<Ui::DynamicImage> subscribedFullImage;
+	mutable QSize fullRequestSize;
 	mutable QImage colorizedFormulaImage;
 	mutable QColor colorizedFormulaColor;
 	mutable QSize colorizedFormulaSize;

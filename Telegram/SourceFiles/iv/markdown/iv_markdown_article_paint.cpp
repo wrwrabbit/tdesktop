@@ -99,6 +99,76 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 		|| PaintDynamicImage(p, thumbnail, rect);
 }
 
+void UpdateResolvedImage(
+		std::shared_ptr<Ui::DynamicImage> *current,
+		std::shared_ptr<Ui::DynamicImage> *previous,
+		const std::shared_ptr<Ui::DynamicImage> &next) {
+	if (!current || !previous || !next) {
+		return;
+	} else if (next == *current) {
+		return;
+	} else if (next == *previous) {
+		std::swap(*current, *previous);
+		return;
+	}
+	*previous = std::move(*current);
+	*current = next;
+}
+
+template <typename RequestImage>
+void RefreshResolvedBlockImage(
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintContext &context,
+		QSize size,
+		QSize *requestedSize,
+		std::shared_ptr<Ui::DynamicImage> *current,
+		std::shared_ptr<Ui::DynamicImage> *previous,
+		std::shared_ptr<Ui::DynamicImage> *subscribed,
+		RequestImage &&request) {
+	if (size.isEmpty() || !requestedSize || !current || !previous || !subscribed) {
+		return;
+	} else if (*requestedSize == size) {
+		return;
+	}
+	*requestedSize = size;
+	const auto image = request(size);
+	if (!image) {
+		return;
+	}
+	UpdateResolvedImage(current, previous, image);
+	if (image == *subscribed) {
+		return;
+	}
+	*subscribed = image;
+	const auto repaint = context.caches.repaint;
+	const auto repaintRect = context.caches.repaintRect;
+	const auto rect = block.mediaRect;
+	image->subscribeToUpdates([repaint, repaintRect, rect] {
+		if (repaintRect && !rect.isEmpty()) {
+			repaintRect(rect);
+		} else if (repaint) {
+			repaint();
+		}
+	});
+}
+
+[[nodiscard]] bool PaintRelatedArticleImage(
+		Painter &p,
+		QRect rect,
+		const std::shared_ptr<Ui::DynamicImage> &thumbnail,
+		const std::shared_ptr<Ui::DynamicImage> &full,
+		const std::shared_ptr<Ui::DynamicImage> &previousThumbnail,
+		const std::shared_ptr<Ui::DynamicImage> &previousFull) {
+	return PaintDynamicImage(p, full, rect, true)
+		|| PaintDynamicImage(p, previousFull, rect, true)
+		|| PaintDynamicImage(p, full, rect)
+		|| PaintDynamicImage(p, previousFull, rect)
+		|| PaintDynamicImage(p, thumbnail, rect, true)
+		|| PaintDynamicImage(p, previousThumbnail, rect, true)
+		|| PaintDynamicImage(p, previousThumbnail, rect)
+		|| PaintDynamicImage(p, thumbnail, rect);
+}
+
 [[nodiscard]] const style::Markdown &PaintStyle(
 		const MarkdownArticlePaintContext &context,
 		const style::Markdown &st) {
@@ -518,6 +588,37 @@ void RefreshBlockThumbnail(
 			});
 		}
 	}
+}
+
+void RefreshRelatedArticleImages(
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintContext &context) {
+	if (!block.photoRuntime || block.thumbnailRect.isEmpty()) {
+		return;
+	}
+	const auto size = block.thumbnailRect.size();
+	RefreshResolvedBlockImage(
+		block,
+		context,
+		size,
+		&block.thumbnailRequestSize,
+		&block.thumbnailImage,
+		&block.previousThumbnailImage,
+		&block.subscribedThumbnailImage,
+		[&](QSize requested) {
+			return block.photoRuntime->thumbnail(requested);
+		});
+	RefreshResolvedBlockImage(
+		block,
+		context,
+		size,
+		&block.fullRequestSize,
+		&block.fullImage,
+		&block.previousFullImage,
+		&block.subscribedFullImage,
+		[&](QSize requested) {
+			return block.photoRuntime->full(requested);
+		});
 }
 
 void PaintTextLeaf(
@@ -1298,25 +1399,29 @@ void PaintQuoteBlock(
 	}
 
 	if (context.caches.blockquote) {
-		const auto &quoteStyle = st.body.blockquote;
-		Ui::Text::ValidateQuotePaintCache(
-			*context.caches.blockquote,
-			quoteStyle);
+		if (!block.pullquote) {
+			const auto &quoteStyle = st.body.blockquote;
+			Ui::Text::ValidateQuotePaintCache(
+				*context.caches.blockquote,
+				quoteStyle);
 
-		p.save();
-		p.setClipRect(quoteClip);
-		Ui::Text::FillQuotePaint(
-			p,
-			block.outer,
-			*context.caches.blockquote,
-			quoteStyle);
-		p.restore();
+			p.save();
+			p.setClipRect(quoteClip);
+			Ui::Text::FillQuotePaint(
+				p,
+				block.outer,
+				*context.caches.blockquote,
+				quoteStyle);
+			p.restore();
+		}
 	}
 
 	auto local = ClippedContext(
 		context,
 		context.clip.intersected(block.contentRect));
-	local.caches.supplementaryColorOverride = QuoteSupplementaryColor(context);
+	if (!block.pullquote) {
+		local.caches.supplementaryColorOverride = QuoteSupplementaryColor(context);
+	}
 	PaintBlocks(
 		p,
 		block.children,
@@ -1707,7 +1812,7 @@ void PaintRelatedArticleBlock(
 		block.visibleMediaRect,
 		[&](Painter &p, const MarkdownArticlePaintContext &visibleContext) {
 			const auto &style = st.relatedArticle;
-			RefreshBlockThumbnail(block, visibleContext);
+			RefreshRelatedArticleImages(block, visibleContext);
 			PaintCardSurface(
 				p,
 				block.mediaRect,
@@ -1724,18 +1829,22 @@ void PaintRelatedArticleBlock(
 						style.thumbnailRadius);
 					p.save();
 					p.setClipPath(path, Qt::IntersectClip);
-					(void)PaintThumbnailImage(
+					(void)PaintRelatedArticleImage(
 						p,
 						block.thumbnailRect,
 						block.thumbnailImage,
-						block.previousThumbnailImage);
+						block.fullImage,
+						block.previousThumbnailImage,
+						block.previousFullImage);
 					p.restore();
 				} else {
-					(void)PaintThumbnailImage(
+					(void)PaintRelatedArticleImage(
 						p,
 						block.thumbnailRect,
 						block.thumbnailImage,
-						block.previousThumbnailImage);
+						block.fullImage,
+						block.previousThumbnailImage,
+						block.previousFullImage);
 				}
 			}
 			if (!block.labelRect.isEmpty()) {
@@ -2045,7 +2154,7 @@ void PaintBlock(
 			context,
 			block.textRect,
 			block.textWidth,
-			style::al_left,
+			block.flowTextAlign,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
 				block.segmentIndex));

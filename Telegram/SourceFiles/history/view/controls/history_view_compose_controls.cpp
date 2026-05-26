@@ -4089,7 +4089,10 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 	Expects(_history != nullptr);
 	Expects(draftKeyCurrent() != Data::DraftKey::None());
 
-	if (_voiceRecordBar->isActive()) {
+	if (item->richPage()) {
+		_show->showToast(tr::lng_edit_error(tr::now));
+		return;
+	} else if (_voiceRecordBar->isActive()) {
 		_show->showBox(Ui::MakeInformBox(tr::lng_edit_caption_voice()));
 		return;
 	} else if (const auto media = item->media()) {

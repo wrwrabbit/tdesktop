@@ -1279,6 +1279,17 @@ constexpr auto kNativeIvEmbedPostAuthorPhotoId = uint64(9301);
 	};
 }
 
+[[nodiscard]] NativeIvMediaFixture NativeIvMixedHeightSlideshowFixture() {
+	auto result = NativeIvSlideshowFixture();
+	result.documents[0] = NativeIvVideoDocument(
+		7004,
+		960,
+		120,
+		u"short-slide-1.mp4"_q,
+		11.);
+	return result;
+}
+
 [[nodiscard]] QString NativeIvPlaceholderLabel(NativeIvPlaceholderKind kind) {
 	switch (kind) {
 	case NativeIvPlaceholderKind::Video:
@@ -2617,6 +2628,33 @@ template <typename Object>
 	return available.isValid()
 		? available.marginsRemoved(QMargins(0, skip, 0, skip))
 		: QRect();
+}
+
+[[nodiscard]] QRect NativeIvOverlayRoundedBodyRect(
+		const EmbedOverlay *overlay,
+		int contentWidth) {
+	if (!overlay) {
+		return QRect();
+	}
+	const auto available = NativeIvOverlayAvailableRect(overlay);
+	const auto skip = NativeIvOverlayCloseHitHeight();
+	const auto embedAvailable = available.marginsRemoved(QMargins(0, skip, 0, skip));
+	if (!embedAvailable.isValid()) {
+		return QRect();
+	}
+	const auto padding = st::markdownEmbedOverlay.padding;
+	const auto availableWidth = std::max(embedAvailable.width(), 1);
+	const auto availableHeight = std::max(embedAvailable.height(), 1);
+	const auto width = std::clamp(
+		(contentWidth > 0)
+			? contentWidth
+			: st::markdownEmbedOverlay.size.width(),
+		1,
+		availableWidth);
+	const auto content = style::centerrect(
+		embedAvailable,
+		QRect(0, 0, width, availableHeight));
+	return content.marginsRemoved(padding);
 }
 
 [[nodiscard]] bool PaintTouchesBottomOrRightImageEdge(const QImage &image) {
@@ -5722,26 +5760,30 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 	};
 
 	const auto previewEmbedLabel = u"native-iv-embed-preview-overlay"_q;
-	const auto previewEmbedBlock = makePreviewEmbedBlock(
-		u"https://example.com/embed"_q,
-		u"Embed caption"_q,
-		true);
-	auto previewEmbedSource = NativeIvSource(QVector<MTPPageBlock>{
-		previewEmbedBlock,
-	});
-	const auto previewEmbedPrepared = TryPrepareNativeInstantView({
-		.source = &previewEmbedSource,
-	});
-	Check(
-		previewEmbedPrepared.supported(),
-		previewEmbedLabel + u" prepare supported"_q,
-		ok);
-	Check(
-		!previewEmbedPrepared.content.failure.failed(),
-		previewEmbedLabel + u" prepare failure"_q,
-		ok);
-	if (previewEmbedPrepared.supported()
-		&& !previewEmbedPrepared.content.failure.failed()) {
+	const auto runPreviewEmbedCase = [&](QString variant, bool fullWidth) {
+		const auto caseLabel = previewEmbedLabel + u" "_q + variant;
+		const auto previewEmbedBlock = makePreviewEmbedBlock(
+			u"https://example.com/embed"_q,
+			u"Embed caption"_q,
+			fullWidth);
+		auto previewEmbedSource = NativeIvSource(QVector<MTPPageBlock>{
+			previewEmbedBlock,
+		});
+		const auto previewEmbedPrepared = TryPrepareNativeInstantView({
+			.source = &previewEmbedSource,
+		});
+		Check(
+			previewEmbedPrepared.supported(),
+			caseLabel + u" prepare supported"_q,
+			ok);
+		Check(
+			!previewEmbedPrepared.content.failure.failed(),
+			caseLabel + u" prepare failure"_q,
+			ok);
+		if (!previewEmbedPrepared.supported()
+			|| previewEmbedPrepared.content.failure.failed()) {
+			return;
+		}
 		auto window = Ui::RpWindow();
 		window.setGeometry(QRect(0, 0, 420, 320));
 		window.show();
@@ -5769,414 +5811,383 @@ void CheckNativeInstantViewPrepareCoverage(bool *ok) {
 			u"nativeIvEmbedOverlayShell"_q);
 		const auto overlayClose = preview->findChild<QWidget*>(
 			u"nativeIvEmbedOverlayClose"_q);
-		Check(
-			body != nullptr,
-			previewEmbedLabel + u" preview body widget"_q,
-			ok);
-		Check(
-			overlay != nullptr,
-			previewEmbedLabel + u" overlay object"_q,
-			ok);
-		Check(
-			overlayShell != nullptr,
-			previewEmbedLabel + u" overlay shell object"_q,
-			ok);
-		Check(
-			overlayClose != nullptr,
-			previewEmbedLabel + u" overlay close object"_q,
-			ok);
+		Check(body != nullptr, caseLabel + u" preview body widget"_q, ok);
+		Check(overlay != nullptr, caseLabel + u" overlay object"_q, ok);
+		Check(overlayShell != nullptr, caseLabel + u" overlay shell object"_q, ok);
+		Check(overlayClose != nullptr, caseLabel + u" overlay close object"_q, ok);
 		if (overlay) {
 			Check(
 				overlay->testEffectiveStorageId().path == expectedStorageId.path
 					&& overlay->testEffectiveStorageId().token
 						== expectedStorageId.token,
-				previewEmbedLabel + u" overlay storage id propagated"_q,
+				caseLabel + u" overlay storage id propagated"_q,
 				ok);
 		}
-		if (body && overlay && overlayShell && overlayClose) {
-			auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
-				previewEmbedBlock,
+		if (!body || !overlay || !overlayShell || !overlayClose) {
+			return;
+		}
+		auto previewProbeSource = NativeIvSource(QVector<MTPPageBlock>{
+			previewEmbedBlock,
+		});
+		const auto previewProbePrepared = TryPrepareNativeInstantView({
+			.source = &previewProbeSource,
+		});
+		Check(
+			previewProbePrepared.supported(),
+			caseLabel + u" probe prepare supported"_q,
+			ok);
+		Check(
+			!previewProbePrepared.content.failure.failed(),
+			caseLabel + u" probe prepare failure"_q,
+			ok);
+		if (!previewProbePrepared.supported()
+			|| previewProbePrepared.content.failure.failed()) {
+			return;
+		}
+		auto probeHeight = 0;
+		auto probeArticle = BuildArticleForTest(
+			std::move(previewProbePrepared.content),
+			std::make_shared<MathRenderer>(),
+			body->width(),
+			&probeHeight);
+		auto lookupFlags = Ui::Text::StateRequest::Flags();
+		lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
+		const auto clickBounds = HitBoundsWhere(
+			probeArticle.get(),
+			body->width(),
+			probeHeight,
+			lookupFlags,
+			[](const MarkdownArticleHitTestResult &hit) {
+				return hit.mediaActivation.kind == MediaActivationKind::Embed;
 			});
-			const auto previewProbePrepared = TryPrepareNativeInstantView({
-				.source = &previewProbeSource,
-			});
-			Check(
-				previewProbePrepared.supported(),
-				previewEmbedLabel + u" probe prepare supported"_q,
-				ok);
-			Check(
-				!previewProbePrepared.content.failure.failed(),
-				previewEmbedLabel + u" probe prepare failure"_q,
-				ok);
-			if (previewProbePrepared.supported()
-				&& !previewProbePrepared.content.failure.failed()) {
-				auto probeHeight = 0;
-				auto probeArticle = BuildArticleForTest(
-					std::move(previewProbePrepared.content),
-					std::make_shared<MathRenderer>(),
-					body->width(),
-					&probeHeight);
-				auto lookupFlags = Ui::Text::StateRequest::Flags();
-				lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
-				const auto clickBounds = HitBoundsWhere(
-					probeArticle.get(),
-					body->width(),
-					probeHeight,
-					lookupFlags,
-					[](const MarkdownArticleHitTestResult &hit) {
-						return hit.mediaActivation.kind
-							== MediaActivationKind::Embed;
-					});
-				Check(
-					clickBounds.has_value(),
-					previewEmbedLabel + u" click bounds"_q,
-					ok);
-				if (clickBounds) {
-					const auto bodyBeforeClick = RenderWidgetForTest(body);
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay hidden before click"_q,
-						ok);
-					Check(
-						!overlayClose->isVisible(),
-						previewEmbedLabel + u" overlay close hidden before click"_q,
-						ok);
-					SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
-					FlushPendingWidgetEvents();
-					const auto loadingBody = RenderWidgetForTest(body);
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay hidden after click"_q,
-						ok);
+		Check(clickBounds.has_value(), caseLabel + u" click bounds"_q, ok);
+		if (!clickBounds) {
+			return;
+		}
+		const auto bodyBeforeClick = RenderWidgetForTest(body);
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay hidden before click"_q,
+			ok);
+		Check(
+			!overlayClose->isVisible(),
+			caseLabel + u" overlay close hidden before click"_q,
+			ok);
+		SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
+		FlushPendingWidgetEvents();
+		const auto loadingBody = RenderWidgetForTest(body);
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay hidden after click"_q,
+			ok);
 #ifdef Q_OS_LINUX
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::External,
-						previewEmbedLabel + u" click enters external mode"_q,
-						ok);
-					Check(
-						!overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" external click skips loading cover"_q,
-						ok);
-					Check(
-						!overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" external click skips ready delay"_q,
-						ok);
-					Check(
-						!PixelsDifferInRect(
-							bodyBeforeClick,
-							loadingBody,
-							*clickBounds),
-						previewEmbedLabel
-							+ u" external click skips placeholder loading"_q,
-						ok);
-					overlay->testHandleNavigationDone(true);
-					FlushPendingWidgetEvents();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel
-							+ u" external success keeps overlay hidden"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::External,
-						previewEmbedLabel
-							+ u" external success keeps external mode"_q,
-						ok);
-					Check(
-						!overlay->testLoadingCoverVisible(),
-						previewEmbedLabel
-							+ u" external success keeps loading cover hidden"_q,
-						ok);
-					Check(
-						!overlay->testReadyDelayScheduled(),
-						previewEmbedLabel
-							+ u" external success keeps ready delay idle"_q,
-						ok);
-					overlay->testHandleNavigationDone(false);
-					FlushPendingWidgetEvents();
-					const auto overlayError = preview->findChild<QWidget*>(
-						u"nativeIvEmbedOverlayErrorWrap"_q);
-					Check(
-						overlayShell->isVisible(),
-						previewEmbedLabel
-							+ u" external failure shows overlay shell"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::Error,
-						previewEmbedLabel
-							+ u" external failure switches to error mode"_q,
-						ok);
-					Check(
-						overlayError && overlayError->isVisible(),
-						previewEmbedLabel
-							+ u" external failure shows overlay error"_q,
-						ok);
-					Check(
-						overlayClose->isVisible(),
-						previewEmbedLabel
-							+ u" overlay close visible on external failure"_q,
-						ok);
-					Check(
-						!overlay->testLoadingCoverVisible(),
-						previewEmbedLabel
-							+ u" external failure keeps loading cover hidden"_q,
-						ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::External,
+			caseLabel + u" click enters external mode"_q,
+			ok);
+		Check(
+			!overlay->testLoadingCoverVisible(),
+			caseLabel + u" external click skips loading cover"_q,
+			ok);
+		Check(
+			!overlay->testReadyDelayScheduled(),
+			caseLabel + u" external click skips ready delay"_q,
+			ok);
+		Check(
+			!PixelsDifferInRect(bodyBeforeClick, loadingBody, *clickBounds),
+			caseLabel + u" external click skips placeholder loading"_q,
+			ok);
+		overlay->testHandleNavigationDone(true);
+		FlushPendingWidgetEvents();
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" external success keeps overlay hidden"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::External,
+			caseLabel + u" external success keeps external mode"_q,
+			ok);
+		Check(
+			!overlay->testLoadingCoverVisible(),
+			caseLabel + u" external success keeps loading cover hidden"_q,
+			ok);
+		Check(
+			!overlay->testReadyDelayScheduled(),
+			caseLabel + u" external success keeps ready delay idle"_q,
+			ok);
+		overlay->testHandleNavigationDone(false);
+		FlushPendingWidgetEvents();
+		const auto overlayError = preview->findChild<QWidget*>(
+			u"nativeIvEmbedOverlayErrorWrap"_q);
+		Check(
+			overlayShell->isVisible(),
+			caseLabel + u" external failure shows overlay shell"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::Error,
+			caseLabel + u" external failure switches to error mode"_q,
+			ok);
+		Check(
+			overlayError && overlayError->isVisible(),
+			caseLabel + u" external failure shows overlay error"_q,
+			ok);
+		Check(
+			overlayClose->isVisible(),
+			caseLabel + u" overlay close visible on external failure"_q,
+			ok);
+		Check(
+			!overlay->testLoadingCoverVisible(),
+			caseLabel + u" external failure keeps loading cover hidden"_q,
+			ok);
 #else // Q_OS_LINUX
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
-						previewEmbedLabel + u" preload mode after click"_q,
-						ok);
-					Check(
-						overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" preload active after click"_q,
-						ok);
-					Check(
-						PixelsDifferInRect(
-							bodyBeforeClick,
-							loadingBody,
-							*clickBounds),
-						previewEmbedLabel + u" placeholder loading visible"_q,
-						ok);
-					const auto availableRect = NativeIvOverlayAvailableRect(
-						overlay,
-						true);
-					Check(
-						availableRect.isValid(),
-						previewEmbedLabel + u" overlay available rect"_q,
-						ok);
-					overlay->testHandleWebviewMessage(
-						NativeIvPreferredSizeMessage(QSize(180, 96)));
-					FlushPendingWidgetEvents();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay stays hidden after preferred size"_q,
-						ok);
-					Check(
-						!overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" ready delay waits for readiness"_q,
-						ok);
-					overlay->testHandleNavigationDone(true);
-					FlushPendingWidgetEvents();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay stays hidden after readiness"_q,
-						ok);
-					Check(
-						overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" preload stays active after readiness"_q,
-						ok);
-					Check(
-						overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" ready delay scheduled after readiness"_q,
-						ok);
-					const auto readyGeometry = overlayShell->geometry();
-					if (availableRect.isValid()) {
-						overlay->testHandleWebviewMessage(
-							NativeIvPreferredSizeMessage(QSize(
-								availableRect.width() * 2,
-								availableRect.height() * 2)));
-						FlushPendingWidgetEvents();
-					}
-					const auto settledGeometry = overlayShell->geometry();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel
-							+ u" overlay stays hidden during settled resize"_q,
-						ok);
-					Check(
-						overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" ready delay remains scheduled"_q,
-						ok);
-					if (availableRect.isValid()) {
-						const auto expectedFullWidthGeometry
-							= NativeIvOverlayFullWidthBodyRect(overlay);
-						Check(
-							readyGeometry != settledGeometry,
-							previewEmbedLabel
-								+ u" hidden preload accepts later preferred size"_q,
-							ok);
-						Check(
-							settledGeometry == expectedFullWidthGeometry,
-							previewEmbedLabel
-								+ u" hidden preload leaves close reserve"_q,
-							ok);
-					}
-					overlay->testFireReadyDelay();
-					FlushPendingWidgetEvents();
-					const auto revealedBody = RenderWidgetForTest(body);
-					const auto revealedBodyGeometry = overlay->testBodyGeometry();
-					const auto expectedBodyGeometry
-						= NativeIvOverlayFullWidthBodyRect(overlay);
-					Check(
-						overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay reveals after ready delay"_q,
-						ok);
-					Check(
-						overlayClose->isVisible(),
-						previewEmbedLabel + u" overlay close visible on reveal"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::EmbeddedVisible,
-						previewEmbedLabel + u" reveal switches to visible mode"_q,
-						ok);
-					Check(
-						!overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" preload clears after reveal"_q,
-						ok);
-					Check(
-						!overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" ready delay clears after reveal"_q,
-						ok);
-					Check(
-						overlayShell->geometry() == settledGeometry,
-						previewEmbedLabel
-							+ u" reveal uses latest settled geometry"_q,
-						ok);
-					Check(
-						revealedBodyGeometry == expectedBodyGeometry,
-						previewEmbedLabel
-							+ u" reveal body geometry keeps close reserve"_q,
-						ok);
-					if (availableRect.isValid() && !revealedBodyGeometry.isEmpty()) {
-						Check(
-							(revealedBodyGeometry.top() - availableRect.top())
-									== NativeIvOverlayCloseHitHeight()
-								&& (availableRect.bottom()
-										- revealedBodyGeometry.bottom())
-									== NativeIvOverlayCloseHitHeight(),
-							previewEmbedLabel
-								+ u" full-width body keeps equal top and bottom skip"_q,
-							ok);
-						Check(
-							overlayShell->size() == NativeIvOverlayShellSizeForBody(
-								revealedBodyGeometry.size(),
-								true),
-							previewEmbedLabel
-								+ u" full-width shell size matches body"_q,
-							ok);
-					}
-					Check(
-						overlayClose->geometry().right() == overlay->rect().right()
-							&& overlayClose->geometry().top()
-								== overlay->rect().top(),
-						previewEmbedLabel
-							+ u" overlay close anchored to top right"_q,
-						ok);
-					Check(
-						overlayClose->geometry().bottom()
-								<= revealedBodyGeometry.top(),
-						previewEmbedLabel
-							+ u" overlay close stays inside reserved band"_q,
-						ok);
-					Check(
-						PixelsDifferInRect(
-							loadingBody,
-							revealedBody,
-							*clickBounds),
-						previewEmbedLabel + u" placeholder loading clears on reveal"_q,
-						ok);
-					overlay->testHandleNavigationDone(false);
-					FlushPendingWidgetEvents();
-					const auto lateFailureError = preview->findChild<QWidget*>(
-						u"nativeIvEmbedOverlayErrorWrap"_q);
-					Check(
-						overlayShell->isVisible(),
-						previewEmbedLabel
-							+ u" late navigation failure keeps overlay visible"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::Error,
-						previewEmbedLabel
-							+ u" late navigation failure switches to error mode"_q,
-						ok);
-					Check(
-						lateFailureError && lateFailureError->isVisible(),
-						previewEmbedLabel
-							+ u" late navigation failure shows overlay error"_q,
-						ok);
-					Check(
-						overlayClose->isVisible(),
-						previewEmbedLabel
-							+ u" overlay close visible on late failure"_q,
-						ok);
-					overlay->closeEmbed();
-					FlushPendingWidgetEvents();
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay hides before failure retry"_q,
-						ok);
-					Check(
-						!overlayClose->isVisible(),
-						previewEmbedLabel
-							+ u" overlay close hides before failure retry"_q,
-						ok);
-					const auto bodyBeforeFailureClick = RenderWidgetForTest(body);
-					SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
-					FlushPendingWidgetEvents();
-					const auto failureLoadingBody = RenderWidgetForTest(body);
-					Check(
-						!overlayShell->isVisible(),
-						previewEmbedLabel + u" overlay stays hidden on failure click"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
-						previewEmbedLabel + u" retry reenters preload mode"_q,
-						ok);
-					Check(
-						overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" preload active before failure"_q,
-						ok);
-					Check(
-						PixelsDifferInRect(
-							bodyBeforeFailureClick,
-							failureLoadingBody,
-							*clickBounds),
-						previewEmbedLabel + u" placeholder loading visible on retry"_q,
-						ok);
-					overlay->testHandleNavigationDone(false);
-					FlushPendingWidgetEvents();
-					const auto bodyAfterFailure = RenderWidgetForTest(body);
-					const auto overlayError = preview->findChild<QWidget*>(
-						u"nativeIvEmbedOverlayErrorWrap"_q);
-					Check(
-						overlayShell->isVisible(),
-						previewEmbedLabel + u" preload failure shows overlay shell"_q,
-						ok);
-					Check(
-						overlay->testMode() == EmbedOverlay::Mode::Error,
-						previewEmbedLabel
-							+ u" preload failure switches to error mode"_q,
-						ok);
-					Check(
-						!overlay->testLoadingCoverVisible(),
-						previewEmbedLabel + u" preload clears after failure"_q,
-						ok);
-					Check(
-						!overlay->testReadyDelayScheduled(),
-						previewEmbedLabel + u" ready delay clears after failure"_q,
-						ok);
-					Check(
-						PixelsDifferInRect(
-							failureLoadingBody,
-							bodyAfterFailure,
-							*clickBounds),
-						previewEmbedLabel
-							+ u" placeholder loading clears after failure callback"_q,
-						ok);
-					Check(
-						overlayError && overlayError->isVisible(),
-						previewEmbedLabel
-							+ u" preload failure shows overlay error"_q,
-						ok);
-					Check(
-						overlayClose->isVisible(),
-						previewEmbedLabel
-							+ u" overlay close visible on preload failure"_q,
-						ok);
-#endif // Q_OS_LINUX
-				}
-			}
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
+			caseLabel + u" preload mode after click"_q,
+			ok);
+		Check(
+			overlay->testLoadingCoverVisible(),
+			caseLabel + u" preload active after click"_q,
+			ok);
+		Check(
+			PixelsDifferInRect(bodyBeforeClick, loadingBody, *clickBounds),
+			caseLabel + u" placeholder loading visible"_q,
+			ok);
+		const auto availableRect = NativeIvOverlayAvailableRect(overlay, fullWidth);
+		Check(availableRect.isValid(), caseLabel + u" overlay available rect"_q, ok);
+		overlay->testHandleWebviewMessage(
+			NativeIvPreferredSizeMessage(QSize(180, 96)));
+		FlushPendingWidgetEvents();
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay stays hidden after preferred size"_q,
+			ok);
+		Check(
+			!overlay->testReadyDelayScheduled(),
+			caseLabel + u" ready delay waits for readiness"_q,
+			ok);
+		overlay->testHandleNavigationDone(true);
+		FlushPendingWidgetEvents();
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay stays hidden after readiness"_q,
+			ok);
+		Check(
+			overlay->testLoadingCoverVisible(),
+			caseLabel + u" preload stays active after readiness"_q,
+			ok);
+		Check(
+			overlay->testReadyDelayScheduled(),
+			caseLabel + u" ready delay scheduled after readiness"_q,
+			ok);
+		const auto readyGeometry = overlayShell->geometry();
+		if (availableRect.isValid()) {
+			overlay->testHandleWebviewMessage(
+				NativeIvPreferredSizeMessage(QSize(
+					availableRect.width() * 2,
+					availableRect.height() * 2)));
+			FlushPendingWidgetEvents();
 		}
-	}
+		const auto settledGeometry = overlayShell->geometry();
+		const auto settledBodyGeometry = overlay->testBodyGeometry();
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay stays hidden during settled resize"_q,
+			ok);
+		Check(
+			overlay->testReadyDelayScheduled(),
+			caseLabel + u" ready delay remains scheduled"_q,
+			ok);
+		if (availableRect.isValid()) {
+			const auto expectedBodyGeometry = fullWidth
+				? NativeIvOverlayFullWidthBodyRect(overlay)
+				: NativeIvOverlayRoundedBodyRect(overlay, body->width());
+			Check(
+				readyGeometry != settledGeometry,
+				caseLabel + u" hidden preload accepts later preferred size"_q,
+				ok);
+			Check(
+				settledBodyGeometry == expectedBodyGeometry,
+				caseLabel + u" hidden preload leaves close reserve"_q,
+				ok);
+		}
+		overlay->testFireReadyDelay();
+		FlushPendingWidgetEvents();
+		const auto revealedBody = RenderWidgetForTest(body);
+		const auto revealedBodyGeometry = overlay->testBodyGeometry();
+		const auto expectedBodyGeometry = fullWidth
+			? NativeIvOverlayFullWidthBodyRect(overlay)
+			: NativeIvOverlayRoundedBodyRect(overlay, body->width());
+		Check(
+			overlayShell->isVisible(),
+			caseLabel + u" overlay reveals after ready delay"_q,
+			ok);
+		Check(
+			overlayClose->isVisible(),
+			caseLabel + u" overlay close visible on reveal"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::EmbeddedVisible,
+			caseLabel + u" reveal switches to visible mode"_q,
+			ok);
+		Check(
+			!overlay->testLoadingCoverVisible(),
+			caseLabel + u" preload clears after reveal"_q,
+			ok);
+		Check(
+			!overlay->testReadyDelayScheduled(),
+			caseLabel + u" ready delay clears after reveal"_q,
+			ok);
+		Check(
+			overlayShell->geometry() == settledGeometry,
+			caseLabel + u" reveal uses latest settled geometry"_q,
+			ok);
+		Check(
+			revealedBodyGeometry == expectedBodyGeometry,
+			caseLabel + u" reveal body geometry keeps close reserve"_q,
+			ok);
+		if (availableRect.isValid() && !revealedBodyGeometry.isEmpty()) {
+			if (fullWidth) {
+				Check(
+					(revealedBodyGeometry.top() - availableRect.top())
+							== NativeIvOverlayCloseHitHeight()
+						&& (availableRect.bottom() - revealedBodyGeometry.bottom())
+							== NativeIvOverlayCloseHitHeight(),
+					caseLabel + u" full-width body keeps equal top and bottom skip"_q,
+					ok);
+			} else {
+				Check(
+					(revealedBodyGeometry.top() - availableRect.top())
+							== (NativeIvOverlayCloseHitHeight()
+								+ st::markdownEmbedOverlay.padding.top())
+						&& (availableRect.bottom() - revealedBodyGeometry.bottom())
+							== (NativeIvOverlayCloseHitHeight()
+								+ st::markdownEmbedOverlay.padding.bottom()),
+					caseLabel + u" rounded body keeps close reserve bands"_q,
+					ok);
+			}
+			Check(
+				overlayShell->size() == NativeIvOverlayShellSizeForBody(
+					revealedBodyGeometry.size(),
+					fullWidth),
+				caseLabel + u" shell size matches body"_q,
+				ok);
+		}
+		if (fullWidth) {
+			Check(
+				overlayClose->geometry().right() == overlay->rect().right()
+					&& overlayClose->geometry().top() == overlay->rect().top(),
+				caseLabel + u" overlay close anchored to overlay root"_q,
+				ok);
+		} else {
+			Check(
+				overlayClose->geometry().right() == overlayShell->geometry().right()
+					&& overlayClose->geometry().right() < overlay->rect().right()
+					&& overlayClose->geometry().top() < overlayShell->geometry().top()
+					&& overlayClose->geometry().top() >= availableRect.top(),
+				caseLabel + u" overlay close anchored to shell right"_q,
+				ok);
+		}
+		Check(
+			overlayClose->geometry().bottom() <= revealedBodyGeometry.top(),
+			caseLabel + u" overlay close stays inside reserved band"_q,
+			ok);
+		Check(
+			PixelsDifferInRect(loadingBody, revealedBody, *clickBounds),
+			caseLabel + u" placeholder loading clears on reveal"_q,
+			ok);
+		overlay->testHandleNavigationDone(false);
+		FlushPendingWidgetEvents();
+		const auto lateFailureError = preview->findChild<QWidget*>(
+			u"nativeIvEmbedOverlayErrorWrap"_q);
+		Check(
+			overlayShell->isVisible(),
+			caseLabel + u" late navigation failure keeps overlay visible"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::Error,
+			caseLabel + u" late navigation failure switches to error mode"_q,
+			ok);
+		Check(
+			lateFailureError && lateFailureError->isVisible(),
+			caseLabel + u" late navigation failure shows overlay error"_q,
+			ok);
+		Check(
+			overlayClose->isVisible(),
+			caseLabel + u" overlay close visible on late failure"_q,
+			ok);
+		overlay->closeEmbed();
+		FlushPendingWidgetEvents();
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay hides before failure retry"_q,
+			ok);
+		Check(
+			!overlayClose->isVisible(),
+			caseLabel + u" overlay close hides before failure retry"_q,
+			ok);
+		const auto bodyBeforeFailureClick = RenderWidgetForTest(body);
+		SendMouseClick(body, clickBounds->center(), Qt::LeftButton);
+		FlushPendingWidgetEvents();
+		const auto failureLoadingBody = RenderWidgetForTest(body);
+		Check(
+			!overlayShell->isVisible(),
+			caseLabel + u" overlay stays hidden on failure click"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::EmbeddedPreload,
+			caseLabel + u" retry reenters preload mode"_q,
+			ok);
+		Check(
+			overlay->testLoadingCoverVisible(),
+			caseLabel + u" preload active before failure"_q,
+			ok);
+		Check(
+			PixelsDifferInRect(
+				bodyBeforeFailureClick,
+				failureLoadingBody,
+				*clickBounds),
+			caseLabel + u" placeholder loading visible on retry"_q,
+			ok);
+		overlay->testHandleNavigationDone(false);
+		FlushPendingWidgetEvents();
+		const auto bodyAfterFailure = RenderWidgetForTest(body);
+		const auto overlayError = preview->findChild<QWidget*>(
+			u"nativeIvEmbedOverlayErrorWrap"_q);
+		Check(
+			overlayShell->isVisible(),
+			caseLabel + u" preload failure shows overlay shell"_q,
+			ok);
+		Check(
+			overlay->testMode() == EmbedOverlay::Mode::Error,
+			caseLabel + u" preload failure switches to error mode"_q,
+			ok);
+		Check(
+			!overlay->testLoadingCoverVisible(),
+			caseLabel + u" preload clears after failure"_q,
+			ok);
+		Check(
+			!overlay->testReadyDelayScheduled(),
+			caseLabel + u" ready delay clears after failure"_q,
+			ok);
+		Check(
+			PixelsDifferInRect(
+				failureLoadingBody,
+				bodyAfterFailure,
+				*clickBounds),
+			caseLabel + u" placeholder loading clears after failure callback"_q,
+			ok);
+		Check(
+			overlayError && overlayError->isVisible(),
+			caseLabel + u" preload failure shows overlay error"_q,
+			ok);
+		Check(
+			overlayClose->isVisible(),
+			caseLabel + u" overlay close visible on preload failure"_q,
+			ok);
+#endif // Q_OS_LINUX
+	};
+	runPreviewEmbedCase(u"full-width"_q, true);
+	runPreviewEmbedCase(u"rounded"_q, false);
 
 	const auto previewCancelLabel = u"native-iv-embed-preview-cancel"_q;
 	const auto firstPreviewBlock = makePreviewEmbedBlock(
@@ -8256,6 +8267,166 @@ void CheckNativeInstantViewCanonicalBlockCoverage(bool *ok) {
 	}
 }
 
+void CheckNativeInstantViewPullquoteCoverage(bool *ok) {
+	const auto label = u"native-iv-pullquote"_q;
+	const auto bodyText = u"Pullquote body"_q;
+	const auto citeText = u"Pullquote cite"_q;
+	const auto renderer = std::make_shared<MathRenderer>();
+	const auto checkPreparedAndPainted = [&](
+			const QString &caseLabel,
+			NativeInstantViewPrepareResult prepared) {
+		Check(prepared.supported(), caseLabel + u" prepare supported"_q, ok);
+		if (!prepared.supported()) {
+			return;
+		}
+		const auto quotes = CollectPreparedBlocksByKind(
+			prepared.content.blocks.blocks,
+			PreparedBlockKind::Quote);
+		Check(quotes.size() == 1, caseLabel + u" quote block count"_q, ok);
+		if (quotes.size() != 1) {
+			return;
+		}
+		const auto *quote = quotes.front();
+		Check(quote->pullquote, caseLabel + u" pullquote flag"_q, ok);
+		Check(
+			quote->children.size() == 2,
+			caseLabel + u" child paragraph count"_q,
+			ok);
+		if (quote->children.size() == 2) {
+			for (auto i = 0; i != 2; ++i) {
+				const auto &child = quote->children[i];
+				Check(
+					child.kind == PreparedBlockKind::Paragraph
+						&& (child.flowAlignment == TableAlignment::Center),
+					caseLabel + u" child centered "_q + QString::number(i),
+					ok);
+				Check(
+					HasEntityRange(
+						child.text,
+						EntityType::Italic,
+						0,
+						child.text.text.size()),
+					caseLabel + u" child italic "_q + QString::number(i),
+					ok);
+			}
+		}
+		const auto articleWidth = 420;
+		auto articleHeight = 0;
+		auto article = BuildArticleForTest(
+			std::move(prepared.content),
+			renderer,
+			articleWidth,
+			&articleHeight);
+		Check(articleHeight > 0, caseLabel + u" article height"_q, ok);
+		if (articleHeight <= 0) {
+			return;
+		}
+		const auto image = PaintArticleForTest(
+			article.get(),
+			articleWidth,
+			articleHeight);
+		Check(HasPaintedPixels(image), caseLabel + u" paint produced pixels"_q, ok);
+		const auto bodyBounds = SegmentHitBounds(
+			article.get(),
+			articleWidth,
+			articleHeight,
+			0);
+		const auto citeBounds = SegmentHitBounds(
+			article.get(),
+			articleWidth,
+			articleHeight,
+			1);
+		Check(bodyBounds.has_value(), caseLabel + u" body bounds"_q, ok);
+		Check(citeBounds.has_value(), caseLabel + u" cite bounds"_q, ok);
+		if (!bodyBounds || !citeBounds) {
+			return;
+		}
+		const auto bodyPainted = PaintedBoundsInRect(image, *bodyBounds);
+		const auto citePainted = PaintedBoundsInRect(image, *citeBounds);
+		Check(bodyPainted.has_value(), caseLabel + u" body paint bounds"_q, ok);
+		Check(citePainted.has_value(), caseLabel + u" cite paint bounds"_q, ok);
+		if (!bodyPainted || !citePainted) {
+			return;
+		}
+		const auto bodyHitBounds = SymbolRangeHitBounds(
+			article.get(),
+			articleWidth,
+			articleHeight,
+			0,
+			bodyText.size(),
+			0);
+		const auto citeHitBounds = SymbolRangeHitBounds(
+			article.get(),
+			articleWidth,
+			articleHeight,
+			0,
+			citeText.size(),
+			1);
+		Check(bodyHitBounds.has_value(), caseLabel + u" body hit bounds"_q, ok);
+		Check(citeHitBounds.has_value(), caseLabel + u" cite hit bounds"_q, ok);
+		if (!bodyHitBounds || !citeHitBounds) {
+			return;
+		}
+		const auto articleCenterX = articleWidth / 2;
+		Check(
+			std::abs(bodyPainted->center().x() - articleCenterX) <= 6,
+			caseLabel + u" body paint centered"_q,
+			ok);
+		Check(
+			std::abs(citePainted->center().x() - articleCenterX) <= 6,
+			caseLabel + u" cite paint centered"_q,
+			ok);
+		Check(
+			std::abs(bodyHitBounds->center().x() - bodyPainted->center().x()) <= 6,
+			caseLabel + u" body hit mapping matches paint"_q,
+			ok);
+		Check(
+			std::abs(citeHitBounds->center().x() - citePainted->center().x()) <= 6,
+			caseLabel + u" cite hit mapping matches paint"_q,
+			ok);
+		const auto contentBounds = bodyPainted->united(*citePainted);
+		const auto accentProbe = QRect(
+			0,
+			contentBounds.top(),
+			std::max(contentBounds.left() - 4, 0),
+			contentBounds.height());
+		Check(
+			!accentProbe.isEmpty(),
+			caseLabel + u" accent probe rect"_q,
+			ok);
+		if (!accentProbe.isEmpty()) {
+			Check(
+				!PaintedBoundsInRect(image, accentProbe).has_value(),
+				caseLabel + u" accent strip absent"_q,
+				ok);
+		}
+	};
+
+	auto nativeSource = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockPullquote(
+			NativeIvText(bodyText),
+			NativeIvText(citeText)),
+	});
+	checkPreparedAndPainted(
+		label + u" native"_q,
+		TryPrepareNativeInstantView({
+			.source = &nativeSource,
+		}));
+
+	auto canonicalPullquote = Iv::RichPage::Block();
+	canonicalPullquote.kind = Iv::RichPage::BlockKind::Quote;
+	canonicalPullquote.pullquote = true;
+	canonicalPullquote.text = CanonicalRichText(
+		TextWithEntities::Simple(bodyText));
+	canonicalPullquote.caption = CanonicalRichText(
+		TextWithEntities::Simple(citeText));
+	checkPreparedAndPainted(
+		label + u" canonical"_q,
+		TryPrepareNativeInstantView({
+			.richPage = CanonicalRichPage({ std::move(canonicalPullquote) }),
+		}));
+}
+
 void CheckRichPageSummaryFlatteningCoverage(bool *ok) {
 	const auto label = u"rich-page-summary-flattening"_q;
 	const auto placeholder = u"Click to view Rich Text"_q;
@@ -9526,23 +9697,33 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 		}
 		return false;
 	};
+	const auto centeredXInRect = [](QRect outer, QRect inner, int tolerance = 6) {
+		return std::abs(inner.center().x() - outer.center().x()) <= tolerance;
+	};
+	const auto leftAlignedInRect = [](QRect outer, QRect inner, int tolerance = 8) {
+		return (inner.left() - outer.left()) <= tolerance;
+	};
+	const auto rightAlignedInRect = [](QRect outer, QRect inner, int tolerance = 8) {
+		return (outer.right() - inner.right()) <= tolerance;
+	};
 
 	const auto videoFixture = NativeIvVideoFixture();
 	const auto audioFixture = NativeIvAudioFixture();
 	const auto mapFixture = NativeIvMapFixture();
 	const auto channelFixture = NativeIvChannelFixture();
 	const auto collageFixture = NativeIvCollageFixture();
-	const auto slideshowFixture = NativeIvSlideshowFixture();
+	const auto slideshowFixture = NativeIvMixedHeightSlideshowFixture();
 
 	const auto relatedArticleLabel = u"native-iv-related-article"_q;
 	const auto relatedPhotoId = uint64(9201);
 	const auto relatedThumbnailColor = QColor(24, 160, 220);
+	const auto relatedFullColor = QColor(12, 110, 180);
 	auto relatedRuntime = std::make_shared<TestMediaRuntime>();
 	auto relatedPhotoRuntime = std::make_shared<TestPhotoRuntime>();
 	relatedPhotoRuntime->thumbnailImage = std::make_shared<TestDynamicImage>(
 		SolidTestImage(87, 87, relatedThumbnailColor));
 	relatedPhotoRuntime->fullImage = std::make_shared<TestDynamicImage>(
-		SolidTestImage(174, 174, QColor(12, 110, 180)));
+		SolidTestImage(174, 174, relatedFullColor));
 	relatedRuntime->addPhotoRuntime(relatedPhotoId, relatedPhotoRuntime);
 	auto relatedSource = NativeIvSource(
 		QVector<MTPPageBlock>{
@@ -9646,13 +9827,29 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 				relatedArticleLabel + u" external article below internal"_q,
 				ok);
 			Check(
-				anyPixelInRect(
-					relatedImage,
-					*internalBounds,
-					[&](QRgb pixel) {
-						return pixel == relatedThumbnailColor.rgba();
-					}),
-				relatedArticleLabel + u" thumbnail paint"_q,
+				relatedThumbnailColor != relatedFullColor,
+				relatedArticleLabel + u" thumbnail/full colors distinct"_q,
+				ok);
+			const auto thumbnailStrip = QRect(
+				std::max(
+					internalBounds->right()
+						- st::defaultMarkdown.relatedArticle.thumbnailSize
+						+ 1,
+					internalBounds->left()),
+				internalBounds->top(),
+				std::min(
+					st::defaultMarkdown.relatedArticle.thumbnailSize,
+					internalBounds->width()),
+				internalBounds->height());
+			Check(
+				!thumbnailStrip.isEmpty()
+					&& anyPixelInRect(
+						relatedImage,
+						thumbnailStrip,
+						[&](QRgb pixel) {
+							return pixel == relatedFullColor.rgba();
+						}),
+				relatedArticleLabel + u" thumbnail rect prefers full image"_q,
 				ok);
 		}
 		if (internalBounds) {
@@ -10305,6 +10502,174 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			mergedCellSelection.expanded == u"Bottom merged"_q,
 			tableLabel + u" single merged cell export"_q,
 			ok);
+	}
+
+	const auto headerAlignTableLabel = u"native-iv-table-header-centering"_q;
+	enum : int {
+		kHeaderAlignCaptionSegment = 0,
+		kHeaderAlignWholeSegment = 1,
+		kHeaderAlignHeaderLeftSegment = 2,
+		kHeaderAlignHeaderRightSegment = 3,
+		kHeaderAlignHeaderTailSegment = 4,
+		kHeaderAlignBodyLeftSegment = 5,
+		kHeaderAlignBodyCenterSegment = 6,
+		kHeaderAlignBodyRightSegment = 7,
+	};
+	auto headerAlignTableSource = NativeIvSource(QVector<MTPPageBlock>{
+		NativeIvTableBlock(
+			u"Header alignment"_q,
+			{
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Header left"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Left),
+					NativeIvTableCell(
+						u"Header right"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Right),
+					NativeIvTableCell(
+						u"Header tail"_q,
+						1,
+						1,
+						true,
+						TableAlignment::Left),
+				}),
+				NativeIvTableRow({
+					NativeIvTableCell(
+						u"Left body"_q,
+						1,
+						1,
+						false,
+						TableAlignment::Left),
+					NativeIvTableCell(
+						u"Center body"_q,
+						1,
+						1,
+						false,
+						TableAlignment::Center),
+					NativeIvTableCell(
+						u"Right body"_q,
+						1,
+						1,
+						false,
+						TableAlignment::Right),
+				}),
+			},
+			true,
+			false),
+	});
+	auto headerAlignPrepared = TryPrepareNativeInstantView({
+		.source = &headerAlignTableSource,
+	});
+	Check(
+		headerAlignPrepared.supported(),
+		headerAlignTableLabel + u" prepare supported"_q,
+		ok);
+	if (headerAlignPrepared.supported()) {
+		auto headerAlignHeight = 0;
+		auto headerAlignArticle = BuildArticleForTest(
+			std::move(headerAlignPrepared.content),
+			renderer,
+			360,
+			&headerAlignHeight);
+		const auto headerAlignImage = PaintArticleForTest(
+			headerAlignArticle.get(),
+			360,
+			headerAlignHeight);
+		Check(
+			HasPaintedPixels(headerAlignImage),
+			headerAlignTableLabel + u" paint produced pixels"_q,
+			ok);
+		auto segmentBounds = std::vector<std::optional<QRect>>();
+		for (auto segmentIndex = 0; segmentIndex != 8; ++segmentIndex) {
+			segmentBounds.push_back(SegmentHitBounds(
+				headerAlignArticle.get(),
+				360,
+				headerAlignHeight,
+				segmentIndex));
+			Check(
+				segmentBounds.back().has_value(),
+				headerAlignTableLabel + u" segment bounds "_q
+					+ QString::number(segmentIndex),
+				ok);
+		}
+		Check(
+			!headerAlignArticle->segmentIsText(8)
+				&& (headerAlignArticle->segmentLength(8) == 0),
+			headerAlignTableLabel + u" expected segment count"_q,
+			ok);
+		auto haveAllBounds = true;
+		for (const auto &bounds : segmentBounds) {
+			if (!bounds) {
+				haveAllBounds = false;
+				break;
+			}
+		}
+		if (haveAllBounds) {
+			const auto headerLeftPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignHeaderLeftSegment], 2));
+			const auto headerRightPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignHeaderRightSegment], 2));
+			const auto headerTailPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignHeaderTailSegment], 2));
+			const auto bodyLeftPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignBodyLeftSegment], 2));
+			const auto bodyCenterPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignBodyCenterSegment], 2));
+			const auto bodyRightPainted = PaintedBoundsInRect(
+				headerAlignImage,
+				insetRect(*segmentBounds[kHeaderAlignBodyRightSegment], 2));
+			Check(
+				headerLeftPainted.has_value()
+					&& headerRightPainted.has_value()
+					&& headerTailPainted.has_value()
+					&& bodyLeftPainted.has_value()
+					&& bodyCenterPainted.has_value()
+					&& bodyRightPainted.has_value(),
+				headerAlignTableLabel + u" painted cell bounds"_q,
+				ok);
+			if (headerLeftPainted
+				&& headerRightPainted
+				&& headerTailPainted
+				&& bodyLeftPainted
+				&& bodyCenterPainted
+				&& bodyRightPainted) {
+				Check(
+					centeredXInRect(
+						*segmentBounds[kHeaderAlignHeaderLeftSegment],
+						*headerLeftPainted)
+						&& centeredXInRect(
+							*segmentBounds[kHeaderAlignHeaderRightSegment],
+							*headerRightPainted)
+						&& centeredXInRect(
+							*segmentBounds[kHeaderAlignHeaderTailSegment],
+							*headerTailPainted),
+					headerAlignTableLabel + u" header cells paint centered"_q,
+					ok);
+				Check(
+					leftAlignedInRect(
+						*segmentBounds[kHeaderAlignBodyLeftSegment],
+						*bodyLeftPainted)
+						&& centeredXInRect(
+							*segmentBounds[kHeaderAlignBodyCenterSegment],
+							*bodyCenterPainted)
+						&& rightAlignedInRect(
+							*segmentBounds[kHeaderAlignBodyRightSegment],
+							*bodyRightPainted),
+					headerAlignTableLabel + u" body cells keep requested alignment"_q,
+					ok);
+			}
+		}
 	}
 
 	const auto salvagedTableLabel = u"native-iv-salvaged-table-article"_q;
@@ -11229,13 +11594,22 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 	}
 
 	const auto slideshowLabel = u"native-iv-slideshow-article"_q;
+	const auto slideshowThumbAColor = QColor(190, 90, 40);
+	const auto slideshowFullAColor = QColor(40, 140, 220);
+	const auto slideshowThumbBColor = QColor(150, 70, 170);
+	const auto slideshowFullBColor = QColor(20, 180, 110);
+	const auto slideshowFallbackColor = st::defaultMarkdown.photo.fallbackBg->c.rgba();
 	auto slideshowRuntime = std::make_shared<TestMediaRuntime>();
 	auto slideshowDocumentA = std::make_shared<TestDocumentRuntime>();
-	slideshowDocumentA->thumbnailImage = std::make_shared<TestDynamicImage>();
-	slideshowDocumentA->fullImage = std::make_shared<TestDynamicImage>();
+	slideshowDocumentA->thumbnailImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(96, 12, slideshowThumbAColor));
+	slideshowDocumentA->fullImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(192, 24, slideshowFullAColor));
 	auto slideshowDocumentB = std::make_shared<TestDocumentRuntime>();
-	slideshowDocumentB->thumbnailImage = std::make_shared<TestDynamicImage>();
-	slideshowDocumentB->fullImage = std::make_shared<TestDynamicImage>();
+	slideshowDocumentB->thumbnailImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(96, 18, slideshowThumbBColor));
+	slideshowDocumentB->fullImage = std::make_shared<TestDynamicImage>(
+		SolidTestImage(192, 36, slideshowFullBColor));
 	slideshowRuntime->addDocumentRuntime(7004, slideshowDocumentA);
 	slideshowRuntime->addDocumentRuntime(7005, slideshowDocumentB);
 	auto slideshowSource = NativeIvSource(
@@ -11282,6 +11656,62 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			slideshowBlockBounds.has_value(),
 			slideshowLabel + u" slideshow media bounds"_q,
 			ok);
+		if (slideshowBlockBounds) {
+			Check(
+				slideshowBlockBounds->height()
+					>= st::defaultMarkdown.groupedMedia.slideshowMinHeight,
+				slideshowLabel + u" short slide keeps minimum frame height"_q,
+				ok);
+			const auto firstForegroundHeight = std::max(
+				(slideshowBlockBounds->width() * 120 + 960 - 1) / 960,
+				1);
+			const auto firstForegroundRect = QRect(
+				slideshowBlockBounds->x(),
+				slideshowBlockBounds->y()
+					+ std::max(
+						(slideshowBlockBounds->height() - firstForegroundHeight) / 2,
+						0),
+				slideshowBlockBounds->width(),
+				firstForegroundHeight);
+			const auto letterboxBand = QRect(
+				firstForegroundRect.left(),
+				slideshowBlockBounds->top(),
+				firstForegroundRect.width(),
+				std::max(
+					firstForegroundRect.top() - slideshowBlockBounds->top(),
+					0));
+			const auto letterboxSampleRect = insetRect(letterboxBand, 4);
+			const auto foregroundSampleRect = insetRect(firstForegroundRect, 4);
+			Check(
+				!letterboxBand.isEmpty()
+					&& anyPixelInRect(
+						slideshowImage,
+						letterboxSampleRect,
+						[&](QRgb pixel) {
+							return (pixel != slideshowFallbackColor)
+								&& (pixel != slideshowFullAColor.rgba());
+						})
+					&& !anyPixelInRect(
+						slideshowImage,
+						letterboxSampleRect,
+						[&](QRgb pixel) {
+							return pixel == slideshowFallbackColor;
+						})
+					&& !anyPixelInRect(
+						slideshowImage,
+						letterboxSampleRect,
+						[&](QRgb pixel) {
+							return pixel == slideshowFullAColor.rgba();
+						})
+					&& anyPixelInRect(
+						slideshowImage,
+						foregroundSampleRect,
+						[&](QRgb pixel) {
+							return pixel == slideshowFullAColor.rgba();
+						}),
+				slideshowLabel + u" short slide paints blurred letterbox band"_q,
+				ok);
+		}
 		const auto slideshowMediaBounds = HitBoundsWhere(
 			slideshowArticle.get(),
 			460,
@@ -11319,19 +11749,27 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 				slideshowLabel + u" context export text"_q,
 				ok);
 			const auto &grouped = st::defaultMarkdown.groupedMedia;
+			const auto secondForegroundHeight = std::max(
+				(slideshowBlockBounds->width() * 480 + 854 - 1) / 854,
+				1);
+			const auto navigationFrameHeight = std::max(
+				std::min(firstForegroundHeight, secondForegroundHeight),
+				grouped.slideshowMinHeight);
 			const auto navButtonSize = std::min({
 				grouped.navButtonSize,
-				std::max(slideshowBlockBounds->height(), 0),
+				std::max(navigationFrameHeight, 0),
 				std::max(
 					(slideshowBlockBounds->width() - 2 * grouped.navButtonSkip) / 2,
 					0),
 			});
+			const auto navigationCenterY = slideshowBlockBounds->y()
+				+ (navigationFrameHeight / 2);
 			const auto nextPoint = QPoint(
 				slideshowBlockBounds->x()
 					+ slideshowBlockBounds->width()
 					- grouped.navButtonSkip
 					- (navButtonSize / 2),
-				slideshowBlockBounds->center().y());
+				navigationCenterY);
 			const auto nextHit = slideshowArticle->hitTest(nextPoint, lookupFlags);
 			Check(
 				(nextHit.state.link != nullptr)
@@ -11348,6 +11786,34 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 					&& (slideshowRuntime->documentRequests.back() == 7005),
 				slideshowLabel + u" next nav resolves second slide"_q,
 				ok);
+			const auto secondBlockBounds = HitBoundsWhere(
+				slideshowArticle.get(),
+				460,
+				slideshowHeight,
+				lookupFlags,
+				[&](const MarkdownArticleHitTestResult &hit) {
+					return hit.segmentIndex == 0;
+				});
+			Check(
+				secondBlockBounds.has_value()
+					&& (secondBlockBounds->height() > slideshowBlockBounds->height()),
+				slideshowLabel + u" second slide can use taller frame"_q,
+				ok);
+			if (secondBlockBounds) {
+				const auto stableNextHit = slideshowArticle->hitTest(
+					nextPoint,
+					lookupFlags);
+				const auto shiftedNextHit = slideshowArticle->hitTest(
+					QPoint(nextPoint.x(), secondBlockBounds->center().y()),
+					lookupFlags);
+				Check(
+					(stableNextHit.state.link != nullptr)
+						&& (stableNextHit.mediaActivation.kind
+							== MediaActivationKind::None)
+						&& (shiftedNextHit.state.link == nullptr),
+					slideshowLabel + u" nav buttons keep smallest-frame y after step"_q,
+					ok);
+			}
 			const auto secondHit = slideshowArticle->hitTest(
 				slideshowMediaBounds->center(),
 				lookupFlags);
@@ -11487,6 +11953,11 @@ void CheckNativeInstantViewArticleCoverage(bool *ok) {
 			(largeSlideshowRuntime->documentRequests.size() == 1)
 				&& (largeSlideshowRuntime->documentRequests.front() == 7004),
 			largeSlideshowLabel + u" skips grouped-grid bulk resolves"_q,
+			ok);
+		Check(
+			largeSlideshowDocument->thumbnailSizes.size() == 1
+				&& largeSlideshowDocument->fullSizes.size() == 1,
+			largeSlideshowLabel + u" active slide avoids grouped-grid batching"_q,
 			ok);
 	}
 }
@@ -15419,6 +15890,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckNativeInstantViewLayer227SpoilerMediaCoverage(&ok);
 	CheckNativeInstantViewCanonicalRichTextCoverage(&ok);
 	CheckNativeInstantViewCanonicalBlockCoverage(&ok);
+	CheckNativeInstantViewPullquoteCoverage(&ok);
 	CheckRichPageSummaryFlatteningCoverage(&ok);
 	CheckCodeBlockTrailingNewlineTrim(&ok);
 	CheckCodeBlockSelectionExportCoverage(&ok);
