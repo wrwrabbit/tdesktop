@@ -128,11 +128,17 @@ struct NativeMessage {
 	return RectPart::Left;
 }
 
+[[nodiscard]] bool IsNoArgumentsSentinel(const QString &string) {
+	return string.isEmpty() || string == u"\"\""_q;
+}
+
 [[nodiscard]] bool CanParseArguments(QJsonValue value) {
 	if (value.isObject()) {
 		return true;
 	} else if (!value.isString()) {
 		return false;
+	} else if (IsNoArgumentsSentinel(value.toString())) {
+		return true;
 	}
 	auto error = QJsonParseError();
 	const auto document = QJsonDocument::fromJson(
