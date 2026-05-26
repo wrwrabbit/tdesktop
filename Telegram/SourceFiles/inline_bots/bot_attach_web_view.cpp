@@ -2819,13 +2819,13 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		| ChatRestriction::SendStickers
 		| ChatRestriction::SendMusic
 		| ChatRestriction::SendFiles;
-	if (Data::CanSendAnyOf(peer, fileTypes)) {
+	if (Data::CanSendAnyOf(peer, fileTypes, false)) {
 		++minimal;
 		raw->addAction(tr::lng_attach_document(tr::now), [=] {
 			attach(false);
 		}, &st::menuIconFile);
 	}
-	if (peer->canCreatePolls()) {
+	if (peer->canCreatePolls(false)) {
 		++minimal;
 		raw->addAction(tr::lng_polls_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -2848,7 +2848,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				{ sendMenuType });
 		}, &st::menuIconCreatePoll);
 	}
-	if (peer->canCreateTodoLists()) {
+	if (peer->canCreateTodoLists(false)) {
 		++minimal;
 		raw->addAction(tr::lng_todo_menu_item(tr::now), [=] {
 			const auto action = actionFactory();
@@ -2871,13 +2871,13 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 	const auto session = &controller->session();
 	const auto locationType = ChatRestriction::SendOther;
 	const auto config = ResolveMapsConfig(session);
-	if (Data::CanSendAnyOf(peer, locationType)
+	if (Data::CanSendAnyOf(peer, locationType, false)
 		&& Ui::LocationPicker::Available(config)) {
 		raw->addAction(tr::lng_maps_point(tr::now), [=] {
 			ChooseAndSendLocation(controller, config, actionFactory());
 		}, &st::menuIconAddress);
 	}
-	const auto addBots = Data::CanSend(peer, ChatRestriction::SendInline)
+	const auto addBots = Data::CanSend(peer, ChatRestriction::SendInline, false)
 		&& !peer->starsPerMessageChecked();
 	for (const auto &bot : bots->attachBots()) {
 		if (!addBots
