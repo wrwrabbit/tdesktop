@@ -797,15 +797,17 @@ LaidOutBlock LayoutDisplayMathBlock(
 		const auto &fallbackPadding = st.displayMath.fallbackPadding;
 		const auto fallbackPaddingWidth = fallbackPadding.left()
 			+ fallbackPadding.right();
-		const auto fallbackText = formula
-			? formula->measured.fallbackText
-			: prepared.formulaTex.trimmed();
+		auto fallbackText = TextWithEntities::Simple(u"Invalid formula"_q);
+		fallbackText.entities.push_back(EntityInText(
+			EntityType::Italic,
+			0,
+			fallbackText.text.size()));
 		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
 		block.fallbackLeaf = Ui::Text::String(
 			TextMinResizeWidth(block.textWidth));
 		block.fallbackLeaf.setMarkedText(
 			st.displayMath.fallbackStyle,
-			TextWithEntities::Simple(fallbackText),
+			std::move(fallbackText),
 			kIvMarkedTextOptions);
 		block.textWidth = std::min(
 			block.textWidth,

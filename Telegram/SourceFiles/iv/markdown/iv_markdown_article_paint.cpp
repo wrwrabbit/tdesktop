@@ -1172,15 +1172,6 @@ void PaintDisplayMathBlock(
 						p.pen().color()));
 			}
 			if (!rendered.success) {
-				const auto radius = st.displayMath.fallbackRadius;
-				p.setPen(Qt::NoPen);
-				p.setBrush(paintSt.displayMath.fallbackBg->c);
-				if (radius > 0) {
-					auto hq = PainterHighQualityEnabler(p);
-					p.drawRoundedRect(block.formulaRect, radius, radius);
-				} else {
-					p.fillRect(block.formulaRect, paintSt.displayMath.fallbackBg->c);
-				}
 				p.setPen(paintSt.textColor->c);
 				PaintTextLeaf(
 					p,
