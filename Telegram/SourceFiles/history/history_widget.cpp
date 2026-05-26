@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
 #include "api/api_chat_participants.h"
@@ -2291,6 +2292,13 @@ void HistoryWidget::setupShortcuts() {
 				using Scheduled = HistoryView::ScheduledMemento;
 				controller()->showSection(
 					std::make_shared<Scheduled>(_history));
+				return true;
+			});
+		_canSendTexts
+			&& _field->isVisible()
+			&& request->check(Command::ComposeAiApplyInPlace, 1)
+			&& request->handle([=] {
+				triggerAiApplyInPlace();
 				return true;
 			});
 		if (showRecordButton()
@@ -4775,6 +4783,22 @@ void HistoryWidget::showAiComposeBox() {
 		.send = std::move(send),
 		.setupMenu = std::move(setupMenu),
 	});
+}
+
+void HistoryWidget::triggerAiApplyInPlace() {
+	Api::TriggerAiApplyInPlace(
+		&session(),
+		controller()->uiShow(),
+		this,
+		_field,
+		prepareTextForEditMsg(),
+		crl::guard(this, [=](TextWithTags textWithTags, int cursor) {
+			setFieldText(
+				textWithTags,
+				TextUpdateEvent::SaveDraft,
+				Ui::InputField::HistoryAction::NewEntry);
+			_field->setCursorPosition(cursor);
+		}));
 }
 
 void HistoryWidget::saveEditMessage(Api::SendOptions options) {
