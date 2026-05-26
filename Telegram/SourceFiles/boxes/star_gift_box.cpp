@@ -1957,27 +1957,6 @@ private:
 
 };
 
-[[nodiscard]] std::vector<not_null<UserData*>> CollectFrequentUsers(
-		not_null<Main::Session*> session,
-		const std::vector<UserId> &birthdays) {
-	auto result = std::vector<not_null<UserData*>>();
-	for (const auto &peer : session->topPeers().list()) {
-		const auto user = peer->asUser();
-		if (!user
-			|| user->isSelf()
-			|| user->isBot()
-			|| user->isServiceUser()
-			|| user->isInaccessible()) {
-			continue;
-		}
-		if (ranges::contains(birthdays, peerToUser(user->id))) {
-			continue;
-		}
-		result.push_back(user);
-	}
-	return result;
-}
-
 [[nodiscard]] CustomList MakeCustomList(
 		not_null<Main::Session*> session,
 		Fn<void(not_null<PeerListController*>)> fill,
@@ -2112,7 +2091,7 @@ Controller::Controller(not_null<Main::Session*> session, PickCallback pick)
 , _contactBirthdays(
 	session->promoSuggestions().knownContactBirthdays().value_or(
 		std::vector<UserId>{}))
-, _frequentUsers(CollectFrequentUsers(session, _contactBirthdays))
+, _frequentUsers(CollectGiftFrequentUsers(session, _contactBirthdays))
 , _selfOption(
 	MakeCustomList(
 		session,
@@ -2332,6 +2311,27 @@ void Controller::rowClicked(not_null<PeerListRow*> row) {
 }
 
 } // namespace
+
+std::vector<not_null<UserData*>> CollectGiftFrequentUsers(
+		not_null<Main::Session*> session,
+		const std::vector<UserId> &exclude) {
+	auto result = std::vector<not_null<UserData*>>();
+	for (const auto &peer : session->topPeers().list()) {
+		const auto user = peer->asUser();
+		if (!user
+			|| user->isSelf()
+			|| user->isBot()
+			|| user->isServiceUser()
+			|| user->isInaccessible()) {
+			continue;
+		}
+		if (ranges::contains(exclude, peerToUser(user->id))) {
+			continue;
+		}
+		result.push_back(user);
+	}
+	return result;
+}
 
 void ChooseStarGiftRecipient(
 		not_null<Window::SessionController*> window) {
