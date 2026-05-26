@@ -8067,6 +8067,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_ai_compose_tone_invalid" = "This style was deleted or the link is invalid.";
 "lng_ai_compose_apply_unbound" = "No style bound to this shortcut. Open a style and toggle 'Apply with hotkey'.";
 "lng_ai_compose_apply_empty" = "Type something first.";
+"lng_ai_compose_bind_set_hotkey_short" = "Set apply hotkey…";
 "lng_ai_compose_bind_use_hotkey" = "Apply with {keys}";
 "lng_ai_compose_tooltip" = "Rewrite, translate, or correct your text using AI.";
 "lng_ai_compose_flood_title" = "Daily limit reached";
