@@ -305,7 +305,7 @@ void RememberCanonicalInlineFormula(
 	}
 	(void)state->rememberFormula(
 		MathKind::Inline,
-		formula->copySource,
+		formula->trimmedTex,
 		context.textSize,
 		context.renderWidthCap,
 		context.renderHeightCap);
@@ -413,7 +413,7 @@ void AppendCanonicalNativeIvRichText(
 	const auto entityData = SerializeInlineTextObjectEntity({
 		.kind = InlineTextObjectKind::Formula,
 		.data = InlineTextObjectFormulaData{
-			.copySource = source,
+			.copySource = InlineFormulaCopySource(source),
 			.trimmedTex = source.trimmed(),
 		},
 	});

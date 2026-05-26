@@ -1672,8 +1672,10 @@ int Element::textHeightFor(int textWidth) const {
 	if (_textWidth != textWidth) {
 		_textWidth = textWidth;
 		if (const auto rich = const_cast<Element*>(this)->richpage()) {
-			_textHeight = rich->article.resizeGetHeight(richPageWidthFor(textWidth));
-			rich->article.setVisibleTopBottom(0, _textHeight);
+			const auto articleHeight = rich->article.resizeGetHeight(
+				richPageWidthFor(textWidth));
+			_textHeight = articleHeight + skipBlockHeight();
+			rich->article.setVisibleTopBottom(0, articleHeight);
 			_textRealWidth = std::clamp(
 				rich->article.lastLayoutWidth(),
 				0,
@@ -1875,59 +1877,8 @@ void Element::validateText() {
 		runtime->mediaRuntime = Iv::CreateMessageMediaRuntime(
 			session,
 			data()->fullId(),
-			[session](QString context) {
-				const auto separator = context.indexOf(u'\n');
-				const auto channelId = ChannelId((separator >= 0)
-					? context.mid(0, separator).toULongLong()
-					: context.toULongLong());
-				const auto username = (separator >= 0)
-					? context.mid(separator + 1)
-					: QString();
-				if (!channelId) {
-					return;
-				}
-				const auto channel = session->data().channel(channelId);
-				const auto resolved = !channel->username().isEmpty()
-					? channel->username()
-					: username;
-				if (channel->isLoaded()) {
-					if (const auto controller = session->tryResolveWindow(channel)) {
-						controller->showPeerHistory(channel);
-					}
-				} else if (!resolved.isEmpty()) {
-					if (const auto controller = session->tryResolveWindow(channel)) {
-						controller->showPeerByLink({
-							.usernameOrId = resolved,
-						});
-					}
-				}
-			},
-			[session](QString context) {
-				const auto separator = context.indexOf(u'\n');
-				const auto channelId = ChannelId((separator >= 0)
-					? context.mid(0, separator).toULongLong()
-					: context.toULongLong());
-				const auto username = (separator >= 0)
-					? context.mid(separator + 1)
-					: QString();
-				if (!channelId) {
-					return;
-				}
-				const auto channel = session->data().channel(channelId);
-				const auto resolved = !channel->username().isEmpty()
-					? channel->username()
-					: username;
-				if (channel->isLoaded()) {
-					session->api().joinChannel(channel);
-				} else if (!resolved.isEmpty()) {
-					if (const auto controller = session->tryResolveWindow(channel)) {
-						controller->showPeerByLink({
-							.usernameOrId = resolved,
-							.joinChannel = true,
-						});
-					}
-				}
-			});
+			[](QString) {}, // openChannel
+			[](QString) {}); // joinChannel
 		auto prepared = Iv::Markdown::TryPrepareNativeInstantView({
 			.richPage = runtime->page,
 			.mediaRuntime = runtime->mediaRuntime,

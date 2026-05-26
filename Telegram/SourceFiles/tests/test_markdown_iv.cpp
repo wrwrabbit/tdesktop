@@ -24,6 +24,7 @@ namespace Data {
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/dynamic_image.h"
+#include "ui/effects/path_shift_gradient.h"
 #include "ui/style/style_core.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/text/text_entity.h"
@@ -7092,7 +7093,8 @@ void CheckNativeInstantViewLayer227RichTextCoverage(bool *ok) {
 		++formulaCount;
 		if (const auto formula = std::get_if<InlineTextObjectFormulaData>(
 				&match.object.data)) {
-			formulaDataOk = (formula->copySource == formulaSource)
+			formulaDataOk = (formula->copySource
+					== InlineFormulaCopySource(formulaSource))
 				&& (formula->trimmedTex == formulaSource.trimmed());
 		}
 	}
@@ -7210,6 +7212,16 @@ void CheckNativeInstantViewLayer227RichTextCoverage(bool *ok) {
 		std::make_shared<MathRenderer>(),
 		420,
 		&articleHeight);
+	if (article->segmentIsText(0)) {
+		const auto copied = article->textForSelection({
+			.from = { .segment = 0, .offset = 0 },
+			.to = { .segment = 0, .offset = article->segmentLength(0) },
+		}, nullptr);
+		Check(
+			copied.expanded.startsWith(InlineFormulaCopySource(formulaSource)),
+			label + u" inline formula copy source"_q,
+			ok);
+	}
 	auto lookupFlags = Ui::Text::StateRequest::Flags();
 	lookupFlags |= Ui::Text::StateRequest::Flag::LookupLink;
 	lookupFlags |= Ui::Text::StateRequest::Flag::LookupSymbol;
@@ -7292,6 +7304,173 @@ void CheckNativeInstantViewLayer227BlockCoverage(bool *ok) {
 	} else {
 		Check(false, label + u" display math formula slot range"_q, ok);
 	}
+}
+
+void CheckThinkingBlockPrepareAndPaintCoverage(bool *ok) {
+	const auto label = u"native-iv-thinking-block"_q;
+	const auto thinkingText = u"Thinking..."_q;
+	const auto finalText = u"Final answer"_q;
+	auto source = NativeIvSource(QVector<MTPPageBlock>{
+		MTP_pageBlockThinking(NativeIvText(thinkingText)),
+		MTP_pageBlockParagraph(NativeIvText(finalText)),
+	});
+
+	const auto defaultPrepared = TryPrepareNativeInstantView({
+		.source = &source,
+	});
+	Check(defaultPrepared.supported(), label + u" native default supported"_q, ok);
+	if (defaultPrepared.supported()) {
+		const auto thinking = CollectPreparedBlocksByKind(
+			defaultPrepared.content.blocks.blocks,
+			PreparedBlockKind::Thinking);
+		Check(thinking.empty(), label + u" native default thinking skipped"_q, ok);
+		const auto paragraphs = CollectPreparedBlocksByKind(
+			defaultPrepared.content.blocks.blocks,
+			PreparedBlockKind::Paragraph);
+		Check(paragraphs.size() == 1, label + u" native paragraph count"_q, ok);
+		if (!paragraphs.empty()) {
+			Check(
+				paragraphs.front()->text.text == finalText,
+				label + u" native paragraph text"_q,
+				ok);
+		}
+	}
+
+	const auto includedPrepared = TryPrepareNativeInstantView({
+		.source = &source,
+		.includeThinkingBlocks = true,
+	});
+	Check(
+		includedPrepared.supported(),
+		label + u" native included supported"_q,
+		ok);
+	if (includedPrepared.supported()) {
+		const auto thinking = CollectPreparedBlocksByKind(
+			includedPrepared.content.blocks.blocks,
+			PreparedBlockKind::Thinking);
+		Check(thinking.size() == 1, label + u" native thinking count"_q, ok);
+		if (!thinking.empty()) {
+			Check(
+				thinking.front()->text.text == thinkingText,
+				label + u" native thinking text"_q,
+				ok);
+		}
+	}
+
+	const auto canonicalThinkingText = u"Canonical thinking..."_q;
+	const auto makeCanonicalPage = [&] {
+		auto thinking = Iv::RichPage::Block();
+		thinking.kind = Iv::RichPage::BlockKind::Thinking;
+		thinking.text = CanonicalRichText(
+			TextWithEntities::Simple(canonicalThinkingText));
+		auto paragraph = Iv::RichPage::Block();
+		paragraph.kind = Iv::RichPage::BlockKind::Paragraph;
+		paragraph.text = CanonicalRichText(
+			TextWithEntities::Simple(finalText));
+		return CanonicalRichPage({
+			std::move(thinking),
+			std::move(paragraph),
+		});
+	};
+
+	const auto defaultCanonical = TryPrepareNativeInstantView({
+		.richPage = makeCanonicalPage(),
+	});
+	Check(
+		defaultCanonical.supported(),
+		label + u" canonical default supported"_q,
+		ok);
+	if (defaultCanonical.supported()) {
+		const auto thinking = CollectPreparedBlocksByKind(
+			defaultCanonical.content.blocks.blocks,
+			PreparedBlockKind::Thinking);
+		Check(
+			thinking.empty(),
+			label + u" canonical default thinking skipped"_q,
+			ok);
+	}
+
+	auto includedCanonical = TryPrepareNativeInstantView({
+		.richPage = makeCanonicalPage(),
+		.includeThinkingBlocks = true,
+	});
+	Check(
+		includedCanonical.supported(),
+		label + u" canonical included supported"_q,
+		ok);
+	if (!includedCanonical.supported()) {
+		return;
+	}
+	const auto thinking = CollectPreparedBlocksByKind(
+		includedCanonical.content.blocks.blocks,
+		PreparedBlockKind::Thinking);
+	Check(thinking.size() == 1, label + u" canonical thinking count"_q, ok);
+	if (thinking.empty()) {
+		return;
+	}
+	Check(
+		thinking.front()->text.text == canonicalThinkingText,
+		label + u" canonical thinking text"_q,
+		ok);
+
+	const auto articleWidth = 360;
+	auto articleHeight = 0;
+	auto renderer = std::make_shared<MathRenderer>();
+	auto article = BuildArticleForTest(
+		std::move(includedCanonical.content),
+		renderer,
+		articleWidth,
+		&articleHeight);
+	Check(articleHeight > 0, label + u" article height"_q, ok);
+	if (articleHeight <= 0) {
+		return;
+	}
+
+	auto thinkingCache = MarkdownArticleThinkingPaintCache();
+	auto gradient = Ui::PathShiftGradient(
+		st::defaultMarkdown.supplementaryTextColor,
+		st::defaultMarkdown.textColor,
+		[] {});
+	gradient.startFrame(0, articleWidth, std::max(1, articleWidth / 2));
+	const auto image = PaintArticleForTest(
+		article.get(),
+		articleWidth,
+		articleHeight,
+		MarkdownArticlePaintCaches{
+			.thinking = &thinkingCache,
+			.pathShiftGradient = &gradient,
+			.st = &st::defaultMarkdown,
+		},
+		2);
+	Check(HasPaintedPixels(image), label + u" paint produced pixels"_q, ok);
+	Check(!thinkingCache.mask.isNull(), label + u" mask cache present"_q, ok);
+	Check(
+		!thinkingCache.gradient.isNull(),
+		label + u" gradient cache present"_q,
+		ok);
+	Check(
+		thinkingCache.mask.devicePixelRatio() == 2,
+		label + u" mask cache dpr"_q,
+		ok);
+	Check(
+		thinkingCache.gradient.devicePixelRatio() == 2,
+		label + u" gradient cache dpr"_q,
+		ok);
+	Check(
+		thinkingCache.mask.format() == QImage::Format_ARGB32_Premultiplied,
+		label + u" mask cache format"_q,
+		ok);
+	const auto expectedCacheWidth = articleWidth * 2;
+	Check(
+		thinkingCache.mask.width() >= expectedCacheWidth
+			&& thinkingCache.mask.height() > 0,
+		label + u" mask cache size"_q,
+		ok);
+	Check(
+		thinkingCache.gradient.width() >= expectedCacheWidth
+			&& thinkingCache.gradient.height() > 0,
+		label + u" gradient cache size"_q,
+		ok);
 }
 
 void CheckNativeInstantViewLayer227ListCoverage(bool *ok) {
@@ -7644,7 +7823,7 @@ void CheckNativeInstantViewCanonicalRichTextCoverage(bool *ok) {
 		SerializeInlineTextObjectEntity({
 			.kind = InlineTextObjectKind::Formula,
 			.data = InlineTextObjectFormulaData{
-				.copySource = formulaSource,
+				.copySource = InlineFormulaCopySource(formulaSource),
 				.trimmedTex = formulaSource.trimmed(),
 			},
 		}));
@@ -7752,7 +7931,8 @@ void CheckNativeInstantViewCanonicalRichTextCoverage(bool *ok) {
 		++formulaCount;
 		if (const auto formula = std::get_if<InlineTextObjectFormulaData>(
 				&match.object.data)) {
-			formulaDataOk = (formula->copySource == formulaSource)
+			formulaDataOk = (formula->copySource
+					== InlineFormulaCopySource(formulaSource))
 				&& (formula->trimmedTex == formulaSource.trimmed());
 		}
 	}
@@ -12991,6 +13171,7 @@ void CheckArticleRasterRegressionCoverage(bool *ok) {
 		-> bool {
 			switch (block.kind) {
 			case PreparedBlockKind::Paragraph:
+			case PreparedBlockKind::Thinking:
 			case PreparedBlockKind::Heading:
 			case PreparedBlockKind::Details:
 			case PreparedBlockKind::CodeBlock:
@@ -15266,6 +15447,7 @@ ThisIsALongUnbrokenStringToTestWrappingBehavior_ABCD1234EFGH5678IJKL
 	CheckNativeInstantViewPrepareCoverage(&ok);
 	CheckNativeInstantViewLayer227RichTextCoverage(&ok);
 	CheckNativeInstantViewLayer227BlockCoverage(&ok);
+	CheckThinkingBlockPrepareAndPaintCoverage(&ok);
 	CheckNativeInstantViewLayer227ListCoverage(&ok);
 	CheckNativeInstantViewLayer227SpoilerMediaCoverage(&ok);
 	CheckNativeInstantViewCanonicalRichTextCoverage(&ok);

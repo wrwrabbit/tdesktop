@@ -84,6 +84,7 @@ struct HistoryMessageRichPage
 	std::shared_ptr<const Iv::RichPage> page;
 	std::shared_ptr<Iv::Markdown::MediaRuntime> mediaRuntime;
 	Iv::Markdown::MarkdownArticle article;
+	Iv::Markdown::MarkdownArticleThinkingPaintCache thinkingPaintCache;
 	int paletteVersion = -1;
 	Host host;
 	mutable ClickHandlerPtr handler;

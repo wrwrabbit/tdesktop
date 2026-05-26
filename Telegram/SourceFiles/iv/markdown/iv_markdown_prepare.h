@@ -35,6 +35,7 @@ namespace Iv::Markdown {
 
 enum class PreparedBlockKind {
 	Paragraph,
+	Thinking,
 	Heading,
 	CodeBlock,
 	Rule,
@@ -384,6 +385,7 @@ struct NativeInstantViewPrepareResult {
 	const style::Markdown &st);
 [[nodiscard]] QString SerializeInlineTextObjectEntity(
 	const InlineTextObjectEntity &object);
+[[nodiscard]] QString InlineFormulaCopySource(const QString &source);
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
 [[nodiscard]] NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	NativeInstantViewPrepareRequest request);

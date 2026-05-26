@@ -471,6 +471,7 @@ QString CodeBlockDisplayText(const QString &text) {
 
 bool IsFlowKind(PreparedBlockKind kind) {
 	return (kind == PreparedBlockKind::Paragraph)
+		|| (kind == PreparedBlockKind::Thinking)
 		|| (kind == PreparedBlockKind::Heading);
 }
 
@@ -565,6 +566,7 @@ int BlockSkip(
 	const auto &skips = st.blockSkips;
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 		return skips.paragraph;
 	case PreparedBlockKind::Heading:
 		return skips.heading;

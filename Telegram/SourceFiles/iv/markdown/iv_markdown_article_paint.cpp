@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "ui/dynamic_image.h"
+#include "ui/effects/path_shift_gradient.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
 
@@ -21,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <variant>
 
 namespace Iv::Markdown {
 namespace {
@@ -175,6 +177,7 @@ void PaintImageCenterCrop(Painter &p, QRect rect, const QImage &image) {
 		const style::Markdown &st) {
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::CodeBlock:
 		return CountTextRevealLines(
@@ -322,6 +325,60 @@ void PaintRevealBand(
 	p.restore();
 }
 
+void EnsureThinkingPaintCacheImage(
+		QImage *image,
+		QSize logicalSize,
+		int ratio) {
+	if (!image || logicalSize.isEmpty()) {
+		return;
+	}
+	ratio = std::max(ratio, 1);
+	const auto neededSize = QSize(
+		logicalSize.width() * ratio,
+		logicalSize.height() * ratio);
+	if (image->devicePixelRatio() == ratio
+		&& image->format() == QImage::Format_ARGB32_Premultiplied
+		&& image->width() >= neededSize.width()
+		&& image->height() >= neededSize.height()) {
+		return;
+	}
+	*image = QImage(
+		QSize(
+			std::max(image->width(), neededSize.width()),
+			std::max(image->height(), neededSize.height())),
+		QImage::Format_ARGB32_Premultiplied);
+	image->setDevicePixelRatio(ratio);
+}
+
+void FillThinkingGradientImage(
+		Painter &targetPainter,
+		QImage *image,
+		QRect logicalRect,
+		const Ui::PathShiftGradient::Background &background) {
+	if (!image) {
+		return;
+	}
+	image->fill(Qt::transparent);
+	if (logicalRect.isEmpty()) {
+		return;
+	}
+	auto imagePainter = Painter(image);
+	const auto localRect = QRect(QPoint(), logicalRect.size());
+	if (const auto color = std::get_if<style::color>(&background)) {
+		imagePainter.fillRect(localRect, (*color)->c);
+	} else {
+		const auto gradient = v::get<QLinearGradient*>(background);
+		auto copy = *gradient;
+		const auto shift = targetPainter.worldTransform().dx()
+			+ logicalRect.x();
+		copy.setStart(copy.start().x() - shift, copy.start().y());
+		copy.setFinalStop(
+			copy.finalStop().x() - shift,
+			copy.finalStop().y());
+		imagePainter.fillRect(localRect, QBrush(copy));
+	}
+}
+
 [[nodiscard]] QColor WithOpacity(style::color color, double opacity) {
 	auto result = color->c;
 	result.setAlphaF(result.alphaF() * std::clamp(opacity, 0., 1.));
@@ -440,6 +497,25 @@ void SetTextLeafPen(
 		? paintSt.textColor->c
 		: context.caches.supplementaryColorOverride.value_or(
 			paintSt.supplementaryTextColor->c));
+}
+
+void PaintThinkingTextLeafDirect(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	const auto &paintSt = PaintStyle(context, st);
+	p.setPen(paintSt.supplementaryTextColor->c);
+	PaintTextLeaf(
+		p,
+		block.leaf,
+		context,
+		block.textRect,
+		block.textWidth,
+		style::al_left,
+		TextSelectionForSegmentIndex(
+			context.selectionState,
+			block.segmentIndex));
 }
 
 void PaintRelatedArticleTextLeaf(
@@ -1782,6 +1858,105 @@ void PaintDetailsBlock(
 	}
 }
 
+void PaintThinkingBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		int devicePixelRatio,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	const auto &paintSt = PaintStyle(context, st);
+	const auto baseColor = paintSt.supplementaryTextColor;
+	const auto selection = TextSelectionForSegmentIndex(
+		context.selectionState,
+		block.segmentIndex);
+	const auto logicalRect = block.outer;
+	const auto visible = context.clip.intersected(logicalRect);
+	if (visible.isEmpty()) {
+		AdvanceRevealLinesForBlock(context, block, st);
+		return;
+	}
+
+	const auto thinking = context.caches.thinking;
+	const auto pathShiftGradient = context.caches.pathShiftGradient;
+	if (!thinking || !pathShiftGradient) {
+		PaintThinkingTextLeafDirect(p, block, st, context);
+		return;
+	}
+	if (selection && !selection->empty()) {
+		PaintThinkingTextLeafDirect(p, block, st, context);
+		return;
+	}
+
+	const auto ratio = std::max(devicePixelRatio, 1);
+	const auto cacheWidth = logicalRect.width() * ratio;
+	const auto cacheHeight = logicalRect.height() * ratio;
+	EnsureThinkingPaintCacheImage(
+		&thinking->mask,
+		logicalRect.size(),
+		ratio);
+	EnsureThinkingPaintCacheImage(
+		&thinking->gradient,
+		logicalRect.size(),
+		ratio);
+	thinking->mask.fill(Qt::transparent);
+
+	{
+		auto maskPainter = Painter(&thinking->mask);
+		maskPainter.setFont(p.font());
+		maskPainter.setPen(p.pen());
+		maskPainter.setBrush(p.brush());
+		maskPainter.setRenderHints(p.renderHints());
+		maskPainter.setInactive(p.inactive());
+		maskPainter.setTextPalette(p.textPalette());
+		maskPainter.translate(-logicalRect.topLeft());
+		maskPainter.setClipRect(logicalRect);
+		maskPainter.setPen(baseColor->c);
+		PaintTextLeaf(
+			maskPainter,
+			block.leaf,
+			ClippedContext(context, logicalRect),
+			block.textRect,
+			block.textWidth,
+			style::al_left,
+			TextSelection());
+	}
+
+	auto highlight = std::optional<style::owned_color>();
+	highlight.emplace(anim::color(baseColor->c, paintSt.textColor->c, 0.45));
+	pathShiftGradient->overrideColors(baseColor, highlight->color());
+	const auto localRect = QRect(QPoint(), logicalRect.size());
+	const auto painted = pathShiftGradient->paint(
+		[&](const Ui::PathShiftGradient::Background &background) {
+			FillThinkingGradientImage(
+				p,
+				&thinking->gradient,
+				logicalRect,
+				background);
+			auto gradientPainter = Painter(&thinking->gradient);
+			gradientPainter.setCompositionMode(
+				QPainter::CompositionMode_DestinationIn);
+			gradientPainter.drawImage(
+				QRectF(localRect),
+				thinking->mask,
+				QRectF(0, 0, cacheWidth, cacheHeight));
+			gradientPainter.setCompositionMode(
+				QPainter::CompositionMode_SourceOver);
+			return true;
+		});
+	pathShiftGradient->clearOverridenColors();
+	if (!painted) {
+		return;
+	}
+
+	p.save();
+	p.setClipRect(visible, Qt::IntersectClip);
+	p.drawImage(
+		QRectF(logicalRect),
+		thinking->gradient,
+		QRectF(0, 0, cacheWidth, cacheHeight));
+	p.restore();
+}
+
 void PaintBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1792,12 +1967,16 @@ void PaintBlock(
 		int outerWidth,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	if (!block.outer.intersects(context.clip)) {
+	if (!block.outer.intersects(context.clip)
+		&& block.kind != PreparedBlockKind::Thinking) {
 		return;
 	}
 	const auto &paintSt = PaintStyle(context, st);
 
 	switch (block.kind) {
+	case PreparedBlockKind::Thinking:
+		PaintThinkingBlock(p, block, devicePixelRatio, st, context);
+		break;
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Heading:
 		if (!block.headerRect.isEmpty()) {

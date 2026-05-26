@@ -106,6 +106,10 @@ std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
 	return std::nullopt;
 }
 
+QString InlineFormulaCopySource(const QString &source) {
+	return u"$"_q + source + u"$"_q;
+}
+
 MarkdownPrepareDimensions CaptureMarkdownPrepareDimensions() {
 	return CaptureMarkdownPrepareDimensions(st::defaultMarkdown);
 }

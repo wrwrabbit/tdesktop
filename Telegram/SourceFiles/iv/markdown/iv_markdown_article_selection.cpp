@@ -336,6 +336,7 @@ void CollectSelectableSegments(
 		block.tertiarySegmentIndex = -1;
 		switch (block.kind) {
 		case PreparedBlockKind::Paragraph:
+		case PreparedBlockKind::Thinking:
 		case PreparedBlockKind::Heading:
 		case PreparedBlockKind::Details: {
 			if (block.leaf.isEmpty() && block.textRect.isEmpty()) {

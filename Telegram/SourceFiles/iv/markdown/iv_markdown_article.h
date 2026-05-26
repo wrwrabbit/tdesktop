@@ -28,6 +28,10 @@ namespace style {
 struct Markdown;
 } // namespace style
 
+namespace Ui {
+class PathShiftGradient;
+} // namespace Ui
+
 namespace Iv::Markdown {
 
 struct PlaceholderBlockRuntime {
@@ -112,9 +116,16 @@ struct PaintSelectionState {
 	}
 };
 
+struct MarkdownArticleThinkingPaintCache {
+	QImage mask;
+	QImage gradient;
+};
+
 struct MarkdownArticlePaintCaches {
 	Ui::Text::QuotePaintCache *pre = nullptr;
 	Ui::Text::QuotePaintCache *blockquote = nullptr;
+	MarkdownArticleThinkingPaintCache *thinking = nullptr;
+	Ui::PathShiftGradient *pathShiftGradient = nullptr;
 	std::span<Ui::Text::SpecialColor> colors;
 	const style::Markdown *st = nullptr;
 	Fn<void()> repaint;

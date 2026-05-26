@@ -55,6 +55,7 @@ namespace {
 	case PreparedBlockKind::RelatedArticle:
 		return true;
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::CodeBlock:
 	case PreparedBlockKind::Rule:
@@ -132,6 +133,7 @@ void PrepareNestedContext(
 	case PreparedBlockKind::EmbedPost:
 		return true;
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::CodeBlock:
 	case PreparedBlockKind::Rule:
@@ -748,6 +750,7 @@ void PrepareNestedContext(
 		LayoutContext context) {
 	switch (prepared.kind) {
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 		return LayoutFlowBlock(
 			prepared,

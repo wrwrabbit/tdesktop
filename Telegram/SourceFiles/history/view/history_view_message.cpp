@@ -2827,6 +2827,8 @@ void Message::paintRichText(
 		.blockquote = context.quoteCache(
 			contentColorCollectible(),
 			contentColorIndex()),
+		.thinking = &rich->thinkingPaintCache,
+		.pathShiftGradient = delegate()->elementPathShiftGradient().get(),
 		.colors = context.st->highlightColors(),
 		.st = &stm->richPageStyle,
 		.repaint = [weak = base::make_weak(const_cast<Message*>(this))] {
@@ -6272,12 +6274,17 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 	const auto lines = int(appearing->lines.size());
 	const auto shown = appearing->shownLine;
 	const auto line = (shown < lines) ? &appearing->lines[shown] : nullptr;
+	const auto finalLineHeight = line
+		? (hasRichPage() && (shown + 1 == lines)
+			? line->bottom + skipBlockHeight()
+			: line->bottom)
+		: 0;
 	const auto use = appearing->use = !anim::Disabled()
 		&& line
 		&& ((shown + 1 < lines)
 			|| (shown + 1 == lines
 				&& ((appearing->revealedLineWidth < line->width)
-					|| (appearing->shownHeight < line->bottom))));
+					|| (appearing->shownHeight < finalLineHeight))));
 	if (!use) {
 		if (data()->isRegular()) {
 			RemoveComponents(TextAppearing::Bit());
@@ -6287,7 +6294,8 @@ bool Message::textAppearCheckLine(not_null<TextAppearing*> appearing) {
 			const auto &line = appearing->lines.back();
 			appearing->revealedLineWidth = line.width;
 			appearing->shownWidth = textRealWidth();
-			appearing->shownHeight = line.bottom;
+			appearing->shownHeight = line.bottom
+				+ (hasRichPage() ? skipBlockHeight() : 0);
 			appearing->widthAnimation.stop();
 			appearing->heightAnimation.stop();
 		}
@@ -6383,7 +6391,8 @@ int Message::textAppearTargetHeight(
 	const auto next = appearing->shownLine + 1;
 	const auto lines = int(appearing->lines.size());
 	if (next + 1 >= lines) {
-		return appearing->lines.back().bottom;
+		return appearing->lines.back().bottom
+			+ (hasRichPage() ? skipBlockHeight() : 0);
 	}
 	const auto &line = appearing->lines[next];
 	const auto bottom = line.bottom;

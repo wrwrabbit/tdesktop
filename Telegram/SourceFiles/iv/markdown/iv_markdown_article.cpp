@@ -318,6 +318,7 @@ void AppendBlockRevealLines(
 		const style::Markdown &st) {
 	switch (block.kind) {
 	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
 	case PreparedBlockKind::CodeBlock:
 		AppendTextRevealLines(

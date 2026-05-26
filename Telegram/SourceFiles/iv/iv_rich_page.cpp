@@ -318,7 +318,7 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		const auto entityData = Markdown::SerializeInlineTextObjectEntity({
 			.kind = Markdown::InlineTextObjectKind::Formula,
 			.data = Markdown::InlineTextObjectFormulaData{
-				.copySource = source,
+				.copySource = Markdown::InlineFormulaCopySource(source),
 				.trimmedTex = source.trimmed(),
 			},
 		});

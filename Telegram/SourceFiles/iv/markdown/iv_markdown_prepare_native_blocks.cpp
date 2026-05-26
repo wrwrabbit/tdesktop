@@ -721,7 +721,7 @@ iframe {
 		}
 		return NativeIvHtmlTag("img", attributes);
 	}, [&](const MTPDtextMath &data) {
-		return NativeIvRichText(qs(data.vsource()));
+		return NativeIvRichText(InlineFormulaCopySource(qs(data.vsource())));
 	}, [&](const MTPDtextCustomEmoji &data) {
 		return NativeIvRichText(qs(data.valt()));
 	}, [&](const MTPDtextBold &data) {
@@ -1755,7 +1755,7 @@ void MarkNativeIvTableSlots(
 	}, [&](const MTPDpageBlockThinking &data) {
 		return AppendNativeIvFlowBlock(
 			result,
-			PreparedBlockKind::Paragraph,
+			PreparedBlockKind::Thinking,
 			0,
 			data.vtext(),
 			state);
@@ -2528,10 +2528,17 @@ namespace {
 			block.anchorId,
 			state);
 	case RichPageBlockKind::Paragraph:
-	case RichPageBlockKind::Thinking:
 		return AppendNativeIvFlowBlock(
 			result,
 			PreparedBlockKind::Paragraph,
+			0,
+			block.text,
+			block.anchorId,
+			state);
+	case RichPageBlockKind::Thinking:
+		return AppendNativeIvFlowBlock(
+			result,
+			PreparedBlockKind::Thinking,
 			0,
 			block.text,
 			block.anchorId,
