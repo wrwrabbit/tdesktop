@@ -20,7 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 namespace {
 
-constexpr auto kParticleStride = int(24);
 constexpr auto kQuadVertexCount = int(6);
 constexpr auto kQuadVertexStride = int(2 * sizeof(float));
 constexpr auto kComputeWorkgroupSize = int(64);
@@ -157,12 +156,6 @@ void ThanosEffectRenderer::initialize(
 		sizeof(RenderUniforms));
 	_renderUniformBuffer->create();
 
-	_placeholderParticleBuffer = rhi->newBuffer(
-		QRhiBuffer::Immutable,
-		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
-		kParticleStride);
-	_placeholderParticleBuffer->create();
-
 	_placeholderTexture = rhi->newTexture(
 		QRhiTexture::RGBA8,
 		QSize(1, 1));
@@ -175,6 +168,21 @@ void ThanosEffectRenderer::initialize(
 		QRhiSampler::ClampToEdge,
 		QRhiSampler::ClampToEdge);
 	_placeholderSampler->create();
+
+	_placeholderStateTexture = rhi->newTexture(
+		QRhiTexture::RGBA32F,
+		QSize(1, 1),
+		1,
+		QRhiTexture::UsedWithLoadStore);
+	_placeholderStateTexture->create();
+
+	_placeholderStateSampler = rhi->newSampler(
+		QRhiSampler::Nearest,
+		QRhiSampler::Nearest,
+		QRhiSampler::None,
+		QRhiSampler::ClampToEdge,
+		QRhiSampler::ClampToEdge);
+	_placeholderStateSampler->create();
 
 	if (!createPipelines(rt)) {
 		LOG(("ThanosEffect: pipeline creation failed, disabling effect"));
@@ -203,14 +211,20 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 
 	_computeInitSrbLayout = _rhi->newShaderResourceBindings();
 	_computeInitSrbLayout->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			_placeholderParticleBuffer),
+			_placeholderStateTexture,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			_computeInitUniformBuffer),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			_placeholderStateTexture,
+			0),
 	});
 	_computeInitSrbLayout->create();
 
@@ -224,14 +238,20 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 
 	_computeUpdateSrbLayout = _rhi->newShaderResourceBindings();
 	_computeUpdateSrbLayout->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			_placeholderParticleBuffer),
+			_placeholderStateTexture,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			_computeUpdateUniformBuffer),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			_placeholderStateTexture,
+			0),
 	});
 	_computeUpdateSrbLayout->create();
 
@@ -255,6 +275,11 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 			QRhiShaderResourceBinding::FragmentStage,
 			_placeholderTexture,
 			_placeholderSampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::VertexStage,
+			_placeholderStateTexture,
+			_placeholderStateSampler),
 	});
 	_renderSrbLayout->create();
 
@@ -267,13 +292,9 @@ bool ThanosEffectRenderer::createPipelines(QRhiRenderTarget *rt) {
 	QRhiVertexInputLayout inputLayout;
 	inputLayout.setBindings({
 		{ quint32(kQuadVertexStride) },
-		{ quint32(kParticleStride),
-			QRhiVertexInputBinding::PerInstance },
 	});
 	inputLayout.setAttributes({
 		{ 0, 0, QRhiVertexInputAttribute::Float2, 0 },
-		{ 1, 1, QRhiVertexInputAttribute::Float2, 0 },
-		{ 1, 2, QRhiVertexInputAttribute::Float, 16 },
 	});
 	_renderPipeline->setVertexInputLayout(inputLayout);
 
@@ -450,9 +471,8 @@ void ThanosEffectRenderer::render(
 
 			const QRhiCommandBuffer::VertexInput vbufs[] = {
 				{ _quadVertexBuffer, 0 },
-				{ item.particleBuffer, 0 },
 			};
-			cb->setVertexInput(0, 2, vbufs);
+			cb->setVertexInput(0, 1, vbufs);
 
 			const auto instanceCount =
 				item.particleCountX * item.particleCountY;
@@ -544,8 +564,6 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			uint32_t(1),
 			uint32_t(maxParticles / float64(result.particleCountY)));
 	}
-	const auto particleCount =
-		result.particleCountX * result.particleCountY;
 
 	auto *tex = _rhi->newTexture(
 		QRhiTexture::RGBA8,
@@ -572,16 +590,42 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 	}
 	result.sampler = sampler;
 
-	auto *particleBuf = _rhi->newBuffer(
-		QRhiBuffer::Static,
-		QRhiBuffer::VertexBuffer | QRhiBuffer::StorageBuffer,
-		particleCount * kParticleStride);
-	if (!particleBuf->create()) {
-		delete particleBuf;
+	auto *stateTex = _rhi->newTexture(
+		QRhiTexture::RGBA32F,
+		QSize(int(result.particleCountX), int(result.particleCountY)),
+		1,
+		QRhiTexture::UsedWithLoadStore);
+	if (!stateTex->create()) {
+		delete stateTex;
 		destroyAnimatingItem(result);
 		return result;
 	}
-	result.particleBuffer = particleBuf;
+	result.particleStateTexture = stateTex;
+
+	auto *velocityTex = _rhi->newTexture(
+		QRhiTexture::RGBA32F,
+		QSize(int(result.particleCountX), int(result.particleCountY)),
+		1,
+		QRhiTexture::UsedWithLoadStore);
+	if (!velocityTex->create()) {
+		delete velocityTex;
+		destroyAnimatingItem(result);
+		return result;
+	}
+	result.particleVelocityTexture = velocityTex;
+
+	auto *stateSampler = _rhi->newSampler(
+		QRhiSampler::Nearest,
+		QRhiSampler::Nearest,
+		QRhiSampler::None,
+		QRhiSampler::ClampToEdge,
+		QRhiSampler::ClampToEdge);
+	if (!stateSampler->create()) {
+		delete stateSampler;
+		destroyAnimatingItem(result);
+		return result;
+	}
+	result.particleStateSampler = stateSampler;
 
 	auto *initUbo = _rhi->newBuffer(
 		QRhiBuffer::Dynamic,
@@ -607,14 +651,20 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 
 	result.computeInitSrb = _rhi->newShaderResourceBindings();
 	result.computeInitSrb->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			particleBuf),
+			stateTex,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			initUbo),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			velocityTex,
+			0),
 	});
 	if (!result.computeInitSrb->create()) {
 		destroyAnimatingItem(result);
@@ -623,14 +673,20 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 
 	result.computeUpdateSrb = _rhi->newShaderResourceBindings();
 	result.computeUpdateSrb->setBindings({
-		QRhiShaderResourceBinding::bufferLoadStore(
+		QRhiShaderResourceBinding::imageLoadStore(
 			0,
 			QRhiShaderResourceBinding::ComputeStage,
-			particleBuf),
+			stateTex,
+			0),
 		QRhiShaderResourceBinding::uniformBuffer(
 			1,
 			QRhiShaderResourceBinding::ComputeStage,
 			updateUbo),
+		QRhiShaderResourceBinding::imageLoadStore(
+			2,
+			QRhiShaderResourceBinding::ComputeStage,
+			velocityTex,
+			0),
 	});
 	if (!result.computeUpdateSrb->create()) {
 		destroyAnimatingItem(result);
@@ -659,6 +715,11 @@ ThanosEffectRenderer::AnimatingItem ThanosEffectRenderer::createAnimatingItem(
 			QRhiShaderResourceBinding::FragmentStage,
 			tex,
 			sampler),
+		QRhiShaderResourceBinding::sampledTexture(
+			2,
+			QRhiShaderResourceBinding::VertexStage,
+			stateTex,
+			stateSampler),
 	});
 	if (!result.renderSrb->create()) {
 		destroyAnimatingItem(result);
@@ -681,7 +742,9 @@ void ThanosEffectRenderer::destroyAnimatingItem(AnimatingItem &item) {
 	deferDelete(item.renderUniformBuffer);
 	deferDelete(item.computeUpdateUniformBuffer);
 	deferDelete(item.computeInitUniformBuffer);
-	deferDelete(item.particleBuffer);
+	deferDelete(item.particleStateSampler);
+	deferDelete(item.particleVelocityTexture);
+	deferDelete(item.particleStateTexture);
 	deferDelete(item.sampler);
 	deferDelete(item.texture);
 	item = {};
@@ -710,12 +773,14 @@ void ThanosEffectRenderer::releaseResources() {
 	delete _computeInitSrbLayout;
 	_computeInitSrbLayout = nullptr;
 
+	delete _placeholderStateSampler;
+	_placeholderStateSampler = nullptr;
+	delete _placeholderStateTexture;
+	_placeholderStateTexture = nullptr;
 	delete _placeholderSampler;
 	_placeholderSampler = nullptr;
 	delete _placeholderTexture;
 	_placeholderTexture = nullptr;
-	delete _placeholderParticleBuffer;
-	_placeholderParticleBuffer = nullptr;
 
 	delete _renderUniformBuffer;
 	_renderUniformBuffer = nullptr;

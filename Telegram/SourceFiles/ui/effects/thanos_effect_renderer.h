@@ -66,7 +66,9 @@ private:
 	struct AnimatingItem {
 		QRhiTexture *texture = nullptr;
 		QRhiSampler *sampler = nullptr;
-		QRhiBuffer *particleBuffer = nullptr;
+		QRhiTexture *particleStateTexture = nullptr;
+		QRhiTexture *particleVelocityTexture = nullptr;
+		QRhiSampler *particleStateSampler = nullptr;
 		QRhiBuffer *computeInitUniformBuffer = nullptr;
 		QRhiBuffer *computeUpdateUniformBuffer = nullptr;
 		QRhiBuffer *renderUniformBuffer = nullptr;
@@ -95,9 +97,10 @@ private:
 	QRhiBuffer *_computeUpdateUniformBuffer = nullptr;
 	QRhiBuffer *_renderUniformBuffer = nullptr;
 
-	QRhiBuffer *_placeholderParticleBuffer = nullptr;
 	QRhiTexture *_placeholderTexture = nullptr;
 	QRhiSampler *_placeholderSampler = nullptr;
+	QRhiTexture *_placeholderStateTexture = nullptr;
+	QRhiSampler *_placeholderStateSampler = nullptr;
 
 	QRhiShaderResourceBindings *_computeInitSrbLayout = nullptr;
 	QRhiShaderResourceBindings *_computeUpdateSrbLayout = nullptr;
