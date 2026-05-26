@@ -1319,9 +1319,7 @@ void Panel::setupDownloadsProgress(
 				state->animation.start(0.);
 			}
 			toggle(true);
-		} else if ((state->progress.total && !progress.total)
-			|| (state->progress.ready < state->progress.total
-				&& progress.ready == progress.total)) {
+		} else if (state->shown && !progress.loading) {
 			state->animation.update(1., false, crl::now());
 			toggle(false);
 		}
