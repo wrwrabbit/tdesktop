@@ -2185,6 +2185,7 @@ Section DetailsFiller::makeMainApp(not_null<UserData*> user) {
 			st::infoOpenApp),
 		st::infoOpenAppMargin,
 		style::al_justify);
+	button->setFullRadius(true);
 
 	const auto controller = _controller->parentController();
 	button->setClickedCallback([=] {
