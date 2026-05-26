@@ -1913,15 +1913,9 @@ void PaintThinkingBlock(
 
 	{
 		auto maskPainter = Painter(&thinking->mask);
-		maskPainter.setFont(p.font());
-		maskPainter.setPen(p.pen());
-		maskPainter.setBrush(p.brush());
-		maskPainter.setRenderHints(p.renderHints());
-		maskPainter.setInactive(p.inactive());
-		maskPainter.setTextPalette(p.textPalette());
 		maskPainter.translate(-logicalRect.topLeft());
 		maskPainter.setClipRect(logicalRect);
-		maskPainter.setPen(baseColor->c);
+		maskPainter.setPen(QColor(255, 255, 255));
 		PaintTextLeaf(
 			maskPainter,
 			block.leaf,

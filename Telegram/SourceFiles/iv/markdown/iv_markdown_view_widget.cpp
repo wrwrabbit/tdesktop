@@ -197,11 +197,18 @@ void MarkdownDocumentWidget::setArticle(
 		std::shared_ptr<MarkdownArticle> article) {
 	ClickHandler::clearActive(this);
 	applyCursor(style::cur_default);
-	if (_article && (_article->mediaBlockHost() == this)) {
-		_article->setTextRepaintCallbacks(nullptr, nullptr);
-		_article->setMediaBlockHost(nullptr);
+	auto previous = std::move(_article);
+	if (previous && (previous->mediaBlockHost() == this)) {
+		previous->setTextRepaintCallbacks(nullptr, nullptr);
+		previous->setMediaBlockHost(nullptr);
+	}
+	if (previous && article && _articlePainted) {
+		_retainedArticle = std::move(previous);
+	} else if (!article) {
+		_retainedArticle = nullptr;
 	}
 	_article = std::move(article);
+	_articlePainted = false;
 	if (_article) {
 		const auto weak = QPointer<MarkdownDocumentWidget>(this);
 		_article->setTextRepaintCallbacks(
@@ -393,12 +400,16 @@ void MarkdownDocumentWidget::paintEvent(QPaintEvent *e) {
 	auto context = textPaintContext(clip);
 	if (scale == 1.) {
 		_article->paint(p, context);
+		_articlePainted = true;
+		_retainedArticle = nullptr;
 		return;
 	}
 	p.save();
 	p.scale(scale, scale);
 	_article->paint(p, context);
 	p.restore();
+	_articlePainted = true;
+	_retainedArticle = nullptr;
 }
 
 void MarkdownDocumentWidget::visibleTopBottomUpdated(

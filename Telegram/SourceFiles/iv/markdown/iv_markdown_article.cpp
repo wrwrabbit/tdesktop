@@ -797,6 +797,7 @@ private:
 	[[nodiscard]] const style::Markdown &layoutStyle() const;
 
 	void relayout(int width);
+	void retainBlocks();
 
 	mutable MarkdownArticleContent _content;
 	std::vector<RenderedFormula> _formulaRenders;
@@ -810,6 +811,7 @@ private:
 	int _laidOutWidth = 0;
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
+	std::vector<LaidOutBlock> _retainedBlocks;
 	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
 	std::unordered_map<uint64, std::shared_ptr<PlaceholderBlockRuntime>>
 		_placeholderRuntimes;
@@ -829,6 +831,7 @@ private:
 	SegmentSpan _visibleSegmentSpan;
 	std::vector<int> _segmentTops;
 	std::vector<int> _segmentBottoms;
+	bool _blocksPainted = false;
 
 };
 
@@ -934,6 +937,8 @@ void MarkdownArticle::Impl::paint(
 		st,
 		local);
 	p.setTextPalette(previousTextPalette);
+	_retainedBlocks.clear();
+	_blocksPainted = true;
 }
 
 MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
@@ -1171,12 +1176,24 @@ void MarkdownArticle::Impl::invalidateLayout() {
 	_laidOutWidth = 0;
 	_height = 0;
 	clearPendingHighlightBlockPointers();
-	_blocks.clear();
+	retainBlocks();
 	_anchors.clear();
 	_segments.clear();
 	_visibleSegmentSpan = {};
 	_segmentTops.clear();
 	_segmentBottoms.clear();
+}
+
+void MarkdownArticle::Impl::retainBlocks() {
+	if (_blocks.empty()) {
+		_blocksPainted = false;
+		return;
+	}
+	if (_blocksPainted) {
+		_retainedBlocks = std::move(_blocks);
+	}
+	_blocks.clear();
+	_blocksPainted = false;
 }
 
 int MarkdownArticle::Impl::currentDevicePixelRatio() const {
@@ -1454,7 +1471,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 		_blocks,
 		&_relatedArticleThumbnails);
 	clearPendingHighlightBlockPointers();
-	_blocks.clear();
+	retainBlocks();
 	_anchors.clear();
 	_segments.clear();
 	_visibleSegmentSpan = {};

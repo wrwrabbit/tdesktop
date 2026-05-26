@@ -129,6 +129,7 @@ private:
 	[[nodiscard]] double zoomScale() const;
 
 	std::shared_ptr<MarkdownArticle> _article;
+	std::shared_ptr<MarkdownArticle> _retainedArticle;
 	std::unique_ptr<Ui::ChatTheme> _theme;
 	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
@@ -157,6 +158,7 @@ private:
 	int _zoom = 100;
 	Ui::VisibleRange _visibleRange;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+	bool _articlePainted = false;
 
 };
 
