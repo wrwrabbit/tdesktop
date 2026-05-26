@@ -1081,7 +1081,7 @@ void PaintTableCaption(
 			context,
 			block.textRect,
 			block.textWidth,
-			style::al_left,
+			block.flowTextAlign,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
 				block.secondarySegmentIndex));

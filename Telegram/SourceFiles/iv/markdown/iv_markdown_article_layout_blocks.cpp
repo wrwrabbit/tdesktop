@@ -78,9 +78,7 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	const auto &textStyle = TableCellTextStyle(prepared, st);
 	result.cell.header = prepared.header;
 	result.cell.verticalAlignment = prepared.verticalAlignment;
-	result.cell.align = prepared.header
-		? style::al_center
-		: CellAlign(prepared.alignment);
+	result.cell.align = CellAlign(prepared.alignment);
 	result.cell.column = std::max(prepared.column, 0);
 	result.cell.colspan = std::max(prepared.colspan, 1);
 	result.cell.rowspan = std::max(prepared.rowspan, 1);
@@ -890,6 +888,7 @@ LaidOutBlock LayoutTableBlock(
 	block.tableBordered = prepared.tableBordered;
 	block.tableStriped = prepared.tableStriped;
 	block.supplementary = prepared.supplementary;
+	block.flowTextAlign = style::al_center;
 
 	auto tableTop = top;
 	if (!prepared.text.text.isEmpty()) {
