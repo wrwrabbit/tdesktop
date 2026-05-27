@@ -61,6 +61,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			rpl::variable<bool> outerWrapToggle;
 			rpl::lifetime activeLifetime;
 			std::optional<TopBarSuggestions::Priority> activeSpec;
+			std::optional<int> activeSpecDay;
 			Fn<void()> prepareSnapshot;
 		};
 
@@ -113,6 +114,14 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				}
 			}
 
+			const auto currentDay = QDate::currentDate().day();
+			if (winner
+				&& winner->dayDependent
+				&& state->activeSpecDay
+				&& *state->activeSpecDay != currentDay) {
+				state->activeSpec = std::nullopt;
+			}
+
 			const auto winnerPriority = winner
 				? std::optional<TopBarSuggestions::Priority>(winner->priority)
 				: std::nullopt;
@@ -123,6 +132,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 
 			state->activeLifetime.destroy();
 			state->activeSpec = winnerPriority;
+			state->activeSpecDay = (winner && winner->dayDependent)
+				? std::optional<int>(currentDay)
+				: std::nullopt;
 
 			if (winner) {
 				auto args = TopBarSuggestions::ActivateArgs{
