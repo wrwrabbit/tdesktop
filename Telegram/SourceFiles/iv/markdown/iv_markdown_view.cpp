@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 
 #include <QtCore/QElapsedTimer>
+#include <QtGui/QPainter>
 #include <QtGui/QScreen>
 
 #include <algorithm>
@@ -180,6 +181,12 @@ namespace {
 	return NormalizeFragmentId(std::move(fragment));
 }
 
+[[nodiscard]] bool ShowWrongLayoutBar(const OpenOptions &options) {
+	return (options.viewerKind != ViewerKind::LocalFile)
+		&& !options.sourceUrl.isEmpty()
+		&& (options.currentPageId != 0);
+}
+
 } // namespace
 
 class MarkdownPreviewRoot final : public Ui::RpWidget {
@@ -226,6 +233,7 @@ private:
 	void startScrollToTopButtonAnimation(bool shown);
 	void updateScrollToTopPosition();
 	void updateChildrenGeometry(QSize size);
+	void updateWrongLayoutGeometry();
 	void updateFailureGeometry();
 	void logPreparationSummary(
 		const PrepareFailureStatus &failure,
@@ -242,8 +250,11 @@ private:
 	std::unique_ptr<Ui::LayerManager> _footnoteLayerManager;
 	EmbedOverlay *_embedOverlay = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
+	Ui::RpWidget *_scrollContent = nullptr;
 	Ui::JumpDownButton *_scrollToTop = nullptr;
 	MarkdownDocumentWidget *_body = nullptr;
+	Ui::RpWidget *_wrongLayoutBar = nullptr;
+	Ui::LinkButton *_wrongLayout = nullptr;
 	Ui::FlatLabel *_failure = nullptr;
 	Ui::LinkButton *_failureOpen = nullptr;
 	const std::shared_ptr<MathRenderer> _renderer;
@@ -292,11 +303,31 @@ void MarkdownPreviewRoot::setup() {
 
 	_scroll = Ui::CreateChild<Ui::ScrollArea>(this, st::boxScroll);
 	_scroll->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-	_body = _scroll->setOwnedWidget(object_ptr<MarkdownDocumentWidget>(_scroll));
+	_scrollContent = _scroll->setOwnedWidget(object_ptr<Ui::RpWidget>(_scroll));
+	_body = Ui::CreateChild<MarkdownDocumentWidget>(_scrollContent);
 	_scrollToTop = Ui::CreateChild<Ui::JumpDownButton>(_scroll, st::dialogsToUp);
 	_scrollToTop->setClickedCallback([=] { scrollToTop(); });
 	_scrollToTop->setAccessibleName(tr::lng_sr_scroll_to_top(tr::now));
 	_scrollToTop->raise();
+	if (ShowWrongLayoutBar(_options)) {
+		_wrongLayoutBar = Ui::CreateChild<Ui::RpWidget>(_scrollContent);
+		_wrongLayoutBar->paintRequest(
+		) | rpl::on_next([=](QRect clip) {
+			QPainter(_wrongLayoutBar).fillRect(clip, st::windowBgOver);
+		}, _wrongLayoutBar->lifetime());
+		_wrongLayout = Ui::CreateChild<Ui::LinkButton>(
+			_wrongLayoutBar,
+			tr::lng_iv_wrong_layout(tr::now),
+			st::ivWrongLayoutLink);
+		_wrongLayout->setClickedCallback([=] {
+			_callback({
+				.type = Event::Type::Report,
+				.webpageId = _options.currentPageId,
+				.context = CurrentClickHandlerContext(_options),
+			});
+		});
+		_wrongLayoutBar->hide();
+	}
 	_failure = Ui::CreateChild<Ui::FlatLabel>(
 		this,
 		tr::lng_markdown_preview_cant(tr::now),
@@ -340,6 +371,10 @@ void MarkdownPreviewRoot::setup() {
 		if (_options.delegate) {
 			_body->setZoom(_options.delegate->ivZoom());
 		}
+		_body->heightValue(
+		) | rpl::on_next([=](int) {
+			updateChildrenGeometry(size());
+		}, _body->lifetime());
 	}
 	_failure->hide();
 	_failureOpen->hide();
@@ -642,6 +677,9 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		if (_body) {
 			_body->hide();
 		}
+		if (_wrongLayoutBar) {
+			_wrongLayoutBar->hide();
+		}
 		_failure->show();
 		if (_options.sourcePath.isEmpty()) {
 			_failureOpen->hide();
@@ -674,9 +712,13 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	if (_options.delegate) {
 		_body->setZoom(_options.delegate->ivZoom());
 	}
-	updateBodyVisibleTopBottom();
 	_scroll->show();
 	_body->show();
+	if (_wrongLayoutBar) {
+		_wrongLayoutBar->show();
+	}
+	updateChildrenGeometry(size());
+	updateBodyVisibleTopBottom();
 	_failure->hide();
 	_failureOpen->hide();
 	if (!_pendingFragment.isEmpty()) {
@@ -870,22 +912,57 @@ void MarkdownPreviewRoot::updateScrollToTopPosition() {
 
 void MarkdownPreviewRoot::updateChildrenGeometry(QSize size) {
 	_scroll->setGeometry(QRect(QPoint(), size));
-	auto bodyWidth = std::max(_scroll->width(), 1);
+	const auto contentWidth = std::max(_scroll->width(), 1);
+	auto bodyWidth = contentWidth;
 	if (_body) {
 		bodyWidth = std::min(bodyWidth, _body->maxWidth());
 		_body->resizeToWidth(bodyWidth);
 		_body->moveToLeft(
-			std::max((_scroll->width() - bodyWidth) / 2, 0),
-			_body->y(),
-			_scroll->width());
+			std::max((contentWidth - bodyWidth) / 2, 0),
+			0,
+			contentWidth);
 		updateBodyVisibleTopBottom();
 	}
+	if (_scrollContent) {
+		const auto bodyHeight = _body ? _body->height() : 0;
+		const auto footerHeight = (_wrongLayoutBar
+			&& !_wrongLayoutBar->isHidden())
+			? st::ivWrongLayoutBarHeight
+			: 0;
+		_scrollContent->resize(
+			contentWidth,
+			std::max(_scroll->height(), bodyHeight + footerHeight));
+	}
+	updateWrongLayoutGeometry();
 	if (_embedOverlay) {
 		_embedOverlay->updateGeometry(QRect(QPoint(), size), bodyWidth);
 	}
 	_scrollToTop->raise();
 	updateScrollToTopPosition();
 	updateFailureGeometry();
+}
+
+void MarkdownPreviewRoot::updateWrongLayoutGeometry() {
+	if (!_wrongLayoutBar || !_wrongLayout) {
+		return;
+	}
+	const auto footerHeight = st::ivWrongLayoutBarHeight;
+	const auto contentWidth = _scrollContent
+		? std::max(_scrollContent->width(), 1)
+		: std::max(width(), 1);
+	const auto contentHeight = _scrollContent
+		? _scrollContent->height()
+		: height();
+	_wrongLayoutBar->setGeometry(
+		0,
+		std::max(contentHeight - footerHeight, 0),
+		contentWidth,
+		footerHeight);
+	_wrongLayout->resizeToNaturalWidth(contentWidth);
+	_wrongLayout->moveToLeft(
+		std::max((contentWidth - _wrongLayout->width()) / 2, 0),
+		std::max((footerHeight - _wrongLayout->height()) / 2, 0),
+		contentWidth);
 }
 
 void MarkdownPreviewRoot::updateFailureGeometry() {

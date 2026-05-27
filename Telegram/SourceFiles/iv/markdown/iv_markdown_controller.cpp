@@ -898,6 +898,7 @@ void Controller::createPreview() {
 		case Event::Type::Close:
 		case Event::Type::Quit:
 		case Event::Type::OpenFile:
+		case Event::Type::Report:
 			_events.fire(std::move(event));
 			break;
 		}

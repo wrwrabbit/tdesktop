@@ -272,6 +272,7 @@ struct Event {
 		Quit,
 		OpenPage,
 		OpenFile,
+		Report,
 	};
 	Type type = Type::Close;
 	uint64 webpageId = 0;

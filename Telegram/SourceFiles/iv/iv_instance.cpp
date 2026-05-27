@@ -801,6 +801,12 @@ void Shown::createMarkdownController(
 			break;
 		case FromType::OpenFile:
 			break;
+		case FromType::Report:
+			_events.fire({
+				.type = ToType::Report,
+				.context = QString::number(event.webpageId),
+			});
+			break;
 		}
 	}, _markdownController->lifetime());
 }
@@ -1817,6 +1823,8 @@ void Instance::showRichMessage(
 					UrlClickHandler::Open(event.url, event.context);
 				}
 				break;
+			case Type::Report:
+				break;
 			}
 		}, controller->lifetime());
 		i = _markdowns.emplace(key, std::move(controller)).first;
@@ -1862,6 +1870,8 @@ bool Instance::showMarkdown(
 					break;
 				case Type::Quit:
 					Shortcuts::Launch(Shortcuts::Command::Quit);
+					break;
+				case Type::Report:
 					break;
 				// Don't try opening markdown links inside markdown viewer,
 				// messenger-provided markdown files should know nothing

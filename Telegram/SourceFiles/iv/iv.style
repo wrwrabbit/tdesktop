@@ -73,6 +73,12 @@ ivSubtitleHeight: 48px;
 ivSubtitleTop: 12px;
 ivSubtitleLeft: 22px;
 ivSubtitleSkip: 0px;
+ivWrongLayoutBarHeight: 32px;
+ivWrongLayoutLink: LinkButton(defaultLinkButton) {
+	color: windowSubTextFg;
+	overColor: windowSubTextFg;
+	padding: margins(5px, 5px, 5px, 5px);
+}
 
 MarkdownBlockSkips {
 	paragraph: pixels;
