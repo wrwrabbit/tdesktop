@@ -168,6 +168,10 @@ void AppendPreparedIvRichText(
 			entity.length(),
 			data));
 	}
+	result->anchorIds.reserve(result->anchorIds.size() + prepared.anchorIds.size());
+	for (auto &anchorId : prepared.anchorIds) {
+		result->anchorIds.push_back(std::move(anchorId));
+	}
 }
 
 [[nodiscard]] bool PrepareNativeIvCaption(
@@ -974,6 +978,7 @@ iframe {
 	SortPreparedIvRichText(&caption);
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	if (data.vblocks().v.isEmpty()) {
 		block.children.push_back(
@@ -1463,6 +1468,7 @@ void MarkNativeIvTableSlots(
 	SortPreparedIvRichText(&title);
 	block.text = std::move(title.text);
 	block.links = std::move(title.links);
+	block.anchorIds = std::move(title.anchorIds);
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
 	const auto rowCount = std::min(int(data.vrows().v.size()), limits.maxRows);
@@ -2009,6 +2015,7 @@ namespace {
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
 	block.supplementary = true;
 	block.placeholder.label = std::move(label);
 	block.placeholder.copyText = block.text.text.isEmpty()
@@ -2281,6 +2288,7 @@ namespace {
 	SortPreparedIvRichText(&title);
 	block.text = std::move(title.text);
 	block.links = std::move(title.links);
+	block.anchorIds = std::move(title.anchorIds);
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
 	const auto rowCount = std::min(int(data.tableRows.size()), limits.maxRows);
@@ -2529,6 +2537,7 @@ namespace {
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	if (data.blocks.empty()) {
 		block.children.push_back(

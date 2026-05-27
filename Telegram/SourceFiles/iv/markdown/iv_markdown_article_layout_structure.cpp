@@ -199,6 +199,7 @@ void PrepareNestedContext(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::ListItem;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	block.listKind = prepared.listKind;
 	block.listDelimiter = prepared.listDelimiter;
@@ -313,6 +314,8 @@ void PrepareNestedContext(
 		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::List;
+	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.listKind = prepared.listKind;
 	block.listDelimiter = prepared.listDelimiter;
 
@@ -392,6 +395,8 @@ void PrepareNestedContext(
 		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Quote;
+	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.pullquote = prepared.pullquote;
 
 	const auto depthDelta = std::max(
@@ -465,6 +470,7 @@ void PrepareNestedContext(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.collapsed = prepared.collapsed;
 	block.supplementary = prepared.supplementary;
 	const auto &details = st.details;
@@ -597,6 +603,7 @@ void PrepareNestedContext(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::EmbedPost;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	block.thumbnailPhotoId = prepared.embedPost.authorPhotoId;
 	if (prepared.embedPost.authorPhotoId && mediaRuntime) {

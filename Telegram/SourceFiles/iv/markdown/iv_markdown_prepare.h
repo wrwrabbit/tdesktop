@@ -230,6 +230,7 @@ struct PreparedBlock {
 	QString codeLanguage;
 	QString formulaTex;
 	QString anchorId;
+	std::vector<QString> anchorIds;
 	PreparedPhotoBlockData photo;
 	PreparedVideoBlockData video;
 	PreparedAudioBlockData audio;

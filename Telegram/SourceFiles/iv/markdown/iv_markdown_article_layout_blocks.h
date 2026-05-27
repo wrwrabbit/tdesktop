@@ -97,6 +97,7 @@ struct LaidOutBlock {
 	QRect visibleMediaRect;
 	QPoint markerCenter;
 	QString anchorId;
+	std::vector<QString> anchorIds;
 	int textWidth = 0;
 	int labelWidth = 0;
 	int subtitleWidth = 0;

@@ -277,6 +277,22 @@ int MarkdownDocumentWidget::anchorTop(const QString &anchorId) const {
 	return int(std::floor(top * zoomScale()));
 }
 
+bool MarkdownDocumentWidget::expandDetailsToAnchor(const QString &anchorId) {
+	if (!_article) {
+		return false;
+	}
+	const auto result = _article->expandDetailsToAnchor(anchorId);
+	if (!result.found) {
+		return false;
+	}
+	if (result.changed) {
+		clearSelection();
+		forceRelayoutCurrentWidth();
+		updateHoverAtCursor();
+	}
+	return true;
+}
+
 bool MarkdownDocumentWidget::toggleDetails(const QString &anchorId) {
 	if (!_article || !_article->toggleDetails(anchorId)) {
 		return false;

@@ -183,6 +183,11 @@ struct MarkdownArticleHitTestResult {
 	}
 };
 
+struct MarkdownArticleAnchorExpansion {
+	bool found = false;
+	bool changed = false;
+};
+
 class MarkdownArticle {
 public:
 	MarkdownArticle(
@@ -211,6 +216,8 @@ public:
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+	[[nodiscard]] MarkdownArticleAnchorExpansion expandDetailsToAnchor(
+		const QString &anchorId);
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] bool segmentIsText(int index) const;
 	[[nodiscard]] int segmentLength(int index) const;

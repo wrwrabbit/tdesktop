@@ -91,6 +91,9 @@ private:
 		const HistoryEntry &entry,
 		uint64 pageId,
 		const QString &sourceUrl) const;
+	[[nodiscard]] bool sameCurrentPage(
+		uint64 pageId,
+		const QString &sourceUrl) const;
 	[[nodiscard]] bool sameHistoryLocation(
 		const HistoryEntry &entry,
 		uint64 pageId,

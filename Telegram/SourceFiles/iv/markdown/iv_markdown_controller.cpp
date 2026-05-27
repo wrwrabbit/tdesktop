@@ -528,6 +528,15 @@ bool Controller::sameHistoryPage(
 		: (!sourceUrl.isEmpty() && entry.sourceUrl == sourceUrl);
 }
 
+bool Controller::sameCurrentPage(uint64 pageId, const QString &sourceUrl) const {
+	return (pageId != 0
+		&& _options.currentPageId != 0
+		&& pageId == _options.currentPageId)
+		|| (!sourceUrl.isEmpty()
+			&& !_options.sourceUrl.isEmpty()
+			&& sourceUrl == _options.sourceUrl);
+}
+
 bool Controller::sameHistoryLocation(
 		const HistoryEntry &entry,
 		uint64 pageId,
@@ -623,19 +632,33 @@ void Controller::handleOpenPage(Event event) {
 		_events.fire(std::move(event));
 		return;
 	}
-	const auto currentIndex = (_historyIndex >= 0 && _historyIndex < int(_history.size()))
+	const auto currentIndex = (_historyIndex >= 0
+		&& _historyIndex < int(_history.size()))
 		? _historyIndex
 		: -1;
 	const auto current = (currentIndex >= 0) ? &_history[currentIndex] : nullptr;
-	const auto samePage = current
-		&& sameHistoryPage(*current, target.pageId, target.sourceUrl);
-	const auto currentEntry = samePage ? *current : HistoryEntry();
-	if (samePage
-		&& sameHistoryLocation(
-			*current,
-			target.pageId,
-			target.sourceUrl,
-			target.hash)) {
+	const auto samePage = sameCurrentPage(target.pageId, target.sourceUrl)
+		|| (current
+			&& sameHistoryPage(*current, target.pageId, target.sourceUrl));
+	if (samePage) {
+		if (target.hash.isEmpty()) {
+			if (_preview) {
+				ScrollMarkdownPreviewToY(
+					_preview.get(),
+					0,
+					MarkdownPreviewScrollMode::Animated);
+			}
+			return;
+		}
+		if (_preview
+			&& ScrollMarkdownPreviewToAnchor(
+				_preview.get(),
+				target.hash,
+				MarkdownPreviewScrollMode::Animated)) {
+			return;
+		}
+		DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1"
+			).arg(target.hash));
 		return;
 	}
 	saveCurrentHistoryScroll();
@@ -648,7 +671,7 @@ void Controller::handleOpenPage(Event event) {
 			target.hash)) {
 		targetIndex = _historyIndex + 1;
 	} else {
-		auto options = samePage ? currentEntry.options : _options;
+		auto options = _options;
 		options.sourceUrl = target.sourceUrl;
 		options.initialFragment = target.hash;
 		options.currentPageId = target.pageId;
@@ -670,27 +693,6 @@ void Controller::handleOpenPage(Event event) {
 	entry.options.currentPageId = target.pageId;
 	_historyIndex = targetIndex;
 	updateHistoryButtons();
-	if (samePage) {
-		if (showHistoryEntry(targetIndex)) {
-			return;
-		}
-		if (_preview) {
-			if (target.hash.isEmpty()) {
-				ScrollMarkdownPreviewToY(_preview.get(), 0);
-			}
-			if (target.hash.isEmpty()
-				|| ScrollMarkdownPreviewToAnchor(_preview.get(), target.hash)) {
-				entry.title = _title;
-				entry.preparedContent = currentEntry.preparedContent;
-				entry.scrollTop = MarkdownPreviewScrollTop(_preview.get());
-				_options.initialFragment = target.hash;
-				_shownHistoryIndex = targetIndex;
-				return;
-			}
-		}
-		_events.fire(std::move(event));
-		return;
-	}
 	if (!showHistoryEntry(targetIndex)) {
 		event.url = ComposePageHistoryUrl(target);
 		_events.fire(std::move(event));

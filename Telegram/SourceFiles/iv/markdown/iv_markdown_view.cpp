@@ -6,12 +6,14 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_view.h"
+#include "base/algorithm.h"
 #include "base/weak_ptr.h"
 #include "core/click_handler_types.h"
 #include "core/credits_amount.h"
 #include "core/file_utilities.h"
-#include "iv/markdown/iv_markdown_embed_overlay.h"
 #include "iv/markdown/iv_markdown_article_text.h"
+#include "iv/markdown/iv_markdown_embed_overlay.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_view_widget.h"
 #include "iv/iv_delegate.h"
 #include "lang/lang_keys.h"
@@ -24,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/basic_click_handlers.h"
 #include "ui/integration.h"
 #include "ui/rect.h"
 #include "logs.h"
@@ -37,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QScreen>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -158,6 +162,24 @@ namespace {
 	return true;
 }
 
+[[nodiscard]] std::optional<QString> CurrentPageExternalLinkFragment(
+		const PreparedLink &link,
+		const OpenOptions &options) {
+	if (link.kind != PreparedLinkKind::External
+		|| link.target.isEmpty()
+		|| options.sourceUrl.isEmpty()) {
+		return std::nullopt;
+	}
+	const auto hash = link.target.indexOf(QChar('#'));
+	const auto base = (hash < 0) ? link.target : link.target.mid(0, hash);
+	if (base != options.sourceUrl
+		&& base != UrlClickHandler::EncodeForOpening(options.sourceUrl)) {
+		return std::nullopt;
+	}
+	auto fragment = (hash < 0) ? QString() : link.target.mid(hash + 1);
+	return NormalizeFragmentId(std::move(fragment));
+}
+
 } // namespace
 
 class MarkdownPreviewRoot final : public Ui::RpWidget {
@@ -173,8 +195,10 @@ public:
 		std::shared_ptr<MathRenderer> renderer,
 	Fn<void(Event)> callback,
 	const OpenOptions &options);
-	bool scrollToAnchor(const QString &anchorId);
-	void scrollToY(int top);
+	bool scrollToAnchor(
+		const QString &anchorId,
+		MarkdownPreviewScrollMode mode);
+	void scrollToY(int top, MarkdownPreviewScrollMode mode);
 	[[nodiscard]] int scrollTop() const;
 	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
 
@@ -196,6 +220,7 @@ private:
 		PreparedFootnote footnote);
 	void applyPreparedContent(MarkdownArticleContent prepared, int prepareMs);
 	void scrollToTop();
+	void scrollToYAnimated(int top);
 	void updateBodyVisibleTopBottom();
 	void updateScrollToTopVisibility();
 	void startScrollToTopButtonAnimation(bool shown);
@@ -401,7 +426,20 @@ void MarkdownPreviewRoot::activateLink(
 		return;
 	}
 	switch (link.kind) {
-	case PreparedLinkKind::External:
+	case PreparedLinkKind::External: {
+		if (const auto fragment = CurrentPageExternalLinkFragment(
+				link,
+				_options)) {
+			if (fragment->isEmpty()) {
+				scrollToY(0, MarkdownPreviewScrollMode::Animated);
+			} else if (!scrollToAnchor(
+					*fragment,
+					MarkdownPreviewScrollMode::Animated)) {
+				DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1").arg(
+					*fragment));
+			}
+			return;
+		}
 		if (!ActivateExternalLink(
 				link,
 				button,
@@ -409,7 +447,7 @@ void MarkdownPreviewRoot::activateLink(
 			DEBUG_LOG(("Native Markdown IV: failed external link activation: %1").arg(
 				link.target));
 		}
-		break;
+	} break;
 	case PreparedLinkKind::InstantViewPage: {
 		auto target = link.target;
 		if (!link.fragment.isEmpty()) {
@@ -424,7 +462,7 @@ void MarkdownPreviewRoot::activateLink(
 	} break;
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::FootnoteBacklink:
-		if (!scrollToAnchor(link.target)) {
+		if (!scrollToAnchor(link.target, MarkdownPreviewScrollMode::Animated)) {
 			DEBUG_LOG(("Native Markdown IV: unresolved anchor: %1").arg(
 				link.target));
 		}
@@ -642,7 +680,9 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	_failure->hide();
 	_failureOpen->hide();
 	if (!_pendingFragment.isEmpty()) {
-		const auto scrolled = scrollToAnchor(_pendingFragment);
+		const auto scrolled = scrollToAnchor(
+			_pendingFragment,
+			MarkdownPreviewScrollMode::Instant);
 		static_cast<void>(scrolled);
 		_pendingFragment.clear();
 	}
@@ -656,23 +696,41 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		_body->lastRelayoutMs());
 }
 
-bool MarkdownPreviewRoot::scrollToAnchor(const QString &anchorId) {
+bool MarkdownPreviewRoot::scrollToAnchor(
+		const QString &anchorId,
+		MarkdownPreviewScrollMode mode) {
 	if (!_body || !_scroll || anchorId.isEmpty()) {
 		return false;
 	}
-	const auto top = _body->anchorTop(anchorId);
+	auto top = _body->anchorTop(anchorId);
 	if (top < 0) {
-		return false;
+		if (!_body->expandDetailsToAnchor(anchorId)) {
+			return false;
+		}
+		top = _body->anchorTop(anchorId);
+		if (top < 0) {
+			return false;
+		}
 	}
-	scrollToY(top);
+	scrollToY(top, mode);
 	return true;
 }
 
-void MarkdownPreviewRoot::scrollToY(int top) {
-	if (_scroll) {
+void MarkdownPreviewRoot::scrollToY(
+		int top,
+		MarkdownPreviewScrollMode mode) {
+	if (!_scroll) {
+		return;
+	}
+	switch (mode) {
+	case MarkdownPreviewScrollMode::Instant:
 		_scrollToAnimation.stop();
 		_scroll->scrollToY(top);
 		updateScrollToTopVisibility();
+		break;
+	case MarkdownPreviewScrollMode::Animated:
+		scrollToYAnimated(top);
+		break;
 	}
 }
 
@@ -688,14 +746,18 @@ rpl::producer<int> MarkdownPreviewRoot::scrollTopValue() const {
 
 bool ScrollMarkdownPreviewToAnchor(
 		Ui::RpWidget *preview,
-		const QString &anchorId) {
+		const QString &anchorId,
+		MarkdownPreviewScrollMode mode) {
 	const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview);
-	return root ? root->scrollToAnchor(anchorId) : false;
+	return root ? root->scrollToAnchor(anchorId, mode) : false;
 }
 
-void ScrollMarkdownPreviewToY(Ui::RpWidget *preview, int top) {
+void ScrollMarkdownPreviewToY(
+		Ui::RpWidget *preview,
+		int top,
+		MarkdownPreviewScrollMode mode) {
 	if (const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview)) {
-		root->scrollToY(top);
+		root->scrollToY(top, mode);
 	}
 }
 
@@ -713,25 +775,50 @@ void MarkdownPreviewRoot::scrollToTop() {
 	if (!_scroll || _scrollToAnimation.animating()) {
 		return;
 	}
+	if (_scroll->scrollTop() == 0) {
+		return;
+	}
+	scrollToYAnimated(0);
+}
+
+void MarkdownPreviewRoot::scrollToYAnimated(int top) {
+	if (!_scroll) {
+		return;
+	}
+	const auto scrollTo = _scroll->computeScrollToY(top, -1);
+	_scrollToAnimation.stop();
 	auto scrollTop = _scroll->scrollTop();
-	const auto scrollTo = 0;
 	if (scrollTop == scrollTo) {
+		updateScrollToTopVisibility();
 		return;
 	}
 	const auto maxAnimatedDelta = _scroll->height();
 	if (scrollTo + maxAnimatedDelta < scrollTop) {
 		scrollTop = scrollTo + maxAnimatedDelta;
 		_scroll->scrollToY(scrollTop);
+	} else if (scrollTo - maxAnimatedDelta > scrollTop) {
+		scrollTop = scrollTo - maxAnimatedDelta;
+		_scroll->scrollToY(scrollTop);
 	}
 
 	startScrollToTopButtonAnimation(false);
 
+	const auto scroll = [=] {
+		if (!_scroll) {
+			return;
+		}
+		const auto animated = qRound(_scrollToAnimation.value(scrollTo));
+		const auto animatedDelta = animated - scrollTo;
+		const auto realDelta = _scroll->scrollTop() - scrollTo;
+		if (base::OppositeSigns(realDelta, animatedDelta)) {
+			_scrollToAnimation.stop();
+		} else if (std::abs(realDelta) > std::abs(animatedDelta)) {
+			_scroll->scrollToY(animated);
+		}
+	};
+
 	_scrollToAnimation.start(
-		[=] {
-			if (_scroll) {
-				_scroll->scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
-			}
-		},
+		scroll,
 		scrollTop,
 		scrollTo,
 		st::slideDuration,

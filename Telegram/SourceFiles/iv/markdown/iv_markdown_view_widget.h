@@ -54,6 +54,7 @@ public:
 	void invalidateRasterCache();
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+	[[nodiscard]] bool expandDetailsToAnchor(const QString &anchorId);
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] int lastRelayoutMs() const;
 	int resizeGetHeight(int newWidth) override;

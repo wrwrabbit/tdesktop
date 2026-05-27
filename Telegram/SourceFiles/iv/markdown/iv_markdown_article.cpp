@@ -6,6 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article.h"
+
+#include "base/algorithm.h"
 #include "iv/markdown/iv_markdown_article_layout_structure.h"
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article_selection.h"
@@ -643,6 +645,36 @@ void RebuildVisibleSegmentLookup(
 	return false;
 }
 
+[[nodiscard]] bool PreparedBlockHasAnchor(
+		const PreparedBlock &block,
+		const QString &anchorId) {
+	return block.anchorId == anchorId
+		|| ranges::contains(block.anchorIds, anchorId);
+}
+
+[[nodiscard]] MarkdownArticleAnchorExpansion ExpandDetailsToAnchor(
+		std::vector<PreparedBlock> *blocks,
+		const QString &anchorId) {
+	if (!blocks || anchorId.isEmpty()) {
+		return {};
+	}
+	for (auto &block : *blocks) {
+		if (PreparedBlockHasAnchor(block, anchorId)) {
+			return { true, false };
+		}
+		auto result = ExpandDetailsToAnchor(&block.children, anchorId);
+		if (result.found) {
+			if (block.kind == PreparedBlockKind::Details
+				&& block.collapsed) {
+				block.collapsed = false;
+				result.changed = true;
+			}
+			return result;
+		}
+	}
+	return {};
+}
+
 void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 	if (!blocks) {
 		return;
@@ -702,6 +734,9 @@ public:
 		Ui::Text::StateRequest::Flags flags) const;
 
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
+
+	[[nodiscard]] MarkdownArticleAnchorExpansion expandDetailsToAnchor(
+		const QString &anchorId);
 
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 
@@ -976,6 +1011,17 @@ int MarkdownArticle::Impl::anchorTop(const QString &anchorId) const {
 		}
 	}
 	return -1;
+}
+
+MarkdownArticleAnchorExpansion MarkdownArticle::Impl::expandDetailsToAnchor(
+		const QString &anchorId) {
+	const auto result = ExpandDetailsToAnchor(
+		&_content.blocks.blocks,
+		anchorId);
+	if (result.changed) {
+		invalidateLayout();
+	}
+	return result;
 }
 
 bool MarkdownArticle::Impl::toggleDetails(const QString &anchorId) {
@@ -1598,6 +1644,11 @@ MarkdownArticleHitTestResult MarkdownArticle::hitTest(
 
 int MarkdownArticle::anchorTop(const QString &anchorId) const {
 	return _impl->anchorTop(anchorId);
+}
+
+MarkdownArticleAnchorExpansion MarkdownArticle::expandDetailsToAnchor(
+		const QString &anchorId) {
+	return _impl->expandDetailsToAnchor(anchorId);
 }
 
 bool MarkdownArticle::toggleDetails(const QString &anchorId) {

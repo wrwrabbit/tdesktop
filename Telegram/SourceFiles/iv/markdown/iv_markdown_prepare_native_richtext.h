@@ -17,6 +17,7 @@ inline constexpr auto kNativeIvLinkSpecialColorIndex = 9;
 struct PreparedIvRichText {
 	TextWithEntities text;
 	std::vector<PreparedLink> links;
+	std::vector<QString> anchorIds;
 };
 
 struct NativeIvRichTextContext {

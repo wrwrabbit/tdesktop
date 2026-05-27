@@ -522,8 +522,23 @@ void CollectAnchors(
 		return;
 	}
 	for (const auto &block : blocks) {
-		if (!block.anchorId.isEmpty()) {
-			anchors->push_back({ block.anchorId, block.outer.top() });
+		if (!block.anchorId.isEmpty() || !block.anchorIds.empty()) {
+			const auto top = !block.textRect.isEmpty()
+				? block.textRect.top()
+				: [&] {
+					for (const auto &child : block.children) {
+						if (child.outer.height() > 0) {
+							return child.outer.top();
+						}
+					}
+					return block.outer.top();
+				}();
+			if (!block.anchorId.isEmpty()) {
+				anchors->push_back({ block.anchorId, top });
+			}
+			for (const auto &anchorId : block.anchorIds) {
+				anchors->push_back({ anchorId, top });
+			}
 		}
 		CollectAnchors(block.children, anchors);
 	}

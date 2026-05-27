@@ -692,6 +692,7 @@ LaidOutBlock LayoutFlowBlock(
 	auto block = LaidOutBlock();
 	block.kind = prepared.kind;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.headingLevel = prepared.headingLevel;
 	block.supplementary = prepared.supplementary;
 	block.pullquote = prepared.pullquote;
@@ -737,6 +738,8 @@ LaidOutBlock LayoutCodeBlock(
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
+	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.copyText = prepared.text.text;
 	block.codeLanguage = prepared.codeLanguage;
 	block.textWidth = std::max(width, 1);
@@ -783,6 +786,8 @@ LaidOutBlock LayoutDisplayMathBlock(
 		int width) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::DisplayMath;
+	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.formulaIndex = prepared.formulaIndex;
 	block.copyText = prepared.formulaTex;
 
@@ -885,6 +890,7 @@ LaidOutBlock LayoutTableBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Table;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.tableBordered = prepared.tableBordered;
 	block.tableStriped = prepared.tableStriped;
 	block.supplementary = prepared.supplementary;
@@ -1130,6 +1136,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Placeholder;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.copyText = prepared.placeholder.copyText;
 	block.labelText = prepared.placeholder.label;
 	block.placeholderId = prepared.placeholder.id;
@@ -1214,6 +1221,7 @@ LaidOutBlock LayoutRelatedArticleBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::RelatedArticle;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.copyText = prepared.relatedArticle.copyText;
 	block.labelText = prepared.relatedArticle.title;
 	block.preparedLink = prepared.relatedArticle.link;
@@ -1382,6 +1390,7 @@ LaidOutBlock LayoutPhotoBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Photo;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
@@ -1453,6 +1462,7 @@ LaidOutBlock LayoutVideoBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Video;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
@@ -1524,6 +1534,7 @@ LaidOutBlock LayoutAudioBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Audio;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
@@ -1581,6 +1592,7 @@ LaidOutBlock LayoutMapBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Map;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
@@ -1647,6 +1659,7 @@ LaidOutBlock LayoutChannelBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Channel;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);
@@ -1702,6 +1715,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.anchorId = prepared.anchorId;
+	block.anchorIds = prepared.anchorIds;
 	block.supplementary = prepared.supplementary;
 	if (context.mediaBlockFactory) {
 		block.mediaBlock = context.mediaBlockFactory(prepared);

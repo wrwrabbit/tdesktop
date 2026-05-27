@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct GeoPointLocation;
 
+#include "base/algorithm.h"
 #include "data/data_location.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
@@ -272,8 +273,29 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	TextWithEntities *result,
 	std::vector<PreparedLink> *links,
 	QString *blockAnchorId,
+	std::vector<QString> *blockAnchorIds,
 	NativeIvPrepareState *state,
 	NativeIvRichTextContext context);
+
+void AddNativeIvBlockAnchor(
+		QString *blockAnchorId,
+		std::vector<QString> *blockAnchorIds,
+		QString anchorId) {
+	if (anchorId.isEmpty()) {
+		return;
+	}
+	if (blockAnchorId && blockAnchorId->isEmpty()) {
+		*blockAnchorId = std::move(anchorId);
+		return;
+	}
+	if (blockAnchorId && *blockAnchorId == anchorId) {
+		return;
+	}
+	if (blockAnchorIds
+		&& !ranges::contains(*blockAnchorIds, anchorId)) {
+		blockAnchorIds->push_back(std::move(anchorId));
+	}
+}
 
 [[nodiscard]] bool AddNativeIvEntity(
 		TextWithEntities *text,
@@ -388,6 +410,7 @@ void AppendCanonicalNativeIvRichText(
 		TextWithEntities *result,
 		std::vector<PreparedLink> *links,
 		QString *blockAnchorId,
+		std::vector<QString> *blockAnchorIds,
 		NativeIvPrepareState *state,
 		NativeIvRichTextContext context,
 		EntityType type,
@@ -398,6 +421,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context)) {
 		return false;
@@ -442,6 +466,7 @@ void AppendCanonicalNativeIvRichText(
 		TextWithEntities *result,
 		std::vector<PreparedLink> *links,
 		QString *blockAnchorId,
+		std::vector<QString> *blockAnchorIds,
 		NativeIvPrepareState *state,
 		NativeIvRichTextContext context) {
 	if (state->blocked()) {
@@ -459,6 +484,7 @@ void AppendCanonicalNativeIvRichText(
 					result,
 					links,
 					blockAnchorId,
+					blockAnchorIds,
 					state,
 					context)) {
 				return false;
@@ -510,6 +536,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -522,6 +549,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -534,6 +562,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -546,6 +575,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -558,6 +588,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -570,6 +601,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -592,6 +624,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -612,6 +645,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -624,6 +658,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -636,6 +671,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -647,6 +683,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Spoiler);
@@ -656,6 +693,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Mention);
@@ -665,6 +703,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Hashtag);
@@ -674,6 +713,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::BotCommand);
@@ -683,6 +723,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Cashtag);
@@ -692,6 +733,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Url);
@@ -701,6 +743,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Email);
@@ -710,6 +753,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::Phone);
@@ -719,6 +763,7 @@ void AppendCanonicalNativeIvRichText(
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context,
 			EntityType::BankCard);
@@ -729,6 +774,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -751,6 +797,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -786,6 +833,7 @@ void AppendCanonicalNativeIvRichText(
 				result,
 				links,
 				blockAnchorId,
+				blockAnchorIds,
 				state,
 				context)) {
 			return false;
@@ -800,14 +848,16 @@ void AppendCanonicalNativeIvRichText(
 			result->text.size() - from,
 			u"tel:"_q + qs(data.vphone()));
 	}, [&](const MTPDtextAnchor &data) {
-		if (blockAnchorId && blockAnchorId->isEmpty()) {
-			*blockAnchorId = NormalizeFragmentId(qs(data.vname()));
-		}
+		AddNativeIvBlockAnchor(
+			blockAnchorId,
+			blockAnchorIds,
+			NormalizeFragmentId(qs(data.vname())));
 		return AppendNativeIvRichText(
 			data.vtext(),
 			result,
 			links,
 			blockAnchorId,
+			blockAnchorIds,
 			state,
 			context);
 	});
@@ -824,6 +874,7 @@ void AppendCanonicalNativeIvRichText(
 			&result->text,
 			&result->links,
 			blockAnchorId,
+			&result->anchorIds,
 			state,
 			context)) {
 		return false;
@@ -845,6 +896,7 @@ void AppendCanonicalNativeIvRichText(
 				&result->text,
 				&result->links,
 				blockAnchorId,
+				&result->anchorIds,
 				state,
 				context)) {
 			return false;
@@ -989,6 +1041,7 @@ bool PrepareNativeIvRichText(
 		&result->text,
 		&result->links,
 		blockAnchorId,
+		&result->anchorIds,
 		state,
 		context);
 }
@@ -1000,9 +1053,7 @@ bool PrepareNativeIvRichText(
 		NativeIvPrepareState *state,
 		NativeIvRichTextContext context) {
 	context = ResolveNativeIvRichTextContext(state, context);
-	if (blockAnchorId && blockAnchorId->isEmpty() && !text.anchorId.isEmpty()) {
-		*blockAnchorId = text.anchorId;
-	}
+	AddNativeIvBlockAnchor(blockAnchorId, &result->anchorIds, text.anchorId);
 	AppendCanonicalNativeIvRichText(text, result, state, context);
 	return true;
 }
@@ -1025,6 +1076,7 @@ bool AppendPreparedIvRichBlock(
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
 	block.supplementary = supplementary;
 	result->push_back(std::move(block));
 	return true;
@@ -1060,6 +1112,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.photo.id = GeneratePreparedMediaBlockId(state);
 	block.photo.photoId = info->id;
@@ -1094,6 +1147,7 @@ bool PrepareNativeIvVideoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
@@ -1124,6 +1178,7 @@ bool PrepareNativeIvAudioBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.audio.id = GeneratePreparedMediaBlockId(state);
 	block.audio.documentId = info->id;
@@ -1169,6 +1224,7 @@ bool PrepareNativeIvMapBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	prepared.id = GeneratePreparedMediaBlockId(state);
 	block.map = std::move(prepared);
@@ -1247,6 +1303,7 @@ bool PrepareNativeIvGroupedMediaBlock(
 	SortPreparedIvRichText(&preparedCaption);
 	block.text = std::move(preparedCaption.text);
 	block.links = std::move(preparedCaption.links);
+	block.anchorIds = std::move(preparedCaption.anchorIds);
 	block.supplementary = true;
 	result->push_back(std::move(block));
 	return true;
@@ -1272,6 +1329,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.photo.id = GeneratePreparedMediaBlockId(state);
 	block.photo.photoId = CanonicalPhotoId(data);
@@ -1304,6 +1362,7 @@ bool PrepareNativeIvVideoBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
@@ -1333,6 +1392,7 @@ bool PrepareNativeIvAudioBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.audio.id = GeneratePreparedMediaBlockId(state);
 	block.audio.documentId = CanonicalDocumentId(data);
@@ -1362,6 +1422,7 @@ bool PrepareNativeIvMapBlock(
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
 	block.map.id = GeneratePreparedMediaBlockId(state);
 	block.map.latitude = data.latitude;
@@ -1433,6 +1494,7 @@ bool PrepareNativeIvGroupedMediaBlock(
 	block.text = std::move(preparedCaption.text);
 	block.links = std::move(preparedCaption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
+	block.anchorIds = std::move(preparedCaption.anchorIds);
 	block.supplementary = true;
 	result->push_back(std::move(block));
 	return true;
@@ -1469,6 +1531,7 @@ bool PrepareNativeIvPlaceholderBlock(
 	block.text = std::move(prepared.text);
 	block.links = std::move(prepared.links);
 	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
 	block.supplementary = true;
 	block.placeholder.label = std::move(label);
 	block.placeholder.embed = std::move(embed);
