@@ -1197,6 +1197,12 @@ public:
 	[[nodiscard]] rpl::producer<bool> allLoadedValue() const;
 
 private:
+	struct IconCache {
+		QImage credits;
+		QImage tonIn;
+		QImage tonOut;
+	};
+
 	void applySlice(const Data::CreditsStatusSlice &slice);
 
 	const not_null<Main::Session*> _session;
@@ -1206,6 +1212,7 @@ private:
 	Api::CreditsHistory _api;
 	Data::CreditsStatusSlice _firstSlice;
 	Data::CreditsStatusSlice::OffsetToken _apiToken;
+	IconCache _iconCache;
 	Ui::Text::MarkedContext _context;
 
 	base::flat_map<PeerListRowId, not_null<PeerListRow*>> _rowsById;
@@ -1229,20 +1236,29 @@ CreditsController::CreditsController(CreditsDescriptor d)
 			const Ui::Text::MarkedContext &context
 		) -> std::unique_ptr<Ui::Text::CustomEmoji> {
 		if (data == Ui::kCreditsCurrency) {
+			if (_iconCache.credits.isNull()) {
+				_iconCache.credits = Ui::GenerateStars(height, 1);
+			}
 			return std::make_unique<Ui::Text::ShiftedEmoji>(
-				Ui::MakeCreditsIconEmoji(height, 1),
+				std::make_unique<Ui::CustomEmoji::Internal>(
+					u"credits_icon:%1:1"_q.arg(height),
+					_iconCache.credits),
 				QPoint(-st::lineWidth, st::lineWidth));
 		}
 		if (data.startsWith(u"ton"_q)) {
 			const auto in = data.split(u":"_q)[1].startsWith(u"in"_q);
+			auto &slot = in ? _iconCache.tonIn : _iconCache.tonOut;
+			if (slot.isNull()) {
+				slot = Ui::Earn::IconCurrencyColored(
+					st::tonFieldIconSize,
+					in
+						? st::boxTextFgGood->c
+						: st::menuIconAttentionColor->c);
+			}
 			return std::make_unique<Ui::Text::ShiftedEmoji>(
 				std::make_unique<Ui::CustomEmoji::Internal>(
 					data.toString(),
-					Ui::Earn::IconCurrencyColored(
-						st::tonFieldIconSize,
-						in
-							? st::boxTextFgGood->c
-							: st::menuIconAttentionColor->c)),
+					slot),
 				QPoint(0, st::lineWidth));
 		}
 		const auto desc = DeserializeCreditsRowDescriptionData(
