@@ -216,15 +216,6 @@ base::options::toggle ShowChannelJoinedBelowAbout({
 	return Ui::CreateSkipWidget(parent, st::infoProfileSkip);
 }
 
-[[nodiscard]] object_ptr<Ui::SlideWrap<>> CreateSlideSkipWidget(
-		not_null<Ui::RpWidget*> parent) {
-	auto result = Ui::CreateSlideSkipWidget(
-		parent,
-		st::infoProfileSkip);
-	result->setDuration(st::infoSlideDuration);
-	return result;
-}
-
 [[nodiscard]] rpl::producer<TextWithEntities> AboutWithAdvancedValue(
 		not_null<PeerData*> peer) {
 
