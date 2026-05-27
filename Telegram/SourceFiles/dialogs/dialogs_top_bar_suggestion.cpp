@@ -60,6 +60,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			rpl::variable<Toggle> desiredWrapToggle;
 			rpl::variable<bool> outerWrapToggle;
 			rpl::lifetime activeLifetime;
+			std::optional<TopBarSuggestions::Priority> activeSpec;
 			Fn<void()> prepareSnapshot;
 		};
 
@@ -101,20 +102,29 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			&TopBarSuggestions::Spec::priority);
 
 		const auto processCurrentSuggestion = [=](auto repeat) -> void {
-			state->activeLifetime.destroy();
-
 			const auto recompute = [=] { repeat(repeat); };
-			const auto wonHere = std::make_shared<bool>(false);
-			const auto activated = std::make_shared<bool>(false);
 
+			auto winner = (const TopBarSuggestions::Spec*)(nullptr);
 			for (auto i = 0; i < int(specs->size()); ++i) {
 				const auto &spec = (*specs)[i];
-				if (!spec.available(context)) {
-					continue;
+				if (spec.available(context)) {
+					winner = &spec;
+					break;
 				}
+			}
 
-				*activated = true;
+			const auto winnerPriority = winner
+				? std::optional<TopBarSuggestions::Priority>(winner->priority)
+				: std::nullopt;
+			if (state->activeSpec == winnerPriority
+				&& (!winner || state->wrap)) {
+				return;
+			}
 
+			state->activeLifetime.destroy();
+			state->activeSpec = winnerPriority;
+
+			if (winner) {
 				auto args = TopBarSuggestions::ActivateArgs{
 					.context = context,
 					.lifetime = &state->activeLifetime,
@@ -141,15 +151,10 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						}
 						state->desiredWrapToggle.force_assign(
 							Toggle{ true, anim::type::normal });
-						*wonHere = true;
 					},
 					.recompute = recompute,
 				};
-				spec.activate(std::move(args));
-				break;
-			}
-
-			if (*wonHere || *activated) {
+				winner->activate(std::move(args));
 				return;
 			}
 
@@ -160,6 +165,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			state->desiredWrapToggle.force_assign(
 				Toggle{ false, anim::type::normal });
 			base::call_delayed(st::slideWrapDuration * 2, wrap, [=] {
+				if (state->activeSpec) {
+					return;
+				}
 				state->content = nullptr;
 				state->wrap = nullptr;
 				state->prepareSnapshot = nullptr;
