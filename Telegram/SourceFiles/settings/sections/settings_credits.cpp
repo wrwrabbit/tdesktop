@@ -121,7 +121,13 @@ private:
 	void setupSwipeBack();
 	void setupHistory(not_null<Ui::VerticalLayout*> container);
 	void setupSubscriptions(not_null<Ui::VerticalLayout*> container);
+
+	void visibleTopBottomUpdated(
+		int visibleTop,
+		int visibleBottom) override;
+
 	const CreditsType _creditsType;
+	Ui::VerticalLayout *_content = nullptr;
 
 	QWidget *_parent = nullptr;
 
@@ -482,6 +488,7 @@ void Credits::setupSwipeBack() {
 
 void Credits::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	_content = content;
 	const auto isCurrency = _creditsType == CreditsType::Ton;
 	const auto statsButton = &_statsButton;
 	const auto giftButton = &_giftButton;
@@ -793,6 +800,10 @@ void Credits::showFinished() {
 	controller()->checkHighlightControl(u"stars/stats"_q, _statsButton);
 	controller()->checkHighlightControl(u"stars/gift"_q, _giftButton);
 	controller()->checkHighlightControl(u"stars/earn"_q, _earnButton);
+}
+
+void Credits::visibleTopBottomUpdated(int visibleTop, int visibleBottom) {
+	setChildVisibleTopBottom(_content, visibleTop, visibleBottom);
 }
 
 class Currency {
