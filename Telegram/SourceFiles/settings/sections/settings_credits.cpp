@@ -420,6 +420,7 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 	const auto apiLifetime = content->lifetime().make_state<rpl::lifetime>();
 	{
 		using Api = Api::CreditsHistory;
+		constexpr auto kFirstPageLimit = 20;
 		const auto c = (_creditsType == CreditsType::Ton);
 		const auto apiFull = apiLifetime->make_state<Api>(self, true, true, c);
 		const auto apiIn = apiLifetime->make_state<Api>(self, true, false, c);
@@ -433,9 +434,9 @@ void Credits::setupHistory(not_null<Ui::VerticalLayout*> container) {
 						fill(bot, fullSlice, inSlice, outSlice);
 						apiLifetime->destroy();
 					}, *apiLifetime);
-				});
-			});
-		});
+				}, kFirstPageLimit);
+			}, kFirstPageLimit);
+		}, kFirstPageLimit);
 	}
 }
 
