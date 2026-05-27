@@ -1182,6 +1182,9 @@ const style::PeerListItem &CreditsRow::computeSt(
 		: st::boostsListBox.item;
 }
 
+constexpr auto kCreditsAutoLoadThreshold = 100;
+constexpr auto kCreditsAutoLoadBatchSize = 20;
+
 class CreditsController final : public PeerListController {
 public:
 	explicit CreditsController(CreditsDescriptor d);
@@ -1192,9 +1195,10 @@ public:
 	void loadMoreRows() override;
 
 	[[nodiscard]] bool skipRequest() const;
-	void requestNext();
+	void requestNext(int limit = 0);
 
 	[[nodiscard]] rpl::producer<bool> allLoadedValue() const;
+	[[nodiscard]] rpl::producer<bool> showMoreShownValue() const;
 
 private:
 	struct IconCache {
@@ -1218,6 +1222,7 @@ private:
 	base::flat_map<PeerListRowId, not_null<PeerListRow*>> _rowsById;
 
 	rpl::variable<bool> _allLoaded = false;
+	rpl::variable<int> _loadedCount = 0;
 	bool _requesting = false;
 
 };
@@ -1288,7 +1293,7 @@ bool CreditsController::skipRequest() const {
 	return _requesting || _allLoaded.current();
 }
 
-void CreditsController::requestNext() {
+void CreditsController::requestNext(int limit) {
 	_requesting = true;
 	const auto done = [=](const Data::CreditsStatusSlice &s) {
 		_requesting = false;
@@ -1297,7 +1302,7 @@ void CreditsController::requestNext() {
 	if (_subscription) {
 		return _api.requestSubscriptions(_apiToken, done);
 	}
-	_api.request(_apiToken, done);
+	_api.request(_apiToken, done, limit);
 }
 
 void CreditsController::prepare() {
@@ -1306,11 +1311,20 @@ void CreditsController::prepare() {
 }
 
 void CreditsController::loadMoreRows() {
+	if (_subscription
+		|| skipRequest()
+		|| _loadedCount.current() >= kCreditsAutoLoadThreshold) {
+		return;
+	}
+	requestNext(kCreditsAutoLoadBatchSize);
 }
 
 void CreditsController::applySlice(const Data::CreditsStatusSlice &slice) {
 	_allLoaded = slice.allLoaded;
 	_apiToken = _subscription ? slice.tokenSubscriptions : slice.token;
+	_loadedCount = _loadedCount.current()
+		+ int(slice.list.size())
+		+ int(slice.subscriptions.size());
 
 	auto create = [&](
 			const Data::CreditsHistoryEntry &i,
@@ -1365,6 +1379,18 @@ void CreditsController::rowClicked(not_null<PeerListRow*> row) {
 
 rpl::producer<bool> CreditsController::allLoadedValue() const {
 	return _allLoaded.value();
+}
+
+rpl::producer<bool> CreditsController::showMoreShownValue() const {
+	if (_subscription) {
+		return _allLoaded.value() | rpl::map(!rpl::mappers::_1);
+	}
+	return rpl::combine(
+		_allLoaded.value(),
+		_loadedCount.value()
+	) | rpl::map([](bool allLoaded, int count) {
+		return !allLoaded && (count >= kCreditsAutoLoadThreshold);
+	});
 }
 
 } // namespace
@@ -1551,7 +1577,7 @@ void AddCreditsHistoryList(
 		}
 	};
 	wrap->toggleOn(
-		state->controller.allLoadedValue() | rpl::map(!rpl::mappers::_1),
+		state->controller.showMoreShownValue(),
 		anim::type::instant);
 	wrap->entity()->setClickedCallback(showMore);
 }
