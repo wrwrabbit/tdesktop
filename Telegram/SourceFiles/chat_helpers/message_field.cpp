@@ -903,10 +903,10 @@ AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 				if (!features.autocompleteMentions) {
 					return {};
 				}
-				if ((position - fragmentPosition - i < 1 || text[i].isLetter()) && (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_'))) {
+				if ((position - fragmentPosition - i < 1 || text[i].isLetterOrNumber()) && (i < 2 || !(text[i - 2].isLetterOrNumber() || text[i - 2] == '_'))) {
 					result.fromStart = (i == 1) && (fragmentPosition == 0);
 					result.query = text.mid(i - 1, position - fragmentPosition - i + 1);
-				} else if ((position - fragmentPosition - i < 1 || text[i].isLetter()) && i > 2 && (text[i - 2].isLetterOrNumber() || text[i - 2] == '_') && !mentionInCommand) {
+				} else if ((position - fragmentPosition - i < 1 || text[i].isLetterOrNumber()) && i > 2 && (text[i - 2].isLetterOrNumber() || text[i - 2] == '_') && !mentionInCommand) {
 					mentionInCommand = true;
 					--i;
 					continue;
