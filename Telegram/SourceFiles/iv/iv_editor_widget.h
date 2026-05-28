@@ -52,6 +52,8 @@ public:
 
 protected:
 	void focusInEvent(QFocusEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
@@ -59,12 +61,16 @@ protected:
 private:
 	void setDocument(const Markdown::MarkdownArticleContent &prepared);
 	void activateTextOrdinal(int ordinal, int cursorOffset);
+	void activateTextOrdinal(int ordinal, int selectionFrom, int selectionTo);
+	void activateSegmentSelection(int segmentIndex, TextSelection selection);
 	void activateTrailingParagraph();
 	void applyFieldTextToState();
 	void acceptInlineField();
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
 	void syncInlineFieldGeometry(int width);
+	void clearTextSelection();
+	void updateTextSelection(const Markdown::MarkdownArticleHitTestResult &hit);
 	[[nodiscard]] int textOrdinalForSegment(int segmentIndex) const;
 	[[nodiscard]] int segmentIndexForTextOrdinal(int ordinal) const;
 	[[nodiscard]] QPoint articleTopLeft() const;
@@ -90,9 +96,14 @@ private:
 	int _activeSegmentIndex = -1;
 	int _pendingOrdinal = -1;
 	int _pendingCursorOffset = 0;
+	Markdown::MarkdownArticleSelection _selection;
+	Markdown::MarkdownArticleSelectionEndpoints _selectionEndpoints;
+	int _dragSegment = -1;
+	int _dragOffset = 0;
 	bool _settingField = false;
 	bool _syncingInlineFieldGeometry = false;
 	bool _pendingHeightOverrideUpdate = false;
+	bool _selectingText = false;
 };
 
 } // namespace Iv::Editor

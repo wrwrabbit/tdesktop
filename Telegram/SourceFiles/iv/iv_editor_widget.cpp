@@ -28,10 +28,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QFocusEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
+#include <QtGui/QTextCursor>
+#include <QtGui/QTextDocument>
 
 #include "window/window_session_controller.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace Iv::Editor {
@@ -112,8 +115,44 @@ void EnsurePrePaintCache(
 	return st::ivEditorBodyPadding;
 }
 
-[[nodiscard]] const style::margins &EditorInlineFieldMargins() {
-	return st::ivEditorInlineFieldMargins;
+[[nodiscard]] int CompareSelectionPositions(
+		Markdown::MarkdownArticleSelectionPosition a,
+		Markdown::MarkdownArticleSelectionPosition b) {
+	if (a.segment != b.segment) {
+		return (a.segment < b.segment) ? -1 : 1;
+	}
+	if (a.offset != b.offset) {
+		return (a.offset < b.offset) ? -1 : 1;
+	}
+	return 0;
+}
+
+[[nodiscard]] Markdown::MarkdownArticleSelection NormalizeSelection(
+		Markdown::MarkdownArticleSelection selection) {
+	if (selection.empty()) {
+		return {};
+	}
+	if (CompareSelectionPositions(selection.from, selection.to) > 0) {
+		std::swap(selection.from, selection.to);
+	}
+	return selection;
+}
+
+[[nodiscard]] Markdown::MarkdownArticleSelectionEndpoint MakeSelectionEndpoint(
+		const Markdown::MarkdownArticleHitTestResult &hit) {
+	return {
+		.segment = hit.segmentIndex,
+		.direct = hit.direct,
+	};
+}
+
+[[nodiscard]] int FieldNaturalHeight(not_null<Ui::InputField*> field) {
+	const auto margins = field->fullTextMargins();
+	return std::max(
+		int(std::ceil(field->document()->size().height()))
+			+ margins.top()
+			+ margins.bottom(),
+		1);
 }
 
 } // namespace
@@ -218,6 +257,16 @@ void Widget::activateSegment(int segmentIndex, int cursorOffset) {
 	activateTextOrdinal(ordinal, cursorOffset);
 }
 
+void Widget::activateSegmentSelection(
+		int segmentIndex,
+		TextSelection selection) {
+	const auto ordinal = textOrdinalForSegment(segmentIndex);
+	if (ordinal < 0) {
+		return;
+	}
+	activateTextOrdinal(ordinal, selection.from, selection.to);
+}
+
 void Widget::commitInlineField() {
 	applyFieldTextToState();
 }
@@ -290,6 +339,68 @@ void Widget::focusInEvent(QFocusEvent *e) {
 	}
 }
 
+void Widget::mouseMoveEvent(QMouseEvent *e) {
+	if (!_selectingText) {
+		const auto hit = _article->hitTest(
+			e->pos() - articleTopLeft(),
+			Ui::Text::StateRequest::Flag::LookupSymbol);
+		setCursor((hit.valid()
+			&& hit.direct
+			&& _article->segmentIsText(hit.segmentIndex))
+			? style::cur_text
+			: style::cur_default);
+		Ui::RpWidget::mouseMoveEvent(e);
+		return;
+	}
+	const auto hit = _article->hitTest(
+		e->pos() - articleTopLeft(),
+		Ui::Text::StateRequest::Flag::LookupSymbol);
+	updateTextSelection(hit);
+	e->accept();
+}
+
+void Widget::mousePressEvent(QMouseEvent *e) {
+	if (e->button() != Qt::LeftButton) {
+		Ui::RpWidget::mousePressEvent(e);
+		return;
+	}
+	auto articlePoint = e->pos() - articleTopLeft();
+	auto hit = _article->hitTest(
+		articlePoint,
+		Ui::Text::StateRequest::Flag::LookupSymbol);
+	if (hit.valid() && hit.direct && _article->segmentIsText(hit.segmentIndex)) {
+		if (!_field->isHidden() && hit.segmentIndex != _activeSegmentIndex) {
+			acceptInlineField();
+			hit = _article->hitTest(
+				articlePoint,
+				Ui::Text::StateRequest::Flag::LookupSymbol);
+		}
+		if (hit.valid()
+			&& hit.direct
+			&& _article->segmentIsText(hit.segmentIndex)
+			&& _field->isHidden()) {
+			_dragSegment = hit.segmentIndex;
+			_dragOffset = _article->selectionOffsetFromHit(
+				hit,
+				TextSelectType::Letters);
+			_selection = {
+				{ _dragSegment, _dragOffset },
+				{ _dragSegment, _dragOffset },
+			};
+			_selectionEndpoints = {
+				.from = MakeSelectionEndpoint(hit),
+				.to = MakeSelectionEndpoint(hit),
+			};
+			_selectingText = true;
+			update();
+			e->accept();
+			return;
+		}
+	}
+	clearTextSelection();
+	e->accept();
+}
+
 void Widget::mouseReleaseEvent(QMouseEvent *e) {
 	if (e->button() != Qt::LeftButton) {
 		Ui::RpWidget::mouseReleaseEvent(e);
@@ -299,6 +410,19 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 	const auto hit = _article->hitTest(
 		articlePoint,
 		Ui::Text::StateRequest::Flag::LookupSymbol);
+	if (_selectingText) {
+		updateTextSelection(hit);
+		const auto selection = _selection;
+		const auto segment = _dragSegment;
+		clearTextSelection();
+		if (segment >= 0 && _article->segmentIsText(segment)) {
+			activateSegmentSelection(segment, TextSelection(
+				uint16(std::clamp(selection.from.offset, 0, 0xFFFF)),
+				uint16(std::clamp(selection.to.offset, 0, 0xFFFF))));
+		}
+		e->accept();
+		return;
+	}
 	if (hit.valid() && hit.direct && _article->segmentIsText(hit.segmentIndex)) {
 		const auto offset = _article->selectionOffsetFromHit(
 			hit,
@@ -351,6 +475,13 @@ void Widget::setDocument(const Markdown::MarkdownArticleContent &prepared) {
 }
 
 void Widget::activateTextOrdinal(int ordinal, int cursorOffset) {
+	activateTextOrdinal(ordinal, cursorOffset, cursorOffset);
+}
+
+void Widget::activateTextOrdinal(
+		int ordinal,
+		int selectionFrom,
+		int selectionTo) {
 	if (!_state->setActiveTextByOrdinal(ordinal)) {
 		return;
 	}
@@ -362,7 +493,7 @@ void Widget::activateTextOrdinal(int ordinal, int cursorOffset) {
 	if (segmentIndex < 0) {
 		_activeSegmentIndex = -1;
 		_pendingOrdinal = ordinal;
-		_pendingCursorOffset = cursorOffset;
+		_pendingCursorOffset = selectionTo;
 		_field->hide();
 		return;
 	}
@@ -377,10 +508,13 @@ void Widget::activateTextOrdinal(int ordinal, int cursorOffset) {
 		},
 		Ui::InputField::HistoryAction::Clear);
 	auto cursor = _field->textCursor();
-	cursor.setPosition(std::clamp(
-		cursorOffset,
-		0,
-		_field->getLastText().size()));
+	const auto size = _field->getLastText().size();
+	const auto from = std::clamp(selectionFrom, 0, size);
+	const auto to = std::clamp(selectionTo, 0, size);
+	cursor.setPosition(from);
+	if (to != from) {
+		cursor.setPosition(to, QTextCursor::KeepAnchor);
+	}
 	_field->setTextCursor(cursor);
 	_settingField = false;
 	_field->show();
@@ -438,6 +572,7 @@ void Widget::updateInlineFieldHeightOverride() {
 		: std::max(_field->geometry().bottom() + 1 - segmentRect.y(), 1);
 	_article->setTextLeafHeightOverride(_activeOrdinal, height);
 	resizeToWidth(std::max(widthNoMargins(), 1));
+	update();
 }
 
 void Widget::syncInlineFieldGeometry(int width) {
@@ -452,31 +587,75 @@ void Widget::syncInlineFieldGeometry(int width) {
 		_article->clearTextLeafHeightOverride();
 		return;
 	}
-	const auto margins = _field->fullTextMargins();
-	const auto shellMargins = EditorInlineFieldMargins();
 	const auto fieldWidth = std::max(
-		segmentRect.width()
-			+ margins.left()
-			+ margins.right()
-			+ shellMargins.left()
-			+ shellMargins.right(),
+		std::min(segmentRect.width(), width - segmentRect.x()),
 		1);
 	_syncingInlineFieldGeometry = true;
 	_field->resizeToWidth(fieldWidth);
-	const auto fieldHeight = _field->height();
-	const auto left = std::clamp(
-		segmentRect.x() - margins.left() - shellMargins.left(),
-		0,
-		std::max(width - fieldWidth, 0));
-	const auto top = std::max(
-		segmentRect.y() - margins.top() - shellMargins.top(),
-		0);
+	const auto fieldHeight = FieldNaturalHeight(_field.get());
+	const auto left = segmentRect.x();
+	const auto top = segmentRect.y();
 	_field->setGeometryToLeft(left, top, fieldWidth, fieldHeight, width);
 	_field->raise();
 	_syncingInlineFieldGeometry = false;
 	if (_pendingHeightOverrideUpdate) {
 		_pendingHeightOverrideUpdate = false;
 		updateInlineFieldHeightOverride();
+	}
+}
+
+void Widget::clearTextSelection() {
+	const auto hadSelection = !_selection.empty() || _selectingText;
+	_selection = {};
+	_selectionEndpoints = {};
+	_dragSegment = -1;
+	_dragOffset = 0;
+	_selectingText = false;
+	if (hadSelection) {
+		update();
+	}
+}
+
+void Widget::updateTextSelection(
+		const Markdown::MarkdownArticleHitTestResult &hit) {
+	if (!_selectingText || _dragSegment < 0 || !hit.valid()) {
+		return;
+	}
+	if (!hit.direct
+		|| hit.segmentIndex != _dragSegment
+		|| !_article->segmentIsText(hit.segmentIndex)) {
+		return;
+	}
+	const auto offset = _article->selectionOffsetFromHit(
+		hit,
+		TextSelectType::Letters);
+	const auto adjusted = _article->adjustSelection(
+		_dragSegment,
+		TextSelection(
+			uint16(std::clamp(std::min(_dragOffset, offset), 0, 0xFFFF)),
+			uint16(std::clamp(std::max(_dragOffset, offset), 0, 0xFFFF))),
+		TextSelectType::Letters);
+	const auto selection = NormalizeSelection({
+		{ _dragSegment, adjusted.from },
+		{ _dragSegment, adjusted.to },
+	});
+	const auto endpoints = Markdown::MarkdownArticleSelectionEndpoints{
+		.from = _selectionEndpoints.from.valid()
+			? _selectionEndpoints.from
+			: Markdown::MarkdownArticleSelectionEndpoint{ _dragSegment, false },
+		.to = MakeSelectionEndpoint(hit),
+	};
+	const auto endpointsChanged
+		= (_selectionEndpoints.from.segment != endpoints.from.segment)
+		|| (_selectionEndpoints.from.direct != endpoints.from.direct)
+		|| (_selectionEndpoints.to.segment != endpoints.to.segment)
+		|| (_selectionEndpoints.to.direct != endpoints.to.direct);
+	if (_selection != selection || endpointsChanged) {
+		_selection = selection;
+		_selectionEndpoints = endpoints;
+		update();
+	} else {
+		_selectionEndpoints = endpoints;
 	}
 }
 
@@ -539,6 +718,8 @@ Markdown::MarkdownArticlePaintContext Widget::textPaintContext(QRect clip) {
 		? -1
 		: _activeSegmentIndex;
 	context.debugBlockGeometry = true;
+	context.selectionState.selection = _selection;
+	context.selectionState.endpoints = &_selectionEndpoints;
 	return context;
 }
 

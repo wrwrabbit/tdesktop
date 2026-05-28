@@ -93,7 +93,7 @@ ivEditorInputField: InputField(defaultInputField) {
 	textFg: historyComposeAreaFg;
 	textBg: transparent;
 	textBgActive: transparent;
-	heightMin: 36px;
+	heightMin: 1px;
 	heightMax: 72px;
 	placeholderFg: placeholderFg;
 	placeholderFgActive: placeholderFgActive;
