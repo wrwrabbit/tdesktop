@@ -125,7 +125,7 @@ class SendRichMessage final : public SendData {
 public:
 	SendRichMessage(
 		not_null<Main::Session*> session,
-		const MTPInputRichMessage &message);
+		const MTPRichMessage &message);
 
 	bool isValid() const override;
 

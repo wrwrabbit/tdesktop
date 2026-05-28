@@ -187,9 +187,6 @@ struct RichPageLinkUrl {
 	const MTPRichMessage &message);
 [[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
 	not_null<Main::Session*> session,
-	const MTPInputRichMessage &message);
-[[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
-	not_null<Main::Session*> session,
 	const MTPPage &page);
 [[nodiscard]] TextWithEntities FlattenRichPageSummary(
 	const RichPage &page);

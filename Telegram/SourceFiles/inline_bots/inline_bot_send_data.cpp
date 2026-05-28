@@ -56,7 +56,7 @@ SendDataCommon::SentMessageFields SendText::getSentMessageFields() const {
 
 SendRichMessage::SendRichMessage(
 	not_null<Main::Session*> session,
-	const MTPInputRichMessage &message)
+	const MTPRichMessage &message)
 : SendData(session)
 , _page(Iv::ParseRichPage(session, message))
 , _summary(Iv::FlattenRichPageSummary(_page)) {

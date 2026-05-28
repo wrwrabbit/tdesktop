@@ -554,15 +554,23 @@ bool AppendPreparedQuoteParagraph(
 		block.kind = PreparedBlockKind::ListItem;
 		block.listKind = result->listKind;
 		block.listDelimiter = result->listDelimiter;
+		const auto resolveNumber = [&](const auto &data) {
+			if (const auto value = data.vvalue()) {
+				return value->v;
+			}
+			auto orderedNumber = 0;
+			if (ParseOrderedNumber(
+					qs(data.vnum().value_or_empty()),
+					&orderedNumber)) {
+				return orderedNumber;
+			}
+			return NextNativeIvOrderedNumber(*result);
+		};
 		const auto ok = item.match([&](const MTPDpageListOrderedItemText &data) {
 			block.taskState = NativeIvTaskState(
 				data.is_checkbox(),
 				data.is_checked());
-			auto orderedNumber = 0;
-			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
-				orderedNumber = NextNativeIvOrderedNumber(*result);
-			}
-			block.orderedNumber = orderedNumber;
+			block.orderedNumber = resolveNumber(data);
 			auto prepared = PreparedIvRichText();
 			if (!PrepareNativeIvRichText(
 					data.vtext(),
@@ -580,11 +588,7 @@ bool AppendPreparedQuoteParagraph(
 			block.taskState = NativeIvTaskState(
 				data.is_checkbox(),
 				data.is_checked());
-			auto orderedNumber = 0;
-			if (!ParseOrderedNumber(qs(data.vnum()), &orderedNumber)) {
-				orderedNumber = NextNativeIvOrderedNumber(*result);
-			}
-			block.orderedNumber = orderedNumber;
+			block.orderedNumber = resolveNumber(data);
 			return PrepareNativeIvBlocks(data.vblocks().v, &block.children, state);
 		});
 		if (!ok) {
@@ -1278,7 +1282,7 @@ void MarkNativeIvTableSlots(
 		prepared.kind = PreparedBlockKind::List;
 		prepared.listKind = ListKind::Ordered;
 		prepared.listDelimiter = ListDelimiter::Period;
-		prepared.startNumber = 1;
+		prepared.startNumber = data.vstart().value_or(1);
 		return PrepareNativeIvOrderedList(data.vitems().v, &prepared, state)
 			? (result->push_back(std::move(prepared)), true)
 			: false;
@@ -1289,10 +1293,6 @@ void MarkNativeIvTableSlots(
 	}, [&](const MTPDpageBlockMap &data) {
 		return PrepareNativeIvMapBlock(data, result, state);
 	}, [&](const MTPDinputPageBlockMap &) {
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Unsupported Content"_q,
-			result);
-	}, [&](const MTPDinputPageBlockOrderedList &) {
 		return PrepareNativeIvPlainPlaceholderBlock(
 			u"Unsupported Content"_q,
 			result);

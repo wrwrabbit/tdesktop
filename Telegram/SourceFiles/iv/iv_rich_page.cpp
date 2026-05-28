@@ -211,28 +211,6 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	context->documentInfos.emplace(id, DocumentInfoFromMtp(document));
 }
 
-void RememberInputPhoto(ParseContext *context, const MTPInputPhoto &photo) {
-	photo.match([](const MTPDinputPhotoEmpty &) {
-	}, [&](const MTPDinputPhoto &data) {
-		const auto id = PhotoId(data.vid().v);
-		context->photos.emplace(
-			id,
-			context->session->data().photo(id).get());
-	});
-}
-
-void RememberInputDocument(
-		ParseContext *context,
-		const MTPInputDocument &document) {
-	document.match([](const MTPDinputDocumentEmpty &) {
-	}, [&](const MTPDinputDocument &data) {
-		const auto id = DocumentId(data.vid().v);
-		context->documents.emplace(
-			id,
-			context->session->data().document(id).get());
-	});
-}
-
 [[nodiscard]] PhotoData *FindPhoto(
 		const ParseContext &context,
 		uint64 id) {
@@ -891,13 +869,25 @@ void AppendBlock(
 		auto parsed = MakeBlock(BlockKind::List);
 		parsed.listKind = ListKind::Ordered;
 		parsed.listItems.reserve(data.vitems().v.size());
+		const auto step = data.is_reversed() ? -1 : 1;
+		auto nextNumber = data.vstart().value_or(
+			data.is_reversed() ? int(data.vitems().v.size()) : 1);
 		for (const auto &item : data.vitems().v) {
 			auto listItem = ListItem();
+			const auto fillNumber = [&](const auto &row) {
+				if (const auto num = row.vnum()) {
+					listItem.number = qs(*num);
+				} else if (const auto value = row.vvalue()) {
+					listItem.number = QString::number(value->v);
+				} else {
+					listItem.number = QString::number(nextNumber);
+				}
+			};
 			item.match([&](const MTPDpageListOrderedItemText &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				listItem.number = qs(row.vnum());
+				fillNumber(row);
 				listItem.text = ParseRichText(row.vtext(), context);
 				listItem.anchorId = listItem.text.anchorId;
 				listItem.text.anchorId.clear();
@@ -905,10 +895,11 @@ void AppendBlock(
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				listItem.number = qs(row.vnum());
+				fillNumber(row);
 				AppendBlocks(row.vblocks().v, &listItem.blocks, context);
 			});
 			parsed.listItems.push_back(std::move(listItem));
+			nextNumber += step;
 		}
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockDetails &data) {
@@ -954,8 +945,6 @@ void AppendBlock(
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDinputPageBlockMap &) {
-		result->push_back(MakeBlock(BlockKind::Unsupported));
-	}, [&](const MTPDinputPageBlockOrderedList &) {
 		result->push_back(MakeBlock(BlockKind::Unsupported));
 	});
 }
@@ -1174,19 +1163,6 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	}
 }
 
-[[nodiscard]] std::shared_ptr<const RichPage> PlainRichPageFallback(
-		bool rtl,
-		const QString &text) {
-	auto result = std::make_shared<RichPage>();
-	result->rtl = rtl;
-	if (!text.trimmed().isEmpty()) {
-		auto block = MakeBlock(BlockKind::Paragraph);
-		block.text.text = TextWithEntities::Simple(text);
-		result->blocks.push_back(std::move(block));
-	}
-	return result;
-}
-
 } // namespace
 
 QString EncodeRichPageLinkUrl(
@@ -1241,32 +1217,6 @@ std::shared_ptr<const RichPage> ParseRichPage(
 	}
 	AppendBlocks(data.vblocks().v, &result->blocks, &context);
 	return result;
-}
-
-std::shared_ptr<const RichPage> ParseRichPage(
-		not_null<Main::Session*> session,
-		const MTPInputRichMessage &message) {
-	return message.match([&](const MTPDinputRichMessage &data) {
-		auto result = std::make_shared<RichPage>();
-		auto context = ParseContext{ session };
-		result->rtl = data.is_rtl();
-		if (const auto photos = data.vphotos()) {
-			for (const auto &photo : photos->v) {
-				RememberInputPhoto(&context, photo);
-			}
-		}
-		if (const auto documents = data.vdocuments()) {
-			for (const auto &document : documents->v) {
-				RememberInputDocument(&context, document);
-			}
-		}
-		AppendBlocks(data.vblocks().v, &result->blocks, &context);
-		return std::shared_ptr<const RichPage>(std::move(result));
-	}, [&](const MTPDinputRichMessageHTML &data) {
-		return PlainRichPageFallback(data.is_rtl(), qs(data.vhtml()));
-	}, [&](const MTPDinputRichMessageMarkdown &data) {
-		return PlainRichPageFallback(data.is_rtl(), qs(data.vmarkdown()));
-	});
 }
 
 std::shared_ptr<const RichPage> ParseRichPage(
