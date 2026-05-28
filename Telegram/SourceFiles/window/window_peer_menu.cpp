@@ -76,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/history_item_components.h"
 #include "history/view/history_view_context_menu.h"
+#include "history/view/history_view_schedule_box.h"
 #include "window/window_separate_id.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
@@ -338,6 +339,7 @@ private:
 	void addSetPersonalChannel();
 
 	[[nodiscard]] bool skipCreateActions() const;
+	[[nodiscard]] SendMenu::Details createSendMenuDetails() const;
 
 	not_null<SessionController*> _controller;
 	Dialogs::EntryState _request;
@@ -1249,6 +1251,23 @@ bool Filler::skipCreateActions() const {
 	return isBlocked || isJoinChannel || isBotStart;
 }
 
+SendMenu::Details Filler::createSendMenuDetails() const {
+	using Type = SendMenu::Type;
+
+	const auto type = (_request.section == Section::Scheduled)
+		? Type::Disabled
+		: (!_peer || _peer->starsPerMessageChecked())
+		? Type::SilentOnly
+		: (_request.section == Section::Replies)
+		? (_topic ? Type::Scheduled : Type::SilentOnly)
+		: _peer->isSelf()
+		? Type::Reminder
+		: HistoryView::CanScheduleUntilOnline(_peer)
+		? Type::ScheduledToUser
+		: Type::Scheduled;
+	return { .type = type };
+}
+
 void Filler::addCreatePoll() {
 	if (skipCreateActions()) {
 		return;
@@ -1264,13 +1283,8 @@ void Filler::addCreatePoll() {
 	const auto source = (_request.section == Section::Scheduled)
 		? Api::SendType::Scheduled
 		: Api::SendType::Normal;
-	const auto sendMenuType = (_request.section == Section::Scheduled)
-		? SendMenu::Type::Disabled
-		: (_request.section == Section::Replies
-			|| _peer->starsPerMessageChecked())
-		? SendMenu::Type::SilentOnly
-		: SendMenu::Type::Scheduled;
 	const auto replyTo = _request.currentReplyTo;
+	const auto sendMenuDetails = createSendMenuDetails();
 	const auto suggest = _request.currentSuggest;
 	const auto chosen = kDefaultPollCreateFlags;
 	auto callback = [=] {
@@ -1282,7 +1296,7 @@ void Filler::addCreatePoll() {
 			chosen,
 			PollData::Flags(),
 			source,
-			{ sendMenuType });
+			sendMenuDetails);
 	};
 	_addAction(
 		tr::lng_polls_create(tr::now),
@@ -1306,13 +1320,8 @@ void Filler::addCreateTodoList() {
 	const auto source = (_request.section == Section::Scheduled)
 		? Api::SendType::Scheduled
 		: Api::SendType::Normal;
-	const auto sendMenuType = (_request.section == Section::Scheduled)
-		? SendMenu::Type::Disabled
-		: (_request.section == Section::Replies
-			|| _peer->starsPerMessageChecked())
-		? SendMenu::Type::SilentOnly
-		: SendMenu::Type::Scheduled;
 	const auto replyTo = _request.currentReplyTo;
+	const auto sendMenuDetails = createSendMenuDetails();
 	const auto suggest = _request.currentSuggest;
 	auto callback = [=] {
 		PeerMenuCreateTodoList(
@@ -1321,7 +1330,7 @@ void Filler::addCreateTodoList() {
 			replyTo,
 			suggest,
 			source,
-			{ sendMenuType });
+			sendMenuDetails);
 	};
 	_addAction(
 		tr::lng_todo_create(tr::now),

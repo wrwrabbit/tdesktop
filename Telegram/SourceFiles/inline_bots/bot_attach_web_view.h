@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "dialogs/dialogs_key.h"
+#include "menu/menu_send_details.h"
 #include "mtproto/sender.h"
 #include "ui/chat/attach/attach_bot_webview.h"
 #include "ui/rp_widget.h"
@@ -492,6 +493,7 @@ private:
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer,
 	Fn<Api::SendAction()> actionFactory,
+	Fn<SendMenu::Details()> sendMenuDetails,
 	Fn<void(bool)> attach);
 
 class MenuBotIcon final : public Ui::RpWidget {

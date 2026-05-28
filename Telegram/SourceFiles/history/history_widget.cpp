@@ -3140,6 +3140,7 @@ void HistoryWidget::refreshAttachBotsMenu() {
 		controller(),
 		_history->peer,
 		[=] { return prepareSendAction({}); },
+		[=] { return sendMenuDetails(); },
 		[=](bool compress) { chooseAttach(compress); });
 	if (!_attachBotsMenu) {
 		return;

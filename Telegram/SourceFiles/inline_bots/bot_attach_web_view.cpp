@@ -2897,6 +2897,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer,
 		Fn<Api::SendAction()> actionFactory,
+		Fn<SendMenu::Details()> sendMenuDetails,
 		Fn<void(bool)> attach) {
 	auto result = std::make_unique<Ui::DropdownMenu>(
 		parent,
@@ -2928,10 +2929,6 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			const auto source = action.options.scheduled
 				? Api::SendType::Scheduled
 				: Api::SendType::Normal;
-			const auto sendMenuType = (action.replyTo.topicRootId
-				|| action.history->peer->starsPerMessageChecked())
-				? SendMenu::Type::SilentOnly
-				: SendMenu::Type::Scheduled;
 			const auto chosen = kDefaultPollCreateFlags;
 			Window::PeerMenuCreatePoll(
 				controller,
@@ -2941,7 +2938,7 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				chosen,
 				PollData::Flags(),
 				source,
-				{ sendMenuType });
+				sendMenuDetails());
 		}, &st::menuIconCreatePoll);
 	}
 	if (peer->canCreateTodoLists(false)) {
@@ -2951,17 +2948,13 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 			const auto source = action.options.scheduled
 				? Api::SendType::Scheduled
 				: Api::SendType::Normal;
-			const auto sendMenuType = (action.replyTo.topicRootId
-				|| action.history->peer->starsPerMessageChecked())
-				? SendMenu::Type::SilentOnly
-				: SendMenu::Type::Scheduled;
 			Window::PeerMenuCreateTodoList(
 				controller,
 				peer,
 				action.replyTo,
 				action.options.suggest,
 				source,
-				{ sendMenuType });
+				sendMenuDetails());
 		}, &st::menuIconCreateTodoList);
 	}
 	const auto session = &controller->session();
