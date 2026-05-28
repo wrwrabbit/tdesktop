@@ -797,6 +797,7 @@ inputBotInlineMessageMediaContact#a6edbffd flags:# phone_number:string first_nam
 inputBotInlineMessageGame#4b425864 flags:# reply_markup:flags.2?ReplyMarkup = InputBotInlineMessage;
 inputBotInlineMessageMediaInvoice#d7e78225 flags:# title:string description:string photo:flags.0?InputWebDocument invoice:Invoice payload:bytes provider:string provider_data:DataJSON reply_markup:flags.2?ReplyMarkup = InputBotInlineMessage;
 inputBotInlineMessageMediaWebPage#bddcc510 flags:# invert_media:flags.3?true force_large_media:flags.4?true force_small_media:flags.5?true optional:flags.6?true message:string entities:flags.1?Vector<MessageEntity> url:string reply_markup:flags.2?ReplyMarkup = InputBotInlineMessage;
+inputBotInlineMessageRichMessage#b43df56c flags:# reply_markup:flags.2?ReplyMarkup rich_message:InputRichMessage = InputBotInlineMessage;
 
 inputBotInlineResult#88bf9319 flags:# id:string type:string title:flags.1?string description:flags.2?string url:flags.3?string thumb:flags.4?InputWebDocument content:flags.5?InputWebDocument send_message:InputBotInlineMessage = InputBotInlineResult;
 inputBotInlineResultPhoto#a8d864a7 id:string type:string photo:InputPhoto send_message:InputBotInlineMessage = InputBotInlineResult;
@@ -810,6 +811,7 @@ botInlineMessageMediaVenue#8a86659c flags:# geo:GeoPoint title:string address:st
 botInlineMessageMediaContact#18d1cdc2 flags:# phone_number:string first_name:string last_name:string vcard:string reply_markup:flags.2?ReplyMarkup = BotInlineMessage;
 botInlineMessageMediaInvoice#354a9b09 flags:# shipping_address_requested:flags.1?true test:flags.3?true title:string description:string photo:flags.0?WebDocument currency:string total_amount:long reply_markup:flags.2?ReplyMarkup = BotInlineMessage;
 botInlineMessageMediaWebPage#809ad9a6 flags:# invert_media:flags.3?true force_large_media:flags.4?true force_small_media:flags.5?true manual:flags.7?true safe:flags.8?true message:string entities:flags.1?Vector<MessageEntity> url:string reply_markup:flags.2?ReplyMarkup = BotInlineMessage;
+botInlineMessageRichMessage#c8397e68 flags:# reply_markup:flags.2?ReplyMarkup rich_message:InputRichMessage = BotInlineMessage;
 
 botInlineResult#11965f3a flags:# id:string type:string title:flags.1?string description:flags.2?string url:flags.3?string thumb:flags.4?WebDocument content:flags.5?WebDocument send_message:BotInlineMessage = BotInlineResult;
 botInlineMediaResult#17db940b flags:# id:string type:string photo:flags.0?Photo document:flags.1?Document title:flags.2?string description:flags.3?string send_message:BotInlineMessage = BotInlineResult;
@@ -970,6 +972,7 @@ pageBlockMath#59080c20 source:string = PageBlock;
 pageBlockThinking#3c29a3e2 text:RichText = PageBlock;
 inputPageBlockMap#574b617f geo:InputGeoPoint zoom:int w:int h:int caption:PageCaption = PageBlock;
 inputPageBlockOrderedList#b94cb32b flags:# reversed:flags.2?true items:Vector<InputPageListOrderedItem> start:flags.0?int type:flags.1?string = PageBlock;
+pageBlockBlockquoteBlocks#e6e47c4 blocks:Vector<PageBlock> caption:RichText = PageBlock;
 
 phoneCallDiscardReasonMissed#85e42301 = PhoneCallDiscardReason;
 phoneCallDiscardReasonDisconnect#e095c1a0 = PhoneCallDiscardReason;
@@ -1539,7 +1542,7 @@ attachMenuBots#3c4301c0 hash:long bots:Vector<AttachMenuBot> users:Vector<User> 
 
 attachMenuBotsBot#93bf667f bot:AttachMenuBot users:Vector<User> = AttachMenuBotsBot;
 
-webViewResultUrl#4d22ff98 flags:# fullsize:flags.1?true fullscreen:flags.2?true query_id:flags.0?long url:string = WebViewResult;
+webViewResultUrl#4d22ff98 flags:# fullsize:flags.1?true fullscreen:flags.2?true same_origin:flags.3?true query_id:flags.0?long url:string = WebViewResult;
 
 webViewMessageSent#c94511c flags:# msg_id:flags.0?InputBotInlineMessageID = WebViewMessageSent;
 
@@ -2197,7 +2200,7 @@ aiComposeToneExample#f1d628ec from:TextWithEntities to:TextWithEntities = AiComp
 bots.accessSettings#dd1fbf93 flags:# restricted:flags.0?true add_users:flags.1?Vector<User> = bots.AccessSettings;
 
 messages.chatInviteJoinResultOk#445663a7 updates:Updates = messages.ChatInviteJoinResult;
-messages.chatInviteJoinResultWebView#774bbdf4 bot_id:long url:string query_id:long users:Vector<User> = messages.ChatInviteJoinResult;
+messages.chatInviteJoinResultWebView#2f51c337 bot_id:long webview:WebViewResult users:Vector<User> = messages.ChatInviteJoinResult;
 
 joinChatBotResultApproved#ae152a69 = JoinChatBotResult;
 joinChatBotResultDeclined#efa0194 = JoinChatBotResult;
@@ -2385,7 +2388,7 @@ account.deletePasskey#f5b5563f id:string = Bool;
 account.confirmBotConnection#67ed1f68 bot_id:InputUser = Bool;
 account.getWebBrowserSettings#56655768 hash:long = account.WebBrowserSettings;
 account.updateWebBrowserSettings#9adf82fe flags:# open_external_browser:flags.0?true display_close_button:flags.1?true = account.WebBrowserSettings;
-account.toggleWebBrowserSettingsException#2d0a0571 flags:# delete:flags.1?true open_external_browser:flags.0?Bool url:string = Bool;
+account.toggleWebBrowserSettingsException#60ed4229 flags:# delete:flags.1?true open_external_browser:flags.0?Bool url:string = Updates;
 account.deleteWebBrowserSettingsExceptions#86a0765d = account.WebBrowserSettings;
 
 users.getUsers#d91a548 id:Vector<InputUser> = Vector<User>;
