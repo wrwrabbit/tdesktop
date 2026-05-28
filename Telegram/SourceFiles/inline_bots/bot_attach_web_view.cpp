@@ -820,6 +820,17 @@ void BotAction::handleKeyPress(not_null<QKeyEvent*> e) {
 
 } // namespace
 
+WebViewResultData ParseWebViewResult(const MTPWebViewResult &result) {
+	const auto &data = result.data();
+	return {
+		.url = qs(data.vurl()),
+		.queryId = data.vquery_id().value_or_empty(),
+		.fullscreen = data.is_fullscreen(),
+		.fullsize = data.is_fullsize(),
+		.sameOrigin = data.is_same_origin(),
+	};
+}
+
 base::weak_ptr<WebViewInstance> WebViewInstance::PendingActivation;
 
 MenuBotIcon::MenuBotIcon(
@@ -954,7 +965,7 @@ void WebViewInstance::requestFullBot() {
 	) | rpl::on_next([=] {
 		if (_botFullWaitingArgs.has_value()) {
 			auto args = *base::take(_botFullWaitingArgs);
-			if (args.url.isEmpty()) {
+			if (args.result.url.isEmpty()) {
 				showGame();
 			} else {
 				show(std::move(args));
@@ -1015,8 +1026,7 @@ void WebViewInstance::resolve() {
 	}, [&](WebViewSourceJoinChat data) {
 		confirmOpen([=] {
 			show({
-				.url = data.url,
-				.queryId = data.queryId,
+				.result = data.result,
 			});
 		}, true);
 	});
@@ -1214,11 +1224,8 @@ void WebViewInstance::requestButton() {
 			? action.options.sendAs->input()
 			: MTP_inputPeerEmpty())
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.queryId = data.vquery_id().value_or_empty(),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1248,10 +1255,8 @@ void WebViewInstance::requestSimple() {
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("tdesktop")
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1278,10 +1283,8 @@ void WebViewInstance::requestMain() {
 		MTP_dataJSON(MTP_bytes(botThemeParams().json)),
 		MTP_string("tdesktop")
 	)).done([=](const MTPWebViewResult &result) {
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
-			.fullscreen = data.is_fullscreen(),
+			.result = ParseWebViewResult(result),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_parentShow->showToast(error.type());
@@ -1309,11 +1312,9 @@ void WebViewInstance::requestApp(bool allowWrite) {
 		MTP_string("tdesktop")
 	)).done([=](const MTPWebViewResult &result) {
 		_requestId = 0;
-		const auto &data = result.data();
 		show({
-			.url = qs(data.vurl()),
+			.result = ParseWebViewResult(result),
 			.title = title,
-			.fullscreen = data.is_fullscreen(),
 		});
 	}).fail([=](const MTP::Error &error) {
 		_requestId = 0;
@@ -1437,20 +1438,21 @@ void WebViewInstance::show(ShowArgs &&args) {
 		|| (attached != end(bots)
 			&& (attached->inAttachMenu || attached->inMainMenu));
 	const auto downloads = &_session->attachWebView().downloads();
-	_panelUrl = args.url;
+	_panelUrl = args.result.url;
 	_panel = Ui::BotWebView::Show({
-		.url = args.url,
+		.url = args.result.url,
 		.storageId = _session->local().resolveStorageIdBots(),
 		.title = std::move(title),
 		.titleBadge = std::move(titleBadge),
 		.bottom = rpl::single('@' + _bot->username()),
 		.delegate = static_cast<Ui::BotWebView::Delegate*>(this),
 		.menuButtons = buttons,
-		.fullscreen = args.fullscreen,
+		.fullscreen = args.result.fullscreen,
+		.sameOrigin = args.result.sameOrigin,
 		.allowClipboardRead = allowClipboardRead,
 		.downloadsProgress = downloads->progress(_bot),
 	});
-	started(args.queryId);
+	started(args.result.queryId);
 
 	if (const auto strong = PendingActivation.get()) {
 		if (strong == this) {

@@ -173,9 +173,23 @@ struct WebViewSourceAgeVerification {
 	}
 };
 
-struct WebViewSourceJoinChat {
+struct WebViewResultData {
 	QString url;
 	uint64 queryId = 0;
+	bool fullscreen = false;
+	bool fullsize = false;
+	bool sameOrigin = false;
+
+	friend inline bool operator==(
+		const WebViewResultData &,
+		const WebViewResultData &) = default;
+};
+
+[[nodiscard]] WebViewResultData ParseWebViewResult(
+	const MTPWebViewResult &result);
+
+struct WebViewSourceJoinChat {
+	WebViewResultData result;
 
 	friend inline bool operator==(
 		const WebViewSourceJoinChat &,
@@ -269,10 +283,8 @@ private:
 		bool forceConfirmation);
 
 	struct ShowArgs {
-		QString url;
+		WebViewResultData result;
 		QString title;
-		uint64 queryId = 0;
-		bool fullscreen = false;
 	};
 	void show(ShowArgs &&args);
 	void showGame();

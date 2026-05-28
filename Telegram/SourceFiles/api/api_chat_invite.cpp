@@ -660,8 +660,7 @@ void ProcessChatInviteJoinResult(
 				.maySkipConfirmation = false,
 			},
 			.source = InlineBots::WebViewSourceJoinChat{
-				.url = qs(data.vurl()),
-				.queryId = uint64(data.vquery_id().v),
+				.result = InlineBots::ParseWebViewResult(data.vwebview()),
 			},
 		});
 	});
