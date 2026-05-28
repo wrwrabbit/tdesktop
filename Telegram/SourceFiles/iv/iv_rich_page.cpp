@@ -211,6 +211,28 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	context->documentInfos.emplace(id, DocumentInfoFromMtp(document));
 }
 
+void RememberInputPhoto(ParseContext *context, const MTPInputPhoto &photo) {
+	photo.match([](const MTPDinputPhotoEmpty &) {
+	}, [&](const MTPDinputPhoto &data) {
+		const auto id = PhotoId(data.vid().v);
+		context->photos.emplace(
+			id,
+			context->session->data().photo(id).get());
+	});
+}
+
+void RememberInputDocument(
+		ParseContext *context,
+		const MTPInputDocument &document) {
+	document.match([](const MTPDinputDocumentEmpty &) {
+	}, [&](const MTPDinputDocument &data) {
+		const auto id = DocumentId(data.vid().v);
+		context->documents.emplace(
+			id,
+			context->session->data().document(id).get());
+	});
+}
+
 [[nodiscard]] PhotoData *FindPhoto(
 		const ParseContext &context,
 		uint64 id) {
@@ -1152,6 +1174,19 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	}
 }
 
+[[nodiscard]] std::shared_ptr<const RichPage> PlainRichPageFallback(
+		bool rtl,
+		const QString &text) {
+	auto result = std::make_shared<RichPage>();
+	result->rtl = rtl;
+	if (!text.trimmed().isEmpty()) {
+		auto block = MakeBlock(BlockKind::Paragraph);
+		block.text.text = TextWithEntities::Simple(text);
+		result->blocks.push_back(std::move(block));
+	}
+	return result;
+}
+
 } // namespace
 
 QString EncodeRichPageLinkUrl(
@@ -1206,6 +1241,32 @@ std::shared_ptr<const RichPage> ParseRichPage(
 	}
 	AppendBlocks(data.vblocks().v, &result->blocks, &context);
 	return result;
+}
+
+std::shared_ptr<const RichPage> ParseRichPage(
+		not_null<Main::Session*> session,
+		const MTPInputRichMessage &message) {
+	return message.match([&](const MTPDinputRichMessage &data) {
+		auto result = std::make_shared<RichPage>();
+		auto context = ParseContext{ session };
+		result->rtl = data.is_rtl();
+		if (const auto photos = data.vphotos()) {
+			for (const auto &photo : photos->v) {
+				RememberInputPhoto(&context, photo);
+			}
+		}
+		if (const auto documents = data.vdocuments()) {
+			for (const auto &document : documents->v) {
+				RememberInputDocument(&context, document);
+			}
+		}
+		AppendBlocks(data.vblocks().v, &result->blocks, &context);
+		return std::shared_ptr<const RichPage>(std::move(result));
+	}, [&](const MTPDinputRichMessageHTML &data) {
+		return PlainRichPageFallback(data.is_rtl(), qs(data.vhtml()));
+	}, [&](const MTPDinputRichMessageMarkdown &data) {
+		return PlainRichPageFallback(data.is_rtl(), qs(data.vmarkdown()));
+	});
 }
 
 std::shared_ptr<const RichPage> ParseRichPage(
