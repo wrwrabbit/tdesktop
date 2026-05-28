@@ -23,8 +23,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_iv.h"
 
 #include <QtCore/QDate>
+#include <QtCore/QEvent>
 #include <QtCore/QPointer>
 #include <QtGui/QFocusEvent>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
 #include <QtGui/QTextCursor>
@@ -161,8 +163,8 @@ void Widget::activateInitialNode() {
 		? _activeOrdinal
 		: _state->activeTextOrdinal();
 	if (ordinal < 0) {
-		const auto first = _article->firstTextSegmentIndex();
-		const auto fallback = textOrdinalForSegment(first);
+		const auto first = _article->firstEditableSegmentIndex();
+		const auto fallback = editableOrdinalForSegment(first);
 		if (fallback < 0) {
 			return;
 		}
@@ -173,7 +175,7 @@ void Widget::activateInitialNode() {
 }
 
 void Widget::activateSegment(int segmentIndex, int cursorOffset) {
-	const auto ordinal = textOrdinalForSegment(segmentIndex);
+	const auto ordinal = editableOrdinalForSegment(segmentIndex);
 	if (ordinal < 0) {
 		return;
 	}
@@ -184,16 +186,20 @@ void Widget::commitInlineField() {
 	applyFieldTextToState();
 }
 
-void Widget::acceptInlineField() {
+void Widget::hideInlineFieldAndRefresh() {
 	if (_field->isHidden()) {
 		return;
 	}
 	commitInlineField();
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
-	_field->hide();
+	hideInlineField();
 	_article->clearTextLeafHeightOverride();
 	refreshPreparedContent();
+}
+
+void Widget::acceptInlineField() {
+	hideInlineFieldAndRefresh();
 }
 
 void Widget::refreshPreparedContent() {
@@ -212,18 +218,42 @@ void Widget::syncInlineFieldGeometry() {
 	syncInlineFieldGeometry(widthNoMargins());
 }
 
-void Widget::insertHeading1() {
+void Widget::insertBlock(State::InsertAction action) {
 	commitInlineField();
-	_state->insertHeading1AfterActive();
+	_state->insertBlockAfterActive(action);
 	refreshPreparedContent();
 	activateTextOrdinal(_state->activeTextOrdinal(), 0);
 }
 
+void Widget::insertMedia(State::InsertBlockType type) {
+	switch (type) {
+	case State::InsertBlockType::Photo:
+	case State::InsertBlockType::Video:
+	case State::InsertBlockType::Audio:
+		insertBlock({ .type = type });
+		break;
+	default:
+		break;
+	}
+}
+
+void Widget::insertMap(double latitude, double longitude) {
+	insertBlock({
+		.type = State::InsertBlockType::Map,
+		.latitude = latitude,
+		.longitude = longitude,
+	});
+}
+
+void Widget::insertHeading1() {
+	insertBlock({
+		.type = State::InsertBlockType::Heading,
+		.headingLevel = 1,
+	});
+}
+
 void Widget::insertBlockquote() {
-	commitInlineField();
-	_state->insertBlockquoteAfterActive();
-	refreshPreparedContent();
-	activateTextOrdinal(_state->activeTextOrdinal(), 0);
+	insertBlock({ .type = State::InsertBlockType::Blockquote });
 }
 
 int Widget::resizeGetHeight(int newWidth) {
@@ -245,9 +275,19 @@ int Widget::resizeGetHeight(int newWidth) {
 		st::ivEditorMinHeight);
 }
 
+bool Widget::eventFilter(QObject *object, QEvent *event) {
+	if (_field
+		&& object == _field->rawTextEdit().get()
+		&& event->type() == QEvent::KeyPress
+		&& handleFieldKey(static_cast<QKeyEvent*>(event))) {
+		return true;
+	}
+	return Ui::RpWidget::eventFilter(object, event);
+}
+
 void Widget::focusInEvent(QFocusEvent *e) {
 	Ui::RpWidget::focusInEvent(e);
-	if (!_field->isHidden()) {
+	if (!_settingField && !_field->isHidden()) {
 		_field->setFocusFast();
 	}
 }
@@ -321,6 +361,11 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			&& hit.direct
 			&& _article->segmentIsText(hit.segmentIndex);
 	};
+	const auto directEditableHit = [&] {
+		return hit.valid()
+			&& hit.direct
+			&& _article->segmentIsEditable(hit.segmentIndex);
+	};
 	const auto commitVisibleInlineField = [&] {
 		if (_field->isHidden()) {
 			return;
@@ -328,7 +373,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		commitInlineField();
 		_pendingOrdinal = -1;
 		_pendingCursorOffset = 0;
-		_field->hide();
+		hideInlineField();
 		_article->clearTextLeafHeightOverride();
 		refreshPreparedContent();
 	};
@@ -346,7 +391,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			&& (selection.from.segment == selection.to.segment)
 			&& _article->segmentIsText(selection.from.segment);
 		const auto selectionOrdinal = sameSegmentSelection
-			? textOrdinalForSegment(selection.from.segment)
+			? editableOrdinalForSegment(selection.from.segment)
 			: -1;
 		if (selectionOrdinal >= 0) {
 			const auto selectionFrom = selection.from.offset;
@@ -360,7 +405,8 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			e->accept();
 			return;
 		} else if (selection.empty() && directTextHit()) {
-			const auto targetOrdinal = textOrdinalForSegment(hit.segmentIndex);
+			const auto targetOrdinal = editableOrdinalForSegment(
+				hit.segmentIndex);
 			const auto targetOffset = _article->selectionOffsetFromHit(
 				hit,
 				TextSelectType::Letters);
@@ -381,8 +427,8 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		e->accept();
 		return;
 	}
-	if (directTextHit()) {
-		const auto targetOrdinal = textOrdinalForSegment(hit.segmentIndex);
+	if (directEditableHit()) {
+		const auto targetOrdinal = editableOrdinalForSegment(hit.segmentIndex);
 		const auto offset = _article->selectionOffsetFromHit(
 			hit,
 			TextSelectType::Letters);
@@ -433,7 +479,7 @@ void Widget::setDocument(const Markdown::MarkdownArticleContent &prepared) {
 Markdown::MarkdownArticleTextLeafStyle Widget::inlineFieldStyleForSegment(
 		int segmentIndex) const {
 	return _article
-		? _article->textLeafStyleForSegment(segmentIndex)
+		? _article->editableStyleForSegment(segmentIndex)
 		: Markdown::MarkdownArticleTextLeafStyle();
 }
 
@@ -453,6 +499,9 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 	auto fieldStyle = std::make_shared<style::InputField>(
 		st::ivEditorInputField);
 	fieldStyle->style = *data.textStyle;
+	fieldStyle->style.font = data.italic
+		? data.textStyle->font->italic()
+		: data.textStyle->font;
 	fieldStyle->style.lineHeight = data.lineHeight;
 	fieldStyle->textFg = data.textFg;
 	fieldStyle->textAlign = data.align;
@@ -477,6 +526,7 @@ Widget::InlineFieldStyleData Widget::normalizedInlineFieldStyle(
 		.lineHeight = lineHeight,
 		.textFg = valid ? leafStyle.textColor : st::messageMarkdown.textColor,
 		.align = valid ? leafStyle.align : style::al_left,
+		.italic = valid ? leafStyle.italic : false,
 	};
 }
 
@@ -486,46 +536,65 @@ Widget::InlineFieldStyleKey Widget::inlineFieldStyleKey(
 		? data.textStyle
 		: &st::messageMarkdown.body;
 	return {
-		.font = textStyle->font,
+		.font = data.italic
+			? textStyle->font->italic()
+			: textStyle->font,
 		.lineHeight = data.lineHeight,
 		.textFg = data.textFg,
 		.align = data.align,
 	};
 }
 
-void Widget::ensureInlineFieldStyleForSegment(int segmentIndex) {
+void Widget::ensureInlineFieldForSegment(int segmentIndex) {
 	const auto data = normalizedInlineFieldStyle(
 		inlineFieldStyleForSegment(segmentIndex));
 	const auto key = inlineFieldStyleKey(data);
-	if (_activeFieldStyleKey && *_activeFieldStyleKey == key) {
+	const auto mode = _state->activeFieldMode();
+	if (_activeFieldStyleKey
+		&& *_activeFieldStyleKey == key
+		&& _fieldMode == mode) {
 		return;
 	}
 	const auto &cached = inlineFieldStyleFor(data);
 	_activeFieldStyleKey = key;
+	_fieldMode = mode;
 	recreateInlineField(*cached.style);
 }
 
 void Widget::setupInlineField() {
-	const auto allowPremiumEmoji = [peer = _peer](
-			not_null<DocumentData*> emoji) {
-		return Data::AllowEmojiWithoutPremium(peer, emoji);
-	};
-	InitMessageFieldHandlers({
-		.session = &_controller->session(),
-		.show = _controller->uiShow(),
-		.field = _field.get(),
-		.customEmojiPaused = [=] {
-			return _controller->isGifPausedAtLeastFor(
-				Window::GifPauseReason::Layer);
-		},
-		.allowPremiumEmoji = allowPremiumEmoji,
-		.fieldStyle = &_field->st(),
-	});
-	_field->setMimeDataHook(WrappedMessageFieldMimeHook(
-		Ui::InputField::MimeDataHook(),
-		_field.get()));
+	if (_fieldMode == State::FieldMode::Rich) {
+		const auto allowPremiumEmoji = [peer = _peer](
+				not_null<DocumentData*> emoji) {
+			return Data::AllowEmojiWithoutPremium(peer, emoji);
+		};
+		InitMessageFieldHandlers({
+			.session = &_controller->session(),
+			.show = _controller->uiShow(),
+			.field = _field.get(),
+			.customEmojiPaused = [=] {
+				return _controller->isGifPausedAtLeastFor(
+					Window::GifPauseReason::Layer);
+			},
+			.allowPremiumEmoji = allowPremiumEmoji,
+			.fieldStyle = &_field->st(),
+		});
+		_field->setMimeDataHook(WrappedMessageFieldMimeHook(
+			Ui::InputField::MimeDataHook(),
+			_field.get()));
+	} else {
+		_field->setInstantReplacesEnabled(
+			rpl::single(false),
+			rpl::single(false));
+		_field->setMarkdownReplacesEnabled(
+			rpl::single(Ui::MarkdownEnabledState{
+				Ui::MarkdownDisabled()
+			}));
+	}
+	_field->setDocumentMargin(0.);
+	_field->setAdditionalMargins({});
 	_field->setSubmitSettings(Ui::InputField::SubmitSettings::None);
 	_field->setMaxHeight(std::numeric_limits<int>::max());
+	_field->rawTextEdit()->installEventFilter(this);
 
 	_field->heightChanges(
 	) | rpl::on_next([=] {
@@ -539,7 +608,7 @@ void Widget::setupInlineField() {
 		}
 	}, _field->lifetime());
 
-	_field->hide();
+	hideInlineField();
 }
 
 void Widget::recreateInlineField(const style::InputField &st) {
@@ -592,25 +661,32 @@ void Widget::activateTextOrdinal(
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 
-	const auto segmentIndex = segmentIndexForTextOrdinal(ordinal);
+	const auto segmentIndex = segmentIndexForEditableOrdinal(ordinal);
 	if (segmentIndex < 0) {
 		_activeSegmentIndex = -1;
 		_pendingOrdinal = ordinal;
 		_pendingCursorOffset = selectionTo;
-		_field->hide();
+		hideInlineField();
 		return;
 	}
 
 	_activeSegmentIndex = segmentIndex;
-	ensureInlineFieldStyleForSegment(segmentIndex);
-	const auto activeText = _state->activeText();
+	ensureInlineFieldForSegment(segmentIndex);
 	_settingField = true;
-	_field->setTextWithTags(
-		{
-			activeText.text,
-			TextUtilities::ConvertEntitiesToTextTags(activeText.entities),
-		},
-		Ui::InputField::HistoryAction::Clear);
+	if (_state->activeFieldMode() == State::FieldMode::Raw) {
+		_field->setTextWithTags(
+			{ _state->activeRawText(), {} },
+			Ui::InputField::HistoryAction::Clear);
+		_article->clearTextLeafHeightOverride();
+	} else {
+		const auto activeText = _state->activeText();
+		_field->setTextWithTags(
+			{
+				activeText.text,
+				TextUtilities::ConvertEntitiesToTextTags(activeText.entities),
+			},
+			Ui::InputField::HistoryAction::Clear);
+	}
 	auto cursor = _field->textCursor();
 	const auto size = _field->getLastText().size();
 	const auto from = std::clamp(selectionFrom, 0, size);
@@ -639,6 +715,10 @@ void Widget::applyFieldTextToState() {
 	if (_settingField || _field->isHidden()) {
 		return;
 	}
+	if (_state->activeFieldMode() == State::FieldMode::Raw) {
+		_state->applyActiveRawText(_field->getLastText());
+		return;
+	}
 	const auto text = _field->getTextWithAppliedMarkdown();
 	_state->applyActiveText({
 		.text = text.text,
@@ -646,11 +726,144 @@ void Widget::applyFieldTextToState() {
 	});
 }
 
+void Widget::hideInlineField() {
+	if (_field->isHidden()) {
+		return;
+	}
+	const auto wasSettingField = _settingField;
+	_settingField = true;
+	const auto guard = gsl::finally([&] {
+		_settingField = wasSettingField;
+	});
+	_field->hide();
+}
+
+void Widget::activateTextOrdinalAtEnd(int ordinal) {
+	if (!_state->setActiveTextByOrdinal(ordinal)) {
+		return;
+	}
+	activateTextOrdinal(ordinal, _state->activeTextLength());
+}
+
+bool Widget::handleFieldKey(QKeyEvent *e) {
+	if (_field->isHidden()) {
+		return false;
+	}
+	const auto key = e->key();
+	if (key == Qt::Key_Escape) {
+		hideInlineFieldAndRefresh();
+		e->accept();
+		return true;
+	}
+	const auto modifiers = e->modifiers()
+		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
+	if (modifiers != Qt::NoModifier) {
+		return false;
+	}
+	const auto cursor = _field->textCursor();
+	if (cursor.hasSelection()) {
+		return false;
+	}
+	const auto position = cursor.position();
+	const auto length = _field->getLastText().size();
+	auto handled = false;
+	if (position <= 0
+		&& (key == Qt::Key_Left
+			|| key == Qt::Key_Up
+			|| key == Qt::Key_PageUp)) {
+		handled = moveBoundary(false, false);
+	} else if (position >= length
+		&& (key == Qt::Key_Right
+			|| key == Qt::Key_Down
+			|| key == Qt::Key_PageDown)) {
+		handled = moveBoundary(true, true);
+	} else if (position <= 0 && key == Qt::Key_Backspace) {
+		handled = removeBoundaryOwner(false);
+	} else if (position >= length && key == Qt::Key_Delete) {
+		handled = removeBoundaryOwner(true);
+	}
+	if (handled) {
+		e->accept();
+	}
+	return handled;
+}
+
+bool Widget::moveBoundary(bool forward, bool allowTrailing) {
+	const auto target = forward
+		? _state->nextEditableOrdinal()
+		: _state->previousEditableOrdinal();
+	const auto addTrailing = forward
+		&& allowTrailing
+		&& !target
+		&& !_state->isActiveTopLevelParagraph();
+	if (!target && !addTrailing) {
+		return false;
+	}
+	commitInlineField();
+	if (target) {
+		refreshPreparedContent();
+		if (forward) {
+			activateTextOrdinal(*target, 0);
+		} else {
+			activateTextOrdinalAtEnd(*target);
+		}
+		return true;
+	}
+	const auto ordinal = _state->ensureTrailingParagraphActive();
+	refreshPreparedContent();
+	activateTextOrdinal(ordinal, 0);
+	return true;
+}
+
+bool Widget::moveBoundaryAfterCommit(bool forward, bool allowTrailing) {
+	const auto target = forward
+		? _state->nextEditableOrdinal()
+		: _state->previousEditableOrdinal();
+	if (target) {
+		refreshPreparedContent();
+		if (forward) {
+			activateTextOrdinal(*target, 0);
+		} else {
+			activateTextOrdinalAtEnd(*target);
+		}
+		return true;
+	}
+	if (forward && allowTrailing && !_state->isActiveTopLevelParagraph()) {
+		const auto ordinal = _state->ensureTrailingParagraphActive();
+		refreshPreparedContent();
+		activateTextOrdinal(ordinal, 0);
+		return true;
+	}
+	return false;
+}
+
+bool Widget::removeBoundaryOwner(bool forward) {
+	commitInlineField();
+	if (_state->activeOwnerIsEmpty()) {
+		const auto target = _state->removeActiveOwnerAndSelectAdjacent(
+			forward);
+		hideInlineField();
+		_article->clearTextLeafHeightOverride();
+		refreshPreparedContent();
+		if (target) {
+			if (forward) {
+				activateTextOrdinal(*target, 0);
+			} else {
+				activateTextOrdinalAtEnd(*target);
+			}
+		} else {
+			activateInitialNode();
+		}
+		return true;
+	}
+	return moveBoundaryAfterCommit(forward, forward);
+}
+
 void Widget::ensurePendingActivation() {
 	if (_pendingOrdinal < 0) {
 		_activeSegmentIndex = (_activeOrdinal >= 0)
-			? segmentIndexForTextOrdinal(_activeOrdinal)
-			: _article->firstTextSegmentIndex();
+			? segmentIndexForEditableOrdinal(_activeOrdinal)
+			: _article->firstEditableSegmentIndex();
 		return;
 	}
 	const auto ordinal = _pendingOrdinal;
@@ -670,11 +883,17 @@ void Widget::updateInlineFieldHeightOverride() {
 		_pendingHeightOverrideUpdate = true;
 		return;
 	}
-	const auto segmentRect = outerTextSegmentRect(_activeSegmentIndex);
+	const auto textLeafIndex = _article->textLeafIndexForSegment(
+		_activeSegmentIndex);
+	if (textLeafIndex < 0) {
+		_article->clearTextLeafHeightOverride();
+		return;
+	}
+	const auto segmentRect = outerEditableSegmentRect(_activeSegmentIndex);
 	const auto height = segmentRect.isEmpty()
 		? _field->height()
 		: std::max(_field->geometry().bottom() + 1 - segmentRect.y(), 1);
-	_article->setTextLeafHeightOverride(_activeOrdinal, height);
+	_article->setTextLeafHeightOverride(textLeafIndex, height);
 	resizeToWidth(std::max(widthNoMargins(), 1));
 	update();
 }
@@ -684,24 +903,27 @@ void Widget::syncInlineFieldGeometry(int width) {
 		return;
 	}
 	if (_activeSegmentIndex >= 0) {
-		ensureInlineFieldStyleForSegment(_activeSegmentIndex);
+		ensureInlineFieldForSegment(_activeSegmentIndex);
 	}
-	const auto segmentRect = outerTextSegmentRect(_activeSegmentIndex);
+	const auto segmentRect = outerEditableSegmentRect(_activeSegmentIndex);
 	if (segmentRect.isEmpty()) {
 		_pendingOrdinal = _activeOrdinal;
 		_pendingCursorOffset = _field->textCursor().position();
-		_field->hide();
+		hideInlineField();
 		_article->clearTextLeafHeightOverride();
 		return;
 	}
+	const auto margins = _field->fullTextMargins();
+	const auto left = segmentRect.x() - margins.left();
+	const auto top = segmentRect.y() - margins.top();
 	const auto fieldWidth = std::max(
-		std::min(segmentRect.width(), width - segmentRect.x()),
+		std::min(
+			segmentRect.width() + margins.left() + margins.right(),
+			width - left),
 		1);
 	_syncingInlineFieldGeometry = true;
 	_field->resizeToWidth(fieldWidth);
 	const auto fieldHeight = FieldNaturalHeight(_field.get());
-	const auto left = segmentRect.x();
-	const auto top = segmentRect.y();
 	_field->setGeometryToLeft(left, top, fieldWidth, fieldHeight, width);
 	_field->raise();
 	_syncingInlineFieldGeometry = false;
@@ -766,12 +988,12 @@ void Widget::updateTextSelection(
 	}
 }
 
-int Widget::textOrdinalForSegment(int segmentIndex) const {
-	return _article->textLeafIndexForSegment(segmentIndex);
+int Widget::editableOrdinalForSegment(int segmentIndex) const {
+	return _article->editableIndexForSegment(segmentIndex);
 }
 
-int Widget::segmentIndexForTextOrdinal(int ordinal) const {
-	return _article->segmentIndexForTextLeafIndex(ordinal);
+int Widget::segmentIndexForEditableOrdinal(int ordinal) const {
+	return _article->segmentIndexForEditableIndex(ordinal);
 }
 
 QPoint Widget::articleTopLeft() const {
@@ -786,8 +1008,8 @@ int Widget::articleWidth(int outerWidth) const {
 		1);
 }
 
-QRect Widget::outerTextSegmentRect(int segmentIndex) const {
-	const auto rect = _article->textSegmentRect(segmentIndex);
+QRect Widget::outerEditableSegmentRect(int segmentIndex) const {
+	const auto rect = _article->segmentRect(segmentIndex);
 	return rect.isEmpty() ? rect : rect.translated(articleTopLeft());
 }
 
@@ -823,9 +1045,11 @@ Markdown::MarkdownArticlePaintContext Widget::textPaintContext(QRect clip) {
 			});
 		},
 	};
-	context.hiddenTextSegmentIndex = _field->isHidden()
+	const auto hiddenSegmentIndex = _field->isHidden()
 		? -1
 		: _activeSegmentIndex;
+	context.hiddenTextSegmentIndex = hiddenSegmentIndex;
+	context.hiddenSegmentIndex = hiddenSegmentIndex;
 	context.selectionState.selection = _selection;
 	context.selectionState.endpoints = &_selectionEndpoints;
 	return context;

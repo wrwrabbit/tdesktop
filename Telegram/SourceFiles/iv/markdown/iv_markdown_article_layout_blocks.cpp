@@ -418,7 +418,7 @@ void LayoutMediaCaption(
 		int skip,
 		int *bottom,
 		LayoutContext context) {
-	if (prepared.text.text.isEmpty()) {
+	if (prepared.text.text.isEmpty() && !prepared.forceTextSegment) {
 		return;
 	}
 	block->supplementary = prepared.supplementary;

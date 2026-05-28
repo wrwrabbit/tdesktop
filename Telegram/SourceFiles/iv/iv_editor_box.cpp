@@ -7,32 +7,412 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/iv_editor_box.h"
 
-#include "data/data_msg_id.h"
+#include <QtCore/QDir>
+#include <QtCore/QEvent>
+#include <QtCore/QFileInfo>
+#include <QtCore/QPointer>
+#include <QtNetwork/QNetworkProxy>
+
+#include "base/flat_map.h"
+#include "base/const_string.h"
+#include "base/unique_qptr.h"
+#include "base/weak_ptr.h"
+#include "core/file_utilities.h"
+#include "core/mime_type.h"
+#include "core/shortcuts.h"
 #include "ui/image/image_location.h"
+#include "data/data_location.h"
 #include "data/data_types.h"
 #include "iv/iv_editor_state.h"
 #include "iv/iv_editor_widget.h"
 #include "lang/lang_keys.h"
+#include "main/main_app_config.h"
+#include "main/main_session.h"
+#include "settings.h"
+#include "ui/emoji_config.h"
+#include "storage/storage_account.h"
+#include "ui/controls/location_picker.h"
 #include "ui/layers/generic_box.h"
+#include "ui/rect_part.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/buttons.h"
-#include "ui/wrap/vertical_layout.h"
-#include "styles/style_layers.h"
-#include "styles/style_settings.h"
-
-#include <QtCore/QDate>
+#include "ui/widgets/popup_menu.h"
+#include "ui/widgets/tooltip.h"
 
 #include "window/window_session_controller.h"
+#include "mainwindow.h"
+#include "mainwidget.h"
 
+#include <array>
 #include <memory>
+#include <optional>
+#include <vector>
+
+#include "styles/style_iv.h"
+#include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
+#include "styles/style_widgets.h"
 
 namespace Iv::Editor {
 namespace {
+
+struct ToolbarButton {
+	object_ptr<Ui::IconButton> widget;
+	Fn<rpl::producer<TextWithEntities>()> tooltipFactory;
+};
+
+class Toolbar final : public Ui::RpWidget {
+public:
+	Toolbar(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer,
+		not_null<Widget*> editor,
+		QPointer<QWidget> tooltipParent);
+
+	int resizeGetHeight(int width) override;
+
+protected:
+	bool eventFilter(QObject *object, QEvent *event) override;
+
+private:
+	not_null<Ui::IconButton*> addButton(
+		QString label,
+		Fn<rpl::producer<TextWithEntities>()> tooltipFactory,
+		const style::icon *icon,
+		Fn<void()> callback);
+	void addInsertButtons();
+	void showHeadingMenu(not_null<Ui::IconButton*> button);
+	void chooseMedia();
+	void applyMediaResult(FileDialog::OpenResult &&result);
+	void chooseMap();
+	void showTooltip(not_null<Ui::IconButton*> button);
+	void hideTooltip();
+	void updateTooltipGeometry();
+	[[nodiscard]] ToolbarButton *buttonData(not_null<Ui::IconButton*> button);
+
+	const not_null<Window::SessionController*> _controller;
+	const not_null<PeerData*> _peer;
+	const QPointer<Widget> _editor;
+	const QPointer<QWidget> _tooltipParent;
+	const Ui::LocationPickerConfig _mapsConfig;
+	std::vector<ToolbarButton> _buttons;
+	base::unique_qptr<Ui::ImportantTooltip> _tooltip;
+	base::unique_qptr<Ui::PopupMenu> _menu;
+	Ui::IconButton *_hovered = nullptr;
+
+};
+
+[[nodiscard]] Ui::LocationPickerConfig ResolveMapsConfig(
+		not_null<Main::Session*> session) {
+	const auto &appConfig = session->appConfig();
+	auto map = appConfig.get<base::flat_map<QString, QString>>(
+		u"tdesktop_config_map"_q,
+		base::flat_map<QString, QString>());
+	return {
+		.mapsToken = map[u"maps"_q],
+		.geoToken = map[u"geo"_q],
+	};
+}
+
+[[nodiscard]] QString HeadingLabel(int level) {
+	switch (level) {
+	case 1: return tr::lng_article_insert_heading1(tr::now);
+	case 2: return tr::lng_article_insert_heading2(tr::now);
+	case 3: return tr::lng_article_insert_heading3(tr::now);
+	case 4: return tr::lng_article_insert_heading4(tr::now);
+	case 5: return tr::lng_article_insert_heading5(tr::now);
+	case 6: return tr::lng_article_insert_heading6(tr::now);
+	}
+	return tr::lng_article_insert_heading1(tr::now);
+}
+
+[[nodiscard]] std::optional<State::InsertBlockType> MediaTypeForPath(
+		const QString &path) {
+	const auto mime = Core::MimeTypeForFile(QFileInfo(path)).name();
+	if (Core::FileIsImage(path, mime)) {
+		return State::InsertBlockType::Photo;
+	} else if (mime.startsWith(u"video/"_q)) {
+		return State::InsertBlockType::Video;
+	} else if (mime.startsWith(u"audio/"_q)) {
+		return State::InsertBlockType::Audio;
+	}
+	return std::nullopt;
+}
+
+Toolbar::Toolbar(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer,
+	not_null<Widget*> editor,
+	QPointer<QWidget> tooltipParent)
+: Ui::RpWidget(parent)
+, _controller(controller)
+, _peer(peer)
+, _editor(editor.get())
+, _tooltipParent(std::move(tooltipParent))
+, _mapsConfig(ResolveMapsConfig(&controller->session())) {
+	setMouseTracking(true);
+	addInsertButtons();
+}
+
+not_null<Ui::IconButton*> Toolbar::addButton(
+		QString label,
+		Fn<rpl::producer<TextWithEntities>()> tooltipFactory,
+		const style::icon *icon,
+		Fn<void()> callback) {
+	auto button = object_ptr<Ui::IconButton>(this, st::ivEditorToolbarButton);
+	const auto raw = button.data();
+	raw->setAccessibleName(label);
+	raw->setIconOverride(icon, icon);
+	raw->setClickedCallback([=, callback = std::move(callback)] {
+		hideTooltip();
+		callback();
+	});
+	raw->installEventFilter(this);
+	_buttons.push_back({
+		std::move(button),
+		std::move(tooltipFactory),
+	});
+	return raw;
+}
+
+void Toolbar::addInsertButtons() {
+	const auto insert = [=](State::InsertAction action) {
+		if (_editor) {
+			_editor->insertBlock(action);
+		}
+	};
+	const auto insertType = [=](State::InsertBlockType type) {
+		insert({ .type = type });
+	};
+
+	const auto heading = addButton(
+		tr::lng_article_insert_heading(tr::now),
+		[] { return tr::lng_article_insert_heading(tr::marked); },
+		&st::ivEditorToolbarHeadingIcon,
+		[] {});
+	heading->setClickedCallback([=] {
+		hideTooltip();
+		showHeadingMenu(heading);
+	});
+	addButton(
+		tr::lng_article_insert_blockquote(tr::now),
+		[] { return tr::lng_article_insert_blockquote(tr::marked); },
+		&st::ivEditorToolbarBlockquoteIcon,
+		[=] { insertType(State::InsertBlockType::Blockquote); });
+	addButton(
+		tr::lng_article_insert_math(tr::now),
+		[] { return tr::lng_article_insert_math(tr::marked); },
+		&st::ivEditorToolbarMathIcon,
+		[=] { insertType(State::InsertBlockType::Math); });
+	addButton(
+		tr::lng_article_insert_divider(tr::now),
+		[] { return tr::lng_article_insert_divider(tr::marked); },
+		&st::ivEditorToolbarDividerIcon,
+		[=] { insertType(State::InsertBlockType::Divider); });
+	addButton(
+		tr::lng_article_insert_ordered_list(tr::now),
+		[] { return tr::lng_article_insert_ordered_list(tr::marked); },
+		&st::ivEditorToolbarOrderedListIcon,
+		[=] { insertType(State::InsertBlockType::OrderedList); });
+	addButton(
+		tr::lng_article_insert_bullet_list(tr::now),
+		[] { return tr::lng_article_insert_bullet_list(tr::marked); },
+		&st::ivEditorToolbarBulletListIcon,
+		[=] { insertType(State::InsertBlockType::BulletList); });
+	addButton(
+		tr::lng_article_insert_task_list(tr::now),
+		[] { return tr::lng_article_insert_task_list(tr::marked); },
+		&st::ivEditorToolbarTaskListIcon,
+		[=] { insertType(State::InsertBlockType::TaskList); });
+	addButton(
+		tr::lng_article_insert_pullquote(tr::now),
+		[] { return tr::lng_article_insert_pullquote(tr::marked); },
+		&st::ivEditorToolbarPullquoteIcon,
+		[=] { insertType(State::InsertBlockType::Pullquote); });
+	addButton(
+		tr::lng_article_insert_media(tr::now),
+		[] { return tr::lng_article_insert_media(tr::marked); },
+		&st::ivEditorToolbarAttachIcon,
+		[=] { chooseMedia(); });
+	addButton(
+		tr::lng_article_insert_details(tr::now),
+		[] { return tr::lng_article_insert_details(tr::marked); },
+		&st::ivEditorToolbarDetailsIcon,
+		[=] { insertType(State::InsertBlockType::Details); });
+	addButton(
+		tr::lng_article_insert_table(tr::now),
+		[] { return tr::lng_article_insert_table(tr::marked); },
+		&st::ivEditorToolbarTableIcon,
+		[=] { insertType(State::InsertBlockType::Table); });
+
+	if (Ui::LocationPicker::Available(_mapsConfig)) {
+		addButton(
+			tr::lng_article_insert_map(tr::now),
+			[] { return tr::lng_article_insert_map(tr::marked); },
+			&st::menuIconAddress,
+			[=] { chooseMap(); });
+	}
+}
+
+void Toolbar::showHeadingMenu(not_null<Ui::IconButton*> button) {
+	_menu = base::make_unique_q<Ui::PopupMenu>(this);
+	for (const auto level : std::array{ 1, 2, 3, 4, 5, 6 }) {
+		_menu->addAction(
+			HeadingLabel(level),
+			[=] {
+				if (_editor) {
+					_editor->insertBlock({
+						.type = State::InsertBlockType::Heading,
+						.headingLevel = level,
+					});
+				}
+			});
+	}
+	_menu->popup(button->mapToGlobal(QPoint(0, button->height())));
+}
+
+void Toolbar::chooseMedia() {
+	const auto weak = QPointer<Toolbar>(this);
+	FileDialog::GetOpenPath(
+		QPointer<QWidget>(this),
+		tr::lng_article_insert_media(tr::now),
+		FileDialog::AllFilesFilter(),
+		[=](FileDialog::OpenResult &&result) {
+			if (weak) {
+				weak->applyMediaResult(std::move(result));
+			}
+		});
+}
+
+void Toolbar::applyMediaResult(FileDialog::OpenResult &&result) {
+	if (result.paths.isEmpty()) {
+		return;
+	}
+	const auto type = MediaTypeForPath(result.paths.front());
+	if (!type) {
+		_controller->showToast(tr::lng_edit_media_invalid_file(tr::now));
+		return;
+	}
+	if (_editor) {
+		_editor->insertMedia(*type);
+	}
+}
+
+void Toolbar::chooseMap() {
+	const auto weak = QPointer<Toolbar>(this);
+	const auto session = &_controller->session();
+	Ui::LocationPicker::Show({
+		.parent = _controller->widget().get(),
+		.config = _mapsConfig,
+		.chooseLabel = tr::lng_maps_point_send(),
+		.recipient = _peer,
+		.session = session,
+		.callback = [=](Data::InputVenue venue) {
+			if (weak && weak->_editor) {
+				weak->_editor->insertMap(venue.lat, venue.lon);
+			}
+		},
+		.quit = [] { Shortcuts::Launch(Shortcuts::Command::Quit); },
+		.storageId = session->local().resolveStorageIdBots(),
+		.closeRequests = _controller->content()->death(),
+	});
+}
+
+int Toolbar::resizeGetHeight(int width) {
+	const auto padding = st::ivEditorToolbarPadding;
+	const auto buttonWidth = st::ivEditorToolbarButton.width;
+	const auto buttonHeight = st::ivEditorToolbarButton.height;
+	const auto right = width - padding.right();
+	auto left = padding.left();
+	auto top = padding.top();
+	for (const auto &button : _buttons) {
+		if (left > padding.left() && left + buttonWidth > right) {
+			left = padding.left();
+			top += buttonHeight + st::ivEditorToolbarRowSkip;
+		}
+		button.widget->moveToLeft(left, top, width);
+		left += buttonWidth + st::ivEditorToolbarButtonSkip;
+	}
+	updateTooltipGeometry();
+	return top + buttonHeight + padding.bottom();
+}
+
+bool Toolbar::eventFilter(QObject *object, QEvent *event) {
+	for (const auto &data : _buttons) {
+		if (data.widget.data() != object) {
+			continue;
+		}
+		const auto button = data.widget.data();
+		if (event->type() == QEvent::Enter) {
+			showTooltip(not_null<Ui::IconButton*>(button));
+		} else if (event->type() == QEvent::Leave && _hovered == button) {
+			hideTooltip();
+		}
+		break;
+	}
+	return Ui::RpWidget::eventFilter(object, event);
+}
+
+void Toolbar::showTooltip(not_null<Ui::IconButton*> button) {
+	hideTooltip();
+	const auto data = buttonData(button);
+	if (!data) {
+		return;
+	}
+	_hovered = button;
+	const auto tooltipParent = _tooltipParent
+		? _tooltipParent.data()
+		: (parentWidget() ? parentWidget() : this);
+	_tooltip.reset(Ui::CreateChild<Ui::ImportantTooltip>(
+		tooltipParent,
+		Ui::MakeNiceTooltipLabel(
+			tooltipParent,
+			data->tooltipFactory(),
+			st::boxWideWidth,
+			st::defaultImportantTooltipLabel),
+		st::defaultImportantTooltip));
+	_tooltip->setAttribute(Qt::WA_TransparentForMouseEvents);
+	_tooltip->toggleFast(false);
+	updateTooltipGeometry();
+	_tooltip->raise();
+	_tooltip->toggleAnimated(true);
+}
+
+void Toolbar::hideTooltip() {
+	_hovered = nullptr;
+	if (_tooltip) {
+		_tooltip->toggleFast(false);
+		_tooltip = nullptr;
+	}
+}
+
+void Toolbar::updateTooltipGeometry() {
+	if (!_tooltip || !_hovered) {
+		return;
+	}
+	const auto tooltipParent = _tooltip->parentWidget();
+	const auto geometry = Ui::MapFrom(
+		tooltipParent,
+		_hovered,
+		_hovered->rect());
+	_tooltip->pointAt(geometry, RectPart::Top | RectPart::Center);
+}
+
+ToolbarButton *Toolbar::buttonData(not_null<Ui::IconButton*> button) {
+	for (auto &data : _buttons) {
+		if (data.widget.data() == button.get()) {
+			return &data;
+		}
+	}
+	return nullptr;
+}
 
 void SetupBox(
 		not_null<Ui::GenericBox*> box,
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	box->setTitle(tr::lng_article_editor_title());
 	box->setWidth(st::boxWideWidth);
 	box->setNoContentMargin(true);
 
@@ -43,21 +423,13 @@ void SetupBox(
 		peer,
 		state),
 		style::margins());
-	const auto toolbar = box->setPinnedToTopContent(
-		object_ptr<Ui::VerticalLayout>(box));
-
-	toolbar->add(object_ptr<Ui::SettingsButton>(
-		toolbar,
-		tr::lng_article_insert_heading1(),
-		st::settingsButtonNoIcon))->setClickedCallback([=] {
-		editor->insertHeading1();
-	});
-	toolbar->add(object_ptr<Ui::SettingsButton>(
-		toolbar,
-		tr::lng_article_insert_blockquote(),
-		st::settingsButtonNoIcon))->setClickedCallback([=] {
-		editor->insertBlockquote();
-	});
+	const auto tooltipParent = box->getDelegate()->outerContainer();
+	box->setPinnedToTopContent(object_ptr<Toolbar>(
+		box,
+		controller,
+		peer,
+		editor,
+		tooltipParent));
 
 	box->setFocusCallback([=] {
 		editor->activateInitialNode();

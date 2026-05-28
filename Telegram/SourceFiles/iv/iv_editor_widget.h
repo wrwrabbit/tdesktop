@@ -17,6 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <optional>
 #include <vector>
 
+class QEvent;
+class QKeyEvent;
+class QObject;
+
 namespace Ui {
 class ChatStyle;
 class ChatTheme;
@@ -48,12 +52,16 @@ public:
 	void commitInlineField();
 	void refreshPreparedContent();
 	void syncInlineFieldGeometry();
+	void insertBlock(State::InsertAction action);
+	void insertMedia(State::InsertBlockType type);
+	void insertMap(double latitude, double longitude);
 	void insertHeading1();
 	void insertBlockquote();
 
 	int resizeGetHeight(int newWidth) override;
 
 protected:
+	bool eventFilter(QObject *object, QEvent *event) override;
 	void focusInEvent(QFocusEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
@@ -67,6 +75,7 @@ private:
 		int lineHeight = 0;
 		style::color textFg;
 		style::align align = style::al_left;
+		bool italic = false;
 	};
 
 	struct InlineFieldStyleKey {
@@ -109,22 +118,31 @@ private:
 		const Markdown::MarkdownArticleTextLeafStyle &style) const;
 	[[nodiscard]] InlineFieldStyleKey inlineFieldStyleKey(
 		const InlineFieldStyleData &data) const;
-	void ensureInlineFieldStyleForSegment(int segmentIndex);
+	void ensureInlineFieldForSegment(int segmentIndex);
 	void setupInlineField();
 	void recreateInlineField(const style::InputField &st);
 	void activateTrailingParagraph();
 	void applyFieldTextToState();
+	void hideInlineField();
 	void acceptInlineField();
+	void hideInlineFieldAndRefresh();
+	void activateTextOrdinalAtEnd(int ordinal);
+	[[nodiscard]] bool handleFieldKey(QKeyEvent *e);
+	[[nodiscard]] bool moveBoundary(bool forward, bool allowTrailing);
+	[[nodiscard]] bool moveBoundaryAfterCommit(
+		bool forward,
+		bool allowTrailing);
+	[[nodiscard]] bool removeBoundaryOwner(bool forward);
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
 	void syncInlineFieldGeometry(int width);
 	void clearTextSelection();
 	void updateTextSelection(const Markdown::MarkdownArticleHitTestResult &hit);
-	[[nodiscard]] int textOrdinalForSegment(int segmentIndex) const;
-	[[nodiscard]] int segmentIndexForTextOrdinal(int ordinal) const;
+	[[nodiscard]] int editableOrdinalForSegment(int segmentIndex) const;
+	[[nodiscard]] int segmentIndexForEditableOrdinal(int ordinal) const;
 	[[nodiscard]] QPoint articleTopLeft() const;
 	[[nodiscard]] int articleWidth(int outerWidth) const;
-	[[nodiscard]] QRect outerTextSegmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect outerEditableSegmentRect(int segmentIndex) const;
 	[[nodiscard]] Markdown::MarkdownArticlePaintContext textPaintContext(
 		QRect clip);
 
@@ -138,6 +156,7 @@ private:
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	std::vector<CachedInlineFieldStyle> _fieldStyles;
 	std::optional<InlineFieldStyleKey> _activeFieldStyleKey;
+	State::FieldMode _fieldMode = State::FieldMode::Rich;
 	int _articleHeight = 0;
 	int _activeOrdinal = -1;
 	int _activeSegmentIndex = -1;

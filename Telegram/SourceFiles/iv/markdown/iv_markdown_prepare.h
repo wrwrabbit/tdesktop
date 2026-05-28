@@ -253,6 +253,7 @@ struct PreparedBlock {
 	bool tight = false;
 	bool supplementary = false;
 	bool pullquote = false;
+	bool forceTextSegment = false;
 };
 
 struct PreparedRenderDocument {

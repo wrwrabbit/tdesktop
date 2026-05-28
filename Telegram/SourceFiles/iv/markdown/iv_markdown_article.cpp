@@ -119,6 +119,14 @@ void RestoreRelatedArticleImageStates(
 	}
 }
 
+[[nodiscard]] bool IsDisplayMathSegment(const SelectableSegment &segment) {
+	return (segment.kind == SelectableSegmentKind::DisplayMath);
+}
+
+[[nodiscard]] bool IsEditableSegment(const SelectableSegment &segment) {
+	return segment.isTextLeaf() || IsDisplayMathSegment(segment);
+}
+
 void CollectPlaceholderIds(
 		const std::vector<LaidOutBlock> &blocks,
 		std::unordered_set<uint64> *result) {
@@ -747,17 +755,32 @@ public:
 
 	[[nodiscard]] bool segmentIsText(int index) const;
 
+	[[nodiscard]] bool segmentIsDisplayMath(int index) const;
+
+	[[nodiscard]] bool segmentIsEditable(int index) const;
+
 	[[nodiscard]] int segmentLength(int index) const;
 
 	[[nodiscard]] int firstTextSegmentIndex() const;
+
+	[[nodiscard]] int firstEditableSegmentIndex() const;
 
 	[[nodiscard]] int textLeafIndexForSegment(int segmentIndex) const;
 
 	[[nodiscard]] int segmentIndexForTextLeafIndex(int textLeafIndex) const;
 
+	[[nodiscard]] int editableIndexForSegment(int segmentIndex) const;
+
+	[[nodiscard]] int segmentIndexForEditableIndex(int editableIndex) const;
+
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
 
+	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
+
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
+		int segmentIndex) const;
+
+	[[nodiscard]] MarkdownArticleTextLeafStyle editableStyleForSegment(
 		int segmentIndex) const;
 
 	[[nodiscard]] int selectionOffsetFromHit(
@@ -1087,6 +1110,16 @@ bool MarkdownArticle::Impl::segmentIsText(int index) const {
 	return segment && segment->isTextLeaf();
 }
 
+bool MarkdownArticle::Impl::segmentIsDisplayMath(int index) const {
+	const auto segment = FindSegment(&_segments, index);
+	return segment && IsDisplayMathSegment(*segment);
+}
+
+bool MarkdownArticle::Impl::segmentIsEditable(int index) const {
+	const auto segment = FindSegment(&_segments, index);
+	return segment && IsEditableSegment(*segment);
+}
+
 int MarkdownArticle::Impl::segmentLength(int index) const {
 	const auto segment = FindSegment(&_segments, index);
 	return segment ? SegmentLength(*segment) : 0;
@@ -1095,6 +1128,15 @@ int MarkdownArticle::Impl::segmentLength(int index) const {
 int MarkdownArticle::Impl::firstTextSegmentIndex() const {
 	for (const auto &segment : _segments) {
 		if (segment.isTextLeaf()) {
+			return segment.index;
+		}
+	}
+	return -1;
+}
+
+int MarkdownArticle::Impl::firstEditableSegmentIndex() const {
+	for (const auto &segment : _segments) {
+		if (IsEditableSegment(segment)) {
 			return segment.index;
 		}
 	}
@@ -1131,9 +1173,54 @@ int MarkdownArticle::Impl::segmentIndexForTextLeafIndex(
 	return -1;
 }
 
+int MarkdownArticle::Impl::editableIndexForSegment(int segmentIndex) const {
+	auto editableIndex = 0;
+	for (const auto &segment : _segments) {
+		if (!IsEditableSegment(segment)) {
+			continue;
+		} else if (segment.index == segmentIndex) {
+			return editableIndex;
+		}
+		++editableIndex;
+	}
+	return -1;
+}
+
+int MarkdownArticle::Impl::segmentIndexForEditableIndex(
+		int editableIndex) const {
+	if (editableIndex < 0) {
+		return -1;
+	}
+	auto current = 0;
+	for (const auto &segment : _segments) {
+		if (!IsEditableSegment(segment)) {
+			continue;
+		} else if (current == editableIndex) {
+			return segment.index;
+		}
+		++current;
+	}
+	return -1;
+}
+
 QRect MarkdownArticle::Impl::textSegmentRect(int segmentIndex) const {
 	const auto segment = FindSegment(&_segments, segmentIndex);
 	return (segment && segment->isTextLeaf()) ? segment->textRect : QRect();
+}
+
+QRect MarkdownArticle::Impl::segmentRect(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment) {
+		return QRect();
+	} else if (segment->isTextLeaf()) {
+		return segment->textRect;
+	} else if (IsDisplayMathSegment(*segment)) {
+		if (!segment->outerRect.isEmpty()) {
+			return segment->outerRect;
+		}
+		return segment->block ? segment->block->formulaRect : QRect();
+	}
+	return QRect();
 }
 
 MarkdownArticleTextLeafStyle MarkdownArticle::Impl::textLeafStyleForSegment(
@@ -1148,6 +1235,26 @@ MarkdownArticleTextLeafStyle MarkdownArticle::Impl::textLeafStyleForSegment(
 		.textStyle = &textStyle,
 		.textColor = TextColorForSegment(*segment, st),
 		.lineHeight = TextLineHeight(textStyle),
+		.align = segment->align,
+		.italic = segment->block && segment->block->pullquote,
+	};
+}
+
+MarkdownArticleTextLeafStyle MarkdownArticle::Impl::editableStyleForSegment(
+		int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment) {
+		return {};
+	} else if (segment->isTextLeaf()) {
+		return textLeafStyleForSegment(segmentIndex);
+	} else if (!IsDisplayMathSegment(*segment)) {
+		return {};
+	}
+	const auto &st = layoutStyle();
+	return {
+		.textStyle = &st.displayMath.fallbackStyle,
+		.textColor = st.displayMath.fg,
+		.lineHeight = TextLineHeight(st.displayMath.fallbackStyle),
 		.align = segment->align,
 	};
 }
@@ -1788,12 +1895,24 @@ bool MarkdownArticle::segmentIsText(int index) const {
 	return _impl->segmentIsText(index);
 }
 
+bool MarkdownArticle::segmentIsDisplayMath(int index) const {
+	return _impl->segmentIsDisplayMath(index);
+}
+
+bool MarkdownArticle::segmentIsEditable(int index) const {
+	return _impl->segmentIsEditable(index);
+}
+
 int MarkdownArticle::segmentLength(int index) const {
 	return _impl->segmentLength(index);
 }
 
 int MarkdownArticle::firstTextSegmentIndex() const {
 	return _impl->firstTextSegmentIndex();
+}
+
+int MarkdownArticle::firstEditableSegmentIndex() const {
+	return _impl->firstEditableSegmentIndex();
 }
 
 int MarkdownArticle::textLeafIndexForSegment(int segmentIndex) const {
@@ -1804,13 +1923,30 @@ int MarkdownArticle::segmentIndexForTextLeafIndex(int textLeafIndex) const {
 	return _impl->segmentIndexForTextLeafIndex(textLeafIndex);
 }
 
+int MarkdownArticle::editableIndexForSegment(int segmentIndex) const {
+	return _impl->editableIndexForSegment(segmentIndex);
+}
+
+int MarkdownArticle::segmentIndexForEditableIndex(int editableIndex) const {
+	return _impl->segmentIndexForEditableIndex(editableIndex);
+}
+
 QRect MarkdownArticle::textSegmentRect(int segmentIndex) const {
 	return _impl->textSegmentRect(segmentIndex);
+}
+
+QRect MarkdownArticle::segmentRect(int segmentIndex) const {
+	return _impl->segmentRect(segmentIndex);
 }
 
 MarkdownArticleTextLeafStyle MarkdownArticle::textLeafStyleForSegment(
 		int segmentIndex) const {
 	return _impl->textLeafStyleForSegment(segmentIndex);
+}
+
+MarkdownArticleTextLeafStyle MarkdownArticle::editableStyleForSegment(
+		int segmentIndex) const {
+	return _impl->editableStyleForSegment(segmentIndex);
 }
 
 int MarkdownArticle::selectionOffsetFromHit(

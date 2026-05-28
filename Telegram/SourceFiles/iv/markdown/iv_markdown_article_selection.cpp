@@ -405,13 +405,14 @@ void CollectSelectableSegments(
 			segment.kind = SelectableSegmentKind::DisplayMath;
 			segment.block = &block;
 			segment.outerRect = block.visibleFormulaRect;
+			segment.align = block.formulaAlign;
 			segment.length = 1;
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
 		} break;
 		case PreparedBlockKind::Table: {
-			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+			if (!block.textRect.isEmpty()) {
 				auto textSegment = SelectableSegment();
 				textSegment.kind = SelectableSegmentKind::TextLeaf;
 				textSegment.leaf = &block.leaf;
@@ -477,7 +478,7 @@ void CollectSelectableSegments(
 			block.segmentIndex = AddSelectableSegment(
 				segments,
 				std::move(segment));
-			if (!block.textRect.isEmpty() && !block.leaf.isEmpty()) {
+			if (!block.textRect.isEmpty()) {
 				auto textSegment = SelectableSegment();
 				textSegment.kind = SelectableSegmentKind::TextLeaf;
 				textSegment.leaf = &block.leaf;

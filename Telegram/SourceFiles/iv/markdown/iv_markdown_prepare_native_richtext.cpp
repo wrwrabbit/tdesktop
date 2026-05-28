@@ -292,6 +292,35 @@ void AppendCanonicalNativeIvRichText(
 		state);
 }
 
+[[nodiscard]] bool PrepareNativeIvCanonicalPlaceholderBlock(
+		QString label,
+		const Iv::RichPage::RichText &caption,
+		QString anchorId,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto prepared = PreparedIvRichText();
+	if (!PrepareNativeIvCaption(caption, &prepared, &anchorId, state)) {
+		return state->result.failure.failed()
+			? false
+			: PrepareNativeIvPlainPlaceholderBlock(std::move(label), result);
+	}
+	SortPreparedIvRichText(&prepared);
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Placeholder;
+	block.text = std::move(prepared.text);
+	block.links = std::move(prepared.links);
+	block.anchorId = std::move(anchorId);
+	block.anchorIds = std::move(prepared.anchorIds);
+	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	block.placeholder.label = std::move(label);
+	block.placeholder.copyText = block.text.text.isEmpty()
+		? block.placeholder.label
+		: (block.placeholder.label + u"\n"_q + block.text.text);
+	result->push_back(std::move(block));
+	return true;
+}
+
 } // namespace
 
 bool PrepareNativeIvRichText(
@@ -351,7 +380,14 @@ bool PrepareNativeIvPhotoBlock(
 	if (!CanonicalPhotoId(data)
 		|| CanonicalWidth(data) <= 0
 		|| CanonicalHeight(data) <= 0) {
-		return true;
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Photo"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -366,6 +402,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
 	block.photo.id = GeneratePreparedMediaBlockId(state);
 	block.photo.photoId = CanonicalPhotoId(data);
 	block.photo.width = CanonicalWidth(data);
@@ -384,7 +421,14 @@ bool PrepareNativeIvVideoBlock(
 	if (!CanonicalDocumentId(data)
 		|| CanonicalWidth(data) <= 0
 		|| CanonicalHeight(data) <= 0) {
-		return true;
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Video"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -399,6 +443,7 @@ bool PrepareNativeIvVideoBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
 	block.video.id = GeneratePreparedMediaBlockId(state);
 	block.video.media.kind = PreparedMediaItemKind::Document;
 	block.video.media.id = CanonicalDocumentId(data);
@@ -414,7 +459,14 @@ bool PrepareNativeIvAudioBlock(
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	if (!CanonicalDocumentId(data)) {
-		return true;
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Audio"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -429,6 +481,7 @@ bool PrepareNativeIvAudioBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
 	block.audio.id = GeneratePreparedMediaBlockId(state);
 	block.audio.documentId = CanonicalDocumentId(data);
 	block.audio.title = data.audioTitle;
@@ -444,7 +497,14 @@ bool PrepareNativeIvMapBlock(
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	if (!data.accessHash || data.width <= 0 || data.height <= 0) {
-		return true;
+		return state->editMode
+			? PrepareNativeIvCanonicalPlaceholderBlock(
+				u"Map"_q,
+				data.caption,
+				data.anchorId,
+				result,
+				state)
+			: true;
 	}
 	auto caption = PreparedIvRichText();
 	auto anchorId = QString();
@@ -459,6 +519,7 @@ bool PrepareNativeIvMapBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(caption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
 	block.map.id = GeneratePreparedMediaBlockId(state);
 	block.map.latitude = data.latitude;
 	block.map.longitude = data.longitude;

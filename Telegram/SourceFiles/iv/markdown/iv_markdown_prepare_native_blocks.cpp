@@ -144,47 +144,6 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return block;
 }
 
-[[nodiscard]] bool PrepareNativeIvMathBlock(
-		const MTPDpageBlockMath &data,
-		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
-	const auto source = qs(data.vsource());
-	if (source.trimmed().isEmpty()) {
-		return true;
-	}
-	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::DisplayMath;
-	block.formulaTex = source;
-	block.mathKind = MathKind::Display;
-	block.formulaIndex = state->rememberFormula(block);
-	result->push_back(std::move(block));
-	return true;
-}
-
-[[nodiscard]] bool AppendNativeIvFlowBlock(
-		std::vector<PreparedBlock> *result,
-		PreparedBlockKind kind,
-		int headingLevel,
-		const MTPRichText &text,
-		NativeIvPrepareState *state,
-		bool allowEmpty = false) {
-	auto prepared = PreparedIvRichText();
-	auto anchorId = QString();
-	const auto context = NativeIvRichTextContextForTextSize(
-		NativeIvFlowTextSize(kind, headingLevel, state->dimensions),
-		state->dimensions);
-	if (!PrepareNativeIvRichText(text, &prepared, &anchorId, state, context)) {
-		return false;
-	}
-	return AppendPreparedIvRichBlock(
-		result,
-		kind,
-		headingLevel,
-		std::move(prepared),
-		std::move(anchorId),
-		allowEmpty || state->editMode);
-}
-
 void WrapPreparedIvRichTextItalic(PreparedIvRichText *prepared) {
 	if (!prepared || prepared->text.text.isEmpty()) {
 		return;
@@ -217,6 +176,7 @@ bool AppendPreparedQuoteParagraph(
 	}
 	if (pullquote && (result->size() > count)) {
 		result->back().flowAlignment = TableAlignment::Center;
+		result->back().pullquote = true;
 	}
 	return true;
 }
@@ -513,10 +473,20 @@ void MarkNativeIvTableSlots(
 			state->editMode)) {
 		return false;
 	}
+	if (!data.blocks.empty()
+		&& !PrepareNativeIvBlocks(
+			RichPage{
+				.blocks = data.blocks,
+			},
+			&block.children,
+			state)) {
+		return false;
+	}
 	if (block.children.empty()) {
 		block.children.push_back(EmptyParagraphBlock());
 		if (data.pullquote) {
 			block.children.back().flowAlignment = TableAlignment::Center;
+			block.children.back().pullquote = true;
 		}
 	}
 	result->push_back(std::move(block));
@@ -578,7 +548,9 @@ void MarkNativeIvTableSlots(
 					state->editMode)) {
 				return false;
 			}
-		} else if (!PrepareNativeIvBlocks(
+		}
+		if (!item.blocks.empty()
+			&& !PrepareNativeIvBlocks(
 				RichPage{
 					.blocks = item.blocks,
 				},
@@ -767,7 +739,7 @@ void MarkNativeIvTableSlots(
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = std::move(anchorId);
-	block.collapsed = !data.open;
+	block.collapsed = state->editMode ? false : !data.open;
 	block.text = std::move(summary.text);
 	block.links = std::move(summary.links);
 	block.anchorIds = std::move(summary.anchorIds);

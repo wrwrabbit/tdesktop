@@ -157,6 +157,7 @@ struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {
 	PaintSelectionState selectionState;
 	MarkdownArticleRevealPaintState *reveal = nullptr;
 	int hiddenTextSegmentIndex = -1;
+	int hiddenSegmentIndex = -1;
 	bool debugBlockGeometry = false;
 
 	[[nodiscard]] MarkdownArticlePaintContext translated(int x, int y) const {
@@ -192,6 +193,7 @@ struct MarkdownArticleTextLeafStyle {
 	style::color textColor;
 	int lineHeight = 0;
 	style::align align = style::al_left;
+	bool italic = false;
 
 	[[nodiscard]] bool valid() const {
 		return textStyle && textColor;
@@ -237,12 +239,20 @@ public:
 		const QString &anchorId);
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] bool segmentIsText(int index) const;
+	[[nodiscard]] bool segmentIsDisplayMath(int index) const;
+	[[nodiscard]] bool segmentIsEditable(int index) const;
 	[[nodiscard]] int segmentLength(int index) const;
 	[[nodiscard]] int firstTextSegmentIndex() const;
+	[[nodiscard]] int firstEditableSegmentIndex() const;
 	[[nodiscard]] int textLeafIndexForSegment(int segmentIndex) const;
 	[[nodiscard]] int segmentIndexForTextLeafIndex(int textLeafIndex) const;
+	[[nodiscard]] int editableIndexForSegment(int segmentIndex) const;
+	[[nodiscard]] int segmentIndexForEditableIndex(int editableIndex) const;
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
+		int segmentIndex) const;
+	[[nodiscard]] MarkdownArticleTextLeafStyle editableStyleForSegment(
 		int segmentIndex) const;
 	[[nodiscard]] int selectionOffsetFromHit(
 		const MarkdownArticleHitTestResult &result,

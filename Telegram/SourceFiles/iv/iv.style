@@ -79,11 +79,30 @@ ivWrongLayoutLink: LinkButton(defaultLinkButton) {
 	overColor: windowSubTextFg;
 	padding: margins(5px, 5px, 5px, 5px);
 }
-ivEditorBodyPadding: margins(0px, 0px, 0px, 0px);
-ivEditorToolbarPadding: margins(12px, 24px, 12px, 24px);
-ivEditorToolbarButtonsSkip: 8px;
-ivEditorToolbarButtonMinWidth: 132px;
-ivEditorToolbarButtonHeight: 42px;
+ivEditorBodyPadding: margins(0px, 8px, 0px, 8px);
+ivEditorToolbarPadding: margins(8px, defaultVerticalListSkip, 8px, defaultVerticalListSkip);
+ivEditorToolbarButtonSize: 36px;
+ivEditorToolbarButton: IconButton(defaultIconButton) {
+	width: ivEditorToolbarButtonSize;
+	height: ivEditorToolbarButtonSize;
+	iconPosition: point(-1px, -1px);
+	rippleAreaPosition: point(0px, 0px);
+	rippleAreaSize: ivEditorToolbarButtonSize;
+	ripple: defaultRippleAnimationBgOver;
+}
+ivEditorToolbarButtonSkip: 6px;
+ivEditorToolbarRowSkip: 0px;
+ivEditorToolbarHeadingIcon: icon {{ "menu/rich/heading-24x24", menuIconColor }};
+ivEditorToolbarBlockquoteIcon: icon {{ "menu/rich/blockquote-24x24", menuIconColor }};
+ivEditorToolbarMathIcon: icon {{ "menu/rich/math-24x24", menuIconColor }};
+ivEditorToolbarDividerIcon: icon {{ "menu/rich/divider-24x24", menuIconColor }};
+ivEditorToolbarOrderedListIcon: icon {{ "menu/rich/ordered_list-24x24", menuIconColor }};
+ivEditorToolbarBulletListIcon: icon {{ "menu/rich/bullet_list-24x24", menuIconColor }};
+ivEditorToolbarTaskListIcon: icon {{ "menu/rich/task_list-24x24", menuIconColor }};
+ivEditorToolbarPullquoteIcon: icon {{ "menu/rich/pullquote-24x24", menuIconColor }};
+ivEditorToolbarAttachIcon: icon {{ "chat/input_attach", menuIconColor }};
+ivEditorToolbarDetailsIcon: icon {{ "menu/rich/details-24x24", menuIconColor }};
+ivEditorToolbarTableIcon: icon {{ "menu/rich/table-24x24", menuIconColor }};
 ivEditorInlineFieldMargins: margins(4px, 0px, 6px, 0px);
 ivEditorMinHeight: boxWidth;
 ivEditorInputField: InputField(defaultInputField) {

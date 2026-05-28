@@ -687,7 +687,8 @@ void PaintSelectableTextLeaf(
 		std::optional<TextSelection> selection = std::nullopt,
 		int elisionLines = 0) {
 	if ((segmentIndex >= 0)
-		&& (context.hiddenTextSegmentIndex == segmentIndex)) {
+		&& ((context.hiddenTextSegmentIndex == segmentIndex)
+			|| (context.hiddenSegmentIndex == segmentIndex))) {
 		if (context.reveal && !elisionLines) {
 			context.reveal->nextLine += CountTextRevealLines(leaf, rect, width);
 		}
@@ -1362,6 +1363,10 @@ void PaintDisplayMathBlock(
 		context,
 		block.visibleFormulaRect,
 		[&](Painter &p, const MarkdownArticlePaintContext &formulaContext) {
+			if (block.segmentIndex >= 0
+				&& (formulaContext.hiddenSegmentIndex == block.segmentIndex)) {
+				return;
+			}
 			const auto &paintSt = PaintStyle(formulaContext, st);
 			const auto formula = PreparedFormulaFor(formulas, block.formulaIndex);
 			p.setPen(paintSt.textColor->c);
