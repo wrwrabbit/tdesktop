@@ -1948,8 +1948,6 @@ Section DetailsFiller::makePersonalChannel(not_null<UserData*> user) {
 			messageChannelWrap->toggle(false, anim::type::instant);
 			clear();
 
-			Ui::AddSkip(messageChannelWrap->entity());
-
 			const auto inner = messageChannelWrap->entity()->add(
 				object_ptr<Ui::VerticalLayout>(messageChannelWrap->entity()));
 
@@ -2119,7 +2117,6 @@ Section DetailsFiller::makePersonalChannel(not_null<UserData*> user) {
 				button->setAccessibleName(tr::lng_profile_view_channel(tr::now));
 			}
 			inner->setAttribute(Qt::WA_TransparentForMouseEvents);
-			Ui::AddSkip(messageChannelWrap->entity());
 
 			Ui::ToggleChildrenVisibility(messageChannelWrap->entity(), true);
 			Ui::ToggleChildrenVisibility(line, true);
