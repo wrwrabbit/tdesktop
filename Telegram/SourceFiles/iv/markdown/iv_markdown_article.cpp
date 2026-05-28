@@ -757,6 +757,9 @@ public:
 
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
 
+	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
+		int segmentIndex) const;
+
 	[[nodiscard]] int selectionOffsetFromHit(
 		const MarkdownArticleHitTestResult &result,
 		TextSelectType selectionType) const;
@@ -1131,6 +1134,22 @@ int MarkdownArticle::Impl::segmentIndexForTextLeafIndex(
 QRect MarkdownArticle::Impl::textSegmentRect(int segmentIndex) const {
 	const auto segment = FindSegment(&_segments, segmentIndex);
 	return (segment && segment->isTextLeaf()) ? segment->textRect : QRect();
+}
+
+MarkdownArticleTextLeafStyle MarkdownArticle::Impl::textLeafStyleForSegment(
+		int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment || !segment->isTextLeaf()) {
+		return {};
+	}
+	const auto &st = layoutStyle();
+	const auto &textStyle = TextStyleForSegment(*segment, st);
+	return {
+		.textStyle = &textStyle,
+		.textColor = TextColorForSegment(*segment, st),
+		.lineHeight = TextLineHeight(textStyle),
+		.align = segment->align,
+	};
 }
 
 int MarkdownArticle::Impl::selectionOffsetFromHit(
@@ -1787,6 +1806,11 @@ int MarkdownArticle::segmentIndexForTextLeafIndex(int textLeafIndex) const {
 
 QRect MarkdownArticle::textSegmentRect(int segmentIndex) const {
 	return _impl->textSegmentRect(segmentIndex);
+}
+
+MarkdownArticleTextLeafStyle MarkdownArticle::textLeafStyleForSegment(
+		int segmentIndex) const {
+	return _impl->textLeafStyleForSegment(segmentIndex);
 }
 
 int MarkdownArticle::selectionOffsetFromHit(

@@ -10,19 +10,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "iv/iv_editor_state.h"
 #include "iv/markdown/iv_markdown_article.h"
+#include "ui/style/style_core_types.h"
 #include "ui/rp_widget.h"
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace Ui {
 class ChatStyle;
 class ChatTheme;
 class InputField;
-namespace Text {
-struct QuotePaintCache;
-} // namespace Text
 } // namespace Ui
+
+namespace style {
+struct InputField;
+} // namespace style
 
 class PeerData;
 
@@ -59,10 +62,56 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
+	struct InlineFieldStyleData {
+		const style::TextStyle *textStyle = nullptr;
+		int lineHeight = 0;
+		style::color textFg;
+		style::align align = style::al_left;
+	};
+
+	struct InlineFieldStyleKey {
+		style::font font;
+		int lineHeight = 0;
+		style::color textFg;
+		style::align align = style::al_left;
+
+		friend inline bool operator==(
+				const InlineFieldStyleKey &a,
+				const InlineFieldStyleKey &b) {
+			return (a.font == b.font)
+				&& (a.lineHeight == b.lineHeight)
+				&& (a.textFg == b.textFg)
+				&& (a.align == b.align);
+		}
+
+		friend inline bool operator!=(
+				const InlineFieldStyleKey &a,
+				const InlineFieldStyleKey &b) {
+			return !(a == b);
+		}
+	};
+
+	struct CachedInlineFieldStyle {
+		InlineFieldStyleKey key;
+		std::shared_ptr<style::InputField> style;
+	};
+
 	void setDocument(const Markdown::MarkdownArticleContent &prepared);
 	void activateTextOrdinal(int ordinal, int cursorOffset);
 	void activateTextOrdinal(int ordinal, int selectionFrom, int selectionTo);
-	void activateSegmentSelection(int segmentIndex, TextSelection selection);
+	[[nodiscard]] Markdown::MarkdownArticleTextLeafStyle
+	inlineFieldStyleForSegment(int segmentIndex) const;
+	[[nodiscard]] const CachedInlineFieldStyle &inlineFieldStyleFor(
+		const Markdown::MarkdownArticleTextLeafStyle &style);
+	[[nodiscard]] const CachedInlineFieldStyle &inlineFieldStyleFor(
+		const InlineFieldStyleData &data);
+	[[nodiscard]] InlineFieldStyleData normalizedInlineFieldStyle(
+		const Markdown::MarkdownArticleTextLeafStyle &style) const;
+	[[nodiscard]] InlineFieldStyleKey inlineFieldStyleKey(
+		const InlineFieldStyleData &data) const;
+	void ensureInlineFieldStyleForSegment(int segmentIndex);
+	void setupInlineField();
+	void recreateInlineField(const style::InputField &st);
 	void activateTrailingParagraph();
 	void applyFieldTextToState();
 	void acceptInlineField();
@@ -78,8 +127,6 @@ private:
 	[[nodiscard]] QRect outerTextSegmentRect(int segmentIndex) const;
 	[[nodiscard]] Markdown::MarkdownArticlePaintContext textPaintContext(
 		QRect clip);
-	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
-	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 
 	const not_null<Window::SessionController*> _controller;
 	const not_null<PeerData*> _peer;
@@ -89,8 +136,8 @@ private:
 	std::unique_ptr<Ui::ChatTheme> _theme;
 	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
-	std::unique_ptr<Ui::Text::QuotePaintCache> _prePaintCache;
-	std::unique_ptr<Ui::Text::QuotePaintCache> _blockquotePaintCache;
+	std::vector<CachedInlineFieldStyle> _fieldStyles;
+	std::optional<InlineFieldStyleKey> _activeFieldStyleKey;
 	int _articleHeight = 0;
 	int _activeOrdinal = -1;
 	int _activeSegmentIndex = -1;
@@ -101,6 +148,7 @@ private:
 	int _dragSegment = -1;
 	int _dragOffset = 0;
 	bool _settingField = false;
+	bool _trackingPointerPress = false;
 	bool _syncingInlineFieldGeometry = false;
 	bool _pendingHeightOverrideUpdate = false;
 	bool _selectingText = false;

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_selection.h"
 #include "lang/lang_keys.h"
 
+#include "styles/style_iv.h"
+
 #include <algorithm>
 
 namespace Iv::Markdown {
@@ -322,6 +324,34 @@ struct TableCopySlot {
 	return (from < to);
 }
 
+[[nodiscard]] const style::TextStyle &HeadingTextStyle(
+		int level,
+		const style::Markdown &st) {
+	switch (std::clamp(level, 1, 6)) {
+	case 1: return st.heading1;
+	case 2: return st.heading2;
+	case 3: return st.heading3;
+	case 4: return st.heading4;
+	case 5: return st.heading5;
+	case 6: return st.heading6;
+	}
+	return st.heading6;
+}
+
+[[nodiscard]] bool IsEmbedPostAuthorSegment(
+		const SelectableSegment &segment) {
+	return segment.block
+		&& (segment.block->kind == PreparedBlockKind::EmbedPost)
+		&& (segment.leaf == &segment.block->labelLeaf);
+}
+
+[[nodiscard]] bool IsEmbedPostDateSegment(
+		const SelectableSegment &segment) {
+	return segment.block
+		&& (segment.block->kind == PreparedBlockKind::EmbedPost)
+		&& (segment.leaf == &segment.block->subtitleLeaf);
+}
+
 } // namespace
 
 void CollectSelectableSegments(
@@ -555,6 +585,50 @@ const SelectableSegment *FindSegment(
 
 int SegmentLength(const SelectableSegment &segment) {
 	return std::max(segment.length, 0);
+}
+
+const style::TextStyle &TextStyleForSegment(
+		const SelectableSegment &segment,
+		const style::Markdown &st) {
+	if (segment.cell) {
+		return segment.cell->header
+			? st.table.headerStyle
+			: st.table.bodyStyle;
+	} else if (IsEmbedPostAuthorSegment(segment)) {
+		return st.embedPost.authorStyle;
+	} else if (IsEmbedPostDateSegment(segment)) {
+		return st.embedPost.dateStyle;
+	} else if (segment.kind == SelectableSegmentKind::CodeBlock) {
+		return st.code;
+	} else if (!segment.block) {
+		return st.body;
+	}
+	switch (segment.block->kind) {
+	case PreparedBlockKind::Details:
+		return st.details.summaryStyle;
+	case PreparedBlockKind::CodeBlock:
+		return st.code;
+	case PreparedBlockKind::Heading:
+		return HeadingTextStyle(segment.block->headingLevel, st);
+	default:
+		return st.body;
+	}
+}
+
+style::color TextColorForSegment(
+		const SelectableSegment &segment,
+		const style::Markdown &st) {
+	if (IsEmbedPostAuthorSegment(segment)) {
+		return st.embedPost.authorFg;
+	} else if (IsEmbedPostDateSegment(segment)) {
+		return st.embedPost.dateFg;
+	} else if (segment.block
+		&& (segment.block->kind == PreparedBlockKind::Thinking)) {
+		return st.supplementaryTextColor;
+	} else if (segment.block && segment.block->supplementary) {
+		return st.supplementaryTextColor;
+	}
+	return st.textColor;
 }
 
 bool TableSegmentSelected(

@@ -64,6 +64,12 @@ void CollectAnchors(
 	const std::vector<SelectableSegment> *segments,
 	int index);
 [[nodiscard]] int SegmentLength(const SelectableSegment &segment);
+[[nodiscard]] const style::TextStyle &TextStyleForSegment(
+	const SelectableSegment &segment,
+	const style::Markdown &st);
+[[nodiscard]] style::color TextColorForSegment(
+	const SelectableSegment &segment,
+	const style::Markdown &st);
 [[nodiscard]] std::optional<TextSelection> TextSelectionForSegment(
 	const SelectableSegment &segment,
 	const PaintSelectionState &selectionState);

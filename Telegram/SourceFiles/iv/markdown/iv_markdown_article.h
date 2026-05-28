@@ -13,11 +13,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
-#include "ui/click_handler.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/effects/ripple_animation.h"
-#include "ui/painter.h"
+#include "ui/style/style_core_types.h"
 #include "ui/text/text.h"
+#include "ui/click_handler.h"
+#include "ui/painter.h"
 
 #include <memory>
 #include <optional>
@@ -26,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace style {
 struct Markdown;
+struct TextStyle;
 } // namespace style
 
 namespace Ui {
@@ -185,6 +187,17 @@ struct MarkdownArticleHitTestResult {
 	}
 };
 
+struct MarkdownArticleTextLeafStyle {
+	const style::TextStyle *textStyle = nullptr;
+	style::color textColor;
+	int lineHeight = 0;
+	style::align align = style::al_left;
+
+	[[nodiscard]] bool valid() const {
+		return textStyle && textColor;
+	}
+};
+
 struct MarkdownArticleAnchorExpansion {
 	bool found = false;
 	bool changed = false;
@@ -229,6 +242,8 @@ public:
 	[[nodiscard]] int textLeafIndexForSegment(int segmentIndex) const;
 	[[nodiscard]] int segmentIndexForTextLeafIndex(int textLeafIndex) const;
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
+	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
+		int segmentIndex) const;
 	[[nodiscard]] int selectionOffsetFromHit(
 		const MarkdownArticleHitTestResult &result,
 		TextSelectType selectionType) const;
