@@ -189,6 +189,7 @@ private:
 	[[nodiscard]] QByteArray block(const MTPDpageBlockAnchor &data);
 	[[nodiscard]] QByteArray block(const MTPDpageBlockList &data);
 	[[nodiscard]] QByteArray block(const MTPDpageBlockBlockquote &data);
+	[[nodiscard]] QByteArray block(const MTPDpageBlockBlockquoteBlocks &data);
 	[[nodiscard]] QByteArray block(const MTPDpageBlockPullquote &data);
 	[[nodiscard]] QByteArray block(
 		const MTPDpageBlockPhoto &data,
@@ -559,6 +560,20 @@ QByteArray Parser::block(const MTPDpageBlockBlockquote &data) {
 	return tag("blockquote", {
 		{ "dir", "auto" }
 	}, rich(data.vtext()) + cite);
+}
+
+QByteArray Parser::block(const MTPDpageBlockBlockquoteBlocks &data) {
+	const auto caption = rich(data.vcaption());
+	const auto cite = [&] {
+		if (caption.isEmpty()) {
+			return QByteArray();
+		} else {
+			return tag("cite", { { "dir", "auto" } }, caption);
+		}
+	}();
+	return tag("blockquote", {
+		{ "dir", "auto" }
+	}, list(data.vblocks()) + cite);
 }
 
 QByteArray Parser::block(const MTPDpageBlockPullquote &data) {

@@ -626,6 +626,12 @@ void AppendBlock(
 		parsed.caption = ParseRichText(data.vcaption(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
+	}, [&](const MTPDpageBlockBlockquoteBlocks &data) {
+		auto parsed = MakeBlock(BlockKind::Quote);
+		AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		parsed.caption = ParseRichText(data.vcaption(), context);
+		AdoptAnchor(&parsed.anchorId, &parsed.caption);
+		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockPullquote &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
 		parsed.pullquote = true;
@@ -1052,6 +1058,7 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	}
 	case BlockKind::Quote:
 		AppendSummaryLine(result, block.text);
+		AppendSummaryBlocks(result, block.blocks);
 		AppendSummaryLine(result, block.caption);
 		return;
 	case BlockKind::Photo:

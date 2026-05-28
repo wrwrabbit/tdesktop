@@ -1154,6 +1154,35 @@ bool AppendPreparedQuoteParagraph(
 	return true;
 }
 
+[[nodiscard]] bool PrepareNativeIvQuoteBlock(
+		const QVector<MTPPageBlock> &blocks,
+		const MTPRichText &caption,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::Quote;
+	block.pullquote = false;
+	if (!PrepareNativeIvBlocks(blocks, &block.children, state)) {
+		return false;
+	}
+	auto cite = PreparedIvRichText();
+	if (!PrepareNativeIvRichText(caption, &cite, &block.anchorId, state)) {
+		return false;
+	}
+	if (!AppendPreparedQuoteParagraph(
+			&block.children,
+			std::move(cite),
+			false,
+			true)) {
+		return false;
+	}
+	if (block.children.empty()) {
+		block.children.push_back(EmptyParagraphBlock());
+	}
+	result->push_back(std::move(block));
+	return true;
+}
+
 [[nodiscard]] TaskState NativeIvTaskState(bool checkbox, bool checked) {
 	if (!checkbox) {
 		return TaskState::None;
@@ -1855,6 +1884,12 @@ void MarkNativeIvTableSlots(
 			false,
 			result,
 			state);
+	}, [&](const MTPDpageBlockBlockquoteBlocks &data) {
+		return PrepareNativeIvQuoteBlock(
+			data.vblocks().v,
+			data.vcaption(),
+			result,
+			state);
 	}, [&](const MTPDpageBlockPullquote &data) {
 		return PrepareNativeIvQuoteBlock(
 			data.vtext(),
@@ -2154,6 +2189,15 @@ namespace {
 			&block.children,
 			std::move(body),
 			data.pullquote)) {
+		return false;
+	}
+	if (!data.blocks.empty()
+		&& !PrepareNativeIvBlocks(
+			RichPage{
+				.blocks = data.blocks,
+			},
+			&block.children,
+			state)) {
 		return false;
 	}
 	auto cite = PreparedIvRichText();
