@@ -74,6 +74,10 @@ private:
 	void createWindow();
 	void createLayerManager();
 	void createPreview();
+	[[nodiscard]] bool updateExistingPreview(
+		MarkdownArticleContent content,
+		OpenOptions options,
+		int scrollTop);
 	void setContent(
 		MarkdownArticleContent content,
 		QString title,

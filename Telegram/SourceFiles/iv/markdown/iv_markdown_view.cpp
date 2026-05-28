@@ -200,14 +200,15 @@ public:
 		QWidget *parent,
 		MarkdownArticleContent content,
 		std::shared_ptr<MathRenderer> renderer,
-	Fn<void(Event)> callback,
-	const OpenOptions &options);
+		Fn<void(Event)> callback,
+		const OpenOptions &options);
 	bool scrollToAnchor(
 		const QString &anchorId,
 		MarkdownPreviewScrollMode mode);
 	void scrollToY(int top, MarkdownPreviewScrollMode mode);
 	[[nodiscard]] int scrollTop() const;
 	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
+	bool updateContent(MarkdownArticleContent prepared, OpenOptions options);
 
 private:
 	struct PendingEmbedState {
@@ -241,7 +242,7 @@ private:
 		int prepareMs,
 		int layoutMs) const;
 
-	const OpenOptions _options;
+	OpenOptions _options;
 	const std::shared_ptr<const PreparedDocument> _document;
 	std::optional<MarkdownArticleContent> _preparedContent;
 	const Fn<void(Event)> _callback;
@@ -452,6 +453,22 @@ void MarkdownPreviewRoot::prepareArticle() {
 		.sourcePath = _options.sourcePath,
 	});
 	applyPreparedContent(std::move(prepared), int(timer.elapsed()));
+}
+
+bool MarkdownPreviewRoot::updateContent(
+		MarkdownArticleContent prepared,
+		OpenOptions options) {
+	_options = std::move(options);
+	if (!_options.initialFragment.isEmpty()) {
+		_pendingFragment = _options.initialFragment;
+	}
+	if (_body) {
+		_body->setClickHandlerContext(
+			CurrentClickHandlerContext(_options),
+			_options.clickHandlerContextRef);
+	}
+	applyPreparedContent(std::move(prepared), 0);
+	return true;
 }
 
 void MarkdownPreviewRoot::activateLink(
@@ -675,6 +692,7 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		startScrollToTopButtonAnimation(false);
 		_scroll->hide();
 		if (_body) {
+			_body->setArticle(nullptr);
 			_body->hide();
 		}
 		if (_wrongLayoutBar) {
@@ -702,15 +720,24 @@ void MarkdownPreviewRoot::applyPreparedContent(
 		return;
 	}
 
-	auto article = std::make_shared<MarkdownArticle>(
-		st::defaultMarkdown,
-		_renderer);
-	article->setContent(std::move(prepared));
-	_article = article;
-	updateChildrenGeometry(size());
-	_body->setArticle(article);
-	if (_options.delegate) {
-		_body->setZoom(_options.delegate->ivZoom());
+	const auto restoreArticle = !_article;
+	if (!_article) {
+		_article = std::make_shared<MarkdownArticle>(
+			st::defaultMarkdown,
+			_renderer);
+	}
+	_article->setContent(std::move(prepared));
+	_body->setClickHandlerContext(
+		CurrentClickHandlerContext(_options),
+		_options.clickHandlerContextRef);
+	if (restoreArticle) {
+		updateChildrenGeometry(size());
+		_body->setArticle(_article);
+		if (_options.delegate) {
+			_body->setZoom(_options.delegate->ivZoom());
+		}
+	} else {
+		_body->articleContentChanged();
 	}
 	_scroll->show();
 	_body->show();
@@ -1042,6 +1069,16 @@ std::unique_ptr<Ui::RpWidget> CreateMarkdownPreviewWidget(
 		std::move(renderer),
 		std::move(callback),
 		options);
+}
+
+bool UpdateMarkdownPreviewWidget(
+		Ui::RpWidget *preview,
+		MarkdownArticleContent content,
+		const OpenOptions &options) {
+	if (const auto root = dynamic_cast<MarkdownPreviewRoot*>(preview)) {
+		return root->updateContent(std::move(content), options);
+	}
+	return false;
 }
 
 } // namespace Iv::Markdown

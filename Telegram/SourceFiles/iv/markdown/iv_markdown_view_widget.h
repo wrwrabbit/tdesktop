@@ -49,6 +49,7 @@ public:
 		QVariant context,
 		std::shared_ptr<QVariant> contextRef = nullptr);
 	void setArticle(std::shared_ptr<MarkdownArticle> article);
+	void articleContentChanged();
 	void setZoom(int value);
 	void refreshPalette();
 	void invalidateRasterCache();

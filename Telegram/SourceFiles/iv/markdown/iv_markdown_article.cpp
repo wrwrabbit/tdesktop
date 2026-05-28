@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_article_selection.h"
 #include "iv/markdown/iv_markdown_article_text.h"
+#include "iv/markdown/iv_markdown_media_reuse.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "ui/style/style_core_color.h"
 #include "ui/style/style_core_scale.h"
@@ -851,7 +852,7 @@ private:
 	int _height = 0;
 	std::vector<LaidOutBlock> _blocks;
 	std::vector<LaidOutBlock> _retainedBlocks;
-	std::unordered_map<uint64, std::shared_ptr<MediaBlock>> _mediaBlocks;
+	MediaBlockStorage _mediaBlocks;
 	std::unordered_map<uint64, std::shared_ptr<PlaceholderBlockRuntime>>
 		_placeholderRuntimes;
 	std::unordered_map<
@@ -902,10 +903,24 @@ void MarkdownArticle::Impl::setTextRepaintCallbacks(
 }
 
 void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
-	clearMediaBlocks();
+	auto reusedMediaBlocks = MediaBlockStorage();
+	const auto reuseMediaBlocks = (_content.mediaRuntime == content.mediaRuntime);
+	if (reuseMediaBlocks) {
+		auto oldMediaBlocks = MediaBlockStorage();
+		oldMediaBlocks.swap(_mediaBlocks);
+		reusedMediaBlocks = ReuseMediaBlocks(
+			_content.blocks.blocks,
+			&oldMediaBlocks,
+			content.blocks.blocks);
+	} else {
+		clearMediaBlocks();
+	}
 	clearPlaceholderRuntimes();
 	_relatedArticleImages.clear();
 	_content = std::move(content);
+	if (reuseMediaBlocks) {
+		_mediaBlocks = std::move(reusedMediaBlocks);
+	}
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 	resetFormulaRasterCache();
 	invalidateLayout();
@@ -1268,12 +1283,7 @@ void MarkdownArticle::Impl::refreshVisibleSegmentSpan() {
 }
 
 void MarkdownArticle::Impl::clearMediaBlocks() {
-	for (const auto &[id, block] : _mediaBlocks) {
-		if (block) {
-			block->setHost(nullptr);
-		}
-	}
-	_mediaBlocks.clear();
+	ClearMediaBlockStorage(&_mediaBlocks);
 }
 
 void MarkdownArticle::Impl::clearPlaceholderRuntimes() {
@@ -1283,6 +1293,7 @@ void MarkdownArticle::Impl::clearPlaceholderRuntimes() {
 void MarkdownArticle::Impl::refreshMediaBlockHosts() {
 	for (const auto &[id, block] : _mediaBlocks) {
 		if (block) {
+			block->setLayoutStyle(layoutStyle());
 			block->setHost(_mediaBlockHost);
 		}
 	}
@@ -1401,10 +1412,15 @@ std::shared_ptr<MediaBlock> MarkdownArticle::Impl::getOrCreateMediaBlock(
 	}
 	if (const auto i = _mediaBlocks.find(id.value);
 		i != end(_mediaBlocks)) {
+		if (i->second) {
+			i->second->setLayoutStyle(layoutStyle());
+			i->second->setHost(_mediaBlockHost);
+		}
 		return i->second;
 	}
 	auto block = factory();
 	if (block) {
+		block->setLayoutStyle(layoutStyle());
 		block->setHost(_mediaBlockHost);
 	}
 	_mediaBlocks.emplace(id.value, block);

@@ -343,7 +343,8 @@ bool WebPageData::applyChanges(
 		&& document == newDocument
 		&& collage.items == newCollage.items
 		&& (!iv == !newIv)
-		&& (!iv || iv->partial() == newIv->partial())
+		&& (!iv || (iv->partial() == newIv->partial()
+			&& iv->hash() == newIv->hash()))
 		&& (!stickerSet == !newStickerSet)
 		&& (!uniqueGift == !newUniqueGift)
 		&& (!auction == !newAuction)

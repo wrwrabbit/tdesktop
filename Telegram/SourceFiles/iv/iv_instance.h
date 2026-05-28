@@ -86,9 +86,21 @@ private:
 		WebPageData *page = nullptr;
 		int32 hash = 0;
 	};
+	struct ProcessReceivedPageResult {
+		WebPageData *page = nullptr;
+		bool articleChanged = false;
+	};
 
 	void processOpenChannel(const QString &context);
 	void processJoinChannel(const QString &context);
+	void showOpenedPage(
+		not_null<Main::Session*> session,
+		not_null<Data*> data,
+		QString hash,
+		bool requestFullOnOpen);
+	void primeFullRequest(
+		not_null<Main::Session*> session,
+		not_null<Data*> data);
 	void requestFull(not_null<Main::Session*> session, const QString &id);
 
 	void trackSession(not_null<Main::Session*> session);
@@ -102,7 +114,7 @@ private:
 	void closeMarkdownsForSession(not_null<Main::Session*> session);
 	void closeSessionDataViews(not_null<Main::Session*> session);
 
-	WebPageData *processReceivedPage(
+	ProcessReceivedPageResult processReceivedPage(
 		not_null<Main::Session*> session,
 		const QString &url,
 		const MTPmessages_WebPage &result);

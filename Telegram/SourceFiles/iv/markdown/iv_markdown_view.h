@@ -29,6 +29,10 @@ namespace Iv::Markdown {
 	std::shared_ptr<MathRenderer> renderer,
 	Fn<void(Event)> callback,
 	const OpenOptions &options = {});
+bool UpdateMarkdownPreviewWidget(
+	Ui::RpWidget *preview,
+	MarkdownArticleContent content,
+	const OpenOptions &options);
 enum class MarkdownPreviewScrollMode {
 	Instant,
 	Animated,

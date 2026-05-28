@@ -51,6 +51,7 @@ Data::Data(
 	const MTPPage &page,
 	std::shared_ptr<const RichPage> richPage)
 : _pageId(webpage.vid().v)
+, _hash(webpage.vhash().v)
 , _url(qs(webpage.vurl()))
 , _name(webpage.vsite_name()
 	? qs(*webpage.vsite_name())
@@ -72,6 +73,14 @@ Data::Data(
 
 QString Data::id() const {
 	return _url;
+}
+
+uint64 Data::pageId() const {
+	return _pageId;
+}
+
+int32 Data::hash() const {
+	return _hash;
 }
 
 bool Data::partial() const {

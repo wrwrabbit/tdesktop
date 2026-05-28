@@ -390,7 +390,7 @@ private:
 		bool refresh);
 	[[nodiscard]] ShareBoxResult shareBox(ShareBoxDescriptor &&descriptor);
 	[[nodiscard]] std::shared_ptr<Markdown::MediaRuntime> createMediaRuntime(
-		not_null<WebPageData*> page) const;
+		not_null<WebPageData*> page);
 	[[nodiscard]] bool activateMarkdownMedia(
 		const Markdown::MediaActivation &activation,
 		Qt::MouseButton button,
@@ -431,6 +431,8 @@ private:
 	QString _id;
 	std::unique_ptr<Controller> _controller;
 	std::unique_ptr<Markdown::Controller> _markdownController;
+	std::shared_ptr<Markdown::MediaRuntime> _markdownMediaRuntime;
+	QString _markdownRuntimeUrl;
 	base::flat_map<DocumentId, FileStream> _streams;
 	base::flat_map<DocumentId, FileLoad> _files;
 	base::flat_map<QByteArray, rpl::producer<bool>> _inChannelValues;
@@ -566,9 +568,14 @@ void Shown::prepare(not_null<Data*> data, const QString &hash) {
 	const auto weak = base::make_weak(this);
 	const auto richPage = data->richPage();
 	const auto sourceFallback = data->sourceFallback();
+	const auto id = data->id();
 
+	if (_markdownRuntimeUrl != id) {
+		_markdownMediaRuntime = nullptr;
+		_markdownRuntimeUrl = QString();
+	}
 	_preparing = true;
-	const auto id = _id = data->id();
+	_id = id;
 	data->prepare({}, [=, richPage = richPage, sourceFallback = sourceFallback](
 			Prepared result) {
 		result.hash = hash;
@@ -883,12 +890,17 @@ void Shown::showMarkdownWindowed(
 }
 
 std::shared_ptr<Markdown::MediaRuntime> Shown::createMediaRuntime(
-		not_null<WebPageData*> page) const {
-	return CreateCachedPageMediaRuntime(
+		not_null<WebPageData*> page) {
+	if (_markdownMediaRuntime && (page->url == _markdownRuntimeUrl)) {
+		return _markdownMediaRuntime;
+	}
+	_markdownRuntimeUrl = page->url;
+	_markdownMediaRuntime = CreateCachedPageMediaRuntime(
 		_session,
 		page,
 		_openChannel,
 		_joinChannel);
+	return _markdownMediaRuntime;
 }
 
 bool Shown::activateMarkdownMedia(
@@ -1365,20 +1377,28 @@ void Instance::show(
 		not_null<Window::SessionController*> controller,
 		not_null<Data*> data,
 		QString hash) {
-	show(controller->uiShow(), data, hash);
+	showOpenedPage(&controller->session(), data, std::move(hash), true);
 }
 
 void Instance::show(
 		std::shared_ptr<Main::SessionShow> show,
 		not_null<Data*> data,
 		QString hash) {
-	this->show(&show->session(), data, hash);
+	showOpenedPage(&show->session(), data, std::move(hash), true);
 }
 
 void Instance::show(
 		not_null<Main::Session*> session,
 		not_null<Data*> data,
 		QString hash) {
+	showOpenedPage(session, data, std::move(hash), true);
+}
+
+void Instance::showOpenedPage(
+		not_null<Main::Session*> session,
+		not_null<Data*> data,
+		QString hash,
+		bool requestFullOnOpen) {
 	if (Platform::IsMac()) {
 		// Otherwise IV is not visible under the media viewer.
 		Core::App().hideMediaView();
@@ -1388,8 +1408,11 @@ void Instance::show(
 		Core::App().saveSettingsDelayed();
 	}
 
+	primeFullRequest(session, data);
 	const auto guard = gsl::finally([&] {
-		requestFull(session, data->id());
+		if (requestFullOnOpen) {
+			requestFull(session, data->id());
+		}
 	});
 	if (_shown && _shownSession == session) {
 		_shown->moveTo(data, hash);
@@ -1487,11 +1510,11 @@ void Instance::show(
 				MTP_string(url),
 				MTP_int(requested.hash)
 			)).done([=](const MTPmessages_WebPage &result) {
-				const auto page = processReceivedPage(session, url, result);
-				if (page && page->iv) {
+				const auto processed = processReceivedPage(session, url, result);
+				if (const auto page = processed.page; page && page->iv) {
 					const auto parts = event.url.split('#');
 					const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
-					this->show(_shownSession, page->iv.get(), hash);
+					this->showOpenedPage(session, page->iv.get(), hash, false);
 				} else {
 					UrlClickHandler::Open(event.url);
 				}
@@ -1528,6 +1551,14 @@ void Instance::show(
 	}, _shown->lifetime());
 
 	trackSession(session);
+}
+
+void Instance::primeFullRequest(
+		not_null<Main::Session*> session,
+		not_null<Data*> data) {
+	auto &requested = _fullRequested[session][data->id()];
+	requested.page = session->data().webpage(data->pageId()).get();
+	requested.hash = data->hash();
 }
 
 void Instance::trackSession(not_null<Main::Session*> session) {
@@ -1676,7 +1707,11 @@ void Instance::openWithIvPreferred(
 		_ivRequestUri = QString();
 		_ivRequestSession = nullptr;
 		_ivCache[session][url] = page;
-		openWithIvPreferred(session, uri, context);
+		if (page && page->iv) {
+			this->showOpenedPage(session, page->iv.get(), hash, false);
+		} else {
+			openExternal();
+		}
 	};
 	_ivRequestSession = session;
 	_ivRequestUri = uri;
@@ -1686,7 +1721,7 @@ void Instance::openWithIvPreferred(
 		MTP_string(url),
 		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		finish(processReceivedPage(session, url, result));
+		finish(processReceivedPage(session, url, result).page);
 	}).fail([=] {
 		finish(nullptr);
 	}).send();
@@ -1920,14 +1955,18 @@ void Instance::requestFull(
 		MTP_string(id),
 		MTP_int(requested.hash)
 	)).done([=](const MTPmessages_WebPage &result) {
-		const auto page = processReceivedPage(session, id, result);
-		if (page && page->iv && _shown && _shownSession == session) {
-			_shown->update(page->iv.get());
+		const auto processed = processReceivedPage(session, id, result);
+		if (processed.articleChanged
+			&& processed.page
+			&& processed.page->iv
+			&& _shown
+			&& _shownSession == session) {
+			_shown->update(processed.page->iv.get());
 		}
 	}).send();
 }
 
-WebPageData *Instance::processReceivedPage(
+Instance::ProcessReceivedPageResult Instance::processReceivedPage(
 		not_null<Main::Session*> session,
 		const QString &url,
 		const MTPmessages_WebPage &result) {
@@ -1936,21 +1975,34 @@ WebPageData *Instance::processReceivedPage(
 	owner->processUsers(data.vusers());
 	owner->processChats(data.vchats());
 	auto &requested = _fullRequested[session][url];
+	auto processed = ProcessReceivedPageResult();
 	const auto &mtp = data.vwebpage();
 	mtp.match([&](const MTPDwebPageNotModified &data) {
-		const auto page = requested.page;
+		processed.page = requested.page;
 		if (const auto views = data.vcached_page_views()) {
-			if (page && page->iv) {
-				page->iv->updateCachedViews(views->v);
+			if (processed.page && processed.page->iv) {
+				processed.page->iv->updateCachedViews(views->v);
 			}
 		}
 	}, [&](const MTPDwebPage &data) {
+		const auto oldPage = requested.page;
+		const auto oldVersion = oldPage ? oldPage->version : 0;
+		const auto oldIvHash = (oldPage && oldPage->iv)
+			? oldPage->iv->hash()
+			: 0;
 		requested.hash = data.vhash().v;
-		requested.page = owner->processWebpage(data).get();
+		processed.page = owner->processWebpage(data).get();
+		requested.page = processed.page;
+		processed.articleChanged = processed.page
+			&& processed.page->iv
+			&& (!oldPage
+				|| processed.page->version != oldVersion
+				|| processed.page->iv->hash() != oldIvHash);
 	}, [&](const auto &) {
-		requested.page = owner->processWebpage(mtp).get();
+		processed.page = owner->processWebpage(mtp).get();
+		requested.page = processed.page;
 	});
-	return requested.page;
+	return processed;
 }
 
 void Instance::processOpenChannel(const QString &context) {

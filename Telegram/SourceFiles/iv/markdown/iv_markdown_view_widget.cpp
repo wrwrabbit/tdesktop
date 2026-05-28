@@ -230,6 +230,16 @@ void MarkdownDocumentWidget::setArticle(
 	forceRelayoutCurrentWidth();
 }
 
+void MarkdownDocumentWidget::articleContentChanged() {
+	ClickHandler::clearActive(this);
+	applyCursor(style::cur_default);
+	stopPressedPlaceholderRipple();
+	clearSelection();
+	_articlePainted = false;
+	resetTextPaintCaches();
+	forceRelayoutCurrentWidth();
+}
+
 void MarkdownDocumentWidget::setZoom(int value) {
 	value = (value > 0) ? value : 100;
 	if (_zoom == value) {

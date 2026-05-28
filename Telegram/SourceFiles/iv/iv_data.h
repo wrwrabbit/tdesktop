@@ -53,6 +53,8 @@ public:
 	~Data();
 
 	[[nodiscard]] QString id() const;
+	[[nodiscard]] uint64 pageId() const;
+	[[nodiscard]] int32 hash() const;
 	[[nodiscard]] bool partial() const;
 	[[nodiscard]] const std::shared_ptr<const RichPage> &richPage() const;
 	[[nodiscard]] std::optional<Source> sourceFallback() const;
@@ -63,6 +65,7 @@ public:
 
 private:
 	const uint64 _pageId = 0;
+	const int32 _hash = 0;
 	const QString _url;
 	const QString _name;
 	const bool _partial = false;

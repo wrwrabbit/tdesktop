@@ -371,6 +371,43 @@ void Controller::setContent(
 			refreshed.initialFragment = _history[activeIndex].hash;
 		}
 	}
+	if (preserveScroll
+		&& _preview
+		&& historyEnabled(refreshed)) {
+		auto activeIndex = -1;
+		if (_shownHistoryIndex >= 0
+			&& _shownHistoryIndex < int(_history.size())) {
+			activeIndex = _shownHistoryIndex;
+		} else if (_historyIndex >= 0
+			&& _historyIndex < int(_history.size())) {
+			activeIndex = _historyIndex;
+		}
+		if (activeIndex >= 0
+			&& sameHistoryLocation(
+				_history[activeIndex],
+				refreshed.currentPageId,
+				refreshed.sourceUrl,
+				refreshed.initialFragment)) {
+			_title = std::move(title);
+			if (_menu) {
+				_menu = nullptr;
+				_menuToggle->setForceRippled(false);
+			}
+			const auto updated = updateExistingPreview(
+				std::move(content),
+				std::move(refreshed),
+				scrollTop);
+			Assert(updated);
+			if (updated) {
+				refreshTitle();
+				if (_window && _window->isActiveWindow() && _preview) {
+					_preview->setFocus();
+				}
+				updateHistoryButtons();
+			}
+			return;
+		}
+	}
 	if (historyEnabled(refreshed)
 		&& _shownHistoryIndex >= 0
 		&& _shownHistoryIndex < int(_history.size())
@@ -421,6 +458,54 @@ void Controller::setContent(
 		_preview->setFocus();
 	}
 	updateHistoryButtons();
+}
+
+bool Controller::updateExistingPreview(
+		MarkdownArticleContent content,
+		OpenOptions options,
+		int scrollTop) {
+	Expects(_preview != nullptr);
+
+	_preparedContent = std::move(content);
+	_options = std::move(options);
+	_clickHandlerContextRef = ResolveClickHandlerContextRef(
+		_clickHandlerContextRef,
+		_options);
+	_options.clickHandlerContextRef = _clickHandlerContextRef;
+	auto previewOptions = _options;
+	previewOptions.clickHandlerContextRef = _clickHandlerContextRef;
+	previewOptions.clickHandlerContext = ExtendClickHandlerContext(
+		std::move(previewOptions.clickHandlerContext),
+		_show);
+	if (previewOptions.clickHandlerContextRef) {
+		*previewOptions.clickHandlerContextRef
+			= previewOptions.clickHandlerContext;
+	}
+	if (historyEnabled(_options)) {
+		updateCurrentHistoryEntry(*_preparedContent, _title, _options);
+		const auto index = findHistoryEntry(
+			_options.currentPageId,
+			_options.sourceUrl,
+			_options.initialFragment);
+		Assert(index >= 0);
+		if (index >= 0) {
+			_historyIndex = index;
+			_shownHistoryIndex = index;
+		}
+	} else {
+		_historyIndex = -1;
+		_shownHistoryIndex = -1;
+	}
+	previewOptions.initialFragment = QString();
+	if (!UpdateMarkdownPreviewWidget(
+			_preview.get(),
+			std::move(*_preparedContent),
+			previewOptions)) {
+		return false;
+	}
+	_preparedContent.reset();
+	ScrollMarkdownPreviewToY(_preview.get(), scrollTop);
+	return true;
 }
 
 void Controller::updateOptions(OpenOptions options) {
