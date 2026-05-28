@@ -192,8 +192,7 @@ WebPageType ParseWebPageType(
 }
 
 bool IgnoreIv(WebPageType type) {
-	return !Iv::ShowButton()
-		|| (type == WebPageType::Message)
+	return (type == WebPageType::Message)
 		|| (type == WebPageType::Album);
 }
 

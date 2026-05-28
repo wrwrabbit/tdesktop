@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_parse.h"
 #include "iv/markdown/iv_markdown_prepare.h"
-#include "iv/iv_prepare.h"
 
 #include <QtCore/QByteArray>
 

@@ -17,8 +17,6 @@ PRIVATE
     iv/iv_data.h
     iv/iv_delegate.h
     iv/iv_pch.h
-    iv/iv_prepare.cpp
-    iv/iv_prepare.h
     iv/iv_zoom_controls.cpp
     iv/iv_zoom_controls.h
 )
@@ -94,12 +92,6 @@ PRIVATE
     desktop-app::external_cmark_gfm
     desktop-app::external_microtex
     desktop-app::lib_spellcheck
-)
-
-nice_target_sources(td_iv ${res_loc}
-PRIVATE
-    iv_html/page.css
-    iv_html/page.js
 )
 
 target_include_directories(td_iv

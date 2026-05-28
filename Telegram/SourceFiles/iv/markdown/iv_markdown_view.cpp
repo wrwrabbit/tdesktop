@@ -247,7 +247,6 @@ private:
 	std::optional<MarkdownArticleContent> _preparedContent;
 	const Fn<void(Event)> _callback;
 	std::vector<PreparedFootnote> _footnotes;
-	base::flat_map<QByteArray, QByteArray> _embedHtmlResources;
 	std::unique_ptr<Ui::LayerManager> _footnoteLayerManager;
 	EmbedOverlay *_embedOverlay = nullptr;
 	Ui::ScrollArea *_scroll = nullptr;
@@ -338,12 +337,10 @@ void MarkdownPreviewRoot::setup() {
 		tr::lng_markdown_preview_open_file(tr::now));
 	_embedOverlay = Ui::CreateChild<EmbedOverlay>(
 		this,
-		&_embedHtmlResources,
 		[=](QString url) {
 			openEmbedLink(std::move(url));
 		},
-		_options.ivWebviewStorageId,
-		_options.ivWebviewDataRequest);
+		_options.ivWebviewStorageId);
 	_embedOverlay->hide();
 
 	_scroll->hide();
@@ -687,7 +684,6 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	if (failure.failed()) {
 		_article = nullptr;
 		_footnotes.clear();
-		_embedHtmlResources.clear();
 		_scrollToAnimation.stop();
 		startScrollToTopButtonAnimation(false);
 		_scroll->hide();
@@ -712,7 +708,6 @@ void MarkdownPreviewRoot::applyPreparedContent(
 	}
 
 	_footnotes = prepared.footnotes;
-	_embedHtmlResources = std::move(prepared.embedHtmlResources);
 
 	if (!_body) {
 		_article = nullptr;

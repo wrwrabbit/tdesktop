@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "apiwrap.h"
 #include "base/platform/base_platform_info.h"
-#include "base/qt_signal_producer.h"
 #include "base/unixtime.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
@@ -18,61 +17,33 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/click_handler_types.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
-#include "data/data_cloud_file.h"
-#include "data/data_document.h"
-#include "data/data_document_media.h"
-#include "data/data_file_origin.h"
-#include "data/data_location.h"
-#include "data/data_media_types.h"
-#include "data/data_photo_media.h"
 #include "data/data_session.h"
-#include "data/data_thread.h"
 #include "data/data_web_page.h"
-#include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
-#include "history/history_item_components.h"
-#include "history/history_item_helpers.h"
-#include "info/profile/info_profile_values.h"
 #include "iv/markdown/iv_markdown_controller.h"
 #include "iv/iv_cached_media.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
-#include "iv/iv_prepare.h"
 #include "lang/lang_keys.h"
-#include "lottie/lottie_common.h" // Lottie::ReadContent.
-#include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/session/session_show.h"
-#include "media/streaming/media_streaming_loader.h"
 #include "media/view/media_view_open_common.h"
-#include "storage/file_download.h"
 #include "storage/storage_account.h"
-#include "ui/boxes/confirm_box.h"
-#include "ui/layers/layer_widget.h"
-#include "ui/text/text_utilities.h"
 #include "ui/toast/toast.h"
 #include "ui/basic_click_handlers.h"
-#include "webview/webview_data_stream_memory.h"
-#include "webview/webview_interface.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QFileInfo>
-#include <QtGui/QGuiApplication>
-#include <QtGui/QWindow>
 
 #include <optional>
 
 namespace Iv {
 namespace {
 
-constexpr auto kGeoPointScale = 1;
-constexpr auto kGeoPointZoomMin = 13;
-constexpr auto kMaxLoadParts = 5;
-constexpr auto kKeepLoadingParts = 8;
 constexpr auto kAllowPageReloadAfter = 3 * crl::time(1000);
 
 struct NativeIvChannelContext {
@@ -343,30 +314,7 @@ public:
 	}
 
 private:
-	struct MapPreview {
-		std::unique_ptr<::Data::CloudFile> file;
-		QByteArray bytes;
-	};
-	struct PartRequest {
-		Webview::DataRequest request;
-		QByteArray data;
-		std::vector<bool> loaded;
-		int64 offset = 0;
-	};
-	struct FileStream {
-		not_null<DocumentData*> document;
-		std::unique_ptr<::Media::Streaming::Loader> loader;
-		std::vector<PartRequest> requests;
-		std::string mime;
-		rpl::lifetime lifetime;
-	};
-	struct FileLoad {
-		std::shared_ptr<::Data::DocumentMedia> media;
-		std::vector<Webview::DataRequest> requests;
-	};
-
 	void prepare(not_null<Data*> data, const QString &hash);
-	void createController();
 	void createMarkdownController(
 		Markdown::MarkdownArticleContent content,
 		QString title,
@@ -376,19 +324,12 @@ private:
 		QString initialFragment,
 		not_null<WebPageData*> page);
 
-	void showWindowed(
-		Prepared result,
-		std::shared_ptr<const RichPage> richPage,
-		std::optional<Source> sourceFallback,
-		bool refresh);
-	void showHtmlWindowed(Prepared result, bool refresh);
 	void showMarkdownWindowed(
 		Markdown::MarkdownArticleContent content,
 		QString title,
 		QString initialFragment,
 		not_null<WebPageData*> page,
 		bool refresh);
-	[[nodiscard]] ShareBoxResult shareBox(ShareBoxDescriptor &&descriptor);
 	[[nodiscard]] std::shared_ptr<Markdown::MediaRuntime> createMediaRuntime(
 		not_null<WebPageData*> page);
 	[[nodiscard]] bool activateMarkdownMedia(
@@ -396,56 +337,17 @@ private:
 		Qt::MouseButton button,
 		const QVariant &clickHandlerContext) const;
 
-	[[nodiscard]] ::Data::FileOrigin fileOrigin(
-		not_null<WebPageData*> page) const;
-	void streamPhoto(QStringView idWithPageId, Webview::DataRequest request);
-	void streamFile(QStringView idWithPageId, Webview::DataRequest request);
-	void streamFile(FileStream &file, Webview::DataRequest request);
-	void processPartInFile(
-		FileStream &file,
-		::Media::Streaming::LoadedPart &&part);
-	bool finishRequestWithPart(
-		PartRequest &request,
-		const ::Media::Streaming::LoadedPart &part);
-	void streamMap(QString params, Webview::DataRequest request);
-	void sendEmbed(QByteArray hash, Webview::DataRequest request);
-
-	void fillChannelJoinedValues(const Prepared &result);
-	void fillEmbeds(base::flat_map<QByteArray, QByteArray> added);
-	void subscribeToDocuments();
-	[[nodiscard]] QByteArray readFile(
-		const std::shared_ptr<::Data::DocumentMedia> &media);
-	void requestDone(
-		Webview::DataRequest request,
-		QByteArray bytes,
-		std::string mime,
-		int64 offset = 0,
-		int64 total = 0);
-	void requestFail(Webview::DataRequest request);
-
 	const not_null<Delegate*> _delegate;
 	const not_null<Main::Session*> _session;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
-	std::shared_ptr<Main::SessionShow> _show;
 	QString _id;
-	std::unique_ptr<Controller> _controller;
 	std::unique_ptr<Markdown::Controller> _markdownController;
 	std::shared_ptr<Markdown::MediaRuntime> _markdownMediaRuntime;
 	QString _markdownRuntimeUrl;
-	base::flat_map<DocumentId, FileStream> _streams;
-	base::flat_map<DocumentId, FileLoad> _files;
-	base::flat_map<QByteArray, rpl::producer<bool>> _inChannelValues;
-
-	bool _preparing = false;
-
-	base::flat_map<QByteArray, QByteArray> _embeds;
-	base::flat_map<QString, MapPreview> _maps;
-	std::vector<QByteArray> _resources;
 
 	rpl::event_stream<Controller::Event> _events;
 
-	rpl::lifetime _documentLifetime;
 	rpl::lifetime _lifetime;
 
 };
@@ -483,73 +385,6 @@ private:
 
 };
 
-struct MarkdownShown {
-	std::unique_ptr<Markdown::Controller> controller;
-};
-
-class ShareBoxShow final : public Ui::Show {
-public:
-	ShareBoxShow(QPointer<QWidget> parent, Fn<Ui::LayerStackWidget*()> lookup);
-
-	void showOrHideBoxOrLayer(
-			std::variant<
-			v::null_t,
-			object_ptr<Ui::BoxContent>,
-			std::unique_ptr<Ui::LayerWidget>> &&layer,
-			Ui::LayerOptions options,
-			anim::type animated) const override;
-
-	not_null<QWidget*> toastParent() const override;
-
-	bool valid() const override;
-
-	operator bool() const override;
-
-private:
-	const QPointer<QWidget> _parent;
-	const Fn<Ui::LayerStackWidget*()> _lookup;
-};
-
-ShareBoxShow::ShareBoxShow(
-	QPointer<QWidget> parent,
-	Fn<Ui::LayerStackWidget*()> lookup)
-: _parent(parent)
-, _lookup(lookup) {
-}
-
-void ShareBoxShow::showOrHideBoxOrLayer(
-		std::variant<
-		v::null_t,
-		object_ptr<Ui::BoxContent>,
-		std::unique_ptr<Ui::LayerWidget>> &&layer,
-		Ui::LayerOptions options,
-		anim::type animated) const {
-	using UniqueLayer = std::unique_ptr<Ui::LayerWidget>;
-	using ObjectBox = object_ptr<Ui::BoxContent>;
-	const auto stack = _lookup();
-	if (!stack) {
-		return;
-	} else if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
-		stack->showLayer(std::move(*layerWidget), options, animated);
-	} else if (auto box = std::get_if<ObjectBox>(&layer)) {
-		stack->showBox(std::move(*box), options, animated);
-	} else {
-		stack->hideAll(animated);
-	}
-}
-
-not_null<QWidget*> ShareBoxShow::toastParent() const {
-	return _parent.data();
-}
-
-bool ShareBoxShow::valid() const {
-	return _lookup() != nullptr;
-}
-
-ShareBoxShow::operator bool() const {
-	return valid();
-}
-
 Shown::Shown(
 	not_null<Delegate*> delegate,
 	not_null<Main::Session*> session,
@@ -565,164 +400,28 @@ Shown::Shown(
 }
 
 void Shown::prepare(not_null<Data*> data, const QString &hash) {
-	const auto weak = base::make_weak(this);
 	const auto richPage = data->richPage();
 	const auto sourceFallback = data->sourceFallback();
 	const auto id = data->id();
+	const auto page = _session->data().webpage(data->pageId());
 
 	if (_markdownRuntimeUrl != id) {
 		_markdownMediaRuntime = nullptr;
 		_markdownRuntimeUrl = QString();
 	}
-	_preparing = true;
 	_id = id;
-	data->prepare({}, [=, richPage = richPage, sourceFallback = sourceFallback](
-			Prepared result) {
-		result.hash = hash;
-		crl::on_main(weak, [=,
-				richPage = richPage,
-				sourceFallback = sourceFallback,
-				result = std::move(result)]() mutable {
-			result.url = id;
-			if (_id != id || !_preparing) {
-				return;
-			}
-			_preparing = false;
-			fillChannelJoinedValues(result);
-			fillEmbeds(std::move(result.embeds));
-			showWindowed(
-				std::move(result),
-				richPage,
-				sourceFallback,
-				false);
-		});
+
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.source = sourceFallback ? &*sourceFallback : nullptr,
+		.richPage = richPage,
+		.mediaRuntime = createMediaRuntime(page),
 	});
-}
-
-void Shown::fillChannelJoinedValues(const Prepared &result) {
-	for (const auto &id : result.channelIds) {
-		const auto channelId = ChannelId(id.toLongLong());
-		const auto channel = _session->data().channel(channelId);
-		if (!channel->isLoaded() && !channel->username().isEmpty()) {
-			channel->session().api().request(MTPcontacts_ResolveUsername(
-				MTP_flags(0),
-				MTP_string(channel->username()),
-				MTP_string()
-			)).done([=](const MTPcontacts_ResolvedPeer &result) {
-				channel->owner().processUsers(result.data().vusers());
-				channel->owner().processChats(result.data().vchats());
-			}).send();
-		}
-		_inChannelValues[id] = Info::Profile::AmInChannelValue(channel);
-	}
-}
-
-void Shown::fillEmbeds(base::flat_map<QByteArray, QByteArray> added) {
-	if (_embeds.empty()) {
-		_embeds = std::move(added);
-	} else {
-		for (auto &[k, v] : added) {
-			_embeds[k] = std::move(v);
-		}
-	}
-}
-
-ShareBoxResult Shown::shareBox(ShareBoxDescriptor &&descriptor) {
-	const auto url = descriptor.url;
-	const auto wrap = descriptor.parent;
-
-	struct State {
-		Ui::LayerStackWidget *stack = nullptr;
-		rpl::event_stream<> destroyRequests;
-	};
-	const auto state = wrap->lifetime().make_state<State>();
-
-	const auto weak = base::make_weak(wrap);
-	const auto lookup = crl::guard(weak, [state] { return state->stack; });
-	const auto layer = Ui::CreateChild<Ui::LayerStackWidget>(
-		wrap.get(),
-		[=] { return std::make_shared<ShareBoxShow>(weak.get(), lookup); });
-	state->stack = layer;
-	const auto show = layer->showFactory()();
-
-	layer->setHideByBackgroundClick(false);
-	layer->move(0, 0);
-	wrap->sizeValue(
-	) | rpl::on_next([=](QSize size) {
-		layer->resize(size);
-	}, layer->lifetime());
-	layer->hideFinishEvents(
-	) | rpl::filter([=] {
-		return !!lookup(); // Last hide finish is sent from destructor.
-	}) | rpl::on_next([=] {
-		state->destroyRequests.fire({});
-	}, wrap->lifetime());
-
-	const auto waiting = layer->lifetime().make_state<rpl::lifetime>();
-	const auto focus = crl::guard(layer, [=] {
-		const auto set = [=] {
-			layer->window()->setFocus();
-			layer->setInnerFocus();
-		};
-
-		const auto handle = layer->window()->windowHandle();
-		if (!handle) {
-			waiting->destroy();
-			return;
-		} else if (QGuiApplication::focusWindow() == handle) {
-			waiting->destroy();
-			set();
-		} else {
-			*waiting = base::qt_signal_producer(
-				qApp,
-				&QGuiApplication::focusWindowChanged
-			) | rpl::filter([=](QWindow *focused) {
-				const auto handle = layer->window()->windowHandle();
-				return handle && (focused == handle);
-			}) | rpl::on_next([=] {
-				waiting->destroy();
-				set();
-			});
-			layer->window()->activateWindow();
-		}
-	});
-	auto result = ShareBoxResult{
-		.focus = focus,
-		.hide = [=] { show->hideLayer(); },
-		.destroyRequests = state->destroyRequests.events(),
-	};
-
-	FastShareLink(Main::MakeSessionShow(show, _session), url);
-	return result;
-}
-
-void Shown::createController() {
-	Expects(!_controller);
-
-	const auto showShareBox = [=](ShareBoxDescriptor &&descriptor) {
-		return shareBox(std::move(descriptor));
-	};
-	_controller = std::make_unique<Controller>(
-		_delegate,
-		std::move(showShareBox));
-
-	_controller->events(
-	) | rpl::start_to_stream(_events, _controller->lifetime());
-
-	_controller->dataRequests(
-	) | rpl::on_next([=](Webview::DataRequest request) {
-		const auto requested = QString::fromStdString(request.id);
-		const auto id = QStringView(requested);
-		if (id.startsWith(u"photo/")) {
-			streamPhoto(id.mid(6), std::move(request));
-		} else if (id.startsWith(u"document/"_q)) {
-			streamFile(id.mid(9), std::move(request));
-		} else if (id.startsWith(u"map/"_q)) {
-			streamMap(id.mid(4).toUtf8(), std::move(request));
-		} else if (id.startsWith(u"html/"_q)) {
-			sendEmbed(id.mid(5).toUtf8(), std::move(request));
-		}
-	}, _controller->lifetime());
+	showMarkdownWindowed(
+		std::move(prepared.content),
+		data->name(),
+		hash,
+		page,
+		false);
 }
 
 Markdown::OpenOptions Shown::markdownOpenOptions(
@@ -736,26 +435,6 @@ Markdown::OpenOptions Shown::markdownOpenOptions(
 		.currentPageId = page->id,
 		.viewerKind = Markdown::ViewerKind::InstantView,
 		.clickHandlerContextRef = clickHandlerContext,
-		.ivWebviewDataRequest = [=](
-				QByteArray id,
-				Webview::DataRequest request) {
-			const auto requested = QString::fromUtf8(id);
-			const auto view = QStringView(requested);
-			if (view.startsWith(u"photo/")) {
-				streamPhoto(view.mid(6), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"document/"_q)) {
-				streamFile(view.mid(9), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"map/"_q)) {
-				streamMap(view.mid(4).toString().toUtf8(), std::move(request));
-				return Webview::DataResult::Pending;
-			} else if (view.startsWith(u"html/"_q)) {
-				sendEmbed(view.mid(5).toString().toUtf8(), std::move(request));
-				return Webview::DataResult::Pending;
-			}
-			return Webview::DataResult::Failed;
-		},
 		.ivWebviewStorageId = _session->local().resolveStorageIdOther(),
 		.activateMedia = [=](
 				const Markdown::MediaActivation &activation,
@@ -818,54 +497,12 @@ void Shown::createMarkdownController(
 	}, _markdownController->lifetime());
 }
 
-void Shown::showWindowed(
-		Prepared result,
-		std::shared_ptr<const RichPage> richPage,
-		std::optional<Source> sourceFallback,
-		bool refresh) {
-	if constexpr (true) {
-		const auto page = _session->data().webpage(result.pageId);
-		auto native = Markdown::TryPrepareNativeInstantView({
-			.source = sourceFallback ? &*sourceFallback : nullptr,
-			.richPage = std::move(richPage),
-			.mediaRuntime = createMediaRuntime(page),
-		});
-		showMarkdownWindowed(
-			std::move(native.content),
-			std::move(result.name),
-			std::move(result.hash),
-			page,
-			refresh);
-	} else {
-		Q_UNUSED(richPage);
-		Q_UNUSED(sourceFallback);
-		showHtmlWindowed(std::move(result), refresh);
-	}
-}
-
-void Shown::showHtmlWindowed(Prepared result, bool refresh) {
-	_markdownController = nullptr;
-	const auto hadController = (_controller != nullptr);
-	if (!_controller) {
-		createController();
-	}
-	if (refresh && hadController) {
-		_controller->update(std::move(result));
-	} else {
-		_controller->show(
-			_session->local().resolveStorageIdOther(),
-			std::move(result),
-			base::duplicate(_inChannelValues));
-	}
-}
-
 void Shown::showMarkdownWindowed(
 		Markdown::MarkdownArticleContent content,
 		QString title,
 		QString initialFragment,
 		not_null<WebPageData*> page,
 		bool refresh) {
-	_controller = nullptr;
 	if (!_markdownController) {
 		createMarkdownController(
 			std::move(content),
@@ -949,320 +586,6 @@ bool Shown::activateMarkdownMedia(
 	return false;
 }
 
-::Data::FileOrigin Shown::fileOrigin(not_null<WebPageData*> page) const {
-	return ::Data::FileOriginWebPage{ page->url };
-}
-
-void Shown::streamPhoto(
-		QStringView idWithPageId,
-		Webview::DataRequest request) {
-	using namespace Data;
-
-	const auto parts = idWithPageId.split('/');
-	if (parts.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto photo = _session->data().photo(parts[0].toULongLong());
-	const auto page = _session->data().webpage(parts[1].toULongLong());
-	if (photo->isNull() || page->url.isEmpty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto media = photo->createMediaView();
-	media->wanted(PhotoSize::Large, fileOrigin(page));
-	const auto check = [=] {
-		if (!media->loaded() && !media->owner()->failed(PhotoSize::Large)) {
-			return false;
-		}
-		requestDone(
-			request,
-			media->imageBytes(PhotoSize::Large),
-			"image/jpeg");
-		return true;
-	};
-	if (!check()) {
-		photo->session().downloaderTaskFinished(
-		) | rpl::filter(
-			check
-		) | rpl::take(1) | rpl::start(_controller->lifetime());
-	}
-}
-
-void Shown::streamFile(
-		QStringView idWithPageId,
-		Webview::DataRequest request) {
-	using namespace Data;
-
-	const auto parts = idWithPageId.split('/');
-	if (parts.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto documentId = DocumentId(parts[0].toULongLong());
-	const auto i = _streams.find(documentId);
-	if (i != end(_streams)) {
-		streamFile(i->second, std::move(request));
-		return;
-	}
-	const auto document = _session->data().document(documentId);
-	const auto page = _session->data().webpage(parts[1].toULongLong());
-	if (page->url.isEmpty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	auto loader = document->createStreamingLoader(fileOrigin(page), false);
-	if (!loader) {
-		if (document->size >= Storage::kMaxFileInMemory) {
-			requestFail(std::move(request));
-		} else {
-			auto media = document->createMediaView();
-			if (const auto content = readFile(media); !content.isEmpty()) {
-				requestDone(
-					std::move(request),
-					content,
-					document->mimeString().toStdString());
-			} else {
-				subscribeToDocuments();
-				auto &file = _files[documentId];
-				file.media = std::move(media);
-				file.requests.push_back(std::move(request));
-				document->forceToCache(true);
-				document->save(fileOrigin(page), QString());
-			}
-		}
-		return;
-	}
-	auto &file = _streams.emplace(
-		documentId,
-		FileStream{
-			.document = document,
-			.loader = std::move(loader),
-			.mime = document->mimeString().toStdString(),
-		}).first->second;
-
-	file.loader->parts(
-	) | rpl::on_next([=](::Media::Streaming::LoadedPart &&part) {
-		const auto i = _streams.find(documentId);
-		Assert(i != end(_streams));
-		processPartInFile(i->second, std::move(part));
-	}, file.lifetime);
-
-	streamFile(file, std::move(request));
-}
-
-void Shown::streamFile(FileStream &file, Webview::DataRequest request) {
-	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
-	const auto size = file.document->size;
-	const auto last = int((size + kPart - 1) / kPart);
-	const auto from = int(std::min(int64(request.offset), size) / kPart);
-	const auto till = (request.limit > 0)
-		? std::min(int64(request.offset + request.limit), size)
-		: size;
-	const auto parts = std::min(
-		int((till + kPart - 1) / kPart) - from,
-		kMaxLoadParts);
-	//auto base = IvBaseCacheKey(document);
-
-	const auto length = std::min((from + parts) * kPart, size)
-		- from * kPart;
-	file.requests.push_back(PartRequest{
-		.request = std::move(request),
-		.data = QByteArray(length, 0),
-		.loaded = std::vector<bool>(parts, false),
-		.offset = from * kPart,
-	});
-
-	file.loader->resetPriorities();
-	const auto load = std::min(from + kKeepLoadingParts, last) - from;
-	for (auto i = 0; i != load; ++i) {
-		file.loader->load((from + i) * kPart);
-	}
-}
-
-void Shown::subscribeToDocuments() {
-	if (_documentLifetime) {
-		return;
-	}
-	_documentLifetime = _session->data().documentLoadProgress(
-	) | rpl::filter([=](not_null<DocumentData*> document) {
-		return !document->loading();
-	}) | rpl::on_next([=](not_null<DocumentData*> document) {
-		const auto i = _files.find(document->id);
-		if (i == end(_files)) {
-			return;
-		}
-		auto requests = base::take(i->second.requests);
-		const auto content = readFile(i->second.media);
-		_files.erase(i);
-
-		if (!content.isEmpty()) {
-			for (auto &request : requests) {
-				requestDone(
-					std::move(request),
-					content,
-					document->mimeString().toStdString());
-			}
-		} else {
-			for (auto &request : requests) {
-				requestFail(std::move(request));
-			}
-		}
-	});
-}
-
-QByteArray Shown::readFile(
-		const std::shared_ptr<::Data::DocumentMedia> &media) {
-	return Lottie::ReadContent(media->bytes(), media->owner()->filepath());
-}
-
-void Shown::processPartInFile(
-		FileStream &file,
-		::Media::Streaming::LoadedPart &&part) {
-	for (auto i = begin(file.requests); i != end(file.requests);) {
-		if (finishRequestWithPart(*i, part)) {
-			auto done = base::take(*i);
-			i = file.requests.erase(i);
-			requestDone(
-				std::move(done.request),
-				done.data,
-				file.mime,
-				done.offset,
-				file.document->size);
-		} else {
-			++i;
-		}
-	}
-}
-
-bool Shown::finishRequestWithPart(
-		PartRequest &request,
-		const ::Media::Streaming::LoadedPart &part) {
-	const auto offset = part.offset;
-	if (offset == ::Media::Streaming::LoadedPart::kFailedOffset) {
-		request.data = QByteArray();
-		return true;
-	} else if (offset < request.offset
-		|| offset >= request.offset + request.data.size()) {
-		return false;
-	}
-	constexpr auto kPart = ::Media::Streaming::Loader::kPartSize;
-	const auto copy = std::min(
-		int(part.bytes.size()),
-		int(request.data.size() - (offset - request.offset)));
-	const auto index = (offset - request.offset) / kPart;
-	Assert(index < request.loaded.size());
-	if (request.loaded[index]) {
-		return false;
-	}
-	request.loaded[index] = true;
-	memcpy(
-		request.data.data() + index * kPart,
-		part.bytes.constData(),
-		copy);
-	return !ranges::contains(request.loaded, false);
-}
-
-void Shown::streamMap(QString params, Webview::DataRequest request) {
-	using namespace ::Data;
-
-	const auto parts = params.split(u'&');
-	if (parts.size() != 3) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto point = GeoPointFromId(parts[0].toUtf8());
-	const auto size = parts[1].split(',');
-	const auto zoom = parts[2].toInt();
-	if (size.size() != 2) {
-		requestFail(std::move(request));
-		return;
-	}
-	const auto location = GeoPointLocation{
-		.lat = point.lat,
-		.lon = point.lon,
-		.access = point.access,
-		.width = size[0].toInt(),
-		.height = size[1].toInt(),
-		.zoom = std::max(zoom, kGeoPointZoomMin),
-		.scale = kGeoPointScale,
-	};
-	const auto prepared = ImageWithLocation{
-		.location = ImageLocation(
-			{ location },
-			location.width,
-			location.height)
-	};
-	auto &preview = _maps.emplace(params, MapPreview()).first->second;
-	preview.file = std::make_unique<CloudFile>();
-
-	UpdateCloudFile(
-		*preview.file,
-		prepared,
-		_session->data().cache(),
-		kImageCacheTag,
-		[=](FileOrigin origin) { /* restartLoader not used here */ });
-	const auto autoLoading = false;
-	const auto finalCheck = [=] { return true; };
-	const auto done = [=](QByteArray bytes) {
-		const auto i = _maps.find(params);
-		Assert(i != end(_maps));
-		i->second.bytes = std::move(bytes);
-		requestDone(request, i->second.bytes, "image/png");
-	};
-	LoadCloudFile(
-		_session,
-		*preview.file,
-		FileOrigin(),
-		LoadFromCloudOrLocal,
-		autoLoading,
-		kImageCacheTag,
-		finalCheck,
-		done,
-		[=](bool) { done("failed..."); });
-}
-
-void Shown::sendEmbed(QByteArray hash, Webview::DataRequest request) {
-	const auto i = _embeds.find(hash);
-	if (i != end(_embeds)) {
-		requestDone(std::move(request), i->second, "text/html; charset=utf-8");
-	} else {
-		requestFail(std::move(request));
-	}
-}
-
-void Shown::requestDone(
-		Webview::DataRequest request,
-		QByteArray bytes,
-		std::string mime,
-		int64 offset,
-		int64 total) {
-	if (bytes.isEmpty() && mime.empty()) {
-		requestFail(std::move(request));
-		return;
-	}
-	crl::on_main([
-		done = std::move(request.done),
-		data = std::move(bytes),
-		mime = std::move(mime),
-		offset,
-		total
-	] {
-		using namespace Webview;
-		done({
-			.stream = std::make_unique<DataStreamFromMemory>(data, mime),
-			.streamOffset = offset,
-			.totalSize = total,
-		});
-	});
-}
-
-void Shown::requestFail(Webview::DataRequest request) {
-	crl::on_main([done = std::move(request.done)] {
-		done({});
-	});
-}
-
 bool Shown::showing(
 		not_null<Main::Session*> session,
 		not_null<Data*> data) const {
@@ -1274,12 +597,11 @@ bool Shown::showingFrom(not_null<Main::Session*> session) const {
 }
 
 bool Shown::activeFor(not_null<Main::Session*> session) const {
-	return showingFrom(session) && (_controller || _markdownController);
+	return showingFrom(session) && _markdownController;
 }
 
 bool Shown::active() const {
-	return (_controller && _controller->active())
-		|| (_markdownController && _markdownController->active());
+	return _markdownController && _markdownController->active();
 }
 
 void Shown::moveTo(not_null<Data*> data, QString hash) {
@@ -1287,41 +609,38 @@ void Shown::moveTo(not_null<Data*> data, QString hash) {
 }
 
 void Shown::update(not_null<Data*> data) {
-	const auto weak = base::make_weak(this);
 	const auto richPage = data->richPage();
 	const auto sourceFallback = data->sourceFallback();
-
 	const auto id = data->id();
-	data->prepare({}, [=, richPage = richPage, sourceFallback = sourceFallback](
-			Prepared result) {
-		crl::on_main(weak, [=,
-				richPage = richPage,
-				sourceFallback = sourceFallback,
-				result = std::move(result)]() mutable {
-			result.url = id;
-			fillChannelJoinedValues(result);
-			fillEmbeds(std::move(result.embeds));
-			showWindowed(
-				std::move(result),
-				richPage,
-				sourceFallback,
-				true);
-		});
+
+	if (_markdownRuntimeUrl != id) {
+		_markdownMediaRuntime = nullptr;
+		_markdownRuntimeUrl = QString();
+	}
+	_id = id;
+
+	const auto page = _session->data().webpage(data->pageId());
+	auto prepared = Markdown::TryPrepareNativeInstantView({
+		.source = sourceFallback ? &*sourceFallback : nullptr,
+		.richPage = richPage,
+		.mediaRuntime = createMediaRuntime(page),
 	});
+	showMarkdownWindowed(
+		std::move(prepared.content),
+		data->name(),
+		QString(),
+		page,
+		true);
 }
 
 void Shown::showJoinedTooltip() {
-	if (_controller) {
-		_controller->showJoinedTooltip();
-	} else if (_markdownController) {
+	if (_markdownController) {
 		_markdownController->showJoinedTooltip();
 	}
 }
 
 void Shown::minimize() {
-	if (_controller) {
-		_controller->minimize();
-	} else if (_markdownController) {
+	if (_markdownController) {
 		_markdownController->minimize();
 	}
 }
@@ -1335,12 +654,7 @@ TonSite::TonSite(not_null<Delegate*> delegate, QString uri)
 void TonSite::createController() {
 	Expects(!_controller);
 
-	const auto showShareBox = [=](ShareBoxDescriptor &&descriptor) {
-		return ShareBoxResult();
-	};
-	_controller = std::make_unique<Controller>(
-		_delegate,
-		std::move(showShareBox));
+	_controller = std::make_unique<Controller>(_delegate);
 
 	_controller->events(
 	) | rpl::start_to_stream(_events, _controller->lifetime());
@@ -1675,8 +989,6 @@ void Instance::openWithIvPreferred(
 	const auto parts = uri.split('#');
 	if (parts.isEmpty() || parts[0].isEmpty()) {
 		return;
-	} else if (!ShowButton()) {
-		return openExternal();
 	}
 	trackSession(session);
 	const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
@@ -1978,12 +1290,9 @@ Instance::ProcessReceivedPageResult Instance::processReceivedPage(
 	auto processed = ProcessReceivedPageResult();
 	const auto &mtp = data.vwebpage();
 	mtp.match([&](const MTPDwebPageNotModified &data) {
+		Q_UNUSED(data);
+
 		processed.page = requested.page;
-		if (const auto views = data.vcached_page_views()) {
-			if (processed.page && processed.page->iv) {
-				processed.page->iv->updateCachedViews(views->v);
-			}
-		}
 	}, [&](const MTPDwebPage &data) {
 		const auto oldPage = requested.page;
 		const auto oldVersion = oldPage ? oldPage->version : 0;

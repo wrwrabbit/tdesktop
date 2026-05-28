@@ -26,11 +26,6 @@ class DynamicImage;
 class Show;
 } // namespace Ui
 
-namespace Webview {
-enum class DataResult;
-struct DataRequest;
-} // namespace Webview
-
 namespace Iv {
 class Delegate;
 } // namespace Iv
@@ -207,8 +202,8 @@ enum class MediaActivationKind {
 };
 
 struct EmbedRequest {
-	QByteArray resourceId;
-	QString fallbackUrl;
+	QByteArray html;
+	QString url;
 	int width = 0;
 	int height = 0;
 	bool fullWidth = false;
@@ -216,7 +211,7 @@ struct EmbedRequest {
 	bool allowScrolling = false;
 
 	[[nodiscard]] explicit operator bool() const {
-		return !resourceId.isEmpty();
+		return !html.isEmpty() || !url.isEmpty();
 	}
 };
 
@@ -248,9 +243,6 @@ struct OpenOptions {
 	std::shared_ptr<QVariant> clickHandlerContextRef;
 	std::function<void()> openSource;
 	std::function<void(std::shared_ptr<Ui::Show>)> share;
-	std::function<Webview::DataResult(
-		QByteArray,
-		Webview::DataRequest)> ivWebviewDataRequest;
 	Webview::StorageId ivWebviewStorageId;
 	std::function<bool(
 		const MediaActivation &,

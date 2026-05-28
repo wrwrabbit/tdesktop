@@ -140,7 +140,6 @@ void ClearPreparedOutput(MarkdownArticleContent *result) {
 	result->blocks.blocks.clear();
 	result->footnotes.clear();
 	result->formulas.clear();
-	result->embedHtmlResources.clear();
 }
 
 } // namespace Iv::Markdown

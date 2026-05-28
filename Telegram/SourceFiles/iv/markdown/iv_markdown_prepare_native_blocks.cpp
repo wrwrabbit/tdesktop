@@ -6,9 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_prepare_native_blocks.h"
-#include "base/openssl_help.h"
 #include "base/unixtime.h"
-#include "iv/iv_data.h"
 #include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "lang/lang_keys.h"
@@ -206,719 +204,27 @@ void AppendPreparedIvRichText(
 	return true;
 }
 
-struct NativeIvHtmlAttribute {
-	QByteArray name;
-	QByteArray value;
-};
-
-using NativeIvHtmlAttributes = std::vector<NativeIvHtmlAttribute>;
-
-[[nodiscard]] QByteArray NativeIvHtmlEscape(QString text) {
-	return text.toHtmlEscaped().toUtf8();
-}
-
-[[nodiscard]] QByteArray NativeIvRichText(QString text) {
-	auto result = NativeIvHtmlEscape(std::move(text));
-	result.replace("\xE2\x81\xA6", "<span dir=\"ltr\">");
-	result.replace("\xE2\x81\xA7", "<span dir=\"rtl\">");
-	result.replace("\xE2\x81\xA8", "<span dir=\"auto\">");
-	result.replace("\xE2\x81\xA9", "</span>");
-	return result;
-}
-
-[[nodiscard]] QByteArray NativeIvHtmlTag(
-		QByteArray name,
-		NativeIvHtmlAttributes attributes = {},
-		QByteArray body = {}) {
-	auto serialized = QByteArray();
-	for (const auto &[attributeName, value] : attributes) {
-		if (attributeName.isEmpty()) {
-			continue;
-		}
-		serialized += ' ';
-		serialized += attributeName;
-		if (!value.isEmpty()) {
-			serialized += "=\"";
-			serialized += value;
-			serialized += '"';
-		}
-	}
-	return QByteArray("<")
-		+ name
-		+ serialized
-		+ '>'
-		+ body
-		+ "</"
-		+ name
-		+ '>';
-}
-
-[[nodiscard]] QByteArray NativeIvHashBytes(const QByteArray &bytes) {
-	auto binary = std::array<uchar, SHA256_DIGEST_LENGTH>{};
-	SHA256(
-		reinterpret_cast<const unsigned char*>(bytes.constData()),
-		bytes.size(),
-		binary.data());
-	auto result = QByteArray();
-	result.reserve(binary.size() * 2);
-	for (const auto byte : binary) {
-		const auto hex = [](uchar value) -> char {
-			return (value >= 10) ? ('a' + (value - 10)) : ('0' + value);
-		};
-		result.push_back(hex(byte / 16));
-		result.push_back(hex(byte % 16));
-	}
-	return result;
-}
-
-[[nodiscard]] QByteArray StoreNativeIvEmbedHtml(
-		QByteArray html,
-		NativeIvPrepareState *state) {
-	const auto resourceId = QByteArray("native-iv-embed/")
-		+ NativeIvHashBytes(html)
-		+ ".html";
-	state->result.embedHtmlResources.emplace(resourceId, std::move(html));
-	return resourceId;
-}
-
-[[nodiscard]] QByteArray NativeIvResourceUrl(QByteArray resourceId) {
-	return QByteArray("/") + resourceId;
-}
-
-[[nodiscard]] QByteArray NativeIvDocumentUrl(uint64 documentId) {
-	return NativeIvResourceUrl(
-		QByteArray("document/") + QByteArray::number(documentId));
-}
-
-[[nodiscard]] QByteArray WrapNativeIvEmbedHtml(QByteArray body) {
-	return QByteArray(R"NativeIvHtml(<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<script>
-window.TelegramWebviewProxy = {
-	postEvent: function(eventType, eventData) {
-		if (window.external && typeof window.external.invoke === 'function') {
-			try {
-				window.external.invoke(JSON.stringify([eventType, eventData]));
-			} catch (e) {
-			}
-		}
-	}
-};
-</script>
-<style>
-html,
-body {
-	margin: 0;
-	padding: 0;
-	background: #fff;
-	color: #000;
-}
-
-body {
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-
-figure {
-	display: block;
-	margin: 0;
-	max-width: 100%;
-}
-
-img,
-video {
-	display: block;
-	max-width: 100%;
-	height: auto;
-}
-
-.iframe-wrap {
-	display: block;
-	margin: 0 auto;
-	max-width: 100%;
-	overflow: hidden;
-}
-
-iframe {
-	display: block;
-	width: 100%;
-	max-width: 100%;
-	border: 0;
-}
-</style>
-</head>
-<body>)NativeIvHtml")
-		+ body
-		+ QByteArray(R"NativeIvHtml(<script>
-(function() {
-	var iframeWindows = new Map();
-	var lastPreferredWidth = 0;
-	var lastPreferredHeight = 0;
-	var measureScheduled = false;
-
-	function clamp(value, max) {
-		value = Number(value);
-		if (!isFinite(value)) {
-			return 0;
-		}
-		value = Math.round(value);
-		if (value < 1) {
-			return 0;
-		}
-		return Math.min(value, max || 100000);
-	}
-
-	function resourceId() {
-		var path = '';
-		try {
-			path = String(window.location.pathname || '');
-		} catch (e) {
-		}
-		while (path.charAt(0) === '/') {
-			path = path.slice(1);
-		}
-		return path;
-	}
-
-	function documentHeight(doc) {
-		if (!doc) {
-			return 0;
-		}
-		var body = doc.body;
-		var root = doc.documentElement;
-		var height = 0;
-		if (body) {
-			var bodyRect = body.getBoundingClientRect();
-			height = Math.max(
-				height,
-				body.scrollHeight,
-				body.offsetHeight,
-				body.clientHeight,
-				bodyRect.height);
-		}
-		if (root) {
-			var rootRect = root.getBoundingClientRect();
-			height = Math.max(
-				height,
-				root.scrollHeight,
-				root.offsetHeight,
-				root.clientHeight,
-				rootRect.height);
-		}
-		return clamp(height, 100000);
-	}
-
-	function iframeDocumentHeight(iframe) {
-		try {
-			return documentHeight(
-				iframe.contentDocument
-				|| (iframe.contentWindow && iframe.contentWindow.document));
-		} catch (e) {
-			return 0;
-		}
-	}
-
-	function findWrap(iframe) {
-		var node = iframe;
-		while (node && node !== document.body) {
-			if (node.classList && node.classList.contains('iframe-wrap')) {
-				return node;
-			}
-			node = node.parentNode;
-		}
-		return null;
-	}
-
-	function rememberIframe(iframe) {
-		try {
-			if (iframe.contentWindow) {
-				iframeWindows.set(iframe.contentWindow, iframe);
-			}
-		} catch (e) {
-		}
-	}
-
-	function seedIframeHeight(iframe) {
-		if (iframe.getAttribute('data-native-iv-resized') === '1') {
-			return;
-		}
-		var measured = iframeDocumentHeight(iframe);
-		if (measured) {
-			iframe.setAttribute('data-native-iv-measured', '1');
-			iframe.style.height = measured + 'px';
-			return;
-		}
-		var wrap = findWrap(iframe);
-		if (!wrap) {
-			return;
-		}
-		var fixed = clamp(wrap.getAttribute('data-height'), 100000);
-		if (fixed) {
-			iframe.style.height = fixed + 'px';
-			return;
-		}
-		var ratio = Number(wrap.getAttribute('data-aspect-ratio'));
-		if (!isFinite(ratio) || ratio <= 0) {
-			return;
-		}
-		var width = clamp(Math.ceil(
-			wrap.getBoundingClientRect().width
-			|| iframe.getBoundingClientRect().width
-			|| 0), 100000);
-		if (!width) {
-			return;
-		}
-		var height = clamp(width * ratio, 100000);
-		if (height) {
-			iframe.style.height = height + 'px';
-		}
-	}
-
-	function syncIframe(iframe) {
-		rememberIframe(iframe);
-		seedIframeHeight(iframe);
-		if (iframe.getAttribute('data-native-iv-registered') === '1') {
-			return;
-		}
-		iframe.setAttribute('data-native-iv-registered', '1');
-		iframe.addEventListener('load', function() {
-			rememberIframe(iframe);
-			seedIframeHeight(iframe);
-			scheduleMeasure();
-		}, false);
-	}
-
-	function syncIframes() {
-		var iframes = document.getElementsByTagName('iframe');
-		for (var i = 0; i < iframes.length; i++) {
-			syncIframe(iframes[i]);
-		}
-	}
-
-	function measurePreferredSize() {
-		var width = 0;
-		var height = 0;
-		var viewportWidth = clamp(
-			Math.max(
-				window.innerWidth || 0,
-				document.documentElement
-					? document.documentElement.clientWidth
-					: 0),
-			100000);
-		var body = document.body;
-		if (body) {
-			var bodyRect = body.getBoundingClientRect();
-			height = Math.max(
-				height,
-				body.scrollHeight,
-				body.offsetHeight,
-				bodyRect.height);
-			var children = body.children;
-			for (var i = 0; i < children.length; i++) {
-				var child = children[i];
-				var rect = child.getBoundingClientRect();
-				width = Math.max(
-					width,
-					child.scrollWidth,
-					child.offsetWidth,
-					rect.width);
-				height = Math.max(
-					height,
-					child.scrollHeight,
-					child.offsetHeight,
-					rect.bottom - bodyRect.top);
-			}
-			if (!width) {
-				width = Math.max(
-					body.scrollWidth,
-					body.offsetWidth,
-					bodyRect.width);
-			}
-		}
-		var doc = document.documentElement;
-		if (doc && (!width || !height)) {
-			var docRect = doc.getBoundingClientRect();
-			if (!width) {
-				width = Math.max(
-					doc.scrollWidth,
-					doc.offsetWidth,
-					doc.clientWidth,
-					docRect.width);
-			}
-			if (!height) {
-				height = Math.max(
-					doc.scrollHeight,
-					doc.offsetHeight,
-					doc.clientHeight,
-					docRect.height);
-			}
-		}
-		return {
-			width: clamp(width, 100000),
-			height: clamp(height, 100000),
-			viewportWidth: viewportWidth
-		};
-	}
-
-	function reportPreferredSize() {
-		var size = measurePreferredSize();
-		if (!size.width || !size.height) {
-			return;
-		}
-		if (size.width === lastPreferredWidth
-			&& size.height === lastPreferredHeight) {
-			return;
-		}
-		lastPreferredWidth = size.width;
-		lastPreferredHeight = size.height;
-		if (window.external && typeof window.external.invoke === 'function') {
-			try {
-				window.external.invoke(JSON.stringify({
-					event: 'preferred_size',
-					resourceId: resourceId(),
-					width: size.width,
-					height: size.height,
-					viewportWidth: size.viewportWidth,
-					devicePixelRatio: window.devicePixelRatio || 1
-				}));
-			} catch (e) {
-			}
-		}
-	}
-
-	function scheduleMeasure() {
-		if (measureScheduled) {
-			return;
-		}
-		measureScheduled = true;
-		var callback = function() {
-			measureScheduled = false;
-			reportPreferredSize();
-		};
-		if (window.requestAnimationFrame) {
-			window.requestAnimationFrame(callback);
-		} else {
-			setTimeout(callback, 0);
-		}
-	}
-
-	window.addEventListener('message', function(event) {
-		var iframe = iframeWindows.get(event.source);
-		if (!iframe) {
-			return;
-		}
-		var data = event.data;
-		if (typeof data === 'string') {
-			try {
-				data = JSON.parse(data);
-			} catch (e) {
-				return;
-			}
-		}
-		if (!data || data.eventType !== 'resize_frame' || !data.eventData) {
-			return;
-		}
-		var height = clamp(data.eventData.height, 100000);
-		if (!height) {
-			return;
-		}
-		iframe.setAttribute('data-native-iv-resized', '1');
-		iframe.style.height = height + 'px';
-		scheduleMeasure();
-	}, false);
-
-	document.addEventListener('DOMContentLoaded', function() {
-		syncIframes();
-		scheduleMeasure();
-	}, false);
-
-	window.addEventListener('load', function() {
-		syncIframes();
-		scheduleMeasure();
-	}, false);
-
-	window.addEventListener('resize', function() {
-		syncIframes();
-		scheduleMeasure();
-	}, false);
-
-	if (window.ResizeObserver) {
-		var observer = new ResizeObserver(function() {
-			scheduleMeasure();
-		});
-		if (document.documentElement) {
-			observer.observe(document.documentElement);
-		}
-		if (document.body) {
-			observer.observe(document.body);
-		}
-	}
-
-	setInterval(function() {
-		syncIframes();
-		scheduleMeasure();
-	}, 250);
-
-	syncIframes();
-	scheduleMeasure();
-})();
-</script>
-</body>
-</html>)NativeIvHtml");
-}
-
-[[nodiscard]] const NativeIvDocumentInfo *FindNativeIvDocument(
-		uint64 documentId,
-		const NativeIvPrepareState &state) {
-	for (const auto &document : state.documents) {
-		if (document.id == documentId) {
-			return &document;
-		}
-	}
-	return nullptr;
-}
-
-[[nodiscard]] QByteArray RenderNativeIvRichTextHtml(
-		const MTPRichText &text,
-		NativeIvPrepareState *state) {
-	const auto renderAutoLink = [&](const MTPRichText &child, QString prefix) {
-		auto inner = RenderNativeIvRichTextHtml(child, state);
-		const auto target = child.match([&](const MTPDtextPlain &data) {
-			return prefix + qs(data.vtext());
-		}, [](const auto &) {
-			return QString();
-		});
-		return target.isEmpty()
-			? inner
-			: NativeIvHtmlTag(
-				"a",
-				{ { "href", NativeIvHtmlEscape(target) } },
-				inner);
-	};
-	return text.match([&](const MTPDtextEmpty &) {
-		return QByteArray();
-	}, [&](const MTPDtextPlain &data) {
-		return NativeIvRichText(qs(data.vtext()));
-	}, [&](const MTPDtextConcat &data) {
-		auto result = QByteArray();
-		for (const auto &part : data.vtexts().v) {
-			result += RenderNativeIvRichTextHtml(part, state);
-		}
-		return result;
-	}, [&](const MTPDtextImage &data) {
-		const auto documentId = uint64(data.vdocument_id().v);
-		if (!FindNativeIvDocument(documentId, *state)) {
-			return NativeIvRichText(u"Image not found."_q);
-		}
-		auto attributes = NativeIvHtmlAttributes{
-			{ "class", "pic" },
-			{ "src", NativeIvHtmlEscape(
-				QString::fromUtf8(NativeIvDocumentUrl(documentId))) },
-		};
-		if (const auto width = data.vw().v) {
-			attributes.push_back({ "width", QByteArray::number(width) });
-		}
-		if (const auto height = data.vh().v) {
-			attributes.push_back({ "height", QByteArray::number(height) });
-		}
-		return NativeIvHtmlTag("img", attributes);
-	}, [&](const MTPDtextMath &data) {
-		return NativeIvRichText(InlineFormulaCopySource(qs(data.vsource())));
-	}, [&](const MTPDtextCustomEmoji &data) {
-		return NativeIvRichText(qs(data.valt()));
-	}, [&](const MTPDtextBold &data) {
-		return NativeIvHtmlTag("b", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextItalic &data) {
-		return NativeIvHtmlTag("i", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextUnderline &data) {
-		return NativeIvHtmlTag("u", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextStrike &data) {
-		return NativeIvHtmlTag("s", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextFixed &data) {
-		return NativeIvHtmlTag("code", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextUrl &data) {
-		auto attributes = NativeIvHtmlAttributes{
-			{ "href", NativeIvHtmlEscape(qs(data.vurl())) },
-		};
-		return NativeIvHtmlTag(
-			"a",
-			attributes,
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextEmail &data) {
-		return NativeIvHtmlTag(
-			"a",
-			{ { "href", "mailto:" + NativeIvHtmlEscape(qs(data.vemail())) } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextSubscript &data) {
-		return NativeIvHtmlTag("sub", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextSuperscript &data) {
-		return NativeIvHtmlTag("sup", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextMarked &data) {
-		return NativeIvHtmlTag("mark", {}, RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextSpoiler &data) {
-		return NativeIvHtmlTag(
-			"span",
-			{ { "class", "spoiler" } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextMention &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextHashtag &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextBotCommand &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextCashtag &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextAutoUrl &data) {
-		return renderAutoLink(data.vtext(), QString());
-	}, [&](const MTPDtextAutoEmail &data) {
-		return renderAutoLink(data.vtext(), u"mailto:"_q);
-	}, [&](const MTPDtextAutoPhone &data) {
-		return renderAutoLink(data.vtext(), u"tel:"_q);
-	}, [&](const MTPDtextBankCard &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextMentionName &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextDate &data) {
-		return RenderNativeIvRichTextHtml(data.vtext(), state);
-	}, [&](const MTPDtextPhone &data) {
-		return NativeIvHtmlTag(
-			"a",
-			{ { "href", "tel:" + NativeIvHtmlEscape(qs(data.vphone())) } },
-			RenderNativeIvRichTextHtml(data.vtext(), state));
-	}, [&](const MTPDtextAnchor &data) {
-		auto inner = RenderNativeIvRichTextHtml(data.vtext(), state);
-		const auto name = NativeIvHtmlEscape(qs(data.vname()));
-		auto anchor = NativeIvHtmlTag("a", { { "name", name } });
-		if (inner.isEmpty()) {
-			return anchor;
-		}
-		anchor += inner;
-		return NativeIvHtmlTag("span", { { "class", "reference" } }, anchor);
-	});
-}
-
-[[nodiscard]] QByteArray NativeIvCaptionHtml(
-		const MTPPageCaption &caption,
-		NativeIvPrepareState *state) {
-	auto text = RenderNativeIvRichTextHtml(caption.data().vtext(), state);
-	const auto credit = RenderNativeIvRichTextHtml(caption.data().vcredit(), state);
-	if (!credit.isEmpty()) {
-		text += NativeIvHtmlTag("cite", { { "dir", "auto" } }, credit);
-	} else if (text.isEmpty()) {
-		return QByteArray();
-	}
-	return NativeIvHtmlTag("figcaption", { { "dir", "auto" } }, text);
-}
-
 [[nodiscard]] QString StripOneTrailingNewline(QString text);
 [[nodiscard]] PreparedBlock PrepareNativeIvEmbedPostFallbackParagraph(
 	QString url);
 
-[[nodiscard]] QByteArray RenderNativeIvEmbedHtml(
-		const MTPDpageBlockEmbed &data,
-		NativeIvPrepareState *state,
-		bool includeCaption) {
-	auto iframeWidth = QByteArray();
-	auto iframeHeight = QByteArray();
-	auto width = QByteArray();
-	auto height = QByteArray();
-	auto aspectRatio = QByteArray();
-	auto iframeAttributes = NativeIvHtmlAttributes();
-	const auto autosize = !data.vw();
-	const auto fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v);
-	if (autosize) {
-		iframeWidth = "100%";
-	} else if (fullWidth) {
-		width = "100%";
-		if (data.vh()) {
-			if (data.vw()->v) {
-				aspectRatio = QByteArray::number(
-					double(data.vh()->v) / std::max(data.vw()->v, 1),
-					'g',
-					16);
-			} else {
-				height = QByteArray::number(data.vh()->v) + "px";
-			}
-		}
-		iframeWidth = "100%";
-		iframeHeight = height;
+[[nodiscard]] std::optional<EmbedRequest> EmbedRequestFromMtpBlock(
+		const MTPDpageBlockEmbed &data) {
+	auto request = EmbedRequest{
+		.width = data.vw() ? data.vw()->v : 0,
+		.height = data.vh() ? data.vh()->v : 0,
+		.fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v),
+		.fixedHeight = (data.vh() != nullptr),
+		.allowScrolling = data.is_allow_scrolling(),
+	};
+	if (const auto url = data.vurl(); url && !qs(*url).isEmpty()) {
+		request.url = qs(*url);
+	} else if (const auto html = data.vhtml(); html && !html->v.isEmpty()) {
+		request.html = html->v;
 	} else {
-		width = QByteArray::number(data.vw()->v) + "px";
-		if (data.vh()) {
-			aspectRatio = QByteArray::number(
-				double(data.vh()->v) / std::max(data.vw()->v, 1),
-				'g',
-				16);
-		}
+		return std::nullopt;
 	}
-	if (!iframeWidth.isEmpty()) {
-		iframeAttributes.push_back({ "width", iframeWidth });
-	}
-	if (!iframeHeight.isEmpty()) {
-		iframeAttributes.push_back({ "height", iframeHeight });
-	}
-	if (const auto url = data.vurl()) {
-		if (autosize) {
-			iframeAttributes.push_back({
-				"srcdoc",
-				NativeIvHtmlEscape(qs(*url)),
-			});
-		} else {
-			iframeAttributes.push_back({
-				"src",
-				NativeIvHtmlEscape(qs(*url)),
-			});
-		}
-	} else if (const auto html = data.vhtml()) {
-		const auto resourceId = StoreNativeIvEmbedHtml(html->v, state);
-		iframeAttributes.push_back({
-			"src",
-			NativeIvHtmlEscape(QString::fromUtf8(NativeIvResourceUrl(resourceId))),
-		});
-	} else {
-		return QByteArray();
-	}
-	if (!data.is_allow_scrolling()) {
-		iframeAttributes.push_back({ "scrolling", "no" });
-	}
-	iframeAttributes.push_back({ "frameborder", "0" });
-	iframeAttributes.push_back({ "allowtransparency", "true" });
-	iframeAttributes.push_back({ "allowfullscreen", "true" });
-	auto content = NativeIvHtmlTag("iframe", iframeAttributes);
-	if (!autosize) {
-		auto wrapAttributes = NativeIvHtmlAttributes{
-			{ "class", "iframe-wrap" },
-		};
-		auto style = QByteArray();
-		if (!width.isEmpty()) {
-			style += QByteArray("width:") + width + ';';
-		}
-		if (!style.isEmpty()) {
-			wrapAttributes.push_back({ "style", style });
-		}
-		if (!height.isEmpty()) {
-			wrapAttributes.push_back({
-				"data-height",
-				QByteArray::number(data.vh()->v),
-			});
-		} else if (!aspectRatio.isEmpty()) {
-			wrapAttributes.push_back({
-				"data-aspect-ratio",
-				aspectRatio,
-			});
-		}
-		content = NativeIvHtmlTag("div", wrapAttributes, content);
-	}
-	if (includeCaption) {
-		content += NativeIvCaptionHtml(data.vcaption(), state);
-	}
-	auto figureAttributes = NativeIvHtmlAttributes();
-	if (!fullWidth) {
-		figureAttributes.push_back({ "class", "nowide" });
-	}
-	return NativeIvHtmlTag("figure", figureAttributes, content);
+	return request;
 }
 
 [[nodiscard]] bool PrepareNativeIvEmbedBlock(
@@ -926,33 +232,20 @@ iframe {
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	const auto label = tr::lng_iv_click_to_view(tr::now);
-	const auto html = RenderNativeIvEmbedHtml(data, state, false);
-	if (html.isEmpty()) {
+	auto request = EmbedRequestFromMtpBlock(data);
+	if (!request) {
 		return PrepareNativeIvPlaceholderBlock(
 			label,
 			data.vcaption(),
 			result,
 			state);
 	}
-	auto request = EmbedRequest{
-		.resourceId = StoreNativeIvEmbedHtml(
-			WrapNativeIvEmbedHtml(html),
-			state),
-		.fallbackUrl = (!data.vw() || !data.vurl())
-			? QString()
-			: qs(*data.vurl()),
-		.width = data.vw() ? data.vw()->v : 0,
-		.height = data.vh() ? data.vh()->v : 0,
-		.fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v),
-		.fixedHeight = (data.vh() != nullptr),
-		.allowScrolling = data.is_allow_scrolling(),
-	};
 	return PrepareNativeIvPlaceholderBlock(
 		label,
 		data.vcaption(),
 		result,
 		state,
-		std::move(request));
+		std::move(*request));
 }
 
 [[nodiscard]] bool PrepareNativeIvEmbedPostBlock(
@@ -2064,84 +1357,23 @@ namespace {
 	return true;
 }
 
-[[nodiscard]] QByteArray RenderCanonicalNativeIvEmbedHtml(
-		const RichPageBlock &block,
-		NativeIvPrepareState *state) {
-	auto attributes = NativeIvHtmlAttributes();
-	const auto fullWidth = block.fullWidth || (block.width <= 0);
-	if (fullWidth) {
-		attributes.push_back({ "width", "100%" });
-	} else {
-		attributes.push_back({
-			"width",
-			QByteArray::number(block.width),
-		});
-	}
-	if (block.height > 0) {
-		attributes.push_back({
-			"height",
-			QByteArray::number(block.height),
-		});
-	}
-	if (!block.url.isEmpty()) {
-		attributes.push_back({ "src", NativeIvHtmlEscape(block.url) });
-	} else if (!block.html.isEmpty()) {
-		const auto resourceId = StoreNativeIvEmbedHtml(
-			block.html.toUtf8(),
-			state);
-		attributes.push_back({
-			"src",
-			NativeIvHtmlEscape(
-				QString::fromUtf8(NativeIvResourceUrl(resourceId))),
-		});
-	} else {
-		return QByteArray();
-	}
-	if (!block.allowScrolling) {
-		attributes.push_back({ "scrolling", "no" });
-	}
-	attributes.push_back({ "frameborder", "0" });
-	attributes.push_back({ "allowtransparency", "true" });
-	attributes.push_back({ "allowfullscreen", "true" });
-	auto content = NativeIvHtmlTag("iframe", attributes);
-	if (!fullWidth) {
-		auto wrapAttributes = NativeIvHtmlAttributes{
-			{ "class", "iframe-wrap" },
-		};
-		if (block.height > 0) {
-			wrapAttributes.push_back({
-				"style",
-				QByteArray("height:")
-					+ QByteArray::number(block.height)
-					+ "px",
-			});
-		}
-		content = NativeIvHtmlTag(
-			"div",
-			std::move(wrapAttributes),
-			content);
-	}
-	return NativeIvHtmlTag("figure", {}, content);
-}
-
 [[nodiscard]] auto EmbedRequestFromCanonicalBlock(
-		const RichPageBlock &block,
-		NativeIvPrepareState *state) -> std::optional<EmbedRequest> {
-	const auto html = RenderCanonicalNativeIvEmbedHtml(block, state);
-	if (html.isEmpty()) {
-		return std::nullopt;
-	}
-	return EmbedRequest{
-		.resourceId = StoreNativeIvEmbedHtml(
-			WrapNativeIvEmbedHtml(html),
-			state),
-		.fallbackUrl = block.url.isEmpty() ? QString() : block.url,
+		const RichPageBlock &block) -> std::optional<EmbedRequest> {
+	auto request = EmbedRequest{
 		.width = block.width,
 		.height = block.height,
 		.fullWidth = block.fullWidth || !block.width,
 		.fixedHeight = (block.height > 0),
 		.allowScrolling = block.allowScrolling,
 	};
+	if (!block.url.isEmpty()) {
+		request.url = block.url;
+	} else if (!block.html.isEmpty()) {
+		request.html = block.html.toUtf8();
+	} else {
+		return std::nullopt;
+	}
+	return request;
 }
 
 [[nodiscard]] bool AppendNativeIvFlowBlock(
@@ -2718,7 +1950,7 @@ namespace {
 			tr::lng_iv_click_to_view(tr::now),
 			block.caption,
 			block.anchorId,
-			EmbedRequestFromCanonicalBlock(block, state),
+			EmbedRequestFromCanonicalBlock(block),
 			result,
 			state);
 	case RichPageBlockKind::EmbedPost:

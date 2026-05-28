@@ -246,8 +246,8 @@ void SetRichPageSelectionCursor(
 [[nodiscard]] bool SameEmbedRequest(
 		const Iv::Markdown::EmbedRequest &a,
 		const Iv::Markdown::EmbedRequest &b) {
-	return (a.resourceId == b.resourceId)
-		&& (a.fallbackUrl == b.fallbackUrl)
+	return (a.html == b.html)
+		&& (a.url == b.url)
 		&& (a.width == b.width)
 		&& (a.height == b.height)
 		&& (a.fullWidth == b.fullWidth)
@@ -659,9 +659,9 @@ void Message::activateRichPageMedia(
 	case MediaActivationKind::None:
 		break;
 	case MediaActivationKind::Embed:
-		if (!activation.embed.fallbackUrl.isEmpty()) {
+		if (!activation.embed.url.isEmpty()) {
 			HiddenUrlClickHandler::Open(
-				activation.embed.fallbackUrl,
+				activation.embed.url,
 				context.other);
 		}
 		break;

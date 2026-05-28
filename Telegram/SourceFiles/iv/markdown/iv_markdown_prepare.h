@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/flat_map.h"
 #include "iv/markdown/iv_markdown_document.h"
 #include "iv/markdown/iv_markdown_math_renderer.h"
 
@@ -350,7 +349,6 @@ struct MarkdownArticleContent {
 	PreparedRenderDocument blocks;
 	std::vector<PreparedFootnote> footnotes;
 	std::vector<PreparedFormulaSlot> formulas;
-	base::flat_map<QByteArray, QByteArray> embedHtmlResources;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
 	PrepareFailureStatus failure;
 	PrepareDebugStats debug;
