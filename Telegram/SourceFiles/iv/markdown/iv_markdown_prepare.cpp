@@ -134,6 +134,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
 	state.dimensions = request.dimensionsOverride.value_or(
 		CaptureMarkdownPrepareDimensions());
+	state.editMode = request.editMode;
 	const auto finish = [&](NativeInstantViewPrepareResultKind kind, QString reason) {
 		state.result.debug.prepareMs = int(timer.elapsed());
 		return NativeInstantViewPrepareResult{

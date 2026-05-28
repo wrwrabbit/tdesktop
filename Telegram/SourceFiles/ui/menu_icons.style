@@ -63,6 +63,7 @@ menuIconEarn: icon {{ "menu/earn", menuIconColor }};
 menuIconCancelFee: icon {{ "menu/cancel_fee", menuIconColor }};
 menuIconCreatePoll: icon {{ "menu/create_poll", menuIconColor }};
 menuIconCreateTodoList: icon {{ "menu/select", menuIconColor }};
+menuIconArticle: icon {{ "/menu/article_rich-24x24", menuIconColor }};
 menuIconQrCode: icon {{ "menu/qr_code", menuIconColor }};
 menuIconExpand: icon {{ "menu/expand", menuIconColor }};
 menuIconCollapse: icon {{ "menu/collapse", menuIconColor }};

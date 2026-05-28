@@ -139,6 +139,12 @@ struct LaidOutBlock {
 	mutable QSize colorizedFormulaSize;
 };
 
+struct TextLeafHeightOverride {
+	int textLeafIndex = -1;
+	int height = 0;
+	int nextTextLeafIndex = 0;
+};
+
 struct LayoutContext {
 	int listDepth = 0;
 	int quoteDepth = 0;
@@ -148,6 +154,7 @@ struct LayoutContext {
 	bool useArticleBands = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
+	std::shared_ptr<TextLeafHeightOverride> textLeafHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
 	std::function<std::shared_ptr<PlaceholderBlockRuntime>(
 		PreparedPlaceholderBlockId)> placeholderRuntimeFactory;
@@ -169,6 +176,9 @@ struct TableRowLayoutData {
 [[nodiscard]] bool IsFlowKind(PreparedBlockKind kind);
 [[nodiscard]] QString ListMarkerText(const PreparedBlock &block);
 [[nodiscard]] int TextLineHeight(const style::TextStyle &style);
+[[nodiscard]] int ResolveTextLeafHeight(
+	int naturalHeight,
+	LayoutContext context);
 [[nodiscard]] QPoint BulletMarkerCenter(
 	int left,
 	int baseline,
@@ -228,7 +238,8 @@ void RepopulateCodeBlockLeaf(
 	int top,
 	int width,
 	bool allowAsyncSyntaxHighlighting,
-	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
+	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutRuleBlock(
 	const style::Markdown &st,
 	int left,
@@ -249,7 +260,8 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &st,
 	int left,
 	int top,
-	int width);
+	int width,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutPlaceholderBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,

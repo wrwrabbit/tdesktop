@@ -144,6 +144,47 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return block;
 }
 
+[[nodiscard]] bool PrepareNativeIvMathBlock(
+		const MTPDpageBlockMath &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	const auto source = qs(data.vsource());
+	if (source.trimmed().isEmpty()) {
+		return true;
+	}
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::DisplayMath;
+	block.formulaTex = source;
+	block.mathKind = MathKind::Display;
+	block.formulaIndex = state->rememberFormula(block);
+	result->push_back(std::move(block));
+	return true;
+}
+
+[[nodiscard]] bool AppendNativeIvFlowBlock(
+		std::vector<PreparedBlock> *result,
+		PreparedBlockKind kind,
+		int headingLevel,
+		const MTPRichText &text,
+		NativeIvPrepareState *state,
+		bool allowEmpty = false) {
+	auto prepared = PreparedIvRichText();
+	auto anchorId = QString();
+	const auto context = NativeIvRichTextContextForTextSize(
+		NativeIvFlowTextSize(kind, headingLevel, state->dimensions),
+		state->dimensions);
+	if (!PrepareNativeIvRichText(text, &prepared, &anchorId, state, context)) {
+		return false;
+	}
+	return AppendPreparedIvRichBlock(
+		result,
+		kind,
+		headingLevel,
+		std::move(prepared),
+		std::move(anchorId),
+		allowEmpty || state->editMode);
+}
+
 void WrapPreparedIvRichTextItalic(PreparedIvRichText *prepared) {
 	if (!prepared || prepared->text.text.isEmpty()) {
 		return;
@@ -158,7 +199,8 @@ bool AppendPreparedQuoteParagraph(
 		std::vector<PreparedBlock> *result,
 		PreparedIvRichText prepared,
 		bool pullquote,
-		bool supplementary = false) {
+		bool supplementary = false,
+		bool allowEmpty = false) {
 	if (pullquote) {
 		WrapPreparedIvRichTextItalic(&prepared);
 	}
@@ -169,7 +211,7 @@ bool AppendPreparedQuoteParagraph(
 			0,
 			std::move(prepared),
 			QString(),
-			false,
+			allowEmpty,
 			supplementary)) {
 		return false;
 	}
@@ -427,7 +469,7 @@ void MarkNativeIvTableSlots(
 		headingLevel,
 		std::move(prepared),
 		std::move(anchorId),
-		allowEmpty);
+		allowEmpty || state->editMode);
 }
 
 [[nodiscard]] bool PrepareCanonicalNativeIvQuoteBlock(
@@ -445,7 +487,9 @@ void MarkNativeIvTableSlots(
 	if (!AppendPreparedQuoteParagraph(
 			&block.children,
 			std::move(body),
-			data.pullquote)) {
+			data.pullquote,
+			false,
+			state->editMode)) {
 		return false;
 	}
 	if (!data.blocks.empty()
@@ -465,7 +509,8 @@ void MarkNativeIvTableSlots(
 			&block.children,
 			std::move(cite),
 			data.pullquote,
-			true)) {
+			true,
+			state->editMode)) {
 		return false;
 	}
 	if (block.children.empty()) {
@@ -528,7 +573,9 @@ void MarkNativeIvTableSlots(
 					&block.children,
 					PreparedBlockKind::Paragraph,
 					0,
-					std::move(prepared))) {
+					std::move(prepared),
+					QString(),
+					state->editMode)) {
 				return false;
 			}
 		} else if (!PrepareNativeIvBlocks(
@@ -805,7 +852,8 @@ void MarkNativeIvTableSlots(
 				PreparedBlockKind::Heading,
 				4,
 				std::move(title),
-				std::move(anchorId))) {
+				std::move(anchorId),
+				state->editMode)) {
 			return false;
 		}
 	} else if (!anchorId.isEmpty() && related.front().anchorId.isEmpty()) {

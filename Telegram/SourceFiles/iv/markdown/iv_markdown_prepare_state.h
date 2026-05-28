@@ -53,6 +53,9 @@ struct PrepareState {
 struct NativeIvPrepareState {
 	MarkdownArticleContent result;
 	MarkdownPrepareDimensions dimensions;
+	std::vector<NativeIvPhotoInfo> photos;
+	std::vector<NativeIvDocumentInfo> documents;
+	bool editMode = false;
 	int nextGeneratedId = 0;
 	int nextFormulaIndex = 0;
 

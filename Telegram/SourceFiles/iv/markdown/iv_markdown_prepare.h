@@ -336,6 +336,7 @@ struct NativeInstantViewPrepareRequest {
 	std::shared_ptr<const Iv::RichPage> richPage;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
 	std::optional<MarkdownPrepareDimensions> dimensionsOverride;
+	bool editMode = false;
 };
 
 struct MarkdownArticleContent {

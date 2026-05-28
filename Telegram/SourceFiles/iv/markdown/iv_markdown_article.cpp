@@ -718,6 +718,10 @@ public:
 
 	void setContent(MarkdownArticleContent content);
 
+	void setTextLeafHeightOverride(int textLeafIndex, int height);
+
+	void clearTextLeafHeightOverride();
+
 	[[nodiscard]] int maxWidth();
 	[[nodiscard]] int lastLayoutWidth() const;
 
@@ -744,6 +748,14 @@ public:
 	[[nodiscard]] bool segmentIsText(int index) const;
 
 	[[nodiscard]] int segmentLength(int index) const;
+
+	[[nodiscard]] int firstTextSegmentIndex() const;
+
+	[[nodiscard]] int textLeafIndexForSegment(int segmentIndex) const;
+
+	[[nodiscard]] int segmentIndexForTextLeafIndex(int textLeafIndex) const;
+
+	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
 
 	[[nodiscard]] int selectionOffsetFromHit(
 		const MarkdownArticleHitTestResult &result,
@@ -871,6 +883,8 @@ private:
 	SegmentSpan _visibleSegmentSpan;
 	std::vector<int> _segmentTops;
 	std::vector<int> _segmentBottoms;
+	int _textLeafHeightOverrideIndex = -1;
+	int _textLeafHeightOverride = 0;
 	bool _blocksPainted = false;
 
 };
@@ -924,6 +938,24 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 	resetFormulaRasterCache();
 	invalidateLayout();
+}
+
+void MarkdownArticle::Impl::setTextLeafHeightOverride(
+		int textLeafIndex,
+		int height) {
+	textLeafIndex = std::max(textLeafIndex, -1);
+	height = std::max(height, 0);
+	if (_textLeafHeightOverrideIndex == textLeafIndex
+		&& _textLeafHeightOverride == height) {
+		return;
+	}
+	_textLeafHeightOverrideIndex = textLeafIndex;
+	_textLeafHeightOverride = height;
+	invalidateLayout();
+}
+
+void MarkdownArticle::Impl::clearTextLeafHeightOverride() {
+	setTextLeafHeightOverride(-1, 0);
 }
 
 int MarkdownArticle::Impl::maxWidth() {
@@ -1055,6 +1087,50 @@ bool MarkdownArticle::Impl::segmentIsText(int index) const {
 int MarkdownArticle::Impl::segmentLength(int index) const {
 	const auto segment = FindSegment(&_segments, index);
 	return segment ? SegmentLength(*segment) : 0;
+}
+
+int MarkdownArticle::Impl::firstTextSegmentIndex() const {
+	for (const auto &segment : _segments) {
+		if (segment.isTextLeaf()) {
+			return segment.index;
+		}
+	}
+	return -1;
+}
+
+int MarkdownArticle::Impl::textLeafIndexForSegment(int segmentIndex) const {
+	auto textLeafIndex = 0;
+	for (const auto &segment : _segments) {
+		if (!segment.isTextLeaf()) {
+			continue;
+		} else if (segment.index == segmentIndex) {
+			return textLeafIndex;
+		}
+		++textLeafIndex;
+	}
+	return -1;
+}
+
+int MarkdownArticle::Impl::segmentIndexForTextLeafIndex(
+		int textLeafIndex) const {
+	if (textLeafIndex < 0) {
+		return -1;
+	}
+	auto current = 0;
+	for (const auto &segment : _segments) {
+		if (!segment.isTextLeaf()) {
+			continue;
+		} else if (current == textLeafIndex) {
+			return segment.index;
+		}
+		++current;
+	}
+	return -1;
+}
+
+QRect MarkdownArticle::Impl::textSegmentRect(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	return (segment && segment->isTextLeaf()) ? segment->textRect : QRect();
 }
 
 int MarkdownArticle::Impl::selectionOffsetFromHit(
@@ -1556,6 +1632,14 @@ void MarkdownArticle::Impl::relayout(int width) {
 		.useArticleBands = true,
 		.syntaxHighlightTracker = this,
 	};
+	if (_textLeafHeightOverrideIndex >= 0 && _textLeafHeightOverride > 0) {
+		context.textLeafHeightOverride
+			= std::make_shared<TextLeafHeightOverride>(
+				TextLeafHeightOverride{
+					.textLeafIndex = _textLeafHeightOverrideIndex,
+					.height = _textLeafHeightOverride,
+				});
+	}
 	context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
 		return getOrCreateMediaBlock(prepared);
 	};
@@ -1621,6 +1705,16 @@ void MarkdownArticle::setContent(MarkdownArticleContent content) {
 	_impl->setContent(std::move(content));
 }
 
+void MarkdownArticle::setTextLeafHeightOverride(
+		int textLeafIndex,
+		int height) {
+	_impl->setTextLeafHeightOverride(textLeafIndex, height);
+}
+
+void MarkdownArticle::clearTextLeafHeightOverride() {
+	_impl->clearTextLeafHeightOverride();
+}
+
 void MarkdownArticle::invalidateLayout() {
 	_impl->invalidateLayout();
 }
@@ -1677,6 +1771,22 @@ bool MarkdownArticle::segmentIsText(int index) const {
 
 int MarkdownArticle::segmentLength(int index) const {
 	return _impl->segmentLength(index);
+}
+
+int MarkdownArticle::firstTextSegmentIndex() const {
+	return _impl->firstTextSegmentIndex();
+}
+
+int MarkdownArticle::textLeafIndexForSegment(int segmentIndex) const {
+	return _impl->textLeafIndexForSegment(segmentIndex);
+}
+
+int MarkdownArticle::segmentIndexForTextLeafIndex(int textLeafIndex) const {
+	return _impl->segmentIndexForTextLeafIndex(textLeafIndex);
+}
+
+QRect MarkdownArticle::textSegmentRect(int segmentIndex) const {
+	return _impl->textSegmentRect(segmentIndex);
 }
 
 int MarkdownArticle::selectionOffsetFromHit(

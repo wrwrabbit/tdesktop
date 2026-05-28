@@ -16,6 +16,12 @@ PRIVATE
     iv/iv_data.cpp
     iv/iv_data.h
     iv/iv_delegate.h
+    iv/iv_editor_box.cpp
+    iv/iv_editor_box.h
+    iv/iv_editor_state.cpp
+    iv/iv_editor_state.h
+    iv/iv_editor_widget.cpp
+    iv/iv_editor_widget.h
     iv/iv_pch.h
     iv/iv_zoom_controls.cpp
     iv/iv_zoom_controls.h

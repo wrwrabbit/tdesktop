@@ -518,9 +518,11 @@ void PrepareNestedContext(
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
-	const auto summaryHeight = std::max(
-		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(details.summaryStyle));
+	const auto summaryHeight = ResolveTextLeafHeight(
+		std::max(
+			block.leaf.countHeight(block.textWidth, true),
+			TextLineHeight(details.summaryStyle)),
+		context);
 	const auto headerContentHeight = std::max(summaryHeight, iconHeight);
 	const auto headerHeight = headerPadding.top()
 		+ headerContentHeight
@@ -645,9 +647,11 @@ void PrepareNestedContext(
 			style.authorStyle,
 			TextWithEntities::Simple(prepared.embedPost.author),
 			parseOptions);
-		authorHeight = std::max(
-			block.labelLeaf.countHeight(textWidth, true),
-			TextLineHeight(style.authorStyle));
+		authorHeight = ResolveTextLeafHeight(
+			std::max(
+				block.labelLeaf.countHeight(textWidth, true),
+				TextLineHeight(style.authorStyle)),
+			context);
 	}
 
 	auto dateHeight = 0;
@@ -658,9 +662,11 @@ void PrepareNestedContext(
 			style.dateStyle,
 			TextWithEntities::Simple(prepared.embedPost.dateText),
 			parseOptions);
-		dateHeight = std::max(
-			block.subtitleLeaf.countHeight(textWidth, true),
-			TextLineHeight(style.dateStyle));
+		dateHeight = ResolveTextLeafHeight(
+			std::max(
+				block.subtitleLeaf.countHeight(textWidth, true),
+				TextLineHeight(style.dateStyle)),
+			context);
 	}
 
 	const auto textHeight = authorHeight + dateHeight;
@@ -802,7 +808,8 @@ void PrepareNestedContext(
 			top,
 			width,
 			context.allowAsyncSyntaxHighlighting,
-			context.syntaxHighlightTracker);
+			context.syntaxHighlightTracker,
+			context);
 	case PreparedBlockKind::Rule:
 		return LayoutRuleBlock(st, left, top, width);
 	case PreparedBlockKind::List:
@@ -856,7 +863,8 @@ void PrepareNestedContext(
 			st,
 			left,
 			top,
-			width);
+			width,
+			context);
 	case PreparedBlockKind::Photo:
 		return LayoutPhotoBlock(
 			prepared,

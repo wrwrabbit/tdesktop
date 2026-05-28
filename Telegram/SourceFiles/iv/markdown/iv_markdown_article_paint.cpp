@@ -676,6 +676,34 @@ void PaintTextLeaf(
 	p.restore();
 }
 
+void PaintSelectableTextLeaf(
+		Painter &p,
+		const Ui::Text::String &leaf,
+		const MarkdownArticlePaintContext &context,
+		QRect rect,
+		int width,
+		int segmentIndex,
+		style::align align = style::al_left,
+		std::optional<TextSelection> selection = std::nullopt,
+		int elisionLines = 0) {
+	if ((segmentIndex >= 0)
+		&& (context.hiddenTextSegmentIndex == segmentIndex)) {
+		if (context.reveal && !elisionLines) {
+			context.reveal->nextLine += CountTextRevealLines(leaf, rect, width);
+		}
+		return;
+	}
+	PaintTextLeaf(
+		p,
+		leaf,
+		context,
+		rect,
+		width,
+		align,
+		selection,
+		elisionLines);
+}
+
 [[nodiscard]] std::optional<QColor> QuoteSupplementaryColor(
 		const MarkdownArticlePaintContext &context) {
 	if (!context.caches.blockquote) {
@@ -706,12 +734,13 @@ void PaintThinkingTextLeafDirect(
 		const MarkdownArticlePaintContext &context) {
 	const auto &paintSt = PaintStyle(context, st);
 	p.setPen(paintSt.supplementaryTextColor->c);
-	PaintTextLeaf(
+	PaintSelectableTextLeaf(
 		p,
 		block.leaf,
 		context,
 		block.textRect,
 		block.textWidth,
+		block.segmentIndex,
 		style::al_left,
 		TextSelectionForSegmentIndex(
 			context.selectionState,
@@ -1075,12 +1104,13 @@ void PaintTableCaption(
 		const MarkdownArticlePaintContext &context) {
 	if (!block.textRect.isEmpty()) {
 		SetTextLeafPen(p, block, st, context);
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
 			context,
 			block.textRect,
 			block.textWidth,
+			block.secondarySegmentIndex,
 			block.flowTextAlign,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
@@ -1142,12 +1172,13 @@ void PaintWholeTable(
 			if (!cell.textRect.intersects(block.visibleTableRect)) {
 				continue;
 			}
-			PaintTextLeaf(
+			PaintSelectableTextLeaf(
 				p,
 				cell.leaf,
 				tableContext,
 				cell.textRect,
 				cell.textWidth,
+				cell.segmentIndex,
 				cell.align,
 				TextSelectionForSegmentIndex(
 					context.selectionState,
@@ -1240,12 +1271,13 @@ void PaintTableRowBand(
 		if (!cell->textRect.intersects(rowBand)) {
 			continue;
 		}
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			cell->leaf,
 			rowContext,
 			cell->textRect,
 			cell->textWidth,
+			cell->segmentIndex,
 			cell->align,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
@@ -1349,12 +1381,13 @@ void PaintDisplayMathBlock(
 			}
 			if (!rendered.success) {
 				p.setPen(paintSt.textColor->c);
-				PaintTextLeaf(
+				PaintSelectableTextLeaf(
 					p,
 					block.fallbackLeaf,
 					formulaContext,
 					block.textRect,
-					block.textWidth);
+					block.textWidth,
+					block.segmentIndex);
 			}
 
 			if (block.segmentIndex >= 0
@@ -1537,12 +1570,13 @@ void PaintPlaceholderBlock(
 		});
 	if (!block.textRect.isEmpty()) {
 		SetTextLeafPen(p, block, st, context);
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
 			context,
 			block.textRect,
 			block.textWidth,
+			block.secondarySegmentIndex,
 			style::al_left,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
@@ -1599,12 +1633,13 @@ void PaintEmbedPostBlock(
 		}
 		if (!block.labelRect.isEmpty()) {
 			p.setPen(style.authorFg->c);
-			PaintTextLeaf(
+			PaintSelectableTextLeaf(
 				p,
 				block.labelLeaf,
 				headerContext,
 				block.labelRect,
 				block.labelWidth,
+				block.segmentIndex,
 				style::al_left,
 				TextSelectionForSegmentIndex(
 					headerContext.selectionState,
@@ -1612,12 +1647,13 @@ void PaintEmbedPostBlock(
 		}
 		if (!block.subtitleRect.isEmpty()) {
 			p.setPen(style.dateFg->c);
-			PaintTextLeaf(
+			PaintSelectableTextLeaf(
 				p,
 				block.subtitleLeaf,
 				headerContext,
 				block.subtitleRect,
 				block.subtitleWidth,
+				block.secondarySegmentIndex,
 				style::al_left,
 				TextSelectionForSegmentIndex(
 					headerContext.selectionState,
@@ -1687,12 +1723,13 @@ void PaintEmbedPostBlock(
 	}
 	if (!block.textRect.isEmpty()) {
 		SetTextLeafPen(p, block, st, context);
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
 			context,
 			block.textRect,
 			block.textWidth,
+			block.tertiarySegmentIndex,
 			style::al_left,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
@@ -1709,12 +1746,13 @@ void PaintMediaCaption(
 		return;
 	}
 	SetTextLeafPen(p, block, st, context);
-	PaintTextLeaf(
+	PaintSelectableTextLeaf(
 		p,
 		block.leaf,
 		context,
 		block.textRect,
 		block.textWidth,
+		block.secondarySegmentIndex,
 		style::al_left,
 		TextSelectionForSegmentIndex(
 			context.selectionState,
@@ -1997,12 +2035,13 @@ void PaintDetailsBlock(
 			block.collapsed);
 	}
 	p.setPen(paintSt.textColor->c);
-	PaintTextLeaf(
+	PaintSelectableTextLeaf(
 		p,
 		block.leaf,
 		context,
 		block.textRect,
 		block.textWidth,
+		block.segmentIndex,
 		style::al_left,
 		TextSelectionForSegmentIndex(
 			context.selectionState,
@@ -2073,12 +2112,13 @@ void PaintThinkingBlock(
 		maskPainter.translate(-logicalRect.topLeft());
 		maskPainter.setClipRect(logicalRect);
 		maskPainter.setPen(QColor(255, 255, 255));
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			maskPainter,
 			block.leaf,
 			ClippedContext(context, logicalRect),
 			block.textRect,
 			block.textWidth,
+			block.segmentIndex,
 			style::al_left,
 			TextSelection());
 	}
@@ -2136,6 +2176,22 @@ void PaintBlock(
 		&& block.kind != PreparedBlockKind::Thinking) {
 		return;
 	}
+	if (context.debugBlockGeometry && !block.outer.isEmpty()) {
+		switch (reinterpret_cast<quintptr>(&block) % 4) {
+		case 0:
+			p.fillRect(block.outer, QColor(128, 0, 0, 32));
+			break;
+		case 1:
+			p.fillRect(block.outer, QColor(0, 128, 0, 32));
+			break;
+		case 2:
+			p.fillRect(block.outer, QColor(0, 0, 128, 32));
+			break;
+		default:
+			p.fillRect(block.outer, QColor(128, 128, 128, 32));
+			break;
+		}
+	}
 	const auto &paintSt = PaintStyle(context, st);
 
 	switch (block.kind) {
@@ -2148,12 +2204,13 @@ void PaintBlock(
 			p.fillRect(block.headerRect, paintSt.relatedArticle.headerBg->c);
 		}
 		SetTextLeafPen(p, block, st, context);
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
 			context,
 			block.textRect,
 			block.textWidth,
+			block.segmentIndex,
 			block.flowTextAlign,
 			TextSelectionForSegmentIndex(
 				context.selectionState,
@@ -2161,12 +2218,13 @@ void PaintBlock(
 		break;
 	case PreparedBlockKind::CodeBlock:
 		p.setPen(paintSt.textColor->c);
-		PaintTextLeaf(
+		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
 			context,
 			block.textRect,
 			block.textWidth,
+			block.segmentIndex,
 			style::al_left,
 			TextSelectionForSegmentIndex(
 				context.selectionState,

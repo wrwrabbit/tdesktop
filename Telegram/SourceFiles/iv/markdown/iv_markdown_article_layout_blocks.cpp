@@ -379,7 +379,8 @@ void LayoutMediaCaptionText(
 		const style::TextStyle &textStyle,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	block->textWidth = std::max(width, 1);
 	SetTextLeaf(
 		&block->leaf,
@@ -395,9 +396,11 @@ void LayoutMediaCaptionText(
 		left,
 		top,
 		block->textWidth,
-		std::max(
-			block->leaf.countHeight(block->textWidth, true),
-			TextLineHeight(textStyle)));
+		ResolveTextLeafHeight(
+			std::max(
+				block->leaf.countHeight(block->textWidth, true),
+				TextLineHeight(textStyle)),
+			context));
 }
 
 } // namespace
@@ -431,7 +434,8 @@ void LayoutMediaCaption(
 		st.body,
 		textBand.x(),
 		top + skip,
-		textBand.width());
+		textBand.width(),
+		context);
 	*bottom = block->textRect.y() + block->textRect.height();
 }
 
@@ -496,6 +500,19 @@ QString ListMarkerText(const PreparedBlock &block) {
 
 int TextLineHeight(const style::TextStyle &style) {
 	return std::max(style.lineHeight, style.font->height);
+}
+
+int ResolveTextLeafHeight(
+		int naturalHeight,
+		LayoutContext context) {
+	const auto state = context.textLeafHeightOverride;
+	if (!state) {
+		return naturalHeight;
+	}
+	const auto index = state->nextTextLeafIndex++;
+	return (index == state->textLeafIndex)
+		? std::max(state->height, 1)
+		: naturalHeight;
 }
 
 [[nodiscard]] int NominalTextBaseline(
@@ -716,9 +733,11 @@ LaidOutBlock LayoutFlowBlock(
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
 
-	const auto height = std::max(
-		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(textStyle));
+	const auto height = ResolveTextLeafHeight(
+		std::max(
+			block.leaf.countHeight(block.textWidth, true),
+			TextLineHeight(textStyle)),
+		context);
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = QRect(left, top, block.textWidth, height);
 	block.firstLineBaseline = LeafFirstLineBaseline(
@@ -735,7 +754,8 @@ LaidOutBlock LayoutCodeBlock(
 		int top,
 		int width,
 		bool allowAsyncSyntaxHighlighting,
-		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
+		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.anchorId = prepared.anchorId;
@@ -749,9 +769,11 @@ LaidOutBlock LayoutCodeBlock(
 		st,
 		allowAsyncSyntaxHighlighting,
 		syntaxHighlightTracker);
-	const auto height = std::max(
-		block.leaf.countHeight(block.textWidth, true),
-		TextLineHeight(st.code));
+	const auto height = ResolveTextLeafHeight(
+		std::max(
+			block.leaf.countHeight(block.textWidth, true),
+			TextLineHeight(st.code)),
+		context);
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.outer = block.textRect;
 	block.firstLineBaseline = LeafFirstLineBaseline(
@@ -886,7 +908,8 @@ LaidOutBlock LayoutTableBlock(
 		const style::Markdown &st,
 		int left,
 		int top,
-		int width) {
+		int width,
+		LayoutContext context) {
 	auto block = LaidOutBlock();
 	block.kind = PreparedBlockKind::Table;
 	block.anchorId = prepared.anchorId;
@@ -909,7 +932,8 @@ LaidOutBlock LayoutTableBlock(
 			st.body,
 			left,
 			top,
-			width);
+			width,
+			context);
 		block.firstLineBaseline = LeafFirstLineBaseline(
 			block.leaf,
 			block.textRect,
@@ -981,13 +1005,17 @@ LaidOutBlock LayoutTableBlock(
 				spanWidth - padding.left() - padding.right(),
 				1);
 			const auto &textStyle = TableCellTextStyle(cellData.cell, st);
-			cellData.textHeight = (cellData.cell.textWidth >= cellData.preferredWidth)
+			const auto naturalTextHeight = (cellData.cell.textWidth
+				>= cellData.preferredWidth)
 				? cellData.preferredHeight
 				: std::max(
 					cellData.cell.leaf.countHeight(
 						cellData.cell.textWidth,
 						true),
 					TextLineHeight(textStyle));
+			cellData.textHeight = ResolveTextLeafHeight(
+				naturalTextHeight,
+				context);
 			const auto outerHeight = cellData.textHeight
 				+ padding.top()
 				+ padding.bottom();

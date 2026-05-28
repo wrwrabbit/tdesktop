@@ -79,6 +79,34 @@ ivWrongLayoutLink: LinkButton(defaultLinkButton) {
 	overColor: windowSubTextFg;
 	padding: margins(5px, 5px, 5px, 5px);
 }
+ivEditorBodyPadding: margins(0px, 0px, 0px, 0px);
+ivEditorToolbarPadding: margins(12px, 24px, 12px, 24px);
+ivEditorToolbarButtonsSkip: 8px;
+ivEditorToolbarButtonMinWidth: 132px;
+ivEditorToolbarButtonHeight: 42px;
+ivEditorInlineFieldMargins: margins(4px, 0px, 6px, 0px);
+ivEditorMinHeight: boxWidth;
+ivEditorInputField: InputField(defaultInputField) {
+	style: historyTextStyle;
+	textMargins: margins(0px, 0px, 0px, 0px);
+	textAlign: align(left);
+	textFg: historyComposeAreaFg;
+	textBg: transparent;
+	textBgActive: transparent;
+	heightMin: 36px;
+	heightMax: 72px;
+	placeholderFg: placeholderFg;
+	placeholderFgActive: placeholderFgActive;
+	placeholderFgError: placeholderFgActive;
+	placeholderMargins: margins(2px, 0px, 2px, 0px);
+	placeholderAlign: align(topleft);
+	placeholderScale: 0.;
+	placeholderFont: normalFont;
+	placeholderShift: -50px;
+	border: 0px;
+	borderActive: 0px;
+	duration: 100;
+}
 
 MarkdownBlockSkips {
 	paragraph: pixels;

@@ -154,6 +154,8 @@ struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {
 	MarkdownArticlePaintCaches caches;
 	PaintSelectionState selectionState;
 	MarkdownArticleRevealPaintState *reveal = nullptr;
+	int hiddenTextSegmentIndex = -1;
+	bool debugBlockGeometry = false;
 
 	[[nodiscard]] MarkdownArticlePaintContext translated(int x, int y) const {
 		auto result = *this;
@@ -204,6 +206,8 @@ public:
 		Fn<void()> repaint,
 		Fn<void(QRect)> repaintRect);
 	void setContent(MarkdownArticleContent content);
+	void setTextLeafHeightOverride(int textLeafIndex, int height);
+	void clearTextLeafHeightOverride();
 	void invalidateLayout();
 	[[nodiscard]] int maxWidth() const;
 	[[nodiscard]] int lastLayoutWidth() const;
@@ -221,6 +225,10 @@ public:
 	[[nodiscard]] bool toggleDetails(const QString &anchorId);
 	[[nodiscard]] bool segmentIsText(int index) const;
 	[[nodiscard]] int segmentLength(int index) const;
+	[[nodiscard]] int firstTextSegmentIndex() const;
+	[[nodiscard]] int textLeafIndexForSegment(int segmentIndex) const;
+	[[nodiscard]] int segmentIndexForTextLeafIndex(int textLeafIndex) const;
+	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
 	[[nodiscard]] int selectionOffsetFromHit(
 		const MarkdownArticleHitTestResult &result,
 		TextSelectType selectionType) const;
