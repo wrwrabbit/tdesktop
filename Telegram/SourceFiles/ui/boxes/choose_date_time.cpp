@@ -142,7 +142,15 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 			std::move(args.description),
 			*args.style.labelStyle));
 	}
-	const auto parsed = base::unixtime::parse(args.time);
+	const auto min = args.min ? args.min : [] {
+		return base::unixtime::now() + kMinimalSchedule;
+	};
+	const auto max = args.max ? args.max : [] {
+		return base::unixtime::serialize(
+			QDateTime::currentDateTime().addYears(1)) - 1;
+	};
+	const auto parsed = base::unixtime::parse(
+		std::clamp(args.time, min(), max()));
 	const auto state = box->lifetime().make_state<State>(State{
 		.date = parsed.date(),
 		.day = CreateChild<InputField>(
@@ -171,13 +179,6 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 		state->time->setFocusFast();
 	}, state->day->lifetime());
 
-	const auto min = args.min ? args.min : [] {
-		return base::unixtime::now() + kMinimalSchedule;
-	};
-	const auto max = args.max ? args.max : [] {
-		return base::unixtime::serialize(
-			QDateTime::currentDateTime().addYears(1)) - 1;
-	};
 	const auto minDate = [=] {
 		return base::unixtime::parse(min()).date();
 	};
