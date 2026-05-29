@@ -897,6 +897,7 @@ void MarkNativeIvTableSlots(
 			block.anchorId,
 			state);
 	case RichPageBlockKind::Paragraph:
+	case RichPageBlockKind::Footer:
 		return AppendNativeIvFlowBlock(
 			result,
 			PreparedBlockKind::Paragraph,

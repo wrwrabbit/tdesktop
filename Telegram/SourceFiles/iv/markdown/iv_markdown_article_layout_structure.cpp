@@ -15,29 +15,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Iv::Markdown {
 namespace {
 
-[[nodiscard]] int NominalTextBaseline(
-		const style::TextStyle &style,
-		int top) {
-	const auto lineHeight = TextLineHeight(style);
-	const auto textTop = top
-		+ (std::max(lineHeight - style.font->height, 0) / 2);
-	return textTop + style.font->ascent;
-}
-
 [[nodiscard]] int LeafFirstLineBaseline(
 		const Ui::Text::String &leaf,
 		const QRect &textRect,
 		const style::TextStyle &style) {
 	const auto lines = leaf.countLinesGeometry(textRect.width(), true);
 	return textRect.y() + (lines.empty()
-		? NominalTextBaseline(style, 0)
+		? TextLineBaseline(style)
 		: lines.front().baseline);
 }
 
 [[nodiscard]] int MarkdownBodyBaseline(
 		int top,
 		const style::Markdown &st) {
-	return NominalTextBaseline(st.body, top);
+	return TextLineBaseline(st.body, top);
 }
 
 [[nodiscard]] int BlockBottom(const LaidOutBlock &block) {

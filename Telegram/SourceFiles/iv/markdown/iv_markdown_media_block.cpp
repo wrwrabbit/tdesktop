@@ -267,8 +267,7 @@ void SetPlainTextLeaf(
 		const style::TextStyle &textStyle) {
 	const auto lines = leaf.countLinesGeometry(textRect.width(), true);
 	return textRect.y() + (lines.empty()
-		? std::max(TextLineHeight(textStyle) - textStyle.font->height, 0) / 2
-			+ textStyle.font->ascent
+		? TextLineBaseline(textStyle)
 		: lines.front().baseline);
 }
 

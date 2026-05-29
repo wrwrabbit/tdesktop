@@ -5,7 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "iv/iv_editor_state.h"
+#include "iv/editor/iv_editor_state.h"
 
 #include <algorithm>
 #include <utility>
@@ -69,11 +69,61 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 	return text.trimmed().isEmpty();
 }
 
+[[nodiscard]] bool CanEditBlocks(const std::vector<Block> &blocks);
+
+[[nodiscard]] bool CanEditBlock(const Block &block) {
+	switch (block.kind) {
+	case BlockKind::Heading:
+	case BlockKind::Paragraph:
+	case BlockKind::Footer:
+	case BlockKind::Divider:
+	case BlockKind::Anchor:
+	case BlockKind::Photo:
+	case BlockKind::Video:
+	case BlockKind::Audio:
+	case BlockKind::Math:
+	case BlockKind::Table:
+	case BlockKind::Map:
+		return true;
+	case BlockKind::Quote:
+	case BlockKind::Details:
+		return CanEditBlocks(block.blocks);
+	case BlockKind::List:
+		return ranges::all_of(block.listItems, [](const ListItem &item) {
+			return CanEditBlocks(item.blocks);
+		});
+	case BlockKind::Unsupported:
+	case BlockKind::Thinking:
+	case BlockKind::AuthorDate:
+	case BlockKind::Code:
+	case BlockKind::Embed:
+	case BlockKind::EmbedPost:
+	case BlockKind::GroupedMedia:
+	case BlockKind::Channel:
+	case BlockKind::RelatedArticles:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool CanEditBlocks(const std::vector<Block> &blocks) {
+	return ranges::all_of(blocks, &CanEditBlock);
+}
+
 } // namespace
 
 State::State()
-: _richPage(std::make_shared<RichPage>()) {
-	_richPage->blocks.push_back(MakeParagraphBlock());
+: State(std::make_shared<RichPage>(), nullptr) {
+}
+
+State::State(
+	std::shared_ptr<RichPage> richPage,
+	std::shared_ptr<Markdown::MediaRuntime> mediaRuntime)
+: _richPage(richPage ? std::move(richPage) : std::make_shared<RichPage>())
+, _mediaRuntime(std::move(mediaRuntime)) {
+	if (_richPage->blocks.empty()) {
+		_richPage->blocks.push_back(MakeParagraphBlock());
+	}
 	rebuild();
 }
 
@@ -283,6 +333,25 @@ void State::insertBlockquoteAfterActive() {
 }
 
 void State::insertBlockAfterActive(InsertAction action) {
+	auto blocks = std::vector<Block>();
+	blocks.push_back(makeBlock(action));
+	insertBlocksAfterActive(std::move(blocks));
+}
+
+void State::insertPreparedBlockAfterActive(Block block) {
+	auto blocks = std::vector<Block>();
+	blocks.push_back(std::move(block));
+	insertBlocksAfterActive(std::move(blocks));
+}
+
+void State::insertPreparedBlocksAfterActive(std::vector<Block> blocks) {
+	insertBlocksAfterActive(std::move(blocks));
+}
+
+void State::insertBlocksAfterActive(std::vector<Block> blocks) {
+	if (blocks.empty()) {
+		return;
+	}
 	auto anchor = InsertionAnchor{
 		.container = BlockContainerPath(),
 		.blockIndex = int(_richPage->blocks.size()) - 1,
@@ -291,24 +360,25 @@ void State::insertBlockAfterActive(InsertAction action) {
 	if (descriptor) {
 		anchor = descriptor->insertionAnchor;
 	}
-	auto *blocks = blockContainer(anchor.container);
-	if (!blocks) {
+	auto *container = blockContainer(anchor.container);
+	if (!container) {
 		anchor = {
 			.container = BlockContainerPath(),
 			.blockIndex = int(_richPage->blocks.size()) - 1,
 		};
-		blocks = &_richPage->blocks;
+		container = &_richPage->blocks;
 	}
 	const auto insertAt = std::clamp(
 		anchor.blockIndex + 1,
 		0,
-		int(blocks->size()));
-	blocks->insert(blocks->begin() + insertAt, makeBlock(action));
+		int(container->size()));
+	const auto count = int(blocks.size());
+	container->insert(
+		container->begin() + insertAt,
+		std::make_move_iterator(blocks.begin()),
+		std::make_move_iterator(blocks.end()));
 	rebuild();
-	focusInsertedBlock({
-		.container = anchor.container,
-		.index = insertAt,
-	});
+	focusInsertedBlocks(anchor.container, insertAt, count);
 }
 
 std::vector<Block> *State::blockContainer(const BlockContainerPath &path) {
@@ -527,7 +597,7 @@ void State::rebuild() {
 	ensureActiveTextOrdinal();
 	_prepared = Markdown::TryPrepareNativeInstantView({
 		.richPage = _richPage,
-		.mediaRuntime = nullptr,
+		.mediaRuntime = _mediaRuntime,
 		.editMode = true,
 	}).content;
 }
@@ -550,25 +620,14 @@ void State::rebuildTextNodes(
 		switch (block.kind) {
 		case BlockKind::Heading:
 		case BlockKind::Paragraph:
+		case BlockKind::Footer:
 			appendBlockTextNode(path, LeafKind::BlockText);
 			break;
 		case BlockKind::Quote:
-			appendBlockTextNode(
-				path,
-				LeafKind::BlockText,
-				FieldMode::Rich,
-				InsertionAnchor{
-					.container = BlockChildrenContainer(path),
-					.blockIndex = -1,
-				});
-			appendBlockTextNode(
-				path,
-				LeafKind::BlockCaption,
-				FieldMode::Rich,
-				InsertionAnchor{
-					.container = BlockChildrenContainer(path),
-					.blockIndex = -1,
-				});
+			if (block.blocks.empty()) {
+				appendBlockTextNode(path, LeafKind::BlockText);
+			}
+			appendBlockTextNode(path, LeafKind::BlockCaption);
 			rebuildTextNodes(block.blocks, BlockChildrenContainer(path));
 			break;
 		case BlockKind::List:
@@ -711,10 +770,18 @@ void State::ensureEditableNodes() {
 	rebuildTextNodes();
 }
 
-void State::focusInsertedBlock(const BlockPath &path) {
-	for (auto i = 0, count = textNodeCount(); i != count; ++i) {
-		if (descriptorBelongsToBlock(_textNodes[i], path)) {
-			if (setActiveTextByOrdinal(i)) {
+void State::focusInsertedBlocks(
+		const BlockContainerPath &container,
+		int from,
+		int count) {
+	for (auto blockIndex = from; blockIndex != from + count; ++blockIndex) {
+		const auto path = BlockPath{
+			.container = container,
+			.index = blockIndex,
+		};
+		for (auto i = 0, textCount = textNodeCount(); i != textCount; ++i) {
+			if (descriptorBelongsToBlock(_textNodes[i], path)
+				&& setActiveTextByOrdinal(i)) {
 				return;
 			}
 		}
@@ -865,7 +932,7 @@ Block State::makeBlock(InsertAction action) const {
 	case InsertBlockType::Math:
 		return MakeMathBlock();
 	case InsertBlockType::Footer:
-		return MakeParagraphBlock();
+		return MakeFooterBlock();
 	case InsertBlockType::Divider:
 		return MakeDividerBlock();
 	case InsertBlockType::Anchor:
@@ -903,6 +970,13 @@ TextWithEntities State::MakeText(QString text) {
 Block State::MakeParagraphBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Paragraph;
+	block.text.text = MakeText(u"Text"_q);
+	return block;
+}
+
+Block State::MakeFooterBlock() {
+	auto block = Block();
+	block.kind = BlockKind::Footer;
 	block.text.text = MakeText(u"Text"_q);
 	return block;
 }
@@ -961,7 +1035,6 @@ Block State::MakeListBlock(ListKind kind, TaskState taskState) {
 Block State::MakeDetailsBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Details;
-	block.open = true;
 	block.text.text = MakeText(u"Header"_q);
 	block.blocks.push_back(MakeParagraphBlock());
 	return block;
@@ -1087,6 +1160,14 @@ TextWithEntities State::StripEditModeWrapperEntities(TextWithEntities text) {
 	}
 	text.entities = std::move(filtered);
 	return text;
+}
+
+bool CanEditRichPage(const RichPage &page) {
+	return CanEditBlocks(page.blocks);
+}
+
+bool CanEditRichPage(const std::shared_ptr<const RichPage> &page) {
+	return page && CanEditRichPage(*page);
 }
 
 } // namespace Iv::Editor

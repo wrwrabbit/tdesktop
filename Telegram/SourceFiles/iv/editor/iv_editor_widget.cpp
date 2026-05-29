@@ -5,7 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "iv/iv_editor_widget.h"
+#include "iv/editor/iv_editor_widget.h"
 
 #include "data/data_msg_id.h"
 #include "ui/image/image_location.h"
@@ -69,6 +69,42 @@ namespace {
 	return st::ivEditorBodyPadding;
 }
 
+void EnableQTextEditLineMetrics(style::TextStyle &style) {
+	style.qtextEditLineMetrics = true;
+}
+
+void EnableQTextEditLineMetrics(style::Markdown &style) {
+	EnableQTextEditLineMetrics(style.body);
+	EnableQTextEditLineMetrics(style.heading1);
+	EnableQTextEditLineMetrics(style.heading2);
+	EnableQTextEditLineMetrics(style.heading3);
+	EnableQTextEditLineMetrics(style.heading4);
+	EnableQTextEditLineMetrics(style.heading5);
+	EnableQTextEditLineMetrics(style.heading6);
+	EnableQTextEditLineMetrics(style.code);
+	EnableQTextEditLineMetrics(style.displayMath.fallbackStyle);
+	EnableQTextEditLineMetrics(style.table.headerStyle);
+	EnableQTextEditLineMetrics(style.table.bodyStyle);
+	EnableQTextEditLineMetrics(style.details.summaryStyle);
+	EnableQTextEditLineMetrics(style.embedPost.authorStyle);
+	EnableQTextEditLineMetrics(style.embedPost.dateStyle);
+	EnableQTextEditLineMetrics(style.placeholder.labelStyle);
+	EnableQTextEditLineMetrics(style.audio.titleStyle);
+	EnableQTextEditLineMetrics(style.audio.subtitleStyle);
+	EnableQTextEditLineMetrics(style.channel.titleStyle);
+	EnableQTextEditLineMetrics(style.channel.subtitleStyle);
+	EnableQTextEditLineMetrics(style.channel.button.textStyle);
+	EnableQTextEditLineMetrics(style.relatedArticle.titleStyle);
+	EnableQTextEditLineMetrics(style.relatedArticle.subtitleStyle);
+	EnableQTextEditLineMetrics(style.relatedArticle.footerStyle);
+}
+
+[[nodiscard]] style::Markdown CreateEditorMarkdownStyle() {
+	auto result = st::messageMarkdown;
+	EnableQTextEditLineMetrics(result);
+	return result;
+}
+
 [[nodiscard]] int CompareSelectionPositions(
 		Markdown::MarkdownArticleSelectionPosition a,
 		Markdown::MarkdownArticleSelectionPosition b) {
@@ -120,7 +156,9 @@ Widget::Widget(
 , _controller(controller)
 , _peer(peer)
 , _state(std::move(state))
-, _article(std::make_shared<Markdown::MarkdownArticle>(st::messageMarkdown))
+, _articleStyle(std::make_shared<style::Markdown>(
+	CreateEditorMarkdownStyle()))
+, _article(std::make_shared<Markdown::MarkdownArticle>(*_articleStyle))
 , _theme(CreateStandaloneChatTheme())
 , _style(std::make_unique<Ui::ChatStyle>(style::main_palette::get())) {
 	_style->apply(_theme.get());
@@ -225,24 +263,20 @@ void Widget::insertBlock(State::InsertAction action) {
 	activateTextOrdinal(_state->activeTextOrdinal(), 0);
 }
 
-void Widget::insertMedia(State::InsertBlockType type) {
-	switch (type) {
-	case State::InsertBlockType::Photo:
-	case State::InsertBlockType::Video:
-	case State::InsertBlockType::Audio:
-		insertBlock({ .type = type });
-		break;
-	default:
-		break;
-	}
+void Widget::insertPreparedBlock(RichPage::Block block) {
+	auto blocks = std::vector<RichPage::Block>();
+	blocks.push_back(std::move(block));
+	insertPreparedBlocks(std::move(blocks));
 }
 
-void Widget::insertMap(double latitude, double longitude) {
-	insertBlock({
-		.type = State::InsertBlockType::Map,
-		.latitude = latitude,
-		.longitude = longitude,
-	});
+void Widget::insertPreparedBlocks(std::vector<RichPage::Block> blocks) {
+	if (blocks.empty()) {
+		return;
+	}
+	commitInlineField();
+	_state->insertPreparedBlocksAfterActive(std::move(blocks));
+	refreshPreparedContent();
+	activateTextOrdinal(_state->activeTextOrdinal(), 0);
 }
 
 void Widget::insertHeading1() {
@@ -517,14 +551,14 @@ Widget::InlineFieldStyleData Widget::normalizedInlineFieldStyle(
 	const auto valid = leafStyle.valid();
 	const auto textStyle = valid
 		? leafStyle.textStyle
-		: &st::messageMarkdown.body;
+		: &_articleStyle->body;
 	const auto lineHeight = (valid && leafStyle.lineHeight > 0)
 		? leafStyle.lineHeight
 		: std::max(textStyle->lineHeight, textStyle->font->height);
 	return {
 		.textStyle = textStyle,
 		.lineHeight = lineHeight,
-		.textFg = valid ? leafStyle.textColor : st::messageMarkdown.textColor,
+		.textFg = valid ? leafStyle.textColor : _articleStyle->textColor,
 		.align = valid ? leafStyle.align : style::al_left,
 		.italic = valid ? leafStyle.italic : false,
 	};
@@ -534,7 +568,7 @@ Widget::InlineFieldStyleKey Widget::inlineFieldStyleKey(
 		const InlineFieldStyleData &data) const {
 	const auto textStyle = data.textStyle
 		? data.textStyle
-		: &st::messageMarkdown.body;
+		: &_articleStyle->body;
 	return {
 		.font = data.italic
 			? textStyle->font->italic()

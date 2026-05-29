@@ -176,6 +176,10 @@ struct TableRowLayoutData {
 [[nodiscard]] bool IsFlowKind(PreparedBlockKind kind);
 [[nodiscard]] QString ListMarkerText(const PreparedBlock &block);
 [[nodiscard]] int TextLineHeight(const style::TextStyle &style);
+[[nodiscard]] int TextLineAscent(const style::TextStyle &style);
+[[nodiscard]] int TextLineBaseline(
+	const style::TextStyle &style,
+	int top = 0);
 [[nodiscard]] int ResolveTextLeafHeight(
 	int naturalHeight,
 	LayoutContext context);

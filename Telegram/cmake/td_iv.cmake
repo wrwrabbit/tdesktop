@@ -11,17 +11,18 @@ add_library(tdesktop::td_iv ALIAS td_iv)
 target_precompile_headers(td_iv PRIVATE ${src_loc}/iv/iv_pch.h)
 nice_target_sources(td_iv ${src_loc}
 PRIVATE
+    iv/editor/iv_editor_box.cpp
+    iv/editor/iv_editor_box.h
+    iv/editor/iv_editor_state.cpp
+    iv/editor/iv_editor_state.h
+    iv/editor/iv_editor_widget.cpp
+    iv/editor/iv_editor_widget.h
+
     iv/iv_controller.cpp
     iv/iv_controller.h
     iv/iv_data.cpp
     iv/iv_data.h
     iv/iv_delegate.h
-    iv/iv_editor_box.cpp
-    iv/iv_editor_box.h
-    iv/iv_editor_state.cpp
-    iv/iv_editor_state.h
-    iv/iv_editor_widget.cpp
-    iv/iv_editor_widget.h
     iv/iv_pch.h
     iv/iv_zoom_controls.cpp
     iv/iv_zoom_controls.h

@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_unread_things.h"
 #include "history/history.h"
 #include "iv/iv_data.h"
+#include "iv/editor/iv_editor_state.h"
 #include "iv/iv_rich_page.h"
 #include "mtproto/mtproto_config.h"
 #include "ui/text/format_values.h"
@@ -2922,10 +2923,11 @@ bool HistoryItem::isTooOldForEdit(TimeId now) const {
 }
 
 bool HistoryItem::allowsEdit(TimeId now) const {
+	const auto richPageSource = Get<HistoryMessageRichPageSource>();
 	return !isService()
 		&& canBeEdited()
 		&& !isTooOldForEdit(now)
-		&& !richPage()
+		&& (!richPageSource || richPageSource->canEdit)
 		&& (!_media || _media->allowsEdit())
 		&& !isLegacyMessage()
 		&& !isEditingMedia()
@@ -4136,10 +4138,32 @@ std::shared_ptr<const Iv::RichPage> HistoryItem::richPage() const {
 	return source ? source->page : nullptr;
 }
 
+void HistoryItem::applyLocalRichPage(std::shared_ptr<const Iv::RichPage> page) {
+	const auto summary = page
+		? Iv::FlattenRichPageSummary(page)
+		: TextWithEntities();
+	applyLocalRichPage(std::move(page), summary);
+}
+
+void HistoryItem::applyLocalRichPage(
+		std::shared_ptr<const Iv::RichPage> page,
+		const TextWithEntities &summary) {
+	if (page) {
+		setRichPage(std::move(page));
+	} else {
+		clearRichPage();
+	}
+	setText(summary);
+	_history->owner().requestItemTextRefresh(this);
+	invalidateChatListEntry();
+}
+
 void HistoryItem::setRichPage(std::shared_ptr<const Iv::RichPage> page) {
 	if (page) {
 		AddComponents(HistoryMessageRichPageSource::Bit());
-		Get<HistoryMessageRichPageSource>()->page = std::move(page);
+		const auto source = Get<HistoryMessageRichPageSource>();
+		source->page = std::move(page);
+		source->canEdit = Iv::Editor::CanEditRichPage(source->page);
 	} else {
 		clearRichPage();
 	}

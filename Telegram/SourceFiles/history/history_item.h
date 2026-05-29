@@ -541,6 +541,10 @@ public:
 	[[nodiscard]] std::shared_ptr<const Iv::RichPage> richPage() const;
 	[[nodiscard]] bool computeDropForwardedInfo() const;
 	void setText(TextWithEntities textWithEntities);
+	void applyLocalRichPage(std::shared_ptr<const Iv::RichPage> page);
+	void applyLocalRichPage(
+		std::shared_ptr<const Iv::RichPage> page,
+		const TextWithEntities &summary);
 	void setRichPage(std::shared_ptr<const Iv::RichPage> page);
 	void clearRichPage();
 

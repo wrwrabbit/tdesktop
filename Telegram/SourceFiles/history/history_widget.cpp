@@ -139,6 +139,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_subsection_tabs.h"
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/media/history_view_media.h"
+#include "iv/editor/iv_editor_session.h"
 #include "core/click_handler_types.h"
 #include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/tabbed_panel.h"
@@ -5183,7 +5184,7 @@ SendMenu::Details HistoryWidget::sendMenuDetails() const {
 }
 
 SendMenu::Details HistoryWidget::saveMenuDetails() const {
-	return (_editMsgId && _replyEditMsg)
+	return (_editMsgId && _replyEditMsg && !_replyEditMsg->richPage())
 		? _mediaEditManager.sendMenuDetails(HasSendText(_field))
 		: SendMenu::Details();
 }
@@ -9259,7 +9260,7 @@ void HistoryWidget::editMessage(
 		not_null<HistoryItem*> item,
 		const TextSelection &selection) {
 	if (item->richPage()) {
-		controller()->showToast(tr::lng_edit_error(tr::now));
+		Iv::Editor::ShowEditBox(controller(), item);
 		return;
 	} else if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);
@@ -9869,14 +9870,19 @@ void HistoryWidget::updateReplyEditTexts(bool force) {
 		}
 	}
 	if (_replyEditMsg) {
+		const auto richPage = _replyEditMsg->richPage();
 		const auto editMedia = _editMsgId
 			? _replyEditMsg->media()
 			: nullptr;
-		if (_editMsgId && _replyEditMsg) {
+		if (_editMsgId && _replyEditMsg && !richPage) {
 			_mediaEditManager.start(_replyEditMsg);
+		} else {
+			_mediaEditManager.cancel();
 		}
-		_canReplaceMedia = _editMsgId && _replyEditMsg->allowsEditMedia();
-		if (editMedia && editMedia->allowsEditMedia()) {
+		_canReplaceMedia = _editMsgId
+			&& !richPage
+			&& _replyEditMsg->allowsEditMedia();
+		if (_canReplaceMedia && editMedia && editMedia->allowsEditMedia()) {
 			_canAddMedia = false;
 		} else {
 			_canAddMedia = base::take(_canReplaceMedia);

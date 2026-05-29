@@ -691,27 +691,27 @@ defaultMarkdown: Markdown {
 	body: defaultMarkdownBodyStyle;
 	heading1: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(30px semibold);
-		lineHeight: 36px;
+		lineHeight: 42px;
 	}
 	heading2: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(26px semibold);
-		lineHeight: 32px;
+		lineHeight: 36px;
 	}
 	heading3: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(22px semibold);
-		lineHeight: 28px;
+		lineHeight: 31px;
 	}
 	heading4: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(19px semibold);
-		lineHeight: 25px;
+		lineHeight: 27px;
 	}
 	heading5: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(17px semibold);
-		lineHeight: 23px;
+		lineHeight: 24px;
 	}
 	heading6: TextStyle(defaultMarkdownBodyStyle) {
 		font: font(15px semibold);
-		lineHeight: 21px;
+		lineHeight: 22px;
 	}
 	code: defaultMarkdownCodeStyle;
 	pagePadding: margins(0px, 0px, 0px, 16px);
@@ -752,27 +752,27 @@ messageMarkdownDisplayMathFallbackStyle: TextStyle(messageMarkdownCodeStyle) {
 }
 messageMarkdownHeading1Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(19px semibold);
-	lineHeight: 24px;
+	lineHeight: 27px;
 }
 messageMarkdownHeading2Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(18px semibold);
-	lineHeight: 23px;
+	lineHeight: 26px;
 }
 messageMarkdownHeading3Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(17px semibold);
-	lineHeight: 22px;
+	lineHeight: 24px;
 }
 messageMarkdownHeading4Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(16px semibold);
-	lineHeight: 21px;
+	lineHeight: 23px;
 }
 messageMarkdownHeading5Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(15px semibold);
-	lineHeight: 20px;
+	lineHeight: 22px;
 }
 messageMarkdownHeading6Style: TextStyle(messageMarkdownBodyStyle) {
 	font: font(14px semibold);
-	lineHeight: 19px;
+	lineHeight: 21px;
 }
 messageMarkdownDetailsSummaryStyle: TextStyle(messageMarkdownBodyStyle) {
 	linkUnderline: kLinkUnderlineNever;

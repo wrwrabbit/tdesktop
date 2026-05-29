@@ -1298,10 +1298,14 @@ PRIVATE
     intro/intro_widget.h
     iv/iv_cached_media.cpp
     iv/iv_cached_media.h
+    iv/editor/iv_editor_session.cpp
+    iv/editor/iv_editor_session.h
     iv/iv_delegate_impl.cpp
     iv/iv_delegate_impl.h
     iv/iv_instance.cpp
     iv/iv_instance.h
+    iv/iv_rich_message_serializer.cpp
+    iv/iv_rich_message_serializer.h
     iv/iv_rich_page.cpp
     iv/iv_rich_page.h
     lang/lang_cloud_manager.cpp

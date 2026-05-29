@@ -720,10 +720,10 @@ auto InlineFormulaSharedState::vertical(const style::TextStyle &textStyle) const
 			.descent = geometry.descent,
 		};
 	}
-	const auto ascent = std::max(textStyle.font->ascent, 0);
+	const auto ascent = std::max(TextLineAscent(textStyle), 0);
 	return Ui::Text::CustomEmojiVerticalMetrics{
 		.ascent = ascent,
-		.descent = std::max(textStyle.font->height - ascent, 0),
+		.descent = std::max(TextLineHeight(textStyle) - ascent, 0),
 	};
 }
 
@@ -970,18 +970,18 @@ QString InlineIvImageObject::entityData() {
 auto InlineIvImageObject::vertical(const style::TextStyle &textStyle)
 -> std::optional<Ui::Text::CustomEmojiVerticalMetrics> {
 	if (_height > 0) {
-		const auto line = textStyle.font->height;
+		const auto line = TextLineHeight(textStyle);
 		const auto above = _height - (_height / 2);
-		const auto ascent = above - (line / 2) + textStyle.font->ascent;
+		const auto ascent = above - (line / 2) + TextLineAscent(textStyle);
 		return Ui::Text::CustomEmojiVerticalMetrics{
 			.ascent = ascent,
 			.descent = _height - ascent,
 		};
 	}
-	const auto ascent = std::max(textStyle.font->ascent, 0);
+	const auto ascent = std::max(TextLineAscent(textStyle), 0);
 	return Ui::Text::CustomEmojiVerticalMetrics{
 		.ascent = ascent,
-		.descent = std::max(textStyle.font->height - ascent, 0),
+		.descent = std::max(TextLineHeight(textStyle) - ascent, 0),
 	};
 }
 
@@ -1094,10 +1094,10 @@ auto InlineFormulaObjectCache::lookupOrCreate(
 	if (measuredData) {
 		measured = *measuredData;
 	} else {
+		const auto fallbackAscent = std::max(TextLineAscent(textStyle), 0);
 		const auto fallbackSize = QSize(
 			std::max(textStyle.font->width(signature.trimmedTex), 1),
-			std::max(textStyle.font->height, 1));
-		const auto fallbackAscent = std::max(textStyle.font->ascent, 0);
+			std::max(TextLineHeight(textStyle), 1));
 		measured.logicalSize = fallbackSize;
 		measured.logicalDepth = std::max(
 			fallbackSize.height() - fallbackAscent,

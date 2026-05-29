@@ -52,7 +52,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/inline_bot_confirm_prepared.h"
 #include "inline_bots/inline_bot_downloads.h"
 #include "inline_bots/inline_bot_storage.h"
-#include "iv/iv_editor_box.h"
+#include "iv/editor/iv_editor_session.h"
 #include "iv/iv_instance.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
@@ -2960,7 +2960,11 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 	}
 	if (Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
 		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
-			Iv::Editor::ShowBox(controller, peer);
+			Iv::Editor::ShowComposeBox(
+				controller,
+				peer,
+				actionFactory(),
+				sendMenuDetails);
 		}, &st::menuIconArticle);
 	}
 	const auto session = &controller->session();

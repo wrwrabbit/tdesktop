@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/unique_qptr.h"
-#include "iv/iv_editor_state.h"
+#include "iv/editor/iv_editor_state.h"
 #include "iv/markdown/iv_markdown_article.h"
 #include "ui/style/style_core_types.h"
 #include "ui/rp_widget.h"
@@ -29,6 +29,7 @@ class InputField;
 
 namespace style {
 struct InputField;
+struct Markdown;
 } // namespace style
 
 class PeerData;
@@ -53,8 +54,8 @@ public:
 	void refreshPreparedContent();
 	void syncInlineFieldGeometry();
 	void insertBlock(State::InsertAction action);
-	void insertMedia(State::InsertBlockType type);
-	void insertMap(double latitude, double longitude);
+	void insertPreparedBlock(RichPage::Block block);
+	void insertPreparedBlocks(std::vector<RichPage::Block> blocks);
 	void insertHeading1();
 	void insertBlockquote();
 
@@ -149,6 +150,7 @@ private:
 	const not_null<Window::SessionController*> _controller;
 	const not_null<PeerData*> _peer;
 	const std::shared_ptr<State> _state;
+	std::shared_ptr<style::Markdown> _articleStyle;
 	std::shared_ptr<Markdown::MarkdownArticle> _article;
 	base::unique_qptr<Ui::InputField> _field;
 	std::unique_ptr<Ui::ChatTheme> _theme;

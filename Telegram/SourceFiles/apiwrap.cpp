@@ -4075,6 +4075,121 @@ void ApiWrap::sendShortcutMessages(
 	}).send();
 }
 
+void ApiWrap::sendRichMessage(
+		not_null<HistoryItem*> item,
+		const MTPInputRichMessage &richMessage,
+		SendAction action) {
+	Expects(item->history() == action.history);
+
+	const auto history = item->history();
+	const auto peer = history->peer;
+	action.generateLocal = true;
+	sendAction(action);
+
+	const auto clearCloudDraft = action.clearDraft;
+	const auto draftTopicRootId = action.replyTo.topicRootId;
+	const auto draftMonoforumPeerId = action.replyTo.monoforumPeerId;
+	const auto randomId = base::RandomValue<uint64>();
+	auto starsPaid = std::min(
+		peer->starsPerMessageChecked(),
+		action.options.starsApproved);
+	if (starsPaid) {
+		action.options.starsApproved -= starsPaid;
+	}
+	_session->data().registerMessageRandomId(randomId, item->fullId());
+	_session->data().registerMessageSentData(
+		randomId,
+		peer->id,
+		item->originalText().text);
+
+	using Flag = MTPmessages_SendMessage::Flag;
+	auto sendFlags = MTPmessages_SendMessage::Flags(0)
+		| Flag::f_rich_message;
+	if (action.replyTo) {
+		sendFlags |= Flag::f_reply_to;
+	}
+	if (ShouldSendSilent(peer, action.options)) {
+		sendFlags |= Flag::f_silent;
+	}
+	if (clearCloudDraft) {
+		sendFlags |= Flag::f_clear_draft;
+		history->clearCloudDraft(draftTopicRootId, draftMonoforumPeerId);
+		history->startSavingCloudDraft(
+			draftTopicRootId,
+			draftMonoforumPeerId);
+	}
+	if (const auto sendAs = action.options.sendAs) {
+		sendFlags |= Flag::f_send_as;
+	}
+	if (action.options.scheduled) {
+		sendFlags |= Flag::f_schedule_date;
+		if (action.options.scheduleRepeatPeriod) {
+			sendFlags |= Flag::f_schedule_repeat_period;
+		}
+	}
+	if (action.options.shortcutId) {
+		sendFlags |= Flag::f_quick_reply_shortcut;
+	}
+	if (action.options.effectId) {
+		sendFlags |= Flag::f_effect;
+	}
+	if (action.options.suggest) {
+		sendFlags |= Flag::f_suggested_post;
+	}
+	if (starsPaid) {
+		sendFlags |= Flag::f_allow_paid_stars;
+	}
+	const auto done = [=](
+			const MTPUpdates &result,
+			const MTP::Response &response) {
+		if (clearCloudDraft) {
+			history->finishSavingCloudDraft(
+				draftTopicRootId,
+				draftMonoforumPeerId,
+				Api::UnixtimeFromMsgId(response.outerMsgId));
+		}
+	};
+	const auto fail = [=](
+			const MTP::Error &error,
+			const MTP::Response &response) {
+		sendMessageFail(error, peer, randomId, item->fullId());
+		if (clearCloudDraft) {
+			history->finishSavingCloudDraft(
+				draftTopicRootId,
+				draftMonoforumPeerId,
+				Api::UnixtimeFromMsgId(response.outerMsgId));
+		}
+	};
+	const auto mtpShortcut = Data::ShortcutIdToMTP(
+		_session,
+		action.options.shortcutId);
+	history->owner().histories().sendPreparedMessage(
+		history,
+		action.replyTo,
+		randomId,
+		Data::Histories::PrepareMessage<MTPmessages_SendMessage>(
+			MTP_flags(sendFlags),
+			peer->input(),
+			Data::Histories::ReplyToPlaceholder(),
+			MTP_string(QString()),
+			MTP_long(randomId),
+			MTPReplyMarkup(),
+			MTPVector<MTPMessageEntity>(),
+			MTP_int(action.options.scheduled),
+			MTP_int(action.options.scheduleRepeatPeriod),
+			(action.options.sendAs
+				? action.options.sendAs->input()
+				: MTP_inputPeerEmpty()),
+			mtpShortcut,
+			MTP_long(action.options.effectId),
+			MTP_long(starsPaid),
+			Api::SuggestToMTP(action.options.suggest),
+			richMessage),
+		done,
+		fail);
+	finishForwarding(action);
+}
+
 void ApiWrap::sendMessage(
 		MessageToSend &&message,
 		std::optional<MsgId> localMessageId) {

@@ -154,6 +154,9 @@ public:
 	};
 
 	State();
+	State(
+		std::shared_ptr<RichPage> richPage,
+		std::shared_ptr<Markdown::MediaRuntime> mediaRuntime);
 
 	[[nodiscard]] const RichPage &richPage() const;
 	[[nodiscard]] const Markdown::MarkdownArticleContent &prepared() const;
@@ -177,6 +180,8 @@ public:
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
 	void insertBlockAfterActive(InsertAction action);
+	void insertPreparedBlockAfterActive(RichPage::Block block);
+	void insertPreparedBlocksAfterActive(std::vector<RichPage::Block> blocks);
 
 private:
 	[[nodiscard]] std::vector<RichPage::Block> *blockContainer(
@@ -212,6 +217,7 @@ private:
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container);
+	void insertBlocksAfterActive(std::vector<RichPage::Block> blocks);
 	void appendBlockTextNode(
 		const BlockPath &path,
 		LeafKind kind,
@@ -224,7 +230,10 @@ private:
 		int cellIndex);
 	void ensureActiveTextOrdinal();
 	void ensureEditableNodes();
-	void focusInsertedBlock(const BlockPath &path);
+	void focusInsertedBlocks(
+		const BlockContainerPath &container,
+		int from,
+		int count);
 	[[nodiscard]] std::optional<int> adjacentEditableOrdinal(
 		bool forward) const;
 	[[nodiscard]] bool descriptorBelongsToBlock(
@@ -242,6 +251,7 @@ private:
 
 	[[nodiscard]] static TextWithEntities MakeText(QString text);
 	[[nodiscard]] static RichPage::Block MakeParagraphBlock();
+	[[nodiscard]] static RichPage::Block MakeFooterBlock();
 	[[nodiscard]] static RichPage::Block MakeHeadingBlock(int level);
 	[[nodiscard]] static RichPage::Block MakeQuoteBlock(bool pullquote);
 	[[nodiscard]] static RichPage::Block MakeMathBlock();
@@ -266,10 +276,15 @@ private:
 		TextWithEntities text);
 
 	std::shared_ptr<RichPage> _richPage;
+	std::shared_ptr<Markdown::MediaRuntime> _mediaRuntime;
 	Markdown::MarkdownArticleContent _prepared;
 	std::vector<TextNodeDescriptor> _textNodes;
 	int _activeTextOrdinal = -1;
 
 };
+
+[[nodiscard]] bool CanEditRichPage(const RichPage &page);
+[[nodiscard]] bool CanEditRichPage(
+	const std::shared_ptr<const RichPage> &page);
 
 } // namespace Iv::Editor

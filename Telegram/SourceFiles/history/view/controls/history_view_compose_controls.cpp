@@ -78,6 +78,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "inline_bots/inline_results_widget.h"
 #include "inline_bots/inline_bot_result.h"
+#include "iv/editor/iv_editor_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -831,8 +832,11 @@ void FieldHeader::editMessage(
 	_editMsgId = id;
 	if (!id) {
 		_mediaEditManager.cancel();
-	} else if (const auto item = _show->session().data().message(id)) {
+	} else if (const auto item = _show->session().data().message(id);
+			item && !item->richPage()) {
 		_mediaEditManager.start(item);
+	} else {
+		_mediaEditManager.cancel();
 	}
 	if (!photoEditAllowed) {
 		_inPhotoEdit = false;
@@ -916,7 +920,10 @@ MessageToEdit FieldHeader::queryToEdit() {
 }
 
 SendMenu::Details FieldHeader::saveMenuDetails(bool hasSendText) const {
+	const auto item = _data->message(_editMsgId.current());
 	return isEditingMessage()
+		&& item
+		&& !item->richPage()
 		? _mediaEditManager.sendMenuDetails(hasSendText)
 		: SendMenu::Details();
 }
@@ -2762,9 +2769,10 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 	if (draft == editDraft) {
 		const auto resolve = [=] {
 			if (const auto item = _history->owner().message(editingId)) {
+				const auto richPage = item->richPage();
 				const auto media = item->media();
-				_canReplaceMedia = item->allowsEditMedia();
-				if (media && media->allowsEditMedia()) {
+				_canReplaceMedia = !richPage && item->allowsEditMedia();
+				if (_canReplaceMedia && media && media->allowsEditMedia()) {
 					_canAddMedia = false;
 				} else {
 					_canAddMedia = base::take(_canReplaceMedia);
@@ -2775,6 +2783,7 @@ void ComposeControls::applyDraft(FieldHistoryAction fieldHistoryAction) {
 				}
 				_photoEditMedia = (_canReplaceMedia
 					&& _regularWindow
+					&& media
 					&& media->photo()
 					&& !media->photo()->isNull())
 					? media->photo()->createMediaView()
@@ -4082,7 +4091,9 @@ void ComposeControls::editMessage(
 		const TextSelection &selection) {
 	if (const auto item = session().data().message(id)) {
 		editMessage(item);
-		SelectTextInFieldWithMargins(_field, selection);
+		if (!item->richPage()) {
+			SelectTextInFieldWithMargins(_field, selection);
+		}
 	}
 }
 
@@ -4091,7 +4102,11 @@ void ComposeControls::editMessage(not_null<HistoryItem*> item) {
 	Expects(draftKeyCurrent() != Data::DraftKey::None());
 
 	if (item->richPage()) {
-		_show->showToast(tr::lng_edit_error(tr::now));
+		if (_regularWindow) {
+			Iv::Editor::ShowEditBox(_regularWindow, item);
+		} else {
+			_show->showToast(tr::lng_edit_error(tr::now));
+		}
 		return;
 	} else if (_voiceRecordBar->isActive()) {
 		_show->showBox(Ui::MakeInformBox(tr::lng_edit_caption_voice()));

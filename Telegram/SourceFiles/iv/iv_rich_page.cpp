@@ -11,11 +11,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_map.h"
 #include "base/qthelp_url.h"
 #include "base/unixtime.h"
+#include "data/data_document.h"
 #include "data/data_peer.h"
+#include "data/data_photo.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "iv/markdown/iv_markdown_prepare.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
@@ -639,6 +642,16 @@ void AdoptAnchor(QString *anchorId, RichText *text) {
 	}
 }
 
+void AdoptLeadingParagraphListItemText(ListItem *item) {
+	if (item->blocks.empty()
+		|| item->blocks.front().kind != BlockKind::Paragraph) {
+		return;
+	}
+	item->text = std::move(item->blocks.front().text);
+	item->anchorId = std::move(item->blocks.front().anchorId);
+	item->blocks.erase(item->blocks.begin());
+}
+
 void AppendBlocks(
 		const QVector<MTPPageBlock> &blocks,
 		std::vector<Block> *result,
@@ -693,7 +706,7 @@ void AppendBlock(
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockFooter &data) {
-		auto parsed = MakeBlock(BlockKind::Paragraph);
+		auto parsed = MakeBlock(BlockKind::Footer);
 		parsed.text = ParseRichText(data.vtext(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
@@ -723,6 +736,7 @@ void AppendBlock(
 					row.is_checkbox(),
 					row.is_checked());
 				AppendBlocks(row.vblocks().v, &listItem.blocks, context);
+				AdoptLeadingParagraphListItemText(&listItem);
 			});
 			parsed.listItems.push_back(std::move(listItem));
 		}
@@ -1006,6 +1020,7 @@ void AppendBlock(
 					row.is_checked());
 				fillNumber(row);
 				AppendBlocks(row.vblocks().v, &listItem.blocks, context);
+				AdoptLeadingParagraphListItemText(&listItem);
 			});
 			parsed.listItems.push_back(std::move(listItem));
 			nextNumber += step;
@@ -1136,6 +1151,7 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 		return;
 	case BlockKind::Heading:
 	case BlockKind::Paragraph:
+	case BlockKind::Footer:
 	case BlockKind::Code:
 		AppendSummaryLine(result, block.text);
 		return;

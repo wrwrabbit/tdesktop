@@ -146,6 +146,7 @@ struct HistoryMessageMediaForInstantView
 struct HistoryMessageRichPageSource
 : RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
 	std::shared_ptr<const Iv::RichPage> page;
+	bool canEdit = false;
 };
 
 class HiddenSenderInfo {

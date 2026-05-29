@@ -502,6 +502,26 @@ int TextLineHeight(const style::TextStyle &style) {
 	return std::max(style.lineHeight, style.font->height);
 }
 
+int TextLineAscent(const style::TextStyle &style) {
+	if (style.qtextEditLineMetrics) {
+		const auto lineHeight = QFixed(TextLineHeight(style));
+		const auto leading = std::max(style.font->fleading, QFixed());
+		return std::clamp(
+			(lineHeight * 4 / 5) - leading,
+			QFixed(),
+			lineHeight).toInt();
+	}
+	const auto lineHeight = TextLineHeight(style);
+	const auto textTop = std::max(lineHeight - style.font->height, 0) / 2;
+	return textTop + style.font->ascent;
+}
+
+int TextLineBaseline(
+		const style::TextStyle &style,
+		int top) {
+	return top + TextLineAscent(style);
+}
+
 int ResolveTextLeafHeight(
 		int naturalHeight,
 		LayoutContext context) {
@@ -515,15 +535,6 @@ int ResolveTextLeafHeight(
 		: naturalHeight;
 }
 
-[[nodiscard]] int NominalTextBaseline(
-		const style::TextStyle &style,
-		int top) {
-	const auto lineHeight = TextLineHeight(style);
-	const auto textTop = top
-		+ (std::max(lineHeight - style.font->height, 0) / 2);
-	return textTop + style.font->ascent;
-}
-
 [[nodiscard]] int LeafFirstLineBaseline(
 		const Ui::Text::String &leaf,
 		const QRect &textRect,
@@ -531,7 +542,7 @@ int ResolveTextLeafHeight(
 		bool breakEverywhere = true) {
 	const auto lines = leaf.countLinesGeometry(textRect.width(), breakEverywhere);
 	return textRect.y() + (lines.empty()
-		? NominalTextBaseline(style, 0)
+		? TextLineBaseline(style)
 		: lines.front().baseline);
 }
 
@@ -542,7 +553,7 @@ QPoint BulletMarkerCenter(
 	const auto &list = st.list;
 	const auto lineHeight = TextLineHeight(st.body);
 	const auto markerWidth = SingleDigitOrderedMarkerWidth(st);
-	const auto nominalBaseline = NominalTextBaseline(st.body, 0);
+	const auto nominalBaseline = TextLineBaseline(st.body);
 	return QPoint(
 		left + list.markerWidth - list.bulletLeftShift - ((markerWidth + 1) / 2),
 		baseline + (lineHeight / 2) - nominalBaseline);

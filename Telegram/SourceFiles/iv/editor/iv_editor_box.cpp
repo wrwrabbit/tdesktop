@@ -5,33 +5,18 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "iv/iv_editor_box.h"
+#include "iv/editor/iv_editor_box.h"
 
-#include <QtCore/QDir>
 #include <QtCore/QEvent>
-#include <QtCore/QFileInfo>
 #include <QtCore/QPointer>
-#include <QtNetwork/QNetworkProxy>
 
-#include "base/flat_map.h"
-#include "base/const_string.h"
 #include "base/unique_qptr.h"
-#include "base/weak_ptr.h"
-#include "core/file_utilities.h"
-#include "core/mime_type.h"
-#include "core/shortcuts.h"
+#include "data/data_msg_id.h"
 #include "ui/image/image_location.h"
-#include "data/data_location.h"
 #include "data/data_types.h"
-#include "iv/iv_editor_state.h"
-#include "iv/iv_editor_widget.h"
+#include "iv/editor/iv_editor_state.h"
+#include "iv/editor/iv_editor_widget.h"
 #include "lang/lang_keys.h"
-#include "main/main_app_config.h"
-#include "main/main_session.h"
-#include "settings.h"
-#include "ui/emoji_config.h"
-#include "storage/storage_account.h"
-#include "ui/controls/location_picker.h"
 #include "ui/layers/generic_box.h"
 #include "ui/rect_part.h"
 #include "ui/ui_utility.h"
@@ -40,12 +25,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/tooltip.h"
 
 #include "window/window_session_controller.h"
-#include "mainwindow.h"
-#include "mainwidget.h"
 
 #include <array>
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include "styles/style_iv.h"
@@ -65,10 +47,10 @@ class Toolbar final : public Ui::RpWidget {
 public:
 	Toolbar(
 		QWidget *parent,
-		not_null<Window::SessionController*> controller,
-		not_null<PeerData*> peer,
 		not_null<Widget*> editor,
-		QPointer<QWidget> tooltipParent);
+		QPointer<QWidget> tooltipParent,
+		Fn<void(not_null<Widget*>)> requestMedia,
+		Fn<void(not_null<Widget*>)> requestMap);
 
 	int resizeGetHeight(int width) override;
 
@@ -83,37 +65,21 @@ private:
 		Fn<void()> callback);
 	void addInsertButtons();
 	void showHeadingMenu(not_null<Ui::IconButton*> button);
-	void chooseMedia();
-	void applyMediaResult(FileDialog::OpenResult &&result);
-	void chooseMap();
 	void showTooltip(not_null<Ui::IconButton*> button);
 	void hideTooltip();
 	void updateTooltipGeometry();
 	[[nodiscard]] ToolbarButton *buttonData(not_null<Ui::IconButton*> button);
 
-	const not_null<Window::SessionController*> _controller;
-	const not_null<PeerData*> _peer;
 	const QPointer<Widget> _editor;
 	const QPointer<QWidget> _tooltipParent;
-	const Ui::LocationPickerConfig _mapsConfig;
+	const Fn<void(not_null<Widget*>)> _requestMedia;
+	const Fn<void(not_null<Widget*>)> _requestMap;
 	std::vector<ToolbarButton> _buttons;
 	base::unique_qptr<Ui::ImportantTooltip> _tooltip;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 	Ui::IconButton *_hovered = nullptr;
 
 };
-
-[[nodiscard]] Ui::LocationPickerConfig ResolveMapsConfig(
-		not_null<Main::Session*> session) {
-	const auto &appConfig = session->appConfig();
-	auto map = appConfig.get<base::flat_map<QString, QString>>(
-		u"tdesktop_config_map"_q,
-		base::flat_map<QString, QString>());
-	return {
-		.mapsToken = map[u"maps"_q],
-		.geoToken = map[u"geo"_q],
-	};
-}
 
 [[nodiscard]] QString HeadingLabel(int level) {
 	switch (level) {
@@ -127,31 +93,30 @@ private:
 	return tr::lng_article_insert_heading1(tr::now);
 }
 
-[[nodiscard]] std::optional<State::InsertBlockType> MediaTypeForPath(
-		const QString &path) {
-	const auto mime = Core::MimeTypeForFile(QFileInfo(path)).name();
-	if (Core::FileIsImage(path, mime)) {
-		return State::InsertBlockType::Photo;
-	} else if (mime.startsWith(u"video/"_q)) {
-		return State::InsertBlockType::Video;
-	} else if (mime.startsWith(u"audio/"_q)) {
-		return State::InsertBlockType::Audio;
+[[nodiscard]] QString SubmitText(const ShowBoxDescriptor &descriptor) {
+	if (!descriptor.submitLabel.isEmpty()) {
+		return descriptor.submitLabel;
 	}
-	return std::nullopt;
+	switch (descriptor.submitType) {
+	case ShowBoxDescriptor::SubmitType::Send:
+		return tr::lng_send_button(tr::now);
+	case ShowBoxDescriptor::SubmitType::Save:
+		return tr::lng_settings_save(tr::now);
+	}
+	return tr::lng_send_button(tr::now);
 }
 
 Toolbar::Toolbar(
 	QWidget *parent,
-	not_null<Window::SessionController*> controller,
-	not_null<PeerData*> peer,
 	not_null<Widget*> editor,
-	QPointer<QWidget> tooltipParent)
+	QPointer<QWidget> tooltipParent,
+	Fn<void(not_null<Widget*>)> requestMedia,
+	Fn<void(not_null<Widget*>)> requestMap)
 : Ui::RpWidget(parent)
-, _controller(controller)
-, _peer(peer)
 , _editor(editor.get())
 , _tooltipParent(std::move(tooltipParent))
-, _mapsConfig(ResolveMapsConfig(&controller->session())) {
+, _requestMedia(std::move(requestMedia))
+, _requestMap(std::move(requestMap)) {
 	setMouseTracking(true);
 	addInsertButtons();
 }
@@ -231,11 +196,17 @@ void Toolbar::addInsertButtons() {
 		[] { return tr::lng_article_insert_pullquote(tr::marked); },
 		&st::ivEditorToolbarPullquoteIcon,
 		[=] { insertType(State::InsertBlockType::Pullquote); });
-	addButton(
-		tr::lng_article_insert_media(tr::now),
-		[] { return tr::lng_article_insert_media(tr::marked); },
-		&st::ivEditorToolbarAttachIcon,
-		[=] { chooseMedia(); });
+	if (_requestMedia) {
+		addButton(
+			tr::lng_article_insert_media(tr::now),
+			[] { return tr::lng_article_insert_media(tr::marked); },
+			&st::ivEditorToolbarAttachIcon,
+			[=] {
+				if (_editor) {
+					_requestMedia(not_null<Widget*>(_editor.data()));
+				}
+			});
+	}
 	addButton(
 		tr::lng_article_insert_details(tr::now),
 		[] { return tr::lng_article_insert_details(tr::marked); },
@@ -247,12 +218,16 @@ void Toolbar::addInsertButtons() {
 		&st::ivEditorToolbarTableIcon,
 		[=] { insertType(State::InsertBlockType::Table); });
 
-	if (Ui::LocationPicker::Available(_mapsConfig)) {
+	if (_requestMap) {
 		addButton(
 			tr::lng_article_insert_map(tr::now),
 			[] { return tr::lng_article_insert_map(tr::marked); },
 			&st::menuIconAddress,
-			[=] { chooseMap(); });
+			[=] {
+				if (_editor) {
+					_requestMap(not_null<Widget*>(_editor.data()));
+				}
+			});
 	}
 }
 
@@ -271,53 +246,6 @@ void Toolbar::showHeadingMenu(not_null<Ui::IconButton*> button) {
 			});
 	}
 	_menu->popup(button->mapToGlobal(QPoint(0, button->height())));
-}
-
-void Toolbar::chooseMedia() {
-	const auto weak = QPointer<Toolbar>(this);
-	FileDialog::GetOpenPath(
-		QPointer<QWidget>(this),
-		tr::lng_article_insert_media(tr::now),
-		FileDialog::AllFilesFilter(),
-		[=](FileDialog::OpenResult &&result) {
-			if (weak) {
-				weak->applyMediaResult(std::move(result));
-			}
-		});
-}
-
-void Toolbar::applyMediaResult(FileDialog::OpenResult &&result) {
-	if (result.paths.isEmpty()) {
-		return;
-	}
-	const auto type = MediaTypeForPath(result.paths.front());
-	if (!type) {
-		_controller->showToast(tr::lng_edit_media_invalid_file(tr::now));
-		return;
-	}
-	if (_editor) {
-		_editor->insertMedia(*type);
-	}
-}
-
-void Toolbar::chooseMap() {
-	const auto weak = QPointer<Toolbar>(this);
-	const auto session = &_controller->session();
-	Ui::LocationPicker::Show({
-		.parent = _controller->widget().get(),
-		.config = _mapsConfig,
-		.chooseLabel = tr::lng_maps_point_send(),
-		.recipient = _peer,
-		.session = session,
-		.callback = [=](Data::InputVenue venue) {
-			if (weak && weak->_editor) {
-				weak->_editor->insertMap(venue.lat, venue.lon);
-			}
-		},
-		.quit = [] { Shortcuts::Launch(Shortcuts::Command::Quit); },
-		.storageId = session->local().resolveStorageIdBots(),
-		.closeRequests = _controller->content()->death(),
-	});
 }
 
 int Toolbar::resizeGetHeight(int width) {
@@ -411,25 +339,43 @@ ToolbarButton *Toolbar::buttonData(not_null<Ui::IconButton*> button) {
 
 void SetupBox(
 		not_null<Ui::GenericBox*> box,
-		not_null<Window::SessionController*> controller,
-		not_null<PeerData*> peer) {
+		ShowBoxDescriptor descriptor) {
 	box->setWidth(st::boxWideWidth);
 	box->setNoContentMargin(true);
+	box->setCloseByEscape(false);
+	box->setCloseByOutsideClick(false);
 
-	const auto state = std::make_shared<State>();
 	const auto editor = box->addRow(object_ptr<Widget>(
 		box,
-		controller,
-		peer,
-		state),
+		descriptor.controller,
+		descriptor.peer,
+		descriptor.state),
 		style::margins());
 	const auto tooltipParent = box->getDelegate()->outerContainer();
 	box->setPinnedToTopContent(object_ptr<Toolbar>(
 		box,
-		controller,
-		peer,
 		editor,
-		tooltipParent));
+		tooltipParent,
+		std::move(descriptor.requestMedia),
+		std::move(descriptor.requestMap)));
+
+	const auto weak = QPointer<Ui::GenericBox>(box.get());
+	const auto submit = box->addButton(
+		rpl::single(SubmitText(descriptor)),
+		[=, confirmed = std::move(descriptor.confirmed)] {
+			editor->commitInlineField();
+			if ((!confirmed || confirmed()) && weak) {
+				weak->closeBox();
+			}
+		});
+	if (submit && descriptor.setupSubmitButton) {
+		descriptor.setupSubmitButton(not_null<Ui::RpWidget*>(submit.data()));
+	}
+	box->addButton(tr::lng_cancel(), [=, cancelled = std::move(descriptor.cancelled)] {
+		if ((!cancelled || cancelled()) && weak) {
+			weak->closeBox();
+		}
+	});
 
 	box->setFocusCallback([=] {
 		editor->activateInitialNode();
@@ -441,10 +387,24 @@ void SetupBox(
 
 } // namespace
 
+void ShowBox(ShowBoxDescriptor descriptor) {
+	if (!descriptor.state) {
+		descriptor.state = std::make_shared<State>();
+	}
+	descriptor.controller->show(Box<Ui::GenericBox>(
+		SetupBox,
+		std::move(descriptor)));
+}
+
 void ShowBox(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	controller->show(Box<Ui::GenericBox>(SetupBox, controller, peer));
+	auto descriptor = ShowBoxDescriptor{
+		.controller = controller,
+		.peer = peer,
+		.state = std::make_shared<State>(),
+	};
+	ShowBox(std::move(descriptor));
 }
 
 } // namespace Iv::Editor

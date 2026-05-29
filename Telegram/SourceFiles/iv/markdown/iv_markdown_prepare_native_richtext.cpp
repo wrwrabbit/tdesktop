@@ -496,7 +496,8 @@ bool PrepareNativeIvMapBlock(
 		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	if (!data.accessHash || data.width <= 0 || data.height <= 0) {
+	if (data.width <= 0 || data.height <= 0 || data.zoom <= 0
+		|| (!data.accessHash && !state->editMode)) {
 		return state->editMode
 			? PrepareNativeIvCanonicalPlaceholderBlock(
 				u"Map"_q,
