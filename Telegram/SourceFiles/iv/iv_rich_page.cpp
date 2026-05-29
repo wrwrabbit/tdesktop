@@ -40,6 +40,8 @@ using TableRow = RichPage::TableRow;
 using TableVerticalAlignment = RichPage::TableVerticalAlignment;
 using TaskState = RichPage::TaskState;
 
+const auto PhotoLargeLevels = u"ydxcwmbsa"_q;
+
 [[nodiscard]] Block MakeBlock(BlockKind kind) {
 	auto result = Block();
 	result.kind = kind;
@@ -169,11 +171,13 @@ void AppendRich(RichText *to, RichText &&from) {
 	auto result = QSize();
 	photo.match([](const MTPDphotoEmpty &) {
 	}, [&](const MTPDphoto &data) {
+		auto bestLevel = PhotoLargeLevels.size();
 		const auto assign = [&](const QString &type, int width, int height) {
-			if (result.isEmpty() && (type == u"x"_q || type == u"w"_q)) {
-				result = QSize(width, height);
-			}
-			if (type == u"y"_q) {
+			const auto level = type.isEmpty()
+				? -1
+				: PhotoLargeLevels.indexOf(type.front());
+			if (level >= 0 && level < bestLevel) {
+				bestLevel = level;
 				result = QSize(width, height);
 			}
 		};
