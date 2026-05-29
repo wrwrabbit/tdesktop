@@ -956,8 +956,7 @@ public:
 
 	[[nodiscard]] std::shared_ptr<Markdown::IvHistoryViewMediaHost>
 	hostedMediaHost(
-			not_null<Window::SessionController*> controller,
-			not_null<History*> history) const;
+			not_null<Window::SessionController*> controller) const;
 
 	[[nodiscard]] std::shared_ptr<Markdown::HostedMediaBlockFactory>
 	hostedMediaBlockFactory() const override;
@@ -971,6 +970,7 @@ private:
 
 	const not_null<Main::Session*> _session;
 	const ::Data::FileOrigin _origin;
+	const FullMsgId _itemId;
 	const QString _pageUrl;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
@@ -987,6 +987,7 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 	Fn<void(QString)> joinChannel)
 : _session(session)
 , _origin(::Data::FileOriginWebPage{ page->url })
+, _itemId()
 , _pageUrl(page->url)
 , _openChannel(std::move(openChannel))
 , _joinChannel(std::move(joinChannel)) {
@@ -999,6 +1000,7 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 	Fn<void(QString)> joinChannel)
 : _session(session)
 , _origin(itemId)
+, _itemId(itemId)
 , _pageUrl()
 , _openChannel(std::move(openChannel))
 , _joinChannel(std::move(joinChannel)) {
@@ -1090,9 +1092,29 @@ QString CachedPageMediaRuntime::mentionNameEntityData(uint64 userId) const {
 }
 
 auto CachedPageMediaRuntime::hostedMediaHost(
-		not_null<Window::SessionController*> controller,
-		not_null<History*> history) const
+		not_null<Window::SessionController*> controller) const
 -> std::shared_ptr<Markdown::IvHistoryViewMediaHost> {
+	if (_itemId) {
+		const auto item = _session->data().message(_itemId);
+		if (!item) {
+			return nullptr;
+		}
+		if (!_hostedMediaHost) {
+			_hostedMediaHost
+				= std::make_shared<Markdown::IvHistoryViewMediaHost>(
+					controller,
+					not_null{ item });
+		}
+		return _hostedMediaHost;
+	}
+	if (!_session->data().peerLoaded(PeerData::kServiceNotificationsId)) {
+		return nullptr;
+	}
+	const auto history = _session->data().history(
+		PeerData::kServiceNotificationsId);
+	if (!history->peer->isUser()) {
+		return nullptr;
+	}
 	if (!_hostedMediaHost) {
 		_hostedMediaHost
 			= std::make_shared<Markdown::IvHistoryViewMediaHost>(
@@ -1106,16 +1128,13 @@ auto CachedPageMediaRuntime::hostedMediaHost(
 auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 -> std::shared_ptr<Markdown::HostedMediaBlockFactory> {
 	const auto controller = CurrentSessionController(_session);
-	if (!controller || !_session->data().peerLoaded(
-			PeerData::kServiceNotificationsId)) {
+	if (!controller) {
 		return nullptr;
 	}
-	const auto history = _session->data().history(
-		PeerData::kServiceNotificationsId);
-	if (!history->peer->isUser()) {
+	const auto host = hostedMediaHost(not_null{ controller });
+	if (!host) {
 		return nullptr;
 	}
-	const auto host = hostedMediaHost(not_null{ controller }, history);
 	return std::make_shared<Markdown::IvHistoryViewMediaBlockFactory>(
 		base::make_weak(controller),
 		[session = _session, host, origin = fileOrigin()](

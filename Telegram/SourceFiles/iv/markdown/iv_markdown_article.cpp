@@ -1310,6 +1310,9 @@ void MarkdownArticle::Impl::setRenderer(std::shared_ptr<MathRenderer> renderer) 
 }
 
 void MarkdownArticle::Impl::setMediaBlockHost(MediaBlockHost *host) {
+	if (_mediaBlockHost == host) {
+		return;
+	}
 	_mediaBlockHost = host;
 	refreshMediaBlockHosts();
 }

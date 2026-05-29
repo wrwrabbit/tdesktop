@@ -1846,6 +1846,11 @@ void Document::refreshParentId(not_null<HistoryItem*> realParent) {
 	if (auto thumbed = Get<HistoryDocumentThumbed>()) {
 		if (thumbed->linksavel) {
 			thumbed->linksavel->setMessageId(fullId);
+		}
+		if (thumbed->linkopenwithl) {
+			thumbed->linkopenwithl->setMessageId(fullId);
+		}
+		if (thumbed->linkcancell) {
 			thumbed->linkcancell->setMessageId(fullId);
 		}
 	}

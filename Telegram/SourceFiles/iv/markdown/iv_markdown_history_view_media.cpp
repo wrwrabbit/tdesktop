@@ -500,12 +500,16 @@ struct IvHistoryViewMediaHost::State {
 		not_null<Window::SessionController*> controller,
 		not_null<History*> history,
 		QString pageUrl);
+	State(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item);
 
 	const not_null<::Data::Session*> session;
 	const QString pageUrl;
 	const std::unique_ptr<IvHistoryViewDelegate> delegate;
 	const not_null<HistoryItem*> item;
 	AdminLog::OwnedItem owned;
+	std::unique_ptr<HistoryView::Element> realView;
 	HistoryView::Message *view = nullptr;
 };
 
@@ -529,6 +533,24 @@ IvHistoryViewMediaHost::State::State(
 	view->setInstantViewMediaRuntime(this->pageUrl);
 }
 
+IvHistoryViewMediaHost::State::State(
+	not_null<Window::SessionController*> controller,
+	not_null<HistoryItem*> item)
+: session(&item->history()->owner())
+, delegate(std::make_unique<IvHistoryViewDelegate>(
+	controller,
+	session,
+	[=] {
+		if (view) {
+			view->repaint();
+		}
+	}))
+, item(item)
+, realView(this->item->createView(delegate.get()))
+, view(static_cast<HistoryView::Message*>(realView.get())) {
+	view->setInstantViewMediaRuntime(this->pageUrl);
+}
+
 IvHistoryViewMediaHost::IvHistoryViewMediaHost(
 	not_null<Window::SessionController*> controller,
 	not_null<History*> history,
@@ -537,6 +559,12 @@ IvHistoryViewMediaHost::IvHistoryViewMediaHost(
 	controller,
 	history,
 	std::move(pageUrl))) {
+}
+
+IvHistoryViewMediaHost::IvHistoryViewMediaHost(
+	not_null<Window::SessionController*> controller,
+	not_null<HistoryItem*> item)
+: _state(std::make_unique<State>(controller, item)) {
 }
 
 IvHistoryViewMediaHost::~IvHistoryViewMediaHost() = default;

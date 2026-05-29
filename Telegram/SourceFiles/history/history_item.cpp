@@ -4160,17 +4160,23 @@ void HistoryItem::applyLocalRichPage(
 
 void HistoryItem::setRichPage(std::shared_ptr<const Iv::RichPage> page) {
 	if (page) {
-		AddComponents(HistoryMessageRichPageSource::Bit());
+		AddComponents(HistoryMessageRichPageSource::Bit()
+			| HistoryMessageMediaForInstantView::Bit());
 		const auto source = Get<HistoryMessageRichPageSource>();
+		const auto media = Get<HistoryMessageMediaForInstantView>();
 		source->page = std::move(page);
 		source->canEdit = Iv::Editor::CanEditRichPage(source->page);
+		media->url = QString();
+		media->documents.clear();
+		media->photos.clear();
 	} else {
 		clearRichPage();
 	}
 }
 
 void HistoryItem::clearRichPage() {
-	RemoveComponents(HistoryMessageRichPageSource::Bit());
+	RemoveComponents(HistoryMessageRichPageSource::Bit()
+		| HistoryMessageMediaForInstantView::Bit());
 }
 
 void HistoryItem::setTextValue(TextWithEntities text, bool force) {

@@ -39,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "spellcheck/spellcheck_highlight_syntax.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "payments/payments_reaction_process.h" // TryAddingPaidReaction.
 #include "window/window_session_controller.h"
@@ -1855,19 +1856,40 @@ void Element::validateText() {
 			AddComponents(HistoryMessageRichPage::Bit());
 		}
 		const auto runtime = Get<HistoryMessageRichPage>();
-		runtime->host.owner = base::make_weak(message);
-		runtime->article.setMediaBlockHost(&runtime->host);
-		runtime->article.setTextRepaintCallbacks(
-			[weak = runtime->host.owner] {
+		const auto needsBinding = (runtime->article.mediaBlockHost()
+			!= &runtime->host);
+		const auto needsHighlightSubscription = !runtime->highlightReadyLifetime;
+		if (needsBinding || needsHighlightSubscription) {
+			const auto weak = base::make_weak(message);
+			runtime->host.owner = weak;
+			if (needsBinding) {
+				runtime->article.setMediaBlockHost(&runtime->host);
+				runtime->article.setTextRepaintCallbacks(
+					[weak] {
+						if (const auto owner = weak.get()) {
+							owner->requestRichPageRepaint(QRect());
+						}
+					},
+					[weak](QRect articleRect) {
+						if (const auto owner = weak.get()) {
+							owner->requestRichPageRepaint(articleRect);
+						}
+					});
+			}
+		}
+		if (needsHighlightSubscription) {
+			Spellchecker::HighlightReady(
+			) | rpl::on_next([weak = runtime->host.owner](
+					Spellchecker::HighlightProcessId processId) {
 				if (const auto owner = weak.get()) {
-					owner->requestRichPageRepaint(QRect());
+					if (const auto rich = owner->richpage()) {
+						if (rich->article.highlightProcessDone(processId)) {
+							owner->requestRichPageRepaint(QRect());
+						}
+					}
 				}
-			},
-			[weak = runtime->host.owner](QRect articleRect) {
-				if (const auto owner = weak.get()) {
-					owner->requestRichPageRepaint(articleRect);
-				}
-			});
+			}, runtime->highlightReadyLifetime);
+		}
 		if (runtime->page == page && runtime->mediaRuntime) {
 			return;
 		}

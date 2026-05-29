@@ -41,6 +41,9 @@ public:
 		not_null<Window::SessionController*> controller,
 		not_null<History*> history,
 		QString pageUrl);
+	IvHistoryViewMediaHost(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item);
 	~IvHistoryViewMediaHost();
 
 	[[nodiscard]] not_null<::Data::Session*> session() const;
