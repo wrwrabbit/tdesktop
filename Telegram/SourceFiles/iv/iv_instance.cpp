@@ -401,7 +401,6 @@ Shown::Shown(
 
 void Shown::prepare(not_null<Data*> data, const QString &hash) {
 	const auto richPage = data->richPage();
-	const auto sourceFallback = data->sourceFallback();
 	const auto id = data->id();
 	const auto page = _session->data().webpage(data->pageId());
 
@@ -412,7 +411,6 @@ void Shown::prepare(not_null<Data*> data, const QString &hash) {
 	_id = id;
 
 	auto prepared = Markdown::TryPrepareNativeInstantView({
-		.source = sourceFallback ? &*sourceFallback : nullptr,
 		.richPage = richPage,
 		.mediaRuntime = createMediaRuntime(page),
 	});
@@ -483,6 +481,7 @@ void Shown::createMarkdownController(
 				.type = ToType::OpenPage,
 				.url = event.url,
 				.context = QString::number(event.webpageId),
+				.webpageId = event.webpageId,
 			});
 			break;
 		case FromType::OpenFile:
@@ -610,7 +609,6 @@ void Shown::moveTo(not_null<Data*> data, QString hash) {
 
 void Shown::update(not_null<Data*> data) {
 	const auto richPage = data->richPage();
-	const auto sourceFallback = data->sourceFallback();
 	const auto id = data->id();
 
 	if (_markdownRuntimeUrl != id) {
@@ -621,7 +619,6 @@ void Shown::update(not_null<Data*> data) {
 
 	const auto page = _session->data().webpage(data->pageId());
 	auto prepared = Markdown::TryPrepareNativeInstantView({
-		.source = sourceFallback ? &*sourceFallback : nullptr,
 		.richPage = richPage,
 		.mediaRuntime = createMediaRuntime(page),
 	});
@@ -818,16 +815,54 @@ void Instance::showOpenedPage(
 			}
 			const auto session = _shownSession;
 			const auto url = event.url;
-			auto &requested = _fullRequested[session][url];
+			const auto parts = event.url.split('#');
+			const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
+			if (event.webpageId) {
+				const auto page = session->data().webpage(
+					WebPageId(event.webpageId)).get();
+				if (page->iv) {
+					this->showOpenedPage(session, page->iv.get(), hash, false);
+					break;
+				}
+			}
+			const auto requestKey = event.webpageId
+				? QString::number(event.webpageId)
+				: url;
+			auto &requested = _fullRequested[session][requestKey];
+			if (event.webpageId) {
+				const auto page = session->data().webpage(
+					WebPageId(event.webpageId)).get();
+				if (page->iv) {
+					requested.page = page;
+					requested.hash = page->iv->hash();
+				} else {
+					requested.hash = 0;
+				}
+			}
 			requested.lastRequestedAt = crl::now();
 			session->api().request(MTPmessages_GetWebPage(
 				MTP_string(url),
 				MTP_int(requested.hash)
 			)).done([=](const MTPmessages_WebPage &result) {
-				const auto processed = processReceivedPage(session, url, result);
+				const auto processed = processReceivedPage(
+					session,
+					requestKey,
+					result);
 				if (const auto page = processed.page; page && page->iv) {
-					const auto parts = event.url.split('#');
-					const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
+					if (event.webpageId && page->id != event.webpageId) {
+						const auto expected = session->data().webpage(
+							WebPageId(event.webpageId)).get();
+						if (expected->iv) {
+							this->showOpenedPage(
+								session,
+								expected->iv.get(),
+								hash,
+								false);
+						} else {
+							UrlClickHandler::Open(event.url);
+						}
+						return;
+					}
 					this->showOpenedPage(session, page->iv.get(), hash, false);
 				} else {
 					UrlClickHandler::Open(event.url);

@@ -4241,11 +4241,11 @@ void Session::webpageApplyFields(
 	const auto cachedPage = data.vcached_page();
 	const auto ivPhoto = photo ? processPhoto(*photo).get() : nullptr;
 	const auto ivDocument = document ? processDocument(*document).get() : nullptr;
-	auto iv = (cachedPage && !IgnoreIv(type))
-		? std::make_unique<Iv::Data>(
-			data,
-			*cachedPage,
-			Iv::ParseRichPage(_session, *cachedPage))
+	const auto richPage = (cachedPage && !IgnoreIv(type))
+		? Iv::ParseRichPage(_session, data)
+		: nullptr;
+	auto iv = richPage
+		? std::make_unique<Iv::Data>(data, richPage)
 		: nullptr;
 	const auto resolvedPhoto = story
 		? story->photo()

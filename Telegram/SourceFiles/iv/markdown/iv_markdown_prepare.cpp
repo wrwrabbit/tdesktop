@@ -6,7 +6,6 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_prepare.h"
-#include "iv/iv_data.h"
 #include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare_blocks.h"
 #include "iv/markdown/iv_markdown_prepare_formulas.h"
@@ -144,75 +143,37 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 		};
 	};
 
-	if (!request.source && !request.richPage) {
+	if (!request.richPage) {
 		state.setFailure(
 			PrepareTerminalFailure::InvalidRequest,
-			u"missing-native-iv-source"_q);
+			u"missing-native-iv-rich-page"_q);
 		ClearPreparedOutput(&state.result);
 		return finish(
 			NativeInstantViewPrepareResultKind::Failure,
 			state.result.failure.debugReason);
 	}
 
-	if (request.source) {
-		for (const auto &photo : request.source->page.data().vphotos().v) {
-			RememberNativeIvPhoto(&state, photo);
-		}
-		if (request.source->webpagePhoto) {
-			RememberNativeIvPhoto(&state, *request.source->webpagePhoto);
-		}
-		for (const auto &document : request.source->page.data().vdocuments().v) {
-			RememberNativeIvDocument(&state, document);
-		}
-		if (request.source->webpageDocument) {
-			RememberNativeIvDocument(&state, *request.source->webpageDocument);
-		}
-
-		if (!PrepareNativeIvBlocks(
-				request.source->page.data().vblocks().v,
-				&state.result.blocks.blocks,
-				&state)) {
-			if (state.result.failure.failed()) {
-				ClearPreparedOutput(&state.result);
-				return finish(
-					NativeInstantViewPrepareResultKind::Failure,
-					state.result.failure.debugReason);
-			}
-			(void)PrepareNativeIvPlainPlaceholderBlock(
-				u"Prepare Failed"_q,
-				&state.result.blocks.blocks);
-		}
-		ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
-		MeasureNativeIvPreparedFormulas(&state);
+	if (!PrepareNativeIvBlocks(
+			*request.richPage,
+			&state.result.blocks.blocks,
+			&state)) {
 		if (state.result.failure.failed()) {
 			ClearPreparedOutput(&state.result);
 			return finish(
 				NativeInstantViewPrepareResultKind::Failure,
 				state.result.failure.debugReason);
 		}
-	} else if (request.richPage) {
-		if (!PrepareNativeIvBlocks(
-				*request.richPage,
-				&state.result.blocks.blocks,
-				&state)) {
-			if (state.result.failure.failed()) {
-				ClearPreparedOutput(&state.result);
-				return finish(
-					NativeInstantViewPrepareResultKind::Failure,
-					state.result.failure.debugReason);
-			}
-			(void)PrepareNativeIvPlainPlaceholderBlock(
-				u"Prepare Failed"_q,
-				&state.result.blocks.blocks);
-		}
-		ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
-		MeasureNativeIvPreparedFormulas(&state);
-		if (state.result.failure.failed()) {
-			ClearPreparedOutput(&state.result);
-			return finish(
-				NativeInstantViewPrepareResultKind::Failure,
-				state.result.failure.debugReason);
-		}
+		(void)PrepareNativeIvPlainPlaceholderBlock(
+			u"Prepare Failed"_q,
+			&state.result.blocks.blocks);
+	}
+	ApplySoftPreparedBlockLimit(&state.result.blocks.blocks);
+	MeasureNativeIvPreparedFormulas(&state);
+	if (state.result.failure.failed()) {
+		ClearPreparedOutput(&state.result);
+		return finish(
+			NativeInstantViewPrepareResultKind::Failure,
+			state.result.failure.debugReason);
 	}
 	return finish(
 		NativeInstantViewPrepareResultKind::Supported,

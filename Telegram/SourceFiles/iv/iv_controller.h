@@ -46,6 +46,7 @@ public:
 		Type type = Type::Close;
 		QString url;
 		QString context;
+		uint64 webpageId = 0;
 	};
 
 	[[nodiscard]] static bool IsGoodTonSiteUrl(const QString &uri);

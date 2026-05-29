@@ -16,7 +16,6 @@ namespace Iv {
 
 Data::Data(
 	const MTPDwebPage &webpage,
-	const MTPPage &page,
 	std::shared_ptr<const RichPage> richPage)
 : _pageId(webpage.vid().v)
 , _hash(webpage.vhash().v)
@@ -24,19 +23,8 @@ Data::Data(
 , _name(webpage.vsite_name()
 	? qs(*webpage.vsite_name())
 	: SiteNameFromUrl(_url))
-, _partial(page.match([](const MTPDpage &data) {
-		return data.is_part();
-	}, [](const auto &) {
-		return false;
-	}))
-, _richPage(std::move(richPage))
-, _pageFallback(page)
-, _webpagePhotoFallback(webpage.vphoto()
-	? std::optional<MTPPhoto>(*webpage.vphoto())
-	: std::optional<MTPPhoto>())
-, _webpageDocumentFallback(webpage.vdocument()
-	? std::optional<MTPDocument>(*webpage.vdocument())
-	: std::optional<MTPDocument>()) {
+, _partial(richPage ? richPage->part : false)
+, _richPage(std::move(richPage)) {
 }
 
 QString Data::id() const {
@@ -63,17 +51,6 @@ Data::~Data() = default;
 
 const std::shared_ptr<const RichPage> &Data::richPage() const {
 	return _richPage;
-}
-
-std::optional<Source> Data::sourceFallback() const {
-	if (!_pageFallback) {
-		return std::nullopt;
-	}
-	return Source{
-		.page = *_pageFallback,
-		.webpagePhoto = _webpagePhotoFallback,
-		.webpageDocument = _webpageDocumentFallback,
-	};
 }
 
 QString SiteNameFromUrl(const QString &url) {

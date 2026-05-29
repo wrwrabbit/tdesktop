@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <memory>
-#include <optional>
 
 class DocumentData;
 class PhotoData;
@@ -16,17 +15,10 @@ class PhotoData;
 namespace Iv {
 struct RichPage;
 
-struct Source {
-	MTPPage page;
-	std::optional<MTPPhoto> webpagePhoto;
-	std::optional<MTPDocument> webpageDocument;
-};
-
 class Data final {
 public:
 	Data(
 		const MTPDwebPage &webpage,
-		const MTPPage &page,
 		std::shared_ptr<const RichPage> richPage);
 	~Data();
 
@@ -36,7 +28,6 @@ public:
 	[[nodiscard]] int32 hash() const;
 	[[nodiscard]] bool partial() const;
 	[[nodiscard]] const std::shared_ptr<const RichPage> &richPage() const;
-	[[nodiscard]] std::optional<Source> sourceFallback() const;
 
 private:
 	const uint64 _pageId = 0;
@@ -45,9 +36,6 @@ private:
 	const QString _name;
 	const bool _partial = false;
 	const std::shared_ptr<const RichPage> _richPage;
-	const std::optional<MTPPage> _pageFallback;
-	const std::optional<MTPPhoto> _webpagePhotoFallback;
-	const std::optional<MTPDocument> _webpageDocumentFallback;
 
 };
 

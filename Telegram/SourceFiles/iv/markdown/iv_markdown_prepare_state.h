@@ -12,7 +12,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QByteArray>
 
-#include <memory>
 #include <vector>
 
 namespace Iv::Markdown {
@@ -51,29 +50,9 @@ struct PrepareState {
 	[[nodiscard]] QString formulaSourceText(int index) const;
 };
 
-struct NativeIvPhotoInfo {
-	uint64 id = 0;
-	int width = 0;
-	int height = 0;
-};
-
-struct NativeIvDocumentInfo {
-	uint64 id = 0;
-	int width = 0;
-	int height = 0;
-	QString fileName;
-	QString title;
-	QString performer;
-	int duration = 0;
-	bool isVideoFile = false;
-	bool isAnimation = false;
-};
-
 struct NativeIvPrepareState {
 	MarkdownArticleContent result;
 	MarkdownPrepareDimensions dimensions;
-	std::vector<NativeIvPhotoInfo> photos;
-	std::vector<NativeIvDocumentInfo> documents;
 	int nextGeneratedId = 0;
 	int nextFormulaIndex = 0;
 

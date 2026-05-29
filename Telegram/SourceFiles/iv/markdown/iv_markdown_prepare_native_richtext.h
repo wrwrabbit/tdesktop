@@ -26,48 +26,9 @@ struct NativeIvRichTextContext {
 	int renderHeightCap = 0;
 };
 
-void RememberNativeIvPhoto(
-	NativeIvPrepareState *state,
-	const MTPPhoto &photo);
-void RememberNativeIvDocument(
-	NativeIvPrepareState *state,
-	const MTPDocument &document);
 [[nodiscard]] bool PrepareNativeIvPlainPlaceholderBlock(
 	QString label,
 	std::vector<PreparedBlock> *result);
-[[nodiscard]] bool PrepareNativeIvPlaceholderBlock(
-	QString label,
-	const MTPPageCaption &caption,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state,
-	std::optional<EmbedRequest> embed = std::nullopt);
-[[nodiscard]] bool PrepareNativeIvPhotoBlock(
-	const MTPDpageBlockPhoto &data,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvVideoBlock(
-	const MTPDpageBlockVideo &data,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvAudioBlock(
-	const MTPDpageBlockAudio &data,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvMapBlock(
-	const MTPDpageBlockMap &data,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvChannelBlock(
-	const MTPDpageBlockChannel &data,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvGroupedMediaBlock(
-	const QVector<MTPPageBlock> &items,
-	const MTPPageCaption &caption,
-	PreparedGroupedMediaIntent intent,
-	QString placeholderLabel,
-	std::vector<PreparedBlock> *result,
-	NativeIvPrepareState *state);
 [[nodiscard]] bool PrepareNativeIvPhotoBlock(
 	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
@@ -92,12 +53,6 @@ void RememberNativeIvDocument(
 	const Iv::RichPage::Block &data,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state);
-[[nodiscard]] bool PrepareNativeIvRichText(
-	const MTPRichText &text,
-	PreparedIvRichText *result,
-	QString *blockAnchorId,
-	NativeIvPrepareState *state,
-	NativeIvRichTextContext context = {});
 [[nodiscard]] bool PrepareNativeIvRichText(
 	const Iv::RichPage::RichText &text,
 	PreparedIvRichText *result,

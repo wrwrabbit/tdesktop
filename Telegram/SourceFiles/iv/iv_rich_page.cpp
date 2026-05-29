@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/iv_rich_page.h"
 
+#include "base/algorithm.h"
 #include "base/flat_map.h"
 #include "base/qthelp_url.h"
 #include "base/unixtime.h"
@@ -86,12 +87,39 @@ struct ParseContext {
 	return true;
 }
 
+void AddRichAnchor(
+		QString *primary,
+		std::vector<QString> *extra,
+		QString anchorId) {
+	if (anchorId.isEmpty()) {
+		return;
+	}
+	if (primary && primary->isEmpty()) {
+		*primary = std::move(anchorId);
+		return;
+	}
+	if (primary && *primary == anchorId) {
+		return;
+	}
+	if (extra && !ranges::contains(*extra, anchorId)) {
+		extra->push_back(std::move(anchorId));
+	}
+}
+
 void AppendRich(RichText *to, const RichText &from) {
 	to->text.append(from.text);
+	AddRichAnchor(&to->anchorId, &to->anchorIds, from.anchorId);
+	for (const auto &anchorId : from.anchorIds) {
+		AddRichAnchor(&to->anchorId, &to->anchorIds, anchorId);
+	}
 }
 
 void AppendRich(RichText *to, RichText &&from) {
 	to->text.append(std::move(from.text));
+	AddRichAnchor(&to->anchorId, &to->anchorIds, std::move(from.anchorId));
+	for (auto &anchorId : from.anchorIds) {
+		AddRichAnchor(&to->anchorId, &to->anchorIds, std::move(anchorId));
+	}
 }
 
 [[nodiscard]] QString RichPageLinkEntityData(
@@ -195,20 +223,76 @@ void AppendRich(RichText *to, RichText &&from) {
 	return result;
 }
 
+void MergeDocumentInfo(
+		ParseContext::DocumentInfo *existing,
+		ParseContext::DocumentInfo info) {
+	if (!existing) {
+		return;
+	}
+	if (existing->width <= 0 && info.width > 0) {
+		existing->width = info.width;
+	}
+	if (existing->height <= 0 && info.height > 0) {
+		existing->height = info.height;
+	}
+	if (existing->fileName.isEmpty() && !info.fileName.isEmpty()) {
+		existing->fileName = std::move(info.fileName);
+	}
+	if (existing->title.isEmpty() && !info.title.isEmpty()) {
+		existing->title = std::move(info.title);
+	}
+	if (existing->performer.isEmpty() && !info.performer.isEmpty()) {
+		existing->performer = std::move(info.performer);
+	}
+	if (existing->duration <= 0 && info.duration > 0) {
+		existing->duration = info.duration;
+	}
+	if (!existing->isVideoFile && info.isVideoFile) {
+		existing->isVideoFile = true;
+	}
+	if (!existing->isAnimation && info.isAnimation) {
+		existing->isAnimation = true;
+	}
+}
+
 void RememberPhoto(ParseContext *context, const MTPPhoto &photo) {
 	const auto id = PhotoIdFromMtp(photo);
-	context->photos.emplace(
-		id,
-		context->session->data().processPhoto(photo).get());
-	context->photoSizes.emplace(id, PhotoSizeFromMtp(photo));
+	if (!id) {
+		return;
+	}
+	context->photos[id] = context->session->data().processPhoto(photo).get();
+	const auto size = PhotoSizeFromMtp(photo);
+	const auto existing = context->photoSizes.find(id);
+	if (!size.isEmpty() || existing == end(context->photoSizes)) {
+		context->photoSizes[id] = size;
+	}
 }
 
 void RememberDocument(ParseContext *context, const MTPDocument &document) {
 	const auto id = DocumentIdFromMtp(document);
-	context->documents.emplace(
-		id,
-		context->session->data().processDocument(document).get());
-	context->documentInfos.emplace(id, DocumentInfoFromMtp(document));
+	if (!id) {
+		return;
+	}
+	const auto processed = context->session->data().processDocument(document).get();
+	context->documents[id] = processed;
+	auto info = DocumentInfoFromMtp(document);
+	const auto existing = context->documentInfos.find(id);
+	if (existing != end(context->documentInfos)) {
+		MergeDocumentInfo(&existing->second, std::move(info));
+	} else {
+		context->documentInfos.emplace(id, std::move(info));
+	}
+}
+
+void RememberWebPageMedia(
+		ParseContext *context,
+		const MTPDwebPage &webpage) {
+	if (const auto photo = webpage.vphoto()) {
+		RememberPhoto(context, *photo);
+	}
+	if (const auto document = webpage.vdocument()) {
+		RememberDocument(context, *document);
+	}
 }
 
 [[nodiscard]] PhotoData *FindPhoto(
@@ -273,7 +357,8 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		const MTPRichText &text,
 		RichText *result,
 		ParseContext *context,
-		QString *anchorId) {
+		QString *anchorId,
+		std::vector<QString> *anchorIds) {
 	return text.match([&](const MTPDtextEmpty &) {
 		return true;
 	}, [&](const MTPDtextPlain &data) {
@@ -281,7 +366,7 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		return true;
 	}, [&](const MTPDtextConcat &data) {
 		for (const auto &part : data.vtexts().v) {
-			if (!AppendRichText(part, result, context, anchorId)) {
+			if (!AppendRichText(part, result, context, anchorId, anchorIds)) {
 				return false;
 			}
 		}
@@ -341,27 +426,27 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		return true;
 	}, [&](const MTPDtextBold &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Bold);
 	}, [&](const MTPDtextItalic &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Italic);
 	}, [&](const MTPDtextUnderline &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Underline);
 	}, [&](const MTPDtextStrike &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::StrikeOut);
 	}, [&](const MTPDtextFixed &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Code);
 	}, [&](const MTPDtextUrl &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
+		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
 		const auto target = qs(data.vurl());
@@ -375,7 +460,7 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 			RichPageLinkEntityData(target, uint64(data.vwebpage_id().v)));
 	}, [&](const MTPDtextEmail &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
+		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
 		const auto email = qs(data.vemail());
@@ -386,55 +471,55 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
 	}, [&](const MTPDtextSubscript &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Subscript);
 	}, [&](const MTPDtextSuperscript &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Superscript);
 	}, [&](const MTPDtextMarked &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Marked);
 	}, [&](const MTPDtextSpoiler &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Spoiler);
 	}, [&](const MTPDtextMention &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Mention);
 	}, [&](const MTPDtextHashtag &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Hashtag);
 	}, [&](const MTPDtextBotCommand &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::BotCommand);
 	}, [&](const MTPDtextCashtag &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Cashtag);
 	}, [&](const MTPDtextAutoUrl &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Url);
 	}, [&](const MTPDtextAutoEmail &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Email);
 	}, [&](const MTPDtextAutoPhone &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::Phone);
 	}, [&](const MTPDtextBankCard &data) {
 		const auto from = result->text.text.size();
-		return AppendRichText(data.vtext(), result, context, anchorId)
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& AddEntity(&result->text, from, EntityType::BankCard);
 	}, [&](const MTPDtextMentionName &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
+		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
 		const auto entityData = MentionNameEntityData(
@@ -449,7 +534,7 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 				entityData);
 	}, [&](const MTPDtextDate &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
+		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
 		auto flags = FormattedDateFlags();
@@ -478,7 +563,7 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 			SerializeFormattedDateData(data.vdate().v, flags));
 	}, [&](const MTPDtextPhone &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId)) {
+		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
 		}
 		const auto phone = qs(data.vphone());
@@ -488,10 +573,16 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		const auto target = u"tel:"_q + phone;
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
 	}, [&](const MTPDtextAnchor &data) {
-		if (anchorId && anchorId->isEmpty()) {
-			*anchorId = Markdown::NormalizeFragmentId(qs(data.vname()));
-		}
-		return AppendRichText(data.vtext(), result, context, anchorId);
+		AddRichAnchor(
+			anchorId,
+			anchorIds,
+			Markdown::NormalizeFragmentId(qs(data.vname())));
+		return AppendRichText(
+			data.vtext(),
+			result,
+			context,
+			anchorId,
+			anchorIds);
 	});
 }
 
@@ -500,8 +591,10 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		ParseContext *context) {
 	auto result = RichText();
 	auto anchorId = QString();
-	(void)AppendRichText(text, &result, context, &anchorId);
+	auto anchorIds = std::vector<QString>();
+	(void)AppendRichText(text, &result, context, &anchorId, &anchorIds);
 	result.anchorId = std::move(anchorId);
+	result.anchorIds = std::move(anchorIds);
 	return result;
 }
 
@@ -510,9 +603,20 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		ParseContext *context) {
 	auto result = RichText();
 	auto anchorId = QString();
-	(void)AppendRichText(caption.data().vtext(), &result, context, &anchorId);
+	auto anchorIds = std::vector<QString>();
+	(void)AppendRichText(
+		caption.data().vtext(),
+		&result,
+		context,
+		&anchorId,
+		&anchorIds);
 	auto credit = RichText();
-	(void)AppendRichText(caption.data().vcredit(), &credit, context, &anchorId);
+	(void)AppendRichText(
+		caption.data().vcredit(),
+		&credit,
+		context,
+		&anchorId,
+		&anchorIds);
 	if (!credit.text.empty()) {
 		if (!result.text.empty()) {
 			result.text.append(QChar('\n'));
@@ -520,14 +624,15 @@ void RememberDocument(ParseContext *context, const MTPDocument &document) {
 		AppendRich(&result, std::move(credit));
 	}
 	result.anchorId = std::move(anchorId);
+	result.anchorIds = std::move(anchorIds);
 	return result;
 }
 
 void AdoptAnchor(QString *anchorId, RichText *text) {
 	if (anchorId->isEmpty() && !text->anchorId.isEmpty()) {
-		*anchorId = text->anchorId;
+		*anchorId = std::move(text->anchorId);
+		text->anchorId.clear();
 	}
-	text->anchorId.clear();
 }
 
 void AppendBlocks(
@@ -608,8 +713,7 @@ void AppendBlock(
 					row.is_checkbox(),
 					row.is_checked());
 				listItem.text = ParseRichText(row.vtext(), context);
-				listItem.anchorId = listItem.text.anchorId;
-				listItem.text.anchorId.clear();
+				AdoptAnchor(&listItem.anchorId, &listItem.text);
 			}, [&](const MTPDpageListItemBlocks &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
@@ -672,10 +776,11 @@ void AppendBlock(
 	}, [&](const MTPDpageBlockEmbed &data) {
 		auto parsed = MakeBlock(BlockKind::Embed);
 		parsed.url = qs(data.vurl().value_or_empty());
-		parsed.html = data.vhtml() ? qs(data.vhtml()->v) : QString();
+		parsed.html = data.vhtml() ? qba(*data.vhtml()) : QByteArray();
 		parsed.width = data.vw().value_or_empty();
 		parsed.height = data.vh().value_or_empty();
-		parsed.fullWidth = data.is_full_width();
+		parsed.fullWidth = data.is_full_width() || (data.vw() && !data.vw()->v);
+		parsed.fixedHeight = (data.vh() != nullptr);
 		parsed.allowScrolling = data.is_allow_scrolling();
 		parsed.caption = ParseCaption(data.vcaption(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
@@ -857,6 +962,7 @@ void AppendBlock(
 						if (const auto text = cellData.vtext()) {
 							parsedCell.text = ParseRichText(*text, context);
 							parsedCell.text.anchorId.clear();
+							parsedCell.text.anchorIds.clear();
 						}
 						parsedRow.cells.push_back(std::move(parsedCell));
 					});
@@ -889,8 +995,7 @@ void AppendBlock(
 					row.is_checked());
 				fillNumber(row);
 				listItem.text = ParseRichText(row.vtext(), context);
-				listItem.anchorId = listItem.text.anchorId;
-				listItem.text.anchorId.clear();
+				AdoptAnchor(&listItem.anchorId, &listItem.text);
 			}, [&](const MTPDpageListOrderedItemBlocks &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
@@ -1163,14 +1268,42 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	}
 }
 
+std::shared_ptr<const RichPage> ParsePage(
+		not_null<Main::Session*> session,
+		const MTPPage &page,
+		const MTPDwebPage *webpage) {
+	return page.match([&](const MTPDpage &data) {
+		auto result = std::make_shared<RichPage>();
+		auto context = ParseContext{ session };
+		result->url = qs(data.vurl());
+		result->rtl = data.is_rtl();
+		result->part = data.is_part();
+		result->views = data.vviews().value_or_empty();
+		for (const auto &photo : data.vphotos().v) {
+			RememberPhoto(&context, photo);
+		}
+		for (const auto &document : data.vdocuments().v) {
+			RememberDocument(&context, document);
+		}
+		if (webpage) {
+			RememberWebPageMedia(&context, *webpage);
+		}
+		AppendBlocks(data.vblocks().v, &result->blocks, &context);
+		return std::shared_ptr<const RichPage>(std::move(result));
+	}, [](const auto &) {
+		return std::shared_ptr<const RichPage>();
+	});
+}
+
 } // namespace
 
 QString EncodeRichPageLinkUrl(
 		const QString &url,
 		uint64 webpageId) {
-	return u"internal:wrapped?url=%1&context=iv&webpage_id=%2"_q
-		.arg(qthelp::url_encode(url))
-		.arg(webpageId);
+	return u"internal:wrapped?url="_q
+		+ qthelp::url_encode(url)
+		+ u"&context=iv&webpage_id="_q
+		+ QString::number(webpageId);
 }
 
 std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(const QString &data) {
@@ -1222,24 +1355,17 @@ std::shared_ptr<const RichPage> ParseRichPage(
 std::shared_ptr<const RichPage> ParseRichPage(
 		not_null<Main::Session*> session,
 		const MTPPage &page) {
-	return page.match([&](const MTPDpage &data) {
-		auto result = std::make_shared<RichPage>();
-		auto context = ParseContext{ session };
-		result->url = qs(data.vurl());
-		result->rtl = data.is_rtl();
-		result->part = data.is_part();
-		result->views = data.vviews().value_or_empty();
-		for (const auto &photo : data.vphotos().v) {
-			RememberPhoto(&context, photo);
-		}
-		for (const auto &document : data.vdocuments().v) {
-			RememberDocument(&context, document);
-		}
-		AppendBlocks(data.vblocks().v, &result->blocks, &context);
-		return std::shared_ptr<const RichPage>(std::move(result));
-	}, [](const auto &) {
+	return ParsePage(session, page, nullptr);
+}
+
+std::shared_ptr<const RichPage> ParseRichPage(
+		not_null<Main::Session*> session,
+		const MTPDwebPage &webpage) {
+	const auto cachedPage = webpage.vcached_page();
+	if (!cachedPage) {
 		return std::shared_ptr<const RichPage>();
-	});
+	}
+	return ParsePage(session, *cachedPage, &webpage);
 }
 
 TextWithEntities FlattenRichPageSummary(const RichPage &page) {

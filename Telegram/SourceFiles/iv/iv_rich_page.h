@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/basic_types.h"
 #include "ui/text/text_entity.h"
 
+#include <QtCore/QByteArray>
+
 #include <memory>
 #include <optional>
 #include <vector>
@@ -28,6 +30,7 @@ struct RichPage {
 	struct RichText {
 		TextWithEntities text;
 		QString anchorId;
+		std::vector<QString> anchorIds;
 	};
 	enum class BlockKind : uchar {
 		Unsupported,
@@ -126,7 +129,7 @@ struct RichPage {
 		QString language;
 		QString formula;
 		QString url;
-		QString html;
+		QByteArray html;
 		QString author;
 		QString username;
 		QString channelTitle;
@@ -143,6 +146,7 @@ struct RichPage {
 		uint64 documentId = 0;
 		uint64 channelId = 0;
 		bool fullWidth = false;
+		bool fixedHeight = false;
 		bool allowScrolling = false;
 		bool autoplay = false;
 		bool loop = false;
@@ -188,6 +192,9 @@ struct RichPageLinkUrl {
 [[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
 	not_null<Main::Session*> session,
 	const MTPPage &page);
+[[nodiscard]] std::shared_ptr<const RichPage> ParseRichPage(
+	not_null<Main::Session*> session,
+	const MTPDwebPage &webpage);
 [[nodiscard]] TextWithEntities FlattenRichPageSummary(
 	const RichPage &page);
 [[nodiscard]] TextWithEntities FlattenRichPageSummary(
