@@ -455,7 +455,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 446f47239df3102a9a24304b5e3a8c9bee5784f7
+    git checkout 203139f0666149f790fa35119d69d3e7ea11de76
 mac:
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
 """)
@@ -1571,10 +1571,10 @@ else: # qt > '6'
     git submodule update --init --recursive --progress qtbase qtimageformats qtshadertools qtsvg
 depends:patches/qtbase_""" + qt + """/*.patch
 mac:
-    find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
     if [ -d "../patches/qt6_highsierra" ]; then
         find "$PWD/../patches/qt6_highsierra" -maxdepth 1 -name "*.patch" -print0 | sort -z | xargs -0 git -C qtbase apply -v
     fi
+    find $PWD/../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git -C qtbase apply -v
     sed -i.bak 's/tqtc-//' {qtimageformats,qtsvg}/dependencies.yaml
 
     CONFIGURATIONS=-debug
