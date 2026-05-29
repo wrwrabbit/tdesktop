@@ -25,6 +25,9 @@ using LeafKind = State::LeafKind;
 using LeafPath = State::LeafPath;
 using ListItem = RichPage::ListItem;
 using ListKind = RichPage::ListKind;
+using PreparedBlockContainerKind = Markdown::PreparedEditBlockContainerKind;
+using PreparedEditLeafKind = Markdown::PreparedEditLeafKind;
+using PreparedEditSelectionKind = Markdown::PreparedEditSelectionKind;
 using RemovalKind = State::RemovalKind;
 using RemovalTarget = State::RemovalTarget;
 using RichText = RichPage::RichText;
@@ -65,6 +68,102 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 		path.steps.begin());
 }
 
+[[nodiscard]] bool IndexInRange(int index, int from, int till) {
+	return (index >= from) && (index < till);
+}
+
+[[nodiscard]] std::optional<int> BlockIndexInContainer(
+		const LeafPath &leaf,
+		const BlockContainerPath &container) {
+	if (leaf.block.container == container) {
+		return leaf.block.index;
+	}
+	if (!ContainerHasPrefix(leaf.block.container, container)
+		|| leaf.block.container.steps.size() <= container.steps.size()) {
+		return std::nullopt;
+	}
+	const auto &step = leaf.block.container.steps[container.steps.size()];
+	return (step.kind == BlockContainerKind::BlockChildren
+			|| step.kind == BlockContainerKind::ListItemChildren)
+		? std::make_optional(step.blockIndex)
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<int> ListItemIndexForLeaf(
+		const LeafPath &leaf,
+		const BlockPath &block) {
+	if (leaf.block == block && leaf.kind == LeafKind::ListItemText) {
+		return leaf.listItemIndex;
+	}
+	if (!ContainerHasPrefix(leaf.block.container, block.container)
+		|| leaf.block.container.steps.size() <= block.container.steps.size()) {
+		return std::nullopt;
+	}
+	const auto &step = leaf.block.container.steps[block.container.steps.size()];
+	return (step.kind == BlockContainerKind::ListItemChildren
+			&& step.blockIndex == block.index)
+		? std::make_optional(step.listItemIndex)
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<int> TableRowIndexForLeaf(
+		const LeafPath &leaf,
+		const BlockPath &block) {
+	if (!(leaf.block == block)) {
+		return std::nullopt;
+	}
+	if (leaf.kind == LeafKind::BlockText) {
+		return -1;
+	}
+	return (leaf.kind == LeafKind::TableCellText)
+		? std::make_optional(leaf.tableRowIndex)
+		: std::nullopt;
+}
+
+[[nodiscard]] std::optional<int> TableCellIndexForLeaf(
+		const LeafPath &leaf,
+		const BlockPath &block,
+		int rowIndex) {
+	return (leaf.block == block
+			&& leaf.kind == LeafKind::TableCellText
+			&& leaf.tableRowIndex == rowIndex)
+		? std::make_optional(leaf.tableCellIndex)
+		: std::nullopt;
+}
+
+[[nodiscard]] bool BlockCanOwnChildContainer(const Block &block) {
+	return (block.kind == BlockKind::Quote)
+		|| (block.kind == BlockKind::Details);
+}
+
+[[nodiscard]] bool BlockSupportsBlockText(const Block &block) {
+	switch (block.kind) {
+	case BlockKind::Heading:
+	case BlockKind::Paragraph:
+	case BlockKind::Footer:
+	case BlockKind::Code:
+	case BlockKind::Quote:
+	case BlockKind::Table:
+	case BlockKind::Details:
+		return true;
+	default:
+		return false;
+	}
+}
+
+[[nodiscard]] bool BlockSupportsBlockCaption(const Block &block) {
+	switch (block.kind) {
+	case BlockKind::Quote:
+	case BlockKind::Photo:
+	case BlockKind::Video:
+	case BlockKind::Audio:
+	case BlockKind::Map:
+		return true;
+	default:
+		return false;
+	}
+}
+
 [[nodiscard]] bool StringIsEmpty(const QString &text) {
 	return text.trimmed().isEmpty();
 }
@@ -79,6 +178,7 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 	case BlockKind::Code:
 	case BlockKind::Divider:
 	case BlockKind::Anchor:
+	case BlockKind::GroupedMedia:
 	case BlockKind::Photo:
 	case BlockKind::Video:
 	case BlockKind::Audio:
@@ -98,7 +198,6 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 	case BlockKind::AuthorDate:
 	case BlockKind::Embed:
 	case BlockKind::EmbedPost:
-	case BlockKind::GroupedMedia:
 	case BlockKind::Channel:
 	case BlockKind::RelatedArticles:
 		return false;
@@ -137,6 +236,12 @@ const Markdown::MarkdownArticleContent &State::prepared() const {
 
 const std::vector<TextNodeDescriptor> &State::textNodes() const {
 	return _textNodes;
+}
+
+int State::textOrdinalForLeaf(
+		const Markdown::PreparedEditLeafSource &source) const {
+	const auto leaf = convertLeafPath(source);
+	return leaf ? textNodeOrdinal(*leaf) : -1;
 }
 
 int State::textNodeCount() const {
@@ -322,6 +427,796 @@ std::optional<int> State::removeActiveOwnerAndSelectAdjacent(bool forward) {
 		ensureActiveTextOrdinal();
 	}
 	return _activeTextOrdinal;
+}
+
+std::optional<int> State::removeStructuralSelection(
+		const Markdown::PreparedEditSelection &selection,
+		bool forward) {
+	const auto activate = [&](const LeafPath &leaf) -> std::optional<int> {
+		const auto ordinal = textNodeOrdinal(leaf);
+		if (setActiveTextByOrdinal(ordinal)) {
+			return _activeTextOrdinal;
+		}
+		return std::nullopt;
+	};
+	const auto finish = [&](
+			auto postMutationFocus,
+			std::optional<LeafPath> plannedFocus) -> std::optional<int> {
+		rebuild();
+		if (const auto focus = postMutationFocus()) {
+			if (const auto ordinal = activate(*focus)) {
+				return ordinal;
+			}
+		}
+		if (plannedFocus) {
+			if (const auto ordinal = activate(*plannedFocus)) {
+				return ordinal;
+			}
+		}
+		ensureActiveTextOrdinal();
+		return (_activeTextOrdinal >= 0)
+			? std::make_optional(_activeTextOrdinal)
+			: std::nullopt;
+	};
+	const auto leafForContainerOwner = [&](
+			const BlockContainerPath &container) -> std::optional<LeafPath> {
+		if (container.steps.empty()) {
+			return std::nullopt;
+		}
+		auto parent = container;
+		const auto step = parent.steps.back();
+		parent.steps.pop_back();
+		const auto owner = BlockPath{
+			.container = parent,
+			.index = step.blockIndex,
+		};
+		if (step.kind == BlockContainerKind::BlockChildren) {
+			for (const auto &descriptor : _textNodes) {
+				if (leafBelongsToBlock(descriptor.leaf, owner)) {
+					return descriptor.leaf;
+				}
+			}
+		} else if (step.kind == BlockContainerKind::ListItemChildren) {
+			for (const auto &descriptor : _textNodes) {
+				const auto index = ListItemIndexForLeaf(
+					descriptor.leaf,
+					owner);
+				if (index && *index == step.listItemIndex) {
+					return descriptor.leaf;
+				}
+			}
+		}
+		return std::nullopt;
+	};
+	const auto leafNearBlockRange = [&](
+			const StructuralBlockRange &range,
+			bool forward) -> std::optional<LeafPath> {
+		if (forward) {
+			for (const auto &descriptor : _textNodes) {
+				const auto index = BlockIndexInContainer(
+					descriptor.leaf,
+					range.container);
+				if (index && *index >= range.from) {
+					return descriptor.leaf;
+				}
+			}
+		} else {
+			for (auto i = textNodeCount(); i != 0; --i) {
+				const auto &leaf = _textNodes[i - 1].leaf;
+				const auto index = BlockIndexInContainer(leaf, range.container);
+				if (index && *index < range.from) {
+					return leaf;
+				}
+			}
+		}
+		return leafForContainerOwner(range.container);
+	};
+	const auto leafOutsideBlock = [&](
+			const BlockPath &path,
+			bool forward) -> std::optional<LeafPath> {
+		if (forward) {
+			for (const auto &descriptor : _textNodes) {
+				const auto index = BlockIndexInContainer(
+					descriptor.leaf,
+					path.container);
+				if (index && *index > path.index) {
+					return descriptor.leaf;
+				}
+			}
+		} else {
+			for (auto i = textNodeCount(); i != 0; --i) {
+				const auto &leaf = _textNodes[i - 1].leaf;
+				const auto index = BlockIndexInContainer(leaf, path.container);
+				if (index && *index < path.index) {
+					return leaf;
+				}
+			}
+		}
+		return std::nullopt;
+	};
+	const auto leafNearListItemRange = [&](
+			const StructuralListItemRange &range,
+			bool forward) -> std::optional<LeafPath> {
+		if (forward) {
+			for (const auto &descriptor : _textNodes) {
+				const auto index = ListItemIndexForLeaf(
+					descriptor.leaf,
+					range.block);
+				if (index && *index >= range.from) {
+					return descriptor.leaf;
+				}
+			}
+		} else {
+			for (auto i = textNodeCount(); i != 0; --i) {
+				const auto &leaf = _textNodes[i - 1].leaf;
+				const auto index = ListItemIndexForLeaf(leaf, range.block);
+				if (index && *index < range.from) {
+					return leaf;
+				}
+			}
+		}
+		return leafOutsideBlock(range.block, forward);
+	};
+	const auto tableTitleLeaf = [&](
+			const BlockPath &path) -> std::optional<LeafPath> {
+		auto leaf = LeafPath{
+			.kind = LeafKind::BlockText,
+			.block = path,
+		};
+		return (textNodeOrdinal(leaf) >= 0)
+			? std::make_optional(leaf)
+			: std::nullopt;
+	};
+	const auto leafNearTableRows = [&](
+			const StructuralTableRowRange &range,
+			bool forward) -> std::optional<LeafPath> {
+		const auto cellInDirection = [&](
+				bool direction) -> std::optional<LeafPath> {
+			if (direction) {
+				for (const auto &descriptor : _textNodes) {
+					const auto &leaf = descriptor.leaf;
+					if (leaf.block == range.block
+						&& leaf.kind == LeafKind::TableCellText
+						&& leaf.tableRowIndex >= range.from) {
+						return leaf;
+					}
+				}
+			} else {
+				for (auto i = textNodeCount(); i != 0; --i) {
+					const auto &leaf = _textNodes[i - 1].leaf;
+					if (leaf.block == range.block
+						&& leaf.kind == LeafKind::TableCellText
+						&& leaf.tableRowIndex < range.from) {
+						return leaf;
+					}
+				}
+			}
+			return std::nullopt;
+		};
+		if (const auto leaf = cellInDirection(forward)) {
+			return leaf;
+		}
+		if (const auto leaf = cellInDirection(!forward)) {
+			return leaf;
+		}
+		if (const auto leaf = tableTitleLeaf(range.block)) {
+			return leaf;
+		}
+		return leafOutsideBlock(range.block, forward);
+	};
+	const auto leafNearTableCells = [&](
+			const StructuralTableCellRange &range,
+			bool forward) -> std::optional<LeafPath> {
+		if (const auto leaf = firstSelectedLeaf(range)) {
+			return leaf;
+		}
+		return adjacentLeafOutsideRange(range, forward);
+	};
+	const auto focusForRemovedBlock = [&](
+			const BlockPath &path,
+			bool forward) {
+		return leafNearBlockRange(StructuralBlockRange{
+			.container = path.container,
+			.from = path.index,
+			.till = path.index + 1,
+		}, forward);
+	};
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::Blocks: {
+		const auto range = validateBlockRange(selection.blocks);
+		if (!range) {
+			return std::nullopt;
+		}
+		const auto plannedFocus = plannedFocusForRange(*range, forward);
+		const auto blocks = blockContainer(range->container);
+		if (!blocks) {
+			return std::nullopt;
+		}
+		blocks->erase(
+			blocks->begin() + range->from,
+			blocks->begin() + range->till);
+		return finish([&] {
+			return leafNearBlockRange(*range, forward);
+		}, plannedFocus);
+	}
+	case PreparedEditSelectionKind::ListItems: {
+		const auto range = validateListItemRange(selection.listItems);
+		if (!range) {
+			return std::nullopt;
+		}
+		const auto plannedFocus = plannedFocusForRange(*range, forward);
+		const auto owner = block(range->block);
+		if (!owner || owner->kind != BlockKind::List) {
+			return std::nullopt;
+		}
+		owner->listItems.erase(
+			owner->listItems.begin() + range->from,
+			owner->listItems.begin() + range->till);
+		if (owner->listItems.empty()) {
+			const auto removed = range->block;
+			if (!removeTarget({
+					.kind = RemovalKind::Block,
+					.block = removed,
+				})) {
+				return std::nullopt;
+			}
+			return finish([&] {
+				return focusForRemovedBlock(removed, forward);
+			}, plannedFocus);
+		}
+		return finish([&] {
+			return leafNearListItemRange(*range, forward);
+		}, plannedFocus);
+	}
+	case PreparedEditSelectionKind::TableRows: {
+		const auto range = validateTableRowRange(selection.tableRows);
+		if (!range) {
+			return std::nullopt;
+		}
+		const auto plannedFocus = plannedFocusForRange(*range, forward);
+		const auto owner = block(range->block);
+		if (!owner || owner->kind != BlockKind::Table) {
+			return std::nullopt;
+		}
+		owner->tableRows.erase(
+			owner->tableRows.begin() + range->from,
+			owner->tableRows.begin() + range->till);
+		if (owner->tableRows.empty() && RichTextIsEmpty(owner->text)) {
+			const auto removed = range->block;
+			if (!removeTarget({
+					.kind = RemovalKind::Block,
+					.block = removed,
+				})) {
+				return std::nullopt;
+			}
+			return finish([&] {
+				return focusForRemovedBlock(removed, forward);
+			}, plannedFocus);
+		}
+		return finish([&] {
+			return leafNearTableRows(*range, forward);
+		}, plannedFocus);
+	}
+	case PreparedEditSelectionKind::TableCells: {
+		const auto range = validateTableCellRange(selection.tableCells);
+		if (!range) {
+			return std::nullopt;
+		}
+		const auto plannedFocus = plannedFocusForRange(*range, forward);
+		const auto owner = block(range->block);
+		if (!owner
+			|| owner->kind != BlockKind::Table
+			|| range->tableRowIndex >= int(owner->tableRows.size())) {
+			return std::nullopt;
+		}
+		auto &row = owner->tableRows[range->tableRowIndex];
+		if (range->till > int(row.cells.size())) {
+			return std::nullopt;
+		}
+		for (auto i = range->from; i != range->till; ++i) {
+			row.cells[i].text = RichText();
+		}
+		return finish([&] {
+			return leafNearTableCells(*range, forward);
+		}, plannedFocus);
+	}
+	case PreparedEditSelectionKind::None:
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+std::optional<State::BlockContainerPath> State::convertBlockContainerPath(
+		const Markdown::PreparedEditBlockContainerPath &path) const {
+	auto result = BlockContainerPath();
+	result.steps.reserve(path.steps.size());
+	const auto *blocks = &_richPage->blocks;
+	for (const auto &step : path.steps) {
+		if (step.blockIndex < 0 || step.blockIndex >= int(blocks->size())) {
+			return std::nullopt;
+		}
+		const auto &parent = (*blocks)[step.blockIndex];
+		auto converted = BlockContainerStep();
+		converted.blockIndex = step.blockIndex;
+		converted.listItemIndex = step.listItemIndex;
+		switch (step.kind) {
+		case PreparedBlockContainerKind::Root:
+			return std::nullopt;
+		case PreparedBlockContainerKind::BlockChildren:
+			if (!BlockCanOwnChildContainer(parent)) {
+				return std::nullopt;
+			}
+			converted.kind = BlockContainerKind::BlockChildren;
+			blocks = &parent.blocks;
+			break;
+		case PreparedBlockContainerKind::ListItemChildren:
+			if (parent.kind != BlockKind::List
+				|| step.listItemIndex < 0
+				|| step.listItemIndex >= int(parent.listItems.size())) {
+				return std::nullopt;
+			}
+			converted.kind = BlockContainerKind::ListItemChildren;
+			blocks = &parent.listItems[step.listItemIndex].blocks;
+			break;
+		}
+		result.steps.push_back(converted);
+	}
+	return result;
+}
+
+std::optional<State::BlockPath> State::convertBlockPath(
+		const Markdown::PreparedEditBlockPath &path) const {
+	if (path.index < 0) {
+		return std::nullopt;
+	}
+	const auto container = convertBlockContainerPath(path.container);
+	if (!container) {
+		return std::nullopt;
+	}
+	const auto blocks = blockContainer(*container);
+	if (!blocks || path.index >= int(blocks->size())) {
+		return std::nullopt;
+	}
+	return BlockPath{
+		.container = *container,
+		.index = path.index,
+	};
+}
+
+std::optional<State::BlockPath> State::convertBlockPath(
+		const Markdown::PreparedEditBlockSource &source) const {
+	return convertBlockPath(source.path);
+}
+
+std::optional<State::LeafPath> State::convertLeafPath(
+		const Markdown::PreparedEditLeafSource &source) const {
+	const auto blockPath = convertBlockPath(source.block);
+	if (!blockPath) {
+		return std::nullopt;
+	}
+	auto result = LeafPath();
+	result.block = *blockPath;
+	switch (source.kind) {
+	case PreparedEditLeafKind::BlockText:
+		result.kind = LeafKind::BlockText;
+		break;
+	case PreparedEditLeafKind::BlockCaption:
+		result.kind = LeafKind::BlockCaption;
+		break;
+	case PreparedEditLeafKind::ListItemText:
+		if (source.listItemIndex < 0) {
+			return std::nullopt;
+		}
+		result.kind = LeafKind::ListItemText;
+		result.listItemIndex = source.listItemIndex;
+		break;
+	case PreparedEditLeafKind::TableCellText:
+		if (source.tableRowIndex < 0 || source.tableCellIndex < 0) {
+			return std::nullopt;
+		}
+		result.kind = LeafKind::TableCellText;
+		result.tableRowIndex = source.tableRowIndex;
+		result.tableCellIndex = source.tableCellIndex;
+		break;
+	case PreparedEditLeafKind::MathFormula:
+		result.kind = LeafKind::MathFormula;
+		break;
+	}
+	const auto owner = block(result.block);
+	if (!owner) {
+		return std::nullopt;
+	}
+	switch (result.kind) {
+	case LeafKind::BlockText:
+		if (!BlockSupportsBlockText(*owner)) {
+			return std::nullopt;
+		}
+		break;
+	case LeafKind::BlockCaption:
+		if (!BlockSupportsBlockCaption(*owner)) {
+			return std::nullopt;
+		}
+		break;
+	case LeafKind::ListItemText:
+		if (owner->kind != BlockKind::List
+			|| !listItem(result.block, result.listItemIndex)) {
+			return std::nullopt;
+		}
+		break;
+	case LeafKind::TableCellText:
+		if (owner->kind != BlockKind::Table
+			|| !tableCell(
+				result.block,
+				result.tableRowIndex,
+				result.tableCellIndex)) {
+			return std::nullopt;
+		}
+		break;
+	case LeafKind::MathFormula:
+		if (owner->kind != BlockKind::Math) {
+			return std::nullopt;
+		}
+		break;
+	}
+	return result;
+}
+
+std::optional<State::StructuralBlockRange> State::validateBlockRange(
+		const Markdown::PreparedEditBlockRange &range) const {
+	if (range.empty()) {
+		return std::nullopt;
+	}
+	const auto container = convertBlockContainerPath(range.container);
+	if (!container) {
+		return std::nullopt;
+	}
+	const auto blocks = blockContainer(*container);
+	if (!blocks
+		|| range.from < 0
+		|| range.till > int(blocks->size())) {
+		return std::nullopt;
+	}
+	for (auto i = range.from; i != range.till; ++i) {
+		if (!CanEditBlock((*blocks)[i])) {
+			return std::nullopt;
+		}
+	}
+	return StructuralBlockRange{
+		.container = *container,
+		.from = range.from,
+		.till = range.till,
+	};
+}
+
+std::optional<State::StructuralListItemRange> State::validateListItemRange(
+		const Markdown::PreparedEditListItemRange &range) const {
+	if (range.empty()) {
+		return std::nullopt;
+	}
+	const auto path = convertBlockPath(range.block);
+	if (!path) {
+		return std::nullopt;
+	}
+	const auto owner = block(*path);
+	if (!owner
+		|| owner->kind != BlockKind::List
+		|| range.from < 0
+		|| range.till > int(owner->listItems.size())) {
+		return std::nullopt;
+	}
+	for (auto i = range.from; i != range.till; ++i) {
+		if (!CanEditBlocks(owner->listItems[i].blocks)) {
+			return std::nullopt;
+		}
+	}
+	return StructuralListItemRange{
+		.block = *path,
+		.from = range.from,
+		.till = range.till,
+	};
+}
+
+std::optional<State::StructuralTableRowRange> State::validateTableRowRange(
+		const Markdown::PreparedEditTableRowRange &range) const {
+	if (range.empty()) {
+		return std::nullopt;
+	}
+	const auto path = convertBlockPath(range.block);
+	if (!path) {
+		return std::nullopt;
+	}
+	const auto owner = block(*path);
+	if (!owner
+		|| owner->kind != BlockKind::Table
+		|| range.from < 0
+		|| range.till > int(owner->tableRows.size())) {
+		return std::nullopt;
+	}
+	return StructuralTableRowRange{
+		.block = *path,
+		.from = range.from,
+		.till = range.till,
+	};
+}
+
+std::optional<State::StructuralTableCellRange> State::validateTableCellRange(
+		const Markdown::PreparedEditTableCellRange &range) const {
+	if (range.empty()) {
+		return std::nullopt;
+	}
+	const auto path = convertBlockPath(range.block);
+	if (!path) {
+		return std::nullopt;
+	}
+	const auto owner = block(*path);
+	if (!owner
+		|| owner->kind != BlockKind::Table
+		|| range.tableRowIndex < 0
+		|| range.tableRowIndex >= int(owner->tableRows.size())) {
+		return std::nullopt;
+	}
+	const auto &row = owner->tableRows[range.tableRowIndex];
+	if (range.from < 0 || range.till > int(row.cells.size())) {
+		return std::nullopt;
+	}
+	return StructuralTableCellRange{
+		.block = *path,
+		.tableRowIndex = range.tableRowIndex,
+		.from = range.from,
+		.till = range.till,
+	};
+}
+
+bool State::leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralBlockRange &range) const {
+	const auto index = BlockIndexInContainer(path, range.container);
+	return index && IndexInRange(*index, range.from, range.till);
+}
+
+bool State::leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralListItemRange &range) const {
+	const auto index = ListItemIndexForLeaf(path, range.block);
+	return index && IndexInRange(*index, range.from, range.till);
+}
+
+bool State::leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralTableRowRange &range) const {
+	const auto index = TableRowIndexForLeaf(path, range.block);
+	return index && IndexInRange(*index, range.from, range.till);
+}
+
+bool State::leafWillBeRemoved(
+		const LeafPath &,
+		const StructuralTableCellRange &) const {
+	return false;
+}
+
+bool State::leafBelongsToBlock(
+		const LeafPath &leaf,
+		const BlockPath &path) const {
+	const auto &owner = leaf.block;
+	if (owner == path) {
+		return true;
+	}
+	if (!ContainerHasPrefix(owner.container, path.container)) {
+		return false;
+	}
+	if (owner.container.steps.size() <= path.container.steps.size()) {
+		return false;
+	}
+	const auto &step = owner.container.steps[path.container.steps.size()];
+	return step.blockIndex == path.index
+		&& (step.kind == BlockContainerKind::BlockChildren
+			|| step.kind == BlockContainerKind::ListItemChildren);
+}
+
+std::optional<State::LeafPath> State::firstSelectedLeaf(
+		const StructuralTableCellRange &range) const {
+	for (const auto &descriptor : _textNodes) {
+		const auto &leaf = descriptor.leaf;
+		if (leaf.block == range.block
+			&& leaf.kind == LeafKind::TableCellText
+			&& leaf.tableRowIndex == range.tableRowIndex
+			&& IndexInRange(leaf.tableCellIndex, range.from, range.till)) {
+			return leaf;
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
+		const StructuralBlockRange &range,
+		bool forward) const {
+	if (forward) {
+		for (const auto &descriptor : _textNodes) {
+			const auto index = BlockIndexInContainer(
+				descriptor.leaf,
+				range.container);
+			if (index && *index >= range.till) {
+				return descriptor.leaf;
+			}
+		}
+	} else {
+		for (auto i = textNodeCount(); i != 0; --i) {
+			const auto &leaf = _textNodes[i - 1].leaf;
+			const auto index = BlockIndexInContainer(leaf, range.container);
+			if (index && *index < range.from) {
+				return leaf;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
+		const StructuralListItemRange &range,
+		bool forward) const {
+	if (forward) {
+		for (const auto &descriptor : _textNodes) {
+			const auto index = ListItemIndexForLeaf(
+				descriptor.leaf,
+				range.block);
+			if (index && *index >= range.till) {
+				return descriptor.leaf;
+			}
+		}
+	} else {
+		for (auto i = textNodeCount(); i != 0; --i) {
+			const auto &leaf = _textNodes[i - 1].leaf;
+			const auto index = ListItemIndexForLeaf(leaf, range.block);
+			if (index && *index < range.from) {
+				return leaf;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
+		const StructuralTableRowRange &range,
+		bool forward) const {
+	if (forward) {
+		for (const auto &descriptor : _textNodes) {
+			const auto index = TableRowIndexForLeaf(
+				descriptor.leaf,
+				range.block);
+			if (index && *index >= range.till) {
+				return descriptor.leaf;
+			}
+		}
+	} else {
+		for (auto i = textNodeCount(); i != 0; --i) {
+			const auto &leaf = _textNodes[i - 1].leaf;
+			const auto index = TableRowIndexForLeaf(leaf, range.block);
+			if (index && *index < range.from) {
+				return leaf;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
+		const StructuralTableCellRange &range,
+		bool forward) const {
+	if (forward) {
+		for (const auto &descriptor : _textNodes) {
+			const auto index = TableCellIndexForLeaf(
+				descriptor.leaf,
+				range.block,
+				range.tableRowIndex);
+			if (index && *index >= range.till) {
+				return descriptor.leaf;
+			}
+		}
+	} else {
+		for (auto i = textNodeCount(); i != 0; --i) {
+			const auto &leaf = _textNodes[i - 1].leaf;
+			const auto index = TableCellIndexForLeaf(
+				leaf,
+				range.block,
+				range.tableRowIndex);
+			if (index && *index < range.from) {
+				return leaf;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<State::LeafPath> State::fallbackFocusLeaf() const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (descriptor) {
+		return descriptor->leaf;
+	}
+	return !_textNodes.empty()
+		? std::make_optional(_textNodes.front().leaf)
+		: std::nullopt;
+}
+
+std::optional<State::LeafPath> State::plannedFocusForRange(
+		const StructuralBlockRange &range,
+		bool forward) const {
+	if (const auto adjacent = adjacentLeafOutsideRange(range, forward)) {
+		return adjacent;
+	}
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (descriptor && !leafWillBeRemoved(descriptor->leaf, range)) {
+		return descriptor->leaf;
+	}
+	for (const auto &fallback : _textNodes) {
+		if (!leafWillBeRemoved(fallback.leaf, range)) {
+			return fallback.leaf;
+		}
+	}
+	return fallbackFocusLeaf();
+}
+
+std::optional<State::LeafPath> State::plannedFocusForRange(
+		const StructuralListItemRange &range,
+		bool forward) const {
+	if (const auto adjacent = adjacentLeafOutsideRange(range, forward)) {
+		return adjacent;
+	}
+	const auto ownerRange = StructuralBlockRange{
+		.container = range.block.container,
+		.from = range.block.index,
+		.till = range.block.index + 1,
+	};
+	if (const auto adjacent = adjacentLeafOutsideRange(ownerRange, forward)) {
+		return adjacent;
+	}
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (descriptor && !leafWillBeRemoved(descriptor->leaf, range)) {
+		return descriptor->leaf;
+	}
+	for (const auto &fallback : _textNodes) {
+		if (!leafWillBeRemoved(fallback.leaf, range)) {
+			return fallback.leaf;
+		}
+	}
+	return fallbackFocusLeaf();
+}
+
+std::optional<State::LeafPath> State::plannedFocusForRange(
+		const StructuralTableRowRange &range,
+		bool forward) const {
+	if (const auto adjacent = adjacentLeafOutsideRange(range, forward)) {
+		return adjacent;
+	}
+	const auto ownerRange = StructuralBlockRange{
+		.container = range.block.container,
+		.from = range.block.index,
+		.till = range.block.index + 1,
+	};
+	if (const auto adjacent = adjacentLeafOutsideRange(ownerRange, forward)) {
+		return adjacent;
+	}
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (descriptor && !leafWillBeRemoved(descriptor->leaf, range)) {
+		return descriptor->leaf;
+	}
+	for (const auto &fallback : _textNodes) {
+		if (!leafWillBeRemoved(fallback.leaf, range)) {
+			return fallback.leaf;
+		}
+	}
+	return fallbackFocusLeaf();
+}
+
+std::optional<State::LeafPath> State::plannedFocusForRange(
+		const StructuralTableCellRange &range,
+		bool forward) const {
+	if (const auto selected = firstSelectedLeaf(range)) {
+		return selected;
+	}
+	if (const auto adjacent = adjacentLeafOutsideRange(range, forward)) {
+		return adjacent;
+	}
+	return fallbackFocusLeaf();
 }
 
 int State::ensureTrailingParagraphActive() {
@@ -828,20 +1723,7 @@ std::optional<int> State::adjacentEditableOrdinal(bool forward) const {
 bool State::descriptorBelongsToBlock(
 		const TextNodeDescriptor &descriptor,
 		const BlockPath &path) const {
-	const auto &owner = descriptor.leaf.block;
-	if (owner == path) {
-		return true;
-	}
-	if (!ContainerHasPrefix(owner.container, path.container)) {
-		return false;
-	}
-	if (owner.container.steps.size() <= path.container.steps.size()) {
-		return false;
-	}
-	const auto &step = owner.container.steps[path.container.steps.size()];
-	return step.blockIndex == path.index
-		&& (step.kind == BlockContainerKind::BlockChildren
-			|| step.kind == BlockContainerKind::ListItemChildren);
+	return leafBelongsToBlock(descriptor.leaf, path);
 }
 
 bool State::removalTargetIsEmpty(const RemovalTarget &target) const {

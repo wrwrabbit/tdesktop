@@ -112,9 +112,13 @@ struct PaintSelectionState {
 	const std::vector<SelectableSegment> *segments = nullptr;
 	MarkdownArticleSelection selection;
 	const MarkdownArticleSelectionEndpoints *endpoints = nullptr;
+	const PreparedEditSelection *structuralSelection = nullptr;
 
 	[[nodiscard]] bool empty() const {
 		return !segments || selection.empty();
+	}
+	[[nodiscard]] bool hasStructuralSelection() const {
+		return structuralSelection && !structuralSelection->empty();
 	}
 };
 
@@ -235,6 +239,7 @@ public:
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;
+	[[nodiscard]] PreparedEditHit editHitTest(QPoint point) const;
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] MarkdownArticleAnchorExpansion expandDetailsToAnchor(
 		const QString &anchorId);

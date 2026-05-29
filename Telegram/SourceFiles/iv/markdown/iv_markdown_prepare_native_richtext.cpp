@@ -368,7 +368,9 @@ bool AppendPreparedIvRichBlock(
 		PreparedIvRichText prepared,
 		QString anchorId,
 		bool allowEmpty,
-		bool supplementary) {
+		bool supplementary,
+		std::optional<PreparedEditBlockSource> editBlock,
+		std::optional<PreparedEditLeafSource> editLeaf) {
 	SortPreparedIvRichText(&prepared);
 	if (prepared.text.text.isEmpty() && !allowEmpty) {
 		return true;
@@ -381,6 +383,8 @@ bool AppendPreparedIvRichBlock(
 	block.anchorId = std::move(anchorId);
 	block.anchorIds = std::move(prepared.anchorIds);
 	block.supplementary = supplementary;
+	block.editBlock = std::move(editBlock);
+	block.editLeaf = std::move(editLeaf);
 	result->push_back(std::move(block));
 	return true;
 }

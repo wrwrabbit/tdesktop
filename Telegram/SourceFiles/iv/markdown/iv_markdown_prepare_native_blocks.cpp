@@ -26,6 +26,12 @@ using RichPageRelatedArticle = Iv::RichPage::RelatedArticle;
 using RichPageTableCell = Iv::RichPage::TableCell;
 using RichPageTableRow = Iv::RichPage::TableRow;
 
+[[nodiscard]] bool PrepareCanonicalNativeIvBlocks(
+	const std::vector<RichPageBlock> &blocks,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state,
+	PreparedEditBlockContainerPath container);
+
 [[nodiscard]] QString NativeIvDateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
 }
@@ -176,7 +182,8 @@ bool AppendPreparedQuoteParagraph(
 		PreparedIvRichText prepared,
 		bool pullquote,
 		bool supplementary = false,
-		bool allowEmpty = false) {
+		bool allowEmpty = false,
+		std::optional<PreparedEditLeafSource> editLeaf = std::nullopt) {
 	if (pullquote) {
 		WrapPreparedIvRichTextItalic(&prepared);
 	}
@@ -188,7 +195,9 @@ bool AppendPreparedQuoteParagraph(
 			std::move(prepared),
 			QString(),
 			allowEmpty,
-			supplementary)) {
+			supplementary,
+			std::nullopt,
+			std::move(editLeaf))) {
 		return false;
 	}
 	if (pullquote && (result->size() > count)) {
@@ -364,6 +373,152 @@ void MarkNativeIvTableSlots(
 	return result;
 }
 
+[[maybe_unused]] [[nodiscard]] PreparedEditBlockContainerPath BlockChildrenContainer(
+		PreparedEditBlockPath block) {
+	auto result = std::move(block.container);
+	result.steps.push_back({
+		.kind = PreparedEditBlockContainerKind::BlockChildren,
+		.blockIndex = block.index,
+	});
+	return result;
+}
+
+[[maybe_unused]] [[nodiscard]] PreparedEditBlockContainerPath ListItemChildrenContainer(
+		PreparedEditBlockPath block,
+		int listItemIndex) {
+	auto result = std::move(block.container);
+	result.steps.push_back({
+		.kind = PreparedEditBlockContainerKind::ListItemChildren,
+		.blockIndex = block.index,
+		.listItemIndex = listItemIndex,
+	});
+	return result;
+}
+
+[[nodiscard]] PreparedEditBlockSource BlockSource(
+		PreparedEditBlockPath block) {
+	return { .path = std::move(block) };
+}
+
+[[maybe_unused]] [[nodiscard]] PreparedEditListItemSource ListItemSource(
+		PreparedEditBlockPath block,
+		int listItemIndex) {
+	return {
+		.block = std::move(block),
+		.listItemIndex = listItemIndex,
+	};
+}
+
+[[maybe_unused]] [[nodiscard]] PreparedEditTableRowSource TableRowSource(
+		PreparedEditBlockPath block,
+		int tableRowIndex) {
+	return {
+		.block = std::move(block),
+		.tableRowIndex = tableRowIndex,
+	};
+}
+
+[[maybe_unused]] [[nodiscard]] PreparedEditTableCellSource TableCellSource(
+		PreparedEditBlockPath block,
+		int tableRowIndex,
+		int tableCellIndex) {
+	return {
+		.block = std::move(block),
+		.tableRowIndex = tableRowIndex,
+		.tableCellIndex = tableCellIndex,
+	};
+}
+
+[[nodiscard]] PreparedEditLeafSource BlockTextLeafSource(
+		PreparedEditBlockPath block) {
+	return {
+		.kind = PreparedEditLeafKind::BlockText,
+		.block = std::move(block),
+	};
+}
+
+[[nodiscard]] PreparedEditLeafSource BlockCaptionLeafSource(
+		PreparedEditBlockPath block) {
+	return {
+		.kind = PreparedEditLeafKind::BlockCaption,
+		.block = std::move(block),
+	};
+}
+
+[[nodiscard]] PreparedEditLeafSource ListItemTextLeafSource(
+		PreparedEditBlockPath block,
+		int listItemIndex) {
+	return {
+		.kind = PreparedEditLeafKind::ListItemText,
+		.block = std::move(block),
+		.listItemIndex = listItemIndex,
+	};
+}
+
+[[maybe_unused]] [[nodiscard]] PreparedEditLeafSource TableCellTextLeafSource(
+		PreparedEditBlockPath block,
+		int tableRowIndex,
+		int tableCellIndex) {
+	return {
+		.kind = PreparedEditLeafKind::TableCellText,
+		.block = std::move(block),
+		.tableRowIndex = tableRowIndex,
+		.tableCellIndex = tableCellIndex,
+	};
+}
+
+[[nodiscard]] PreparedEditLeafSource MathFormulaLeafSource(
+		PreparedEditBlockPath block) {
+	return {
+		.kind = PreparedEditLeafKind::MathFormula,
+		.block = std::move(block),
+	};
+}
+
+void ApplyBlockCaptionEditSource(
+		PreparedBlock *block,
+		PreparedEditBlockPath path) {
+	block->editBlock = BlockSource(path);
+	block->editLeaf = BlockCaptionLeafSource(path);
+}
+
+using PrepareCanonicalMediaBlock = bool (*)(
+	const RichPageBlock &data,
+	std::vector<PreparedBlock> *result,
+	NativeIvPrepareState *state);
+
+[[nodiscard]] bool PrepareCanonicalNativeIvMediaBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path,
+		PrepareCanonicalMediaBlock prepare) {
+	const auto count = result->size();
+	if (!prepare(data, result, state)) {
+		return false;
+	}
+	if (result->size() > count) {
+		ApplyBlockCaptionEditSource(&result->back(), std::move(path));
+	}
+	return true;
+}
+
+void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
+	for (auto &block : *blocks) {
+		block.editBlock.reset();
+		block.editListItem.reset();
+		block.editLeaf.reset();
+		for (auto &row : block.tableRows) {
+			row.editRow.reset();
+			for (auto &cell : row.cells) {
+				cell.editCell.reset();
+				cell.editLeaf.reset();
+			}
+		}
+		ClearPreparedEditSources(&block.children);
+	}
+}
+
 [[nodiscard]] bool PrepareNativeIvRichPlaceholderBlock(
 		QString label,
 		const RichPage::RichText &caption,
@@ -426,6 +581,7 @@ void MarkNativeIvTableSlots(
 		int headingLevel,
 		const RichPage::RichText &text,
 		QString anchorId,
+		std::optional<PreparedEditBlockPath> path,
 		NativeIvPrepareState *state,
 		bool allowEmpty = false) {
 	auto prepared = PreparedIvRichText();
@@ -440,42 +596,52 @@ void MarkNativeIvTableSlots(
 			context)) {
 		return false;
 	}
+	auto editBlock = std::optional<PreparedEditBlockSource>();
+	auto editLeaf = std::optional<PreparedEditLeafSource>();
+	if (path) {
+		editBlock = BlockSource(*path);
+		editLeaf = BlockTextLeafSource(*path);
+	}
 	return AppendPreparedIvRichBlock(
 		result,
 		kind,
 		headingLevel,
 		std::move(prepared),
 		std::move(anchorId),
-		allowEmpty || state->editMode);
+		allowEmpty || state->editMode,
+		false,
+		std::move(editBlock),
+		std::move(editLeaf));
 }
 
 [[nodiscard]] bool PrepareCanonicalNativeIvQuoteBlock(
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Quote;
 	block.anchorId = data.anchorId;
 	block.pullquote = data.pullquote;
+	block.editBlock = BlockSource(path);
 	auto body = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(data.text, &body, &block.anchorId, state)) {
 		return false;
 	}
-	if (!AppendPreparedQuoteParagraph(
+	if (data.blocks.empty() && !AppendPreparedQuoteParagraph(
 			&block.children,
 			std::move(body),
 			data.pullquote,
 			false,
-			state->editMode)) {
+			state->editMode,
+			BlockTextLeafSource(path))) {
 		return false;
 	}
-	if (!data.blocks.empty()
-		&& !PrepareNativeIvBlocks(
-			RichPage{
-				.blocks = data.blocks,
-			},
+	if (!data.blocks.empty() && !PrepareCanonicalNativeIvBlocks(
+			data.blocks,
 			&block.children,
-			state)) {
+			state,
+			BlockChildrenContainer(path))) {
 		return false;
 	}
 	auto cite = PreparedIvRichText();
@@ -487,16 +653,8 @@ void MarkNativeIvTableSlots(
 			std::move(cite),
 			data.pullquote,
 			true,
-			state->editMode)) {
-		return false;
-	}
-	if (!data.blocks.empty()
-		&& !PrepareNativeIvBlocks(
-			RichPage{
-				.blocks = data.blocks,
-			},
-			&block.children,
-			state)) {
+			state->editMode,
+			BlockCaptionLeafSource(path))) {
 		return false;
 	}
 	if (block.children.empty()) {
@@ -526,14 +684,18 @@ void MarkNativeIvTableSlots(
 [[nodiscard]] bool PrepareCanonicalNativeIvList(
 		const std::vector<RichPageListItem> &items,
 		PreparedBlock *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
+	result->editBlock = BlockSource(path);
 	auto firstNumber = true;
-	for (const auto &item : items) {
+	for (auto i = 0, count = int(items.size()); i != count; ++i) {
+		const auto &item = items[i];
 		auto block = PreparedBlock();
 		block.kind = PreparedBlockKind::ListItem;
 		block.listKind = result->listKind;
 		block.listDelimiter = result->listDelimiter;
 		block.taskState = NativeIvTaskStateFromRichPage(item.taskState);
+		block.editListItem = ListItemSource(path, i);
 		if (result->listKind == ListKind::Ordered) {
 			auto orderedNumber = 0;
 			if (!ParseOrderedNumber(item.number, &orderedNumber)) {
@@ -562,21 +724,23 @@ void MarkNativeIvTableSlots(
 					0,
 					std::move(prepared),
 					QString(),
-					state->editMode)) {
+					state->editMode,
+					false,
+					std::nullopt,
+					ListItemTextLeafSource(path, i))) {
 				return false;
 			}
 		}
-		if (!item.blocks.empty()
-			&& !PrepareNativeIvBlocks(
-				RichPage{
-					.blocks = item.blocks,
-				},
+		if (!item.blocks.empty() && !PrepareCanonicalNativeIvBlocks(
+				item.blocks,
 				&block.children,
-				state)) {
+				state,
+				ListItemChildrenContainer(path, i))) {
 			return false;
 		}
 		if (block.children.empty()) {
 			block.children.push_back(EmptyParagraphBlock());
+			block.children.back().editLeaf = ListItemTextLeafSource(path, i);
 		}
 		result->children.push_back(std::move(block));
 	}
@@ -612,11 +776,13 @@ void MarkNativeIvTableSlots(
 [[nodiscard]] bool PrepareCanonicalNativeIvTableBlock(
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Table;
 	block.tableBordered = data.bordered;
 	block.tableStriped = data.striped;
+	block.editBlock = BlockSource(path);
 	auto title = PreparedIvRichText();
 	block.anchorId = data.anchorId;
 	if (!PrepareNativeIvRichText(data.text, &title, &block.anchorId, state)) {
@@ -626,6 +792,9 @@ void MarkNativeIvTableSlots(
 	block.text = std::move(title.text);
 	block.links = std::move(title.links);
 	block.anchorIds = std::move(title.anchorIds);
+	if (!block.text.text.isEmpty()) {
+		block.editLeaf = BlockTextLeafSource(path);
+	}
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
 	const auto rowCount = std::min(int(data.tableRows.size()), limits.maxRows);
@@ -636,8 +805,12 @@ void MarkNativeIvTableSlots(
 	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
 		const auto &row = data.tableRows[rowIndex];
 		auto preparedRow = PreparedTableRow();
+		preparedRow.editRow = TableRowSource(path, rowIndex);
 		preparedRow.cells.reserve(std::min(int(row.cells.size()), limits.maxColumns));
-		for (const auto &cell : row.cells) {
+		for (auto cellIndex = 0, cellCount = int(row.cells.size());
+				cellIndex != cellCount;
+				++cellIndex) {
+			const auto &cell = row.cells[cellIndex];
 			auto preparedCell = PreparedTableCell();
 			const auto normalizedColspan = NormalizeNativeIvTableSpan(cell.colspan);
 			const auto rowspan = ClampNativeIvTableRowspan(
@@ -674,6 +847,11 @@ void MarkNativeIvTableSlots(
 			preparedCell.verticalAlignment = NativeIvTableVerticalAlignment(cell);
 			preparedCell.colspan = colspan;
 			preparedCell.rowspan = rowspan;
+			preparedCell.editCell = TableCellSource(path, rowIndex, cellIndex);
+			preparedCell.editLeaf = TableCellTextLeafSource(
+				path,
+				rowIndex,
+				cellIndex);
 			if (!cell.text.text.empty()) {
 				auto rich = PreparedIvRichText();
 				const auto context = NativeIvRichTextContextForTextSize(
@@ -732,7 +910,8 @@ void MarkNativeIvTableSlots(
 [[nodiscard]] bool PrepareCanonicalNativeIvDetailsBlock(
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
 	auto summary = PreparedIvRichText();
 	auto anchorId = NativeIvDetailsAnchorId(state);
 	if (!PrepareNativeIvRichText(
@@ -760,12 +939,13 @@ void MarkNativeIvTableSlots(
 	block.text = std::move(summary.text);
 	block.links = std::move(summary.links);
 	block.anchorIds = std::move(summary.anchorIds);
-	return PrepareNativeIvBlocks(
-		RichPage{
-			.blocks = data.blocks,
-		},
+	block.editBlock = BlockSource(path);
+	block.editLeaf = BlockTextLeafSource(path);
+	return PrepareCanonicalNativeIvBlocks(
+		data.blocks,
 		&block.children,
-		state)
+		state,
+		BlockChildrenContainer(path))
 		? (result->push_back(std::move(block)), true)
 		: false;
 }
@@ -881,13 +1061,14 @@ void MarkNativeIvTableSlots(
 	if (data.blocks.empty()) {
 		block.children.push_back(
 			PrepareNativeIvEmbedPostFallbackParagraph(block.embedPost.url));
-	} else if (!PrepareNativeIvBlocks(
-			RichPage{
-				.blocks = data.blocks,
-			},
+	} else if (!PrepareCanonicalNativeIvBlocks(
+			data.blocks,
 			&block.children,
-			state)) {
+			state,
+			PreparedEditBlockContainerPath())) {
 		return false;
+	} else {
+		ClearPreparedEditSources(&block.children);
 	}
 	result->push_back(std::move(block));
 	return true;
@@ -896,7 +1077,8 @@ void MarkNativeIvTableSlots(
 [[nodiscard]] bool PrepareCanonicalNativeIvBlock(
 		const RichPageBlock &block,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
 	if (state->blocked()) {
 		return false;
 	}
@@ -912,6 +1094,7 @@ void MarkNativeIvTableSlots(
 			block.headingLevel,
 			block.text,
 			block.anchorId,
+			path,
 			state);
 	case RichPageBlockKind::Paragraph:
 	case RichPageBlockKind::Footer:
@@ -921,6 +1104,7 @@ void MarkNativeIvTableSlots(
 			0,
 			block.text,
 			block.anchorId,
+			path,
 			state);
 	case RichPageBlockKind::Thinking:
 		return AppendNativeIvFlowBlock(
@@ -929,6 +1113,7 @@ void MarkNativeIvTableSlots(
 			0,
 			block.text,
 			block.anchorId,
+			std::nullopt,
 			state);
 	case RichPageBlockKind::AuthorDate: {
 		auto prepared = PreparedIvRichText();
@@ -974,21 +1159,30 @@ void MarkNativeIvTableSlots(
 		code.text = StripOneTrailingNewline(std::move(prepared.text));
 		code.links = std::move(prepared.links);
 		code.anchorIds = std::move(prepared.anchorIds);
+		code.editBlock = BlockSource(path);
+		code.editLeaf = BlockTextLeafSource(path);
 		result->push_back(std::move(code));
 		return true;
 	}
-	case RichPageBlockKind::Divider:
-		result->push_back(PrepareRuleBlock());
+	case RichPageBlockKind::Divider: {
+		auto prepared = PrepareRuleBlock();
+		prepared.editBlock = BlockSource(path);
+		result->push_back(std::move(prepared));
 		return true;
+	}
 	case RichPageBlockKind::Anchor: {
 		auto prepared = PreparedIvRichText();
+		auto editBlock = std::optional<PreparedEditBlockSource>();
+		editBlock = BlockSource(path);
 		return AppendPreparedIvRichBlock(
 			result,
 			PreparedBlockKind::Paragraph,
 			0,
 			std::move(prepared),
 			block.anchorId,
-			true);
+			true,
+			false,
+			std::move(editBlock));
 	}
 	case RichPageBlockKind::List: {
 		auto prepared = PreparedBlock();
@@ -1003,16 +1197,27 @@ void MarkNativeIvTableSlots(
 		return PrepareCanonicalNativeIvList(
 			block.listItems,
 			&prepared,
-			state)
+			state,
+			path)
 			? (result->push_back(std::move(prepared)), true)
 			: false;
 	}
 	case RichPageBlockKind::Quote:
-		return PrepareCanonicalNativeIvQuoteBlock(block, result, state);
+		return PrepareCanonicalNativeIvQuoteBlock(block, result, state, path);
 	case RichPageBlockKind::Photo:
-		return PrepareNativeIvPhotoBlock(block, result, state);
+		return PrepareCanonicalNativeIvMediaBlock(
+			block,
+			result,
+			state,
+			path,
+			PrepareNativeIvPhotoBlock);
 	case RichPageBlockKind::Video:
-		return PrepareNativeIvVideoBlock(block, result, state);
+		return PrepareCanonicalNativeIvMediaBlock(
+			block,
+			result,
+			state,
+			path,
+			PrepareNativeIvVideoBlock);
 	case RichPageBlockKind::Embed:
 		return PrepareNativeIvRichPlaceholderBlock(
 			tr::lng_iv_click_to_view(tr::now),
@@ -1028,7 +1233,12 @@ void MarkNativeIvTableSlots(
 	case RichPageBlockKind::Channel:
 		return PrepareNativeIvChannelBlock(block, result, state);
 	case RichPageBlockKind::Audio:
-		return PrepareNativeIvAudioBlock(block, result, state);
+		return PrepareCanonicalNativeIvMediaBlock(
+			block,
+			result,
+			state,
+			path,
+			PrepareNativeIvAudioBlock);
 	case RichPageBlockKind::Math:
 		if (block.formula.trimmed().isEmpty()) {
 			return true;
@@ -1038,17 +1248,24 @@ void MarkNativeIvTableSlots(
 			prepared.formulaTex = block.formula;
 			prepared.mathKind = MathKind::Display;
 			prepared.formulaIndex = state->rememberFormula(prepared);
+			prepared.editBlock = BlockSource(path);
+			prepared.editLeaf = MathFormulaLeafSource(path);
 			result->push_back(std::move(prepared));
 			return true;
 		}
 	case RichPageBlockKind::Table:
-		return PrepareCanonicalNativeIvTableBlock(block, result, state);
+		return PrepareCanonicalNativeIvTableBlock(block, result, state, path);
 	case RichPageBlockKind::Details:
-		return PrepareCanonicalNativeIvDetailsBlock(block, result, state);
+		return PrepareCanonicalNativeIvDetailsBlock(block, result, state, path);
 	case RichPageBlockKind::RelatedArticles:
 		return PrepareCanonicalNativeIvRelatedArticlesBlock(block, result, state);
 	case RichPageBlockKind::Map:
-		return PrepareNativeIvMapBlock(block, result, state);
+		return PrepareCanonicalNativeIvMediaBlock(
+			block,
+			result,
+			state,
+			path,
+			PrepareNativeIvMapBlock);
 	}
 	return PrepareNativeIvPlainPlaceholderBlock(
 		u"Unsupported Content"_q,
@@ -1058,9 +1275,14 @@ void MarkNativeIvTableSlots(
 [[nodiscard]] bool PrepareCanonicalNativeIvBlocks(
 		const std::vector<RichPageBlock> &blocks,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
-	for (const auto &block : blocks) {
-		if (!PrepareCanonicalNativeIvBlock(block, result, state)) {
+		NativeIvPrepareState *state,
+		PreparedEditBlockContainerPath container) {
+	for (auto i = 0, count = int(blocks.size()); i != count; ++i) {
+		const auto path = PreparedEditBlockPath{
+			.container = container,
+			.index = i,
+		};
+		if (!PrepareCanonicalNativeIvBlock(blocks[i], result, state, path)) {
 			if (state->result.failure.failed()) {
 				return false;
 			}
@@ -1078,7 +1300,11 @@ bool PrepareNativeIvBlocks(
 		const Iv::RichPage &page,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	return PrepareCanonicalNativeIvBlocks(page.blocks, result, state);
+	return PrepareCanonicalNativeIvBlocks(
+		page.blocks,
+		result,
+		state,
+		PreparedEditBlockContainerPath());
 }
 
 } // namespace Iv::Markdown

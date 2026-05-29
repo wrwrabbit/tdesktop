@@ -1099,6 +1099,108 @@ void AddTableVerticalBorderSegments(
 	return -1;
 }
 
+[[nodiscard]] bool StructuralTableRowOverlaySelected(
+		const PaintSelectionState &selectionState,
+		const LaidOutTableRow &row) {
+	return row.editRow
+		&& StructuralTableRowSelected(selectionState, *row.editRow);
+}
+
+[[nodiscard]] bool StructuralTableCellRowOverlaySelected(
+		const PaintSelectionState &selectionState,
+		const LaidOutTableCell &cell) {
+	if (!cell.editCell) {
+		return false;
+	}
+	auto row = PreparedEditTableRowSource();
+	row.block = cell.editCell->block;
+	row.tableRowIndex = cell.editCell->tableRowIndex;
+	return StructuralTableRowSelected(selectionState, row);
+}
+
+void PaintStructuralTableOverlays(
+		Painter &p,
+		const LaidOutBlock &block,
+		const QPainterPath &shapePath,
+		QRect clip,
+		const MarkdownArticlePaintContext &context) {
+	if (!context.selectionState.hasStructuralSelection() || clip.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setClipRect(clip, Qt::IntersectClip);
+	p.setClipPath(shapePath, Qt::IntersectClip);
+	for (const auto &row : block.tableRows) {
+		if (!row.outer.intersects(clip)
+			|| !StructuralTableRowOverlaySelected(
+				context.selectionState,
+				row)) {
+			continue;
+		}
+		p.fillRect(row.outer, p.textPalette().selectOverlay);
+	}
+	for (const auto &row : block.tableRows) {
+		if (!row.outer.intersects(clip)
+			|| StructuralTableRowOverlaySelected(
+				context.selectionState,
+				row)) {
+			continue;
+		}
+		for (const auto &cell : row.cells) {
+			if (!cell.outer.intersects(clip)
+				|| !cell.editCell
+				|| StructuralTableCellRowOverlaySelected(
+					context.selectionState,
+					cell)
+				|| !StructuralTableCellSelected(
+					context.selectionState,
+					*cell.editCell)) {
+				continue;
+			}
+			p.fillRect(cell.outer, p.textPalette().selectOverlay);
+		}
+	}
+	p.restore();
+}
+
+void PaintStructuralTableRowBandOverlays(
+		Painter &p,
+		const LaidOutBlock &block,
+		const std::vector<const LaidOutTableCell*> &cells,
+		int rowIndex,
+		const QPainterPath &shapePath,
+		QRect clip,
+		const MarkdownArticlePaintContext &context) {
+	if (!context.selectionState.hasStructuralSelection()
+		|| clip.isEmpty()
+		|| rowIndex < 0
+		|| rowIndex >= int(block.tableRows.size())) {
+		return;
+	}
+	const auto &row = block.tableRows[rowIndex];
+	p.save();
+	p.setClipRect(clip, Qt::IntersectClip);
+	p.setClipPath(shapePath, Qt::IntersectClip);
+	if (StructuralTableRowOverlaySelected(context.selectionState, row)) {
+		p.fillRect(row.outer, p.textPalette().selectOverlay);
+	}
+	for (const auto cell : cells) {
+		if (!cell
+			|| !cell->outer.intersects(clip)
+			|| !cell->editCell
+			|| StructuralTableCellRowOverlaySelected(
+				context.selectionState,
+				*cell)
+			|| !StructuralTableCellSelected(
+				context.selectionState,
+				*cell->editCell)) {
+			continue;
+		}
+		p.fillRect(cell->outer, p.textPalette().selectOverlay);
+	}
+	p.restore();
+}
+
 void PaintTableCaption(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1197,6 +1299,12 @@ void PaintWholeTable(
 		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
 		p.restore();
 	}
+	PaintStructuralTableOverlays(
+		p,
+		block,
+		shapePath,
+		tableClip,
+		context);
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
@@ -1295,6 +1403,14 @@ void PaintTableRowBand(
 		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
 		p.restore();
 	}
+	PaintStructuralTableRowBandOverlays(
+		p,
+		block,
+		cells,
+		rowIndex,
+		shapePath,
+		rowClip,
+		context);
 
 	if (block.overflowed) {
 		const auto indicatorWidth = std::min(
@@ -2231,6 +2347,35 @@ void PaintThinkingBlock(
 	p.restore();
 }
 
+void PaintStructuralBlockOverlay(
+		Painter &p,
+		const LaidOutBlock &block,
+		const MarkdownArticlePaintContext &context) {
+	if (!context.selectionState.hasStructuralSelection()
+		|| block.outer.isEmpty()) {
+		return;
+	}
+	const auto selected = (block.editBlock
+			&& StructuralBlockSelected(
+				context.selectionState,
+				*block.editBlock))
+		|| (block.editListItem
+			&& StructuralListItemSelected(
+				context.selectionState,
+				*block.editListItem));
+	if (!selected) {
+		return;
+	}
+	const auto visible = context.clip.intersected(block.outer);
+	if (visible.isEmpty()) {
+		return;
+	}
+	p.save();
+	p.setClipRect(visible, Qt::IntersectClip);
+	p.fillRect(block.outer, p.textPalette().selectOverlay);
+	p.restore();
+}
+
 void PaintBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -2414,6 +2559,7 @@ void PaintBlock(
 			context);
 		break;
 	}
+	PaintStructuralBlockOverlay(p, block, context);
 }
 
 } // namespace

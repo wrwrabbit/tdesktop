@@ -188,6 +188,7 @@ void PrepareNestedContext(
 		LayoutContext context,
 		bool tight) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::ListItem;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -304,6 +305,7 @@ void PrepareNestedContext(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::List;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -385,6 +387,7 @@ void PrepareNestedContext(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Quote;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -459,6 +462,7 @@ void PrepareNestedContext(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -594,6 +598,7 @@ void PrepareNestedContext(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::EmbedPost;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -805,7 +810,7 @@ void PrepareNestedContext(
 			context.syntaxHighlightTracker,
 			context);
 	case PreparedBlockKind::Rule:
-		return LayoutRuleBlock(st, left, top, width);
+		return LayoutRuleBlock(prepared, st, left, top, width);
 	case PreparedBlockKind::List:
 		return LayoutListBlock(
 			prepared,

@@ -67,6 +67,8 @@ struct NativeIvRichTextContext {
 	PreparedIvRichText prepared,
 	QString anchorId = QString(),
 	bool allowEmpty = false,
-	bool supplementary = false);
+	bool supplementary = false,
+	std::optional<PreparedEditBlockSource> editBlock = std::nullopt,
+	std::optional<PreparedEditLeafSource> editLeaf = std::nullopt);
 
 } // namespace Iv::Markdown

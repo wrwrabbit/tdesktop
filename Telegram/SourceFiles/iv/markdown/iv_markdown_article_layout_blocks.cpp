@@ -82,6 +82,8 @@ constexpr auto kCodeTrailingGuard = 0x2060;
 	result.cell.column = std::max(prepared.column, 0);
 	result.cell.colspan = std::max(prepared.colspan, 1);
 	result.cell.rowspan = std::max(prepared.rowspan, 1);
+	result.cell.editCell = prepared.editCell;
+	result.cell.editLeaf = prepared.editLeaf;
 	SetTextLeaf(
 		&result.cell.leaf,
 		textStyle,
@@ -739,6 +741,14 @@ int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
 	return result;
 }
 
+void ApplyPreparedEditSources(
+		LaidOutBlock *block,
+		const PreparedBlock &prepared) {
+	block->editBlock = prepared.editBlock;
+	block->editListItem = prepared.editListItem;
+	block->editLeaf = prepared.editLeaf;
+}
+
 void RepopulateCodeBlockLeaf(
 		LaidOutBlock &block,
 		const std::vector<PreparedFormulaSlot> *formulas,
@@ -795,6 +805,7 @@ LaidOutBlock LayoutFlowBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = prepared.kind;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -848,6 +859,7 @@ LaidOutBlock LayoutCodeBlock(
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -896,11 +908,13 @@ LaidOutBlock LayoutCodeBlock(
 }
 
 LaidOutBlock LayoutRuleBlock(
+		const PreparedBlock &prepared,
 		const style::Markdown &st,
 		int left,
 		int top,
 		int width) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Rule;
 	block.outer = QRect(
 		left,
@@ -919,6 +933,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 		int top,
 		int width) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::DisplayMath;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1023,6 +1038,7 @@ LaidOutBlock LayoutTableBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Table;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1178,6 +1194,7 @@ LaidOutBlock LayoutTableBlock(
 		const auto rowHeight = rowHeights[rowIndex];
 		auto row = LaidOutTableRow();
 		row.header = rowData.header;
+		row.editRow = prepared.tableRows[rowIndex].editRow;
 		row.outer = QRect(
 			left + border,
 			y,
@@ -1274,6 +1291,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Placeholder;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1359,6 +1377,7 @@ LaidOutBlock LayoutRelatedArticleBlock(
 		int width,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::RelatedArticle;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1528,6 +1547,7 @@ LaidOutBlock LayoutPhotoBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Photo;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1600,6 +1620,7 @@ LaidOutBlock LayoutVideoBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Video;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1672,6 +1693,7 @@ LaidOutBlock LayoutAudioBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Audio;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1730,6 +1752,7 @@ LaidOutBlock LayoutMapBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Map;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1797,6 +1820,7 @@ LaidOutBlock LayoutChannelBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::Channel;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
@@ -1853,6 +1877,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		int width,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
+	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::GroupedMedia;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;

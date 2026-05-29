@@ -52,12 +52,15 @@ struct LaidOutTableCell {
 	int rowspan = 1;
 	int segmentIndex = -1;
 	int tableSegmentIndex = -1;
+	std::optional<PreparedEditTableCellSource> editCell;
+	std::optional<PreparedEditLeafSource> editLeaf;
 };
 
 struct LaidOutTableRow {
 	std::vector<LaidOutTableCell> cells;
 	QRect outer;
 	bool header = false;
+	std::optional<PreparedEditTableRowSource> editRow;
 };
 
 struct LaidOutBlock {
@@ -123,6 +126,9 @@ struct LaidOutBlock {
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;
+	std::optional<PreparedEditBlockSource> editBlock;
+	std::optional<PreparedEditListItemSource> editListItem;
+	std::optional<PreparedEditLeafSource> editLeaf;
 	std::shared_ptr<MediaBlock> mediaBlock;
 	std::shared_ptr<PlaceholderBlockRuntime> placeholderRuntime;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
@@ -209,6 +215,9 @@ struct TableRowLayoutData {
 	const PreparedBlock &block,
 	const style::Markdown &st);
 [[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
+void ApplyPreparedEditSources(
+	LaidOutBlock *block,
+	const PreparedBlock &prepared);
 void LayoutMediaCaption(
 	LaidOutBlock *block,
 	const PreparedBlock &prepared,
@@ -254,6 +263,7 @@ void RepopulateCodeBlockLeaf(
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr,
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutRuleBlock(
+	const PreparedBlock &prepared,
 	const style::Markdown &st,
 	int left,
 	int top,

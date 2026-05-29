@@ -162,6 +162,8 @@ public:
 	[[nodiscard]] const RichPage &richPage() const;
 	[[nodiscard]] const Markdown::MarkdownArticleContent &prepared() const;
 	[[nodiscard]] const std::vector<TextNodeDescriptor> &textNodes() const;
+	[[nodiscard]] int textOrdinalForLeaf(
+		const Markdown::PreparedEditLeafSource &source) const;
 	[[nodiscard]] int textNodeCount() const;
 	[[nodiscard]] int activeTextOrdinal() const;
 	[[nodiscard]] bool setActiveTextByOrdinal(int ordinal);
@@ -179,6 +181,9 @@ public:
 	[[nodiscard]] bool activeOwnerIsEmpty() const;
 	[[nodiscard]] std::optional<int> removeActiveOwnerAndSelectAdjacent(
 		bool forward);
+	[[nodiscard]] std::optional<int> removeStructuralSelection(
+		const Markdown::PreparedEditSelection &selection,
+		bool forward);
 	[[nodiscard]] int ensureTrailingParagraphActive();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
@@ -187,6 +192,90 @@ public:
 	void insertPreparedBlocksAfterActive(std::vector<RichPage::Block> blocks);
 
 private:
+	struct StructuralBlockRange {
+		BlockContainerPath container;
+		int from = -1;
+		int till = -1;
+	};
+
+	struct StructuralListItemRange {
+		BlockPath block;
+		int from = -1;
+		int till = -1;
+	};
+
+	struct StructuralTableRowRange {
+		BlockPath block;
+		int from = -1;
+		int till = -1;
+	};
+
+	struct StructuralTableCellRange {
+		BlockPath block;
+		int tableRowIndex = -1;
+		int from = -1;
+		int till = -1;
+	};
+
+	[[nodiscard]] std::optional<BlockContainerPath> convertBlockContainerPath(
+		const Markdown::PreparedEditBlockContainerPath &path) const;
+	[[nodiscard]] std::optional<BlockPath> convertBlockPath(
+		const Markdown::PreparedEditBlockPath &path) const;
+	[[nodiscard]] std::optional<BlockPath> convertBlockPath(
+		const Markdown::PreparedEditBlockSource &source) const;
+	[[nodiscard]] std::optional<LeafPath> convertLeafPath(
+		const Markdown::PreparedEditLeafSource &source) const;
+	[[nodiscard]] std::optional<StructuralBlockRange> validateBlockRange(
+		const Markdown::PreparedEditBlockRange &range) const;
+	[[nodiscard]] std::optional<StructuralListItemRange> validateListItemRange(
+		const Markdown::PreparedEditListItemRange &range) const;
+	[[nodiscard]] std::optional<StructuralTableRowRange> validateTableRowRange(
+		const Markdown::PreparedEditTableRowRange &range) const;
+	[[nodiscard]] auto validateTableCellRange(
+		const Markdown::PreparedEditTableCellRange &range) const
+	-> std::optional<StructuralTableCellRange>;
+	[[nodiscard]] bool leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralBlockRange &range) const;
+	[[nodiscard]] bool leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralListItemRange &range) const;
+	[[nodiscard]] bool leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralTableRowRange &range) const;
+	[[nodiscard]] bool leafWillBeRemoved(
+		const LeafPath &path,
+		const StructuralTableCellRange &range) const;
+	[[nodiscard]] bool leafBelongsToBlock(
+		const LeafPath &leaf,
+		const BlockPath &path) const;
+	[[nodiscard]] std::optional<LeafPath> firstSelectedLeaf(
+		const StructuralTableCellRange &range) const;
+	[[nodiscard]] std::optional<LeafPath> adjacentLeafOutsideRange(
+		const StructuralBlockRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> adjacentLeafOutsideRange(
+		const StructuralListItemRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> adjacentLeafOutsideRange(
+		const StructuralTableRowRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> adjacentLeafOutsideRange(
+		const StructuralTableCellRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> fallbackFocusLeaf() const;
+	[[nodiscard]] std::optional<LeafPath> plannedFocusForRange(
+		const StructuralBlockRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> plannedFocusForRange(
+		const StructuralListItemRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> plannedFocusForRange(
+		const StructuralTableRowRange &range,
+		bool forward) const;
+	[[nodiscard]] std::optional<LeafPath> plannedFocusForRange(
+		const StructuralTableCellRange &range,
+		bool forward) const;
 	[[nodiscard]] std::vector<RichPage::Block> *blockContainer(
 		const BlockContainerPath &path);
 	[[nodiscard]] const std::vector<RichPage::Block> *blockContainer(

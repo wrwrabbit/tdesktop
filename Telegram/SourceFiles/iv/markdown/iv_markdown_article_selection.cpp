@@ -327,6 +327,20 @@ struct TableCopySlot {
 	return (from < to);
 }
 
+[[nodiscard]] bool IndexInRange(int index, int from, int till) {
+	return (index >= from) && (index < till);
+}
+
+[[nodiscard]] const PreparedEditSelection *StructuralSelection(
+		const PaintSelectionState &selectionState,
+		PreparedEditSelectionKind kind) {
+	if (!selectionState.hasStructuralSelection()) {
+		return nullptr;
+	}
+	const auto selection = selectionState.structuralSelection;
+	return (selection->kind == kind) ? selection : nullptr;
+}
+
 [[nodiscard]] const style::TextStyle &HeadingTextStyle(
 		int level,
 		const style::Markdown &st) {
@@ -686,6 +700,63 @@ bool TableSegmentSelected(
 	const auto upper = std::max(tableSegmentIndex, selectedCellIndex);
 	return (normalized.from.segment < lower)
 		&& (normalized.to.segment > upper);
+}
+
+bool StructuralBlockSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditBlockSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::Blocks);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->blocks;
+	return (source.path.container == range.container)
+		&& IndexInRange(source.path.index, range.from, range.till);
+}
+
+bool StructuralListItemSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditListItemSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::ListItems);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->listItems;
+	return (source.block == range.block)
+		&& IndexInRange(source.listItemIndex, range.from, range.till);
+}
+
+bool StructuralTableRowSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditTableRowSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::TableRows);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->tableRows;
+	return (source.block == range.block)
+		&& IndexInRange(source.tableRowIndex, range.from, range.till);
+}
+
+bool StructuralTableCellSelected(
+		const PaintSelectionState &selectionState,
+		const PreparedEditTableCellSource &source) {
+	const auto selection = StructuralSelection(
+		selectionState,
+		PreparedEditSelectionKind::TableCells);
+	if (!selection) {
+		return false;
+	}
+	const auto &range = selection->tableCells;
+	return (source.block == range.block)
+		&& (source.tableRowIndex == range.tableRowIndex)
+		&& IndexInRange(source.tableCellIndex, range.from, range.till);
 }
 
 std::optional<TextSelection> TextSelectionForSegment(

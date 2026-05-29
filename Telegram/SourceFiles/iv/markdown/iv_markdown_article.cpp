@@ -654,6 +654,344 @@ void RebuildVisibleSegmentLookup(
 		SegmentLength(segments[span.till - 1]));
 }
 
+[[nodiscard]] bool ContainsPoint(QRect rect, QPoint point) {
+	return !rect.isEmpty() && rect.contains(point);
+}
+
+[[nodiscard]] bool ValidBlockPath(const PreparedEditBlockPath &path) {
+	return (path.index >= 0);
+}
+
+[[nodiscard]] PreparedEditBlockSource EditBlockSourceFromPath(
+		PreparedEditBlockPath path) {
+	return { .path = std::move(path) };
+}
+
+[[nodiscard]] PreparedEditTableRowSource EditTableRowSourceFromCell(
+		const PreparedEditTableCellSource &source) {
+	return {
+		.block = source.block,
+		.tableRowIndex = source.tableRowIndex,
+	};
+}
+
+[[nodiscard]] PreparedEditHit WithLeaf(
+		PreparedEditHit hit,
+		const std::optional<PreparedEditLeafSource> &leaf) {
+	if (leaf) {
+		hit.leaf = *leaf;
+	}
+	return hit;
+}
+
+[[nodiscard]] PreparedEditHit EditHitFromBlockSource(
+		const PreparedEditBlockSource &source,
+		const std::optional<PreparedEditLeafSource> &leaf = std::nullopt) {
+	if (!ValidBlockPath(source.path)) {
+		return {};
+	}
+	auto result = PreparedEditHit();
+	result.kind = PreparedEditHitKind::Block;
+	result.block = source;
+	return WithLeaf(std::move(result), leaf);
+}
+
+[[nodiscard]] PreparedEditHit EditHitFromListItemSource(
+		const PreparedEditListItemSource &source,
+		const std::optional<PreparedEditLeafSource> &leaf = std::nullopt) {
+	if (!ValidBlockPath(source.block) || source.listItemIndex < 0) {
+		return {};
+	}
+	auto result = PreparedEditHit();
+	result.kind = PreparedEditHitKind::ListItem;
+	result.block = EditBlockSourceFromPath(source.block);
+	result.listItem = source;
+	return WithLeaf(std::move(result), leaf);
+}
+
+[[nodiscard]] PreparedEditHit EditHitFromTableRowSource(
+		const PreparedEditTableRowSource &source,
+		const std::optional<PreparedEditLeafSource> &leaf = std::nullopt) {
+	if (!ValidBlockPath(source.block) || source.tableRowIndex < 0) {
+		return {};
+	}
+	auto result = PreparedEditHit();
+	result.kind = PreparedEditHitKind::TableRow;
+	result.block = EditBlockSourceFromPath(source.block);
+	result.tableRow = source;
+	return WithLeaf(std::move(result), leaf);
+}
+
+[[nodiscard]] PreparedEditHit EditHitFromTableCellSource(
+		const PreparedEditTableCellSource &source,
+		const std::optional<PreparedEditLeafSource> &leaf = std::nullopt) {
+	if (!ValidBlockPath(source.block)
+		|| source.tableRowIndex < 0
+		|| source.tableCellIndex < 0) {
+		return {};
+	}
+	auto result = PreparedEditHit();
+	result.kind = PreparedEditHitKind::TableCell;
+	result.block = EditBlockSourceFromPath(source.block);
+	result.tableRow = EditTableRowSourceFromCell(source);
+	result.tableCell = source;
+	return WithLeaf(std::move(result), leaf);
+}
+
+[[nodiscard]] PreparedEditHit EditHitFromLeafSource(
+		const PreparedEditLeafSource &source,
+		bool preferLeaf) {
+	if (!ValidBlockPath(source.block)) {
+		return {};
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::ListItemText:
+		return EditHitFromListItemSource(
+			PreparedEditListItemSource{
+				.block = source.block,
+				.listItemIndex = source.listItemIndex,
+			},
+			source);
+	case PreparedEditLeafKind::TableCellText:
+		return EditHitFromTableCellSource(
+			PreparedEditTableCellSource{
+				.block = source.block,
+				.tableRowIndex = source.tableRowIndex,
+				.tableCellIndex = source.tableCellIndex,
+			},
+			source);
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::BlockCaption:
+	case PreparedEditLeafKind::MathFormula: {
+		auto result = PreparedEditHit();
+		result.kind = preferLeaf
+			? PreparedEditHitKind::Leaf
+			: PreparedEditHitKind::Block;
+		result.block = EditBlockSourceFromPath(source.block);
+		result.leaf = source;
+		return result;
+	} break;
+	}
+	return {};
+}
+
+[[nodiscard]] PreparedEditHit EditFallbackHitForBlock(
+		const LaidOutBlock &block);
+
+[[nodiscard]] PreparedEditHit EditHitForBlock(
+		const LaidOutBlock &block,
+		QPoint point);
+
+[[nodiscard]] PreparedEditBlockContainerPath ListItemChildContainer(
+		const PreparedEditListItemSource &source) {
+	auto result = source.block.container;
+	result.steps.push_back({
+		.kind = PreparedEditBlockContainerKind::ListItemChildren,
+		.blockIndex = source.block.index,
+		.listItemIndex = source.listItemIndex,
+	});
+	return result;
+}
+
+[[nodiscard]] bool HitHasRealBlockInContainer(
+		const PreparedEditHit &hit,
+		const PreparedEditBlockContainerPath &container) {
+	return hit.block
+		&& (hit.block->path.container.steps.size() >= container.steps.size())
+		&& std::equal(
+			container.steps.begin(),
+			container.steps.end(),
+			hit.block->path.container.steps.begin());
+}
+
+[[nodiscard]] PreparedEditHit EditHitForBlocks(
+		const std::vector<LaidOutBlock> &blocks,
+		QPoint point) {
+	auto fallback = PreparedEditHit();
+	auto fallbackDistance = std::numeric_limits<int>::max();
+	for (const auto &block : blocks) {
+		if (ContainsPoint(block.outer, point)) {
+			return EditHitForBlock(block, point);
+		}
+		const auto candidate = EditFallbackHitForBlock(block);
+		if (!candidate.valid()) {
+			continue;
+		}
+		const auto distance = (point.y() < block.outer.top())
+			? (block.outer.top() - point.y())
+			: (point.y() > block.outer.bottom())
+			? (point.y() - block.outer.bottom())
+			: 0;
+		if (distance < fallbackDistance) {
+			fallback = candidate;
+			fallbackDistance = distance;
+		}
+	}
+	return fallback;
+}
+
+[[nodiscard]] PreparedEditHit EditFallbackHitForBlock(
+		const LaidOutBlock &block) {
+	if (block.editListItem) {
+		return EditHitFromListItemSource(*block.editListItem);
+	} else if (block.editBlock) {
+		return EditHitFromBlockSource(*block.editBlock);
+	} else if (block.editLeaf) {
+		return EditHitFromLeafSource(*block.editLeaf, false);
+	}
+	return {};
+}
+
+[[nodiscard]] PreparedEditHit EditHitForTableCell(
+		const LaidOutTableCell &cell,
+		QPoint point) {
+	auto leaf = ContainsPoint(cell.textRect, point)
+		? cell.editLeaf
+		: std::optional<PreparedEditLeafSource>();
+	if (cell.editCell) {
+		return EditHitFromTableCellSource(*cell.editCell, leaf);
+	} else if (leaf) {
+		return EditHitFromLeafSource(*leaf, false);
+	}
+	return {};
+}
+
+[[nodiscard]] PreparedEditHit EditHitForTableBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+		if (block.editBlock) {
+			return EditHitFromBlockSource(*block.editBlock, block.editLeaf);
+		}
+		return EditHitFromLeafSource(*block.editLeaf, false);
+	}
+	for (const auto &row : block.tableRows) {
+		for (const auto &cell : row.cells) {
+			if (ContainsPoint(cell.outer, point)) {
+				if (const auto result = EditHitForTableCell(cell, point);
+					result.valid()) {
+					return result;
+				}
+			}
+		}
+	}
+	for (const auto &row : block.tableRows) {
+		if (ContainsPoint(row.outer, point)) {
+			if (row.editRow) {
+				return EditHitFromTableRowSource(*row.editRow);
+			}
+		}
+	}
+	return EditFallbackHitForBlock(block);
+}
+
+[[nodiscard]] PreparedEditHit EditHitForListBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (!block.children.empty()) {
+		if (const auto result = EditHitForBlocks(block.children, point);
+			result.valid()) {
+			return result;
+		}
+	}
+	return EditFallbackHitForBlock(block);
+}
+
+[[nodiscard]] PreparedEditHit EditHitForListItemBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	const auto listItemHit = EditFallbackHitForBlock(block);
+	if (ContainsPoint(block.contentRect, point) && !block.children.empty()) {
+		if (const auto childHit = EditHitForBlocks(block.children, point);
+			childHit.valid()) {
+			if (block.editListItem
+				&& HitHasRealBlockInContainer(
+					childHit,
+					ListItemChildContainer(*block.editListItem))) {
+				return childHit;
+			}
+			return childHit.leaf
+				? WithLeaf(listItemHit, childHit.leaf)
+				: listItemHit;
+		}
+	}
+	return listItemHit;
+}
+
+[[nodiscard]] PreparedEditHit EditHitForQuoteBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (ContainsPoint(block.contentRect, point) && !block.children.empty()) {
+		if (const auto childHit = EditHitForBlocks(block.children, point);
+			childHit.valid()) {
+			return childHit;
+		}
+	}
+	return EditFallbackHitForBlock(block);
+}
+
+[[nodiscard]] PreparedEditHit EditHitForDetailsBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (ContainsPoint(block.headerRect, point)) {
+		if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+			if (block.editBlock) {
+				return EditHitFromBlockSource(*block.editBlock, block.editLeaf);
+			}
+			return EditHitFromLeafSource(*block.editLeaf, false);
+		}
+		return EditFallbackHitForBlock(block);
+	}
+	if (ContainsPoint(block.contentRect, point) && !block.children.empty()) {
+		if (const auto childHit = EditHitForBlocks(block.children, point);
+			childHit.valid()) {
+			return childHit;
+		}
+	}
+	return EditFallbackHitForBlock(block);
+}
+
+[[nodiscard]] PreparedEditHit EditHitForBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	switch (block.kind) {
+	case PreparedBlockKind::List:
+		return EditHitForListBlock(block, point);
+	case PreparedBlockKind::ListItem:
+		return EditHitForListItemBlock(block, point);
+	case PreparedBlockKind::Quote:
+		return EditHitForQuoteBlock(block, point);
+	case PreparedBlockKind::Table:
+		return EditHitForTableBlock(block, point);
+	case PreparedBlockKind::Details:
+		return EditHitForDetailsBlock(block, point);
+	case PreparedBlockKind::DisplayMath:
+		if (block.editLeaf) {
+			return EditHitFromLeafSource(*block.editLeaf, true);
+		}
+		break;
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::EmbedPost:
+	case PreparedBlockKind::Placeholder:
+		if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+			return EditHitFromLeafSource(*block.editLeaf, true);
+		}
+		break;
+	}
+	return EditFallbackHitForBlock(block);
+}
+
 [[nodiscard]] bool ToggleDetailsBlock(
 		std::vector<PreparedBlock> *blocks,
 		const QString &anchorId) {
@@ -781,6 +1119,8 @@ public:
 	[[nodiscard]] MarkdownArticleHitTestResult hitTest(
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;
+
+	[[nodiscard]] PreparedEditHit editHitTest(QPoint point) const;
 
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 
@@ -1122,6 +1462,10 @@ MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
 		return HitSegmentFallback(_segments, span, point);
 	}
 	return {};
+}
+
+PreparedEditHit MarkdownArticle::Impl::editHitTest(QPoint point) const {
+	return EditHitForBlocks(_blocks, point);
 }
 
 int MarkdownArticle::Impl::anchorTop(const QString &anchorId) const {
@@ -1952,6 +2296,10 @@ MarkdownArticleHitTestResult MarkdownArticle::hitTest(
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const {
 	return _impl->hitTest(point, flags);
+}
+
+PreparedEditHit MarkdownArticle::editHitTest(QPoint point) const {
+	return _impl->editHitTest(point);
 }
 
 int MarkdownArticle::anchorTop(const QString &anchorId) const {

@@ -85,6 +85,18 @@ void CollectAnchors(
 [[nodiscard]] bool TableSegmentSelected(
 	const PaintSelectionState &selectionState,
 	int tableSegmentIndex);
+[[nodiscard]] bool StructuralBlockSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditBlockSource &source);
+[[nodiscard]] bool StructuralListItemSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditListItemSource &source);
+[[nodiscard]] bool StructuralTableRowSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditTableRowSource &source);
+[[nodiscard]] bool StructuralTableCellSelected(
+	const PaintSelectionState &selectionState,
+	const PreparedEditTableCellSource &source);
 [[nodiscard]] TextForMimeData TextForSegment(
 	const SelectableSegment &segment,
 	TextSelection selection = AllTextSelection);

@@ -65,6 +65,7 @@ public:
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 	void focusInEvent(QFocusEvent *e) override;
+	void keyPressEvent(QKeyEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
@@ -107,6 +108,24 @@ private:
 		std::shared_ptr<style::InputField> style;
 	};
 
+	enum class DragSelectionMode {
+		None,
+		Text,
+		Structural,
+	};
+
+	struct ArticleSelectionDrag {
+		bool active = false;
+		bool fromField = false;
+		bool startedBelow = false;
+		bool codeHeader = false;
+		QPoint pressPoint;
+		Markdown::PreparedEditHit anchorHit;
+		int textSegment = -1;
+		int textOffset = 0;
+		DragSelectionMode mode = DragSelectionMode::None;
+	};
+
 	void setDocument(const Markdown::MarkdownArticleContent &prepared);
 	void activateTextOrdinal(int ordinal, int cursorOffset);
 	void activateTextOrdinal(int ordinal, int selectionFrom, int selectionTo);
@@ -138,8 +157,26 @@ private:
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
 	void syncInlineFieldGeometry(int width);
+	void clearSelection();
 	void clearTextSelection();
-	void updateTextSelection(const Markdown::MarkdownArticleHitTestResult &hit);
+	void clearStructuralSelection();
+	[[nodiscard]] bool hasStructuralSelection() const;
+	void startArticleSelection(
+		QPoint pressPoint,
+		const Markdown::MarkdownArticleHitTestResult &hit,
+		const Markdown::PreparedEditHit &editHit,
+		bool fromField = false,
+		bool startedBelow = false);
+	void updateArticleSelection(
+		QPoint articlePoint,
+		const Markdown::MarkdownArticleHitTestResult &hit,
+		const Markdown::PreparedEditHit &editHit);
+	void finishArticleSelection();
+	[[nodiscard]] bool handleStructuralSelectionKey(QKeyEvent *e);
+	[[nodiscard]] bool handleFieldMouseEvent(QEvent *event);
+	[[nodiscard]] Markdown::PreparedEditSelection structuralSelectionFromHits(
+		const Markdown::PreparedEditHit &anchor,
+		const Markdown::PreparedEditHit &focus) const;
 	[[nodiscard]] int editableOrdinalForSegment(int segmentIndex) const;
 	[[nodiscard]] int segmentIndexForEditableOrdinal(int ordinal) const;
 	[[nodiscard]] QPoint articleTopLeft() const;
@@ -168,13 +205,12 @@ private:
 	int _pendingCursorOffset = 0;
 	Markdown::MarkdownArticleSelection _selection;
 	Markdown::MarkdownArticleSelectionEndpoints _selectionEndpoints;
-	int _dragSegment = -1;
-	int _dragOffset = 0;
+	Markdown::PreparedEditSelection _structuralSelection;
+	ArticleSelectionDrag _articleSelectionDrag;
 	bool _settingField = false;
 	bool _trackingPointerPress = false;
 	bool _syncingInlineFieldGeometry = false;
 	bool _pendingHeightOverrideUpdate = false;
-	bool _selectingText = false;
 };
 
 } // namespace Iv::Editor
