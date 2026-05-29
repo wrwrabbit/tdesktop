@@ -227,6 +227,20 @@ void SetRichPageSelectionCursor(
 	return QString();
 }
 
+void CopyRichPageCodeBlockText(TextForMimeData text, ClickContext context) {
+	if (context.button != Qt::LeftButton || text.empty()) {
+		return;
+	} else if (!text.rich.text.endsWith('\n')) {
+		text.rich.text.append('\n');
+	}
+	if (!text.expanded.endsWith('\n')) {
+		text.expanded.append('\n');
+	}
+	if (Ui::Integration::Instance().copyPreOnClick(context.other)) {
+		TextUtilities::SetClipboardText(std::move(text));
+	}
+}
+
 [[nodiscard]] bool SamePreparedLink(
 		const std::optional<PreparedLink> &a,
 		const std::optional<PreparedLink> &b) {
@@ -4217,7 +4231,19 @@ bool Message::getStateText(
 				hit.segmentIndex,
 				offset,
 				hit.direct);
-			if (hit.preparedLink || hit.mediaActivation.kind != MediaActivationKind::None) {
+			if (hit.codeHeaderCopy) {
+				const auto text = rich->article.textForContext(hit);
+				rich->handlerPreparedLink = std::nullopt;
+				rich->handlerMediaActivation = {};
+				rich->handlerPlaceholderId = {};
+				rich->handlerPlaceholderPoint = {};
+				rich->handler = std::make_shared<RichPageActionClickHandler>(
+					[text](ClickContext context) {
+						CopyRichPageCodeBlockText(text, std::move(context));
+					});
+				outResult->link = rich->handler;
+			} else if (hit.preparedLink
+				|| hit.mediaActivation.kind != MediaActivationKind::None) {
 				const auto prepared = hit.preparedLink;
 				const auto activation = hit.mediaActivation;
 				const auto reuse = SamePreparedLink(

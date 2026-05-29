@@ -108,6 +108,7 @@ private:
 	[[nodiscard]] QVariant viewerToastClickHandlerContext() const;
 	void showToast(const QString &text) const;
 	void copySelectedText();
+	void copyCodeBlock(const MarkdownArticleHitTestResult &state);
 
 	void syncArticleVisibleTopBottom();
 	void relayoutCurrentWidth(bool clearSelection);

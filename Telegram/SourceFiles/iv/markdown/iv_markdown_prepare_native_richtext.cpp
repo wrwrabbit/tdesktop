@@ -185,6 +185,25 @@ void AddNativeIvBlockAnchor(
 	}
 }
 
+[[nodiscard]] bool DropNativeIvClickHandlerEntity(EntityType type) {
+	switch (type) {
+	case EntityType::Mention:
+	case EntityType::Hashtag:
+	case EntityType::BotCommand:
+	case EntityType::Cashtag:
+	case EntityType::Url:
+	case EntityType::Email:
+	case EntityType::Phone:
+	case EntityType::BankCard:
+	case EntityType::CustomUrl:
+	case EntityType::MentionName:
+	case EntityType::FormattedDate:
+		return true;
+	default:
+		return false;
+	}
+}
+
 void RememberCanonicalInlineFormula(
 		const EntityInText &entity,
 		NativeIvPrepareState *state,
@@ -218,6 +237,10 @@ void AppendCanonicalNativeIvRichText(
 	result->text.entities.reserve(
 		result->text.entities.size() + text.text.entities.size());
 	for (const auto &entity : text.text.entities) {
+		if (context.dropClickHandlers
+			&& DropNativeIvClickHandlerEntity(entity.type())) {
+			continue;
+		}
 		if (entity.type() == EntityType::CustomUrl) {
 			if (entity.offset() < 0
 				|| entity.length() <= 0

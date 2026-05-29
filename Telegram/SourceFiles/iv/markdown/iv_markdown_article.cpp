@@ -557,6 +557,25 @@ void RebuildVisibleSegmentLookup(
 	return result;
 }
 
+[[nodiscard]] MarkdownArticleHitTestResult HitCodeBlockHeader(
+		const SelectableSegment &segment,
+		QPoint point,
+		Ui::Text::StateRequest::Flags flags) {
+	if (segment.kind != SelectableSegmentKind::CodeBlock
+		|| !segment.block
+		|| !(flags & Ui::Text::StateRequest::Flag::LookupSymbol)
+		|| !segment.block->headerRect.contains(point)) {
+		return {};
+	}
+	auto result = MarkdownArticleHitTestResult();
+	result.segmentIndex = segment.index;
+	result.forcedOffset = 0;
+	result.state.uponSymbol = true;
+	result.direct = true;
+	result.codeHeaderCopy = true;
+	return result;
+}
+
 [[nodiscard]] MarkdownArticleHitTestResult HitBlockSegment(
 		const SelectableSegment &segment,
 		QPoint point,
@@ -693,6 +712,23 @@ void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 		block.colorizedFormulaColor = QColor();
 		block.colorizedFormulaSize = QSize();
 		ClearColorizedFormulaImages(&block.children);
+	}
+}
+
+void CollectCodeBlockHighlightKeys(
+		const std::vector<PreparedBlock> &blocks,
+		std::unordered_set<
+			PendingHighlightKey,
+			PendingHighlightKeyHasher> *keys) {
+	for (const auto &block : blocks) {
+		if (block.kind == PreparedBlockKind::CodeBlock
+			&& !block.codeLanguage.isEmpty()) {
+			keys->insert({
+				.text = CodeBlockDisplayText(block.text.text),
+				.language = block.codeLanguage,
+			});
+		}
+		CollectCodeBlockHighlightKeys(block.children, keys);
 	}
 }
 
@@ -858,6 +894,8 @@ private:
 
 	void clearPendingHighlightBlockPointers();
 
+	void prunePendingHighlightProcessesForContent();
+
 	void registerPendingHighlightProcess(
 		const PendingHighlightKey &key,
 		Spellchecker::HighlightProcessId processId);
@@ -878,10 +916,10 @@ private:
 	void retainBlocks();
 
 	mutable MarkdownArticleContent _content;
+	style::Markdown _style;
 	std::vector<RenderedFormula> _formulaRenders;
 	std::shared_ptr<MathRenderer> _renderer;
 	std::shared_ptr<InlineFormulaObjectCache> _inlineFormulaObjects;
-	const style::Markdown *_st = nullptr;
 	MediaBlockHost *_mediaBlockHost = nullptr;
 	Fn<void()> _textRepaint;
 	Fn<void(QRect)> _textRepaintRect;
@@ -918,9 +956,10 @@ private:
 MarkdownArticle::Impl::Impl(
 	const style::Markdown &st,
 	std::shared_ptr<MathRenderer> renderer)
-: _renderer(std::move(renderer))
+: _style(st)
+, _renderer(std::move(renderer))
 , _inlineFormulaObjects(CreateInlineFormulaObjectCache(_renderer)) {
-	_st = &st;
+	_style.code.font = _style.code.font->monospace();
 }
 
 void MarkdownArticle::Impl::setRenderer(std::shared_ptr<MathRenderer> renderer) {
@@ -961,6 +1000,7 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	if (reuseMediaBlocks) {
 		_mediaBlocks = std::move(reusedMediaBlocks);
 	}
+	prunePendingHighlightProcessesForContent();
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 	resetFormulaRasterCache();
 	invalidateLayout();
@@ -1057,6 +1097,13 @@ MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const {
 	const auto span = candidateSegmentSpan(point);
+	for (auto i = span.from; i != span.till; ++i) {
+		const auto &segment = _segments[i];
+		if (const auto result = HitCodeBlockHeader(segment, point, flags);
+			result.valid()) {
+			return result;
+		}
+	}
 	for (auto i = span.from; i != span.till; ++i) {
 		const auto &segment = _segments[i];
 		if (const auto result = HitTextSegment(segment, point, flags);
@@ -1292,6 +1339,9 @@ bool MarkdownArticle::Impl::selectionContains(
 		MarkdownArticleSelection selection,
 		const MarkdownArticleSelectionEndpoints *endpoints,
 		const MarkdownArticleHitTestResult &result) const {
+	if (result.codeHeaderCopy) {
+		return false;
+	}
 	const auto segment = FindSegment(&_segments, result.segmentIndex);
 	if (!segment || selection.empty() || !result.valid()) {
 		return false;
@@ -1343,7 +1393,14 @@ bool MarkdownArticle::Impl::highlightProcessDone(
 
 	auto rebuilt = false;
 	for (const auto block : entry.blocks) {
-		RepopulateCodeBlockLeaf(*block, layoutStyle(), true, this);
+		RepopulateCodeBlockLeaf(
+			*block,
+			&_content.formulas,
+			_inlineFormulaObjects.get(),
+			_content.mediaRuntime,
+			layoutStyle(),
+			true,
+			this);
 		registerPendingHighlightBlock(*block);
 		rebuilt = true;
 	}
@@ -1665,6 +1722,25 @@ void MarkdownArticle::Impl::clearPendingHighlightBlockPointers() {
 	}
 }
 
+void MarkdownArticle::Impl::prunePendingHighlightProcessesForContent() {
+	if (_pendingHighlightProcesses.empty()) {
+		return;
+	}
+	auto live = std::unordered_set<
+		PendingHighlightKey,
+		PendingHighlightKeyHasher>();
+	CollectCodeBlockHighlightKeys(_content.blocks.blocks, &live);
+	for (auto i = _pendingHighlightProcesses.begin();
+			i != end(_pendingHighlightProcesses);) {
+		if (live.contains(i->first)) {
+			++i;
+			continue;
+		}
+		_pendingHighlightEntries.erase(i->second);
+		i = _pendingHighlightProcesses.erase(i);
+	}
+}
+
 void MarkdownArticle::Impl::registerPendingHighlightProcess(
 		const PendingHighlightKey &key,
 		Spellchecker::HighlightProcessId processId) {
@@ -1726,7 +1802,7 @@ void MarkdownArticle::Impl::setPlaceholderLoadingValue(
 }
 
 const style::Markdown &MarkdownArticle::Impl::layoutStyle() const {
-	return *_st;
+	return _style;
 }
 
 void MarkdownArticle::Impl::relayout(int width) {

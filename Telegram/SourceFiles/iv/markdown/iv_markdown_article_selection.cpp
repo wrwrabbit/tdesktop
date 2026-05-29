@@ -6,7 +6,8 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_article_selection.h"
-#include "lang/lang_keys.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
+#include "ui/text/text_utilities.h"
 
 #include "styles/style_iv.h"
 
@@ -31,13 +32,14 @@ struct TableCopySlot {
 		const LaidOutBlock &block,
 		TextSelection selection = AllTextSelection) {
 	if (selection == AllTextSelection) {
-		auto rich = tr::marked(block.copyText);
+		auto rich = block.codeText;
 		if (!rich.text.isEmpty()) {
 			rich.entities.push_back(EntityInText(
 				EntityType::Pre,
 				0,
 				rich.text.size(),
 				block.codeLanguage));
+			SortEntities(&rich);
 		}
 		return TextForMimeData::Rich(std::move(rich));
 	}
@@ -46,7 +48,7 @@ struct TableCopySlot {
 	auto displayPosition = 0;
 	auto column = 0;
 	auto found = false;
-	const auto &text = block.copyText;
+	const auto &text = block.codeText.text;
 	for (auto i = 0, count = int(text.size()); i != count; ++i) {
 		const auto ch = text[i];
 		const auto width = (ch == QChar::Tabulation)
@@ -74,13 +76,14 @@ struct TableCopySlot {
 	if (!found || to <= from) {
 		return TextForMimeData();
 	}
-	auto rich = tr::marked(text.mid(from, to - from));
+	auto rich = Ui::Text::Mid(block.codeText, from, to - from);
 	if (!rich.text.isEmpty()) {
 		rich.entities.push_back(EntityInText(
 			EntityType::Pre,
 			0,
 			rich.text.size(),
 			block.codeLanguage));
+		SortEntities(&rich);
 	}
 	return TextForMimeData::Rich(std::move(rich));
 }
@@ -626,6 +629,10 @@ style::color TextColorForSegment(
 	} else if (segment.block
 		&& (segment.block->kind == PreparedBlockKind::Thinking)) {
 		return st.supplementaryTextColor;
+	} else if (segment.kind == SelectableSegmentKind::CodeBlock
+		|| (segment.block
+			&& segment.block->kind == PreparedBlockKind::CodeBlock)) {
+		return st.textPalette.monoFg;
 	} else if (segment.block && segment.block->supplementary) {
 		return st.supplementaryTextColor;
 	}

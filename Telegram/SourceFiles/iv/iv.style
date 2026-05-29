@@ -94,6 +94,7 @@ ivEditorToolbarButtonSkip: 6px;
 ivEditorToolbarRowSkip: 0px;
 ivEditorToolbarHeadingIcon: icon {{ "menu/rich/heading-24x24", menuIconColor }};
 ivEditorToolbarBlockquoteIcon: icon {{ "menu/rich/blockquote-24x24", menuIconColor }};
+ivEditorToolbarCodeIcon: icon {{ "chat/code_tags", menuIconColor }};
 ivEditorToolbarMathIcon: icon {{ "menu/rich/math-24x24", menuIconColor }};
 ivEditorToolbarDividerIcon: icon {{ "menu/rich/divider-24x24", menuIconColor }};
 ivEditorToolbarOrderedListIcon: icon {{ "menu/rich/ordered_list-24x24", menuIconColor }};

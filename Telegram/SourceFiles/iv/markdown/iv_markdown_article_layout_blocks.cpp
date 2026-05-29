@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_layout_blocks.h"
 #include "iv/markdown/iv_markdown_media_block.h"
 #include "iv/markdown/iv_markdown_article_text.h"
-#include "lang/lang_keys.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 
 #include "styles/style_iv.h"
@@ -473,6 +473,65 @@ QString CodeBlockDisplayText(const QString &text) {
 	return result;
 }
 
+TextWithEntities CodeBlockDisplayText(TextWithEntities text) {
+	auto result = TextWithEntities();
+	const auto sourceLength = int(text.text.size());
+	result.text.reserve(sourceLength);
+	result.entities.reserve(text.entities.size());
+
+	auto offsets = std::vector<int>();
+	offsets.reserve(sourceLength + 1);
+	auto column = 0;
+	for (auto i = 0; i != sourceLength; ++i) {
+		offsets.push_back(result.text.size());
+		const auto ch = text.text[i];
+		if (ch == QChar::Tabulation) {
+			const auto count = kCodeTabColumns - (column % kCodeTabColumns);
+			for (auto j = 0; j != count; ++j) {
+				result.text.append(QChar::Space);
+			}
+			column += count;
+			continue;
+		}
+		result.text.append(ch);
+		if (Ui::Text::IsNewline(ch)) {
+			column = 0;
+		} else {
+			++column;
+		}
+	}
+	offsets.push_back(result.text.size());
+
+	for (const auto &entity : text.entities) {
+		const auto from = entity.offset();
+		const auto length = entity.length();
+		if (entity.type() == EntityType::Pre
+			|| from < 0
+			|| from >= sourceLength
+			|| length <= 0) {
+			continue;
+		}
+		const auto till = from + std::min(length, sourceLength - from);
+		if (till <= from) {
+			continue;
+		}
+		const auto displayFrom = offsets[from];
+		const auto displayTill = offsets[till];
+		if (displayTill <= displayFrom) {
+			continue;
+		}
+		result.entities.push_back(EntityInText(
+			entity.type(),
+			displayFrom,
+			displayTill - displayFrom,
+			entity.data()));
+	}
+	if (result.text.isEmpty() || Ui::Text::IsTrimmed(result.text.back())) {
+		result.text.append(QChar(kCodeTrailingGuard));
+	}
+	return result;
+}
+
 bool IsFlowKind(PreparedBlockKind kind) {
 	return (kind == PreparedBlockKind::Paragraph)
 		|| (kind == PreparedBlockKind::Thinking)
@@ -682,29 +741,47 @@ int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
 
 void RepopulateCodeBlockLeaf(
 		LaidOutBlock &block,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st,
 		bool allowAsyncSyntaxHighlighting,
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
-	auto marked = tr::marked(CodeBlockDisplayText(block.copyText));
-	if (!marked.text.isEmpty()) {
-		marked.entities.push_back(EntityInText(
+	auto display = CodeBlockDisplayText(block.codeText);
+	auto highlightRequest = TextWithEntities();
+	highlightRequest.text = display.text;
+	if (!highlightRequest.text.isEmpty()) {
+		highlightRequest.entities.push_back(EntityInText(
 			EntityType::Pre,
 			0,
-			marked.text.size(),
+			highlightRequest.text.size(),
 			block.codeLanguage));
 	}
 	block.syntaxHighlightProcessId = allowAsyncSyntaxHighlighting
 		? (syntaxHighlightTracker
 			? syntaxHighlightTracker->tryHighlightSyntax(
-				marked.text,
+				highlightRequest.text,
 				block.codeLanguage,
-				marked)
-			: Spellchecker::TryHighlightSyntax(marked))
+				highlightRequest)
+			: Spellchecker::TryHighlightSyntax(highlightRequest))
 		: 0;
-	block.leaf.setMarkedText(
+	for (const auto &entity : highlightRequest.entities) {
+		if (entity.type() == EntityType::Colorized
+			&& entity.length() > 0) {
+			display.entities.push_back(entity);
+		}
+	}
+	SortEntities(&display);
+	SetTextLeaf(
+		&block.leaf,
 		st.code,
-		std::move(marked),
-		kIvMarkedTextOptions);
+		st,
+		display,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
+		block.textWidth);
+	BindLinks(&block.leaf, block.codeLinks);
 }
 
 LaidOutBlock LayoutFlowBlock(
@@ -760,6 +837,9 @@ LaidOutBlock LayoutFlowBlock(
 
 LaidOutBlock LayoutCodeBlock(
 		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> *formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st,
 		int left,
 		int top,
@@ -771,12 +851,22 @@ LaidOutBlock LayoutCodeBlock(
 	block.kind = PreparedBlockKind::CodeBlock;
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
-	block.copyText = prepared.text.text;
+	block.codeText = prepared.text;
+	block.codeLinks = prepared.links;
+	block.copyText = block.codeText.text;
 	block.codeLanguage = prepared.codeLanguage;
-	block.textWidth = std::max(width, 1);
+	const auto &pre = st.code.pre;
+	const auto padding = BlockquotePadding(pre);
+	const auto outerWidth = std::max(
+		width,
+		padding.left() + padding.right() + 1);
+	block.textWidth = outerWidth - padding.left() - padding.right();
 	block.leaf = Ui::Text::String(TextMinResizeWidth(block.textWidth));
 	RepopulateCodeBlockLeaf(
 		block,
+		formulas,
+		inlineFormulaObjects,
+		mediaRuntime,
 		st,
 		allowAsyncSyntaxHighlighting,
 		syntaxHighlightTracker);
@@ -785,8 +875,19 @@ LaidOutBlock LayoutCodeBlock(
 			block.leaf.countHeight(block.textWidth, true),
 			TextLineHeight(st.code)),
 		context);
-	block.textRect = QRect(left, top, block.textWidth, height);
-	block.outer = block.textRect;
+	const auto outerHeight = padding.top() + height + padding.bottom();
+	block.outer = QRect(left, top, outerWidth, outerHeight);
+	block.headerRect = QRect(left, top, outerWidth, pre.header);
+	block.bodyRect = QRect(
+		left,
+		top + pre.header,
+		outerWidth,
+		std::max(outerHeight - pre.header, 0));
+	block.textRect = QRect(
+		left + padding.left(),
+		top + padding.top(),
+		block.textWidth,
+		height);
 	block.firstLineBaseline = LeafFirstLineBaseline(
 		block.leaf,
 		block.textRect,

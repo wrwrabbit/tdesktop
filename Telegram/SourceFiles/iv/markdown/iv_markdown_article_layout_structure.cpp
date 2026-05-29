@@ -794,6 +794,9 @@ void PrepareNestedContext(
 	case PreparedBlockKind::CodeBlock:
 		return LayoutCodeBlock(
 			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
 			st,
 			left,
 			top,

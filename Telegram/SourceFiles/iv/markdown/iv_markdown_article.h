@@ -182,6 +182,7 @@ struct MarkdownArticleHitTestResult {
 	QPoint placeholderLocalPoint;
 	int forcedOffset = -1;
 	bool direct = false;
+	bool codeHeaderCopy = false;
 
 	[[nodiscard]] bool valid() const {
 		return (segmentIndex >= 0);

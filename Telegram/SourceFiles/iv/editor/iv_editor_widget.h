@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article.h"
 #include "ui/style/style_core_types.h"
 #include "ui/rp_widget.h"
+#include "rpl/lifetime.h"
 
 #include <memory>
 #include <optional>
@@ -156,6 +157,7 @@ private:
 	std::unique_ptr<Ui::ChatTheme> _theme;
 	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
+	rpl::lifetime _highlightReadyLifetime;
 	std::vector<CachedInlineFieldStyle> _fieldStyles;
 	std::optional<InlineFieldStyleKey> _activeFieldStyleKey;
 	State::FieldMode _fieldMode = State::FieldMode::Rich;

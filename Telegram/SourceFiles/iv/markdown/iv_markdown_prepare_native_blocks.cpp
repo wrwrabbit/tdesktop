@@ -99,15 +99,32 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	SortEntities(&text->text);
 }
 
-[[nodiscard]] QString StripOneTrailingNewline(QString text) {
-	if (text.endsWith(u"\r\n"_q)) {
-		text.chop(2);
-	} else if (!text.isEmpty()) {
-		const auto last = text.back();
+[[nodiscard]] TextWithEntities StripOneTrailingNewline(TextWithEntities text) {
+	auto removed = 0;
+	if (text.text.endsWith(u"\r\n"_q)) {
+		removed = 2;
+	} else if (!text.text.isEmpty()) {
+		const auto last = text.text.back();
 		if ((last == QChar(u'\n')) || (last == QChar(u'\r'))) {
-			text.chop(1);
+			removed = 1;
 		}
 	}
+	if (!removed) {
+		return text;
+	}
+	const auto newLength = text.text.size() - removed;
+	text.text.chop(removed);
+	for (auto &entity : text.entities) {
+		entity.updateTextEnd(newLength);
+	}
+	text.entities.erase(
+		std::remove_if(
+			text.entities.begin(),
+			text.entities.end(),
+			[](const EntityInText &entity) {
+				return (entity.length() <= 0);
+			}),
+		text.entities.end());
 	return text;
 }
 
@@ -945,14 +962,17 @@ void MarkNativeIvTableSlots(
 				block.text,
 				&prepared,
 				&anchorId,
-				state)) {
+				state,
+				{ .dropClickHandlers = true })) {
 			return false;
 		}
 		auto code = PreparedBlock();
 		code.kind = PreparedBlockKind::CodeBlock;
 		code.anchorId = std::move(anchorId);
 		code.codeLanguage = block.language;
-		code.text.text = StripOneTrailingNewline(prepared.text.text);
+		SortPreparedIvRichText(&prepared);
+		code.text = StripOneTrailingNewline(std::move(prepared.text));
+		code.links = std::move(prepared.links);
 		code.anchorIds = std::move(prepared.anchorIds);
 		result->push_back(std::move(code));
 		return true;

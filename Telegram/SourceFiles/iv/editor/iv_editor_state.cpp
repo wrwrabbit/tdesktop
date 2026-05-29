@@ -76,6 +76,7 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 	case BlockKind::Heading:
 	case BlockKind::Paragraph:
 	case BlockKind::Footer:
+	case BlockKind::Code:
 	case BlockKind::Divider:
 	case BlockKind::Anchor:
 	case BlockKind::Photo:
@@ -95,7 +96,6 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 	case BlockKind::Unsupported:
 	case BlockKind::Thinking:
 	case BlockKind::AuthorDate:
-	case BlockKind::Code:
 	case BlockKind::Embed:
 	case BlockKind::EmbedPost:
 	case BlockKind::GroupedMedia:
@@ -218,6 +218,31 @@ void State::applyActiveRawText(QString text) {
 		current->text = MakeText(std::move(text));
 		rebuild();
 	}
+}
+
+std::optional<QString> State::codeBlockLanguage(int ordinal) const {
+	const auto descriptor = textNode(ordinal);
+	if (!descriptor || descriptor->leaf.kind != LeafKind::BlockText) {
+		return std::nullopt;
+	}
+	const auto owner = block(descriptor->leaf.block);
+	return (owner && owner->kind == BlockKind::Code)
+		? std::make_optional(owner->language)
+		: std::nullopt;
+}
+
+bool State::setCodeBlockLanguage(int ordinal, QString language) {
+	const auto descriptor = textNode(ordinal);
+	if (!descriptor || descriptor->leaf.kind != LeafKind::BlockText) {
+		return false;
+	}
+	auto owner = block(descriptor->leaf.block);
+	if (!owner || owner->kind != BlockKind::Code) {
+		return false;
+	}
+	owner->language = std::move(language).trimmed();
+	rebuild();
+	return true;
 }
 
 int State::activeTextLength() const {
@@ -621,6 +646,7 @@ void State::rebuildTextNodes(
 		case BlockKind::Heading:
 		case BlockKind::Paragraph:
 		case BlockKind::Footer:
+		case BlockKind::Code:
 			appendBlockTextNode(path, LeafKind::BlockText);
 			break;
 		case BlockKind::Quote:
@@ -929,6 +955,8 @@ Block State::makeBlock(InsertAction action) const {
 		return MakeHeadingBlock(action.headingLevel);
 	case InsertBlockType::Blockquote:
 		return MakeQuoteBlock(false);
+	case InsertBlockType::Code:
+		return MakeCodeBlock();
 	case InsertBlockType::Math:
 		return MakeMathBlock();
 	case InsertBlockType::Footer:
@@ -995,6 +1023,13 @@ Block State::MakeQuoteBlock(bool pullquote) {
 	block.pullquote = pullquote;
 	block.text.text = MakeText(u"Text"_q);
 	block.caption.text = MakeText(u"Caption"_q);
+	return block;
+}
+
+Block State::MakeCodeBlock() {
+	auto block = Block();
+	block.kind = BlockKind::Code;
+	block.text.text = MakeText(u"Text"_q);
 	return block;
 }
 
@@ -1094,6 +1129,7 @@ bool State::BlockIsEmpty(const Block &block) {
 	if (!RichTextIsEmpty(block.text)
 		|| !RichTextIsEmpty(block.caption)
 		|| !StringIsEmpty(block.formula)
+		|| !block.language.isEmpty()
 		|| !block.anchorId.isEmpty()
 		|| !block.url.isEmpty()
 		|| !block.html.isEmpty()

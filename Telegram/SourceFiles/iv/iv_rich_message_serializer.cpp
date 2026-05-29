@@ -927,10 +927,23 @@ struct SerializeContext {
 				*caption))
 			: std::nullopt;
 	}
+	case BlockKind::Code: {
+		if (!block.blocks.empty()) {
+			return std::nullopt;
+		}
+		const auto text = SerializeRichTextWithAnchor(
+			block.text,
+			block.anchorId,
+			context);
+		return text
+			? std::make_optional(MTP_pageBlockPreformatted(
+				*text,
+				MTP_string(block.language)))
+			: std::nullopt;
+	}
 	case BlockKind::Unsupported:
 	case BlockKind::Thinking:
 	case BlockKind::AuthorDate:
-	case BlockKind::Code:
 	case BlockKind::Embed:
 	case BlockKind::EmbedPost:
 	case BlockKind::GroupedMedia:

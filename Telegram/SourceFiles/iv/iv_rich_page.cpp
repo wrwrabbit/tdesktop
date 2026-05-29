@@ -73,6 +73,12 @@ struct ParseContext {
 		bool isAnimation = false;
 	};
 	base::flat_map<uint64, DocumentInfo> documentInfos;
+	bool dropRichTextClickHandlers = false;
+};
+
+enum class RichTextParseMode {
+	Normal,
+	DropClickHandlers,
 };
 
 [[nodiscard]] QString DateText(TimeId date) {
@@ -354,7 +360,8 @@ void RememberWebPageMedia(
 
 [[nodiscard]] RichText ParseRichText(
 		const MTPRichText &text,
-		ParseContext *context);
+		ParseContext *context,
+		RichTextParseMode mode = RichTextParseMode::Normal);
 
 [[nodiscard]] RichText ParseCaption(
 		const MTPPageCaption &caption,
@@ -460,6 +467,9 @@ void RememberWebPageMedia(
 		if (result->text.text.size() == from) {
 			result->text.append(target);
 		}
+		if (context->dropRichTextClickHandlers) {
+			return true;
+		}
 		return AddEntity(
 			&result->text,
 			from,
@@ -473,6 +483,9 @@ void RememberWebPageMedia(
 		const auto email = qs(data.vemail());
 		if (result->text.text.size() == from) {
 			result->text.append(email);
+		}
+		if (context->dropRichTextClickHandlers) {
+			return true;
 		}
 		const auto target = u"mailto:"_q + email;
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
@@ -495,39 +508,50 @@ void RememberWebPageMedia(
 	}, [&](const MTPDtextMention &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Mention);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Mention));
 	}, [&](const MTPDtextHashtag &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Hashtag);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Hashtag));
 	}, [&](const MTPDtextBotCommand &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::BotCommand);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::BotCommand));
 	}, [&](const MTPDtextCashtag &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Cashtag);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Cashtag));
 	}, [&](const MTPDtextAutoUrl &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Url);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Url));
 	}, [&](const MTPDtextAutoEmail &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Email);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Email));
 	}, [&](const MTPDtextAutoPhone &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::Phone);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::Phone));
 	}, [&](const MTPDtextBankCard &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
-			&& AddEntity(&result->text, from, EntityType::BankCard);
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::BankCard));
 	}, [&](const MTPDtextMentionName &data) {
 		const auto from = result->text.text.size();
 		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
+		}
+		if (context->dropRichTextClickHandlers) {
+			return true;
 		}
 		const auto entityData = MentionNameEntityData(
 			context->session,
@@ -543,6 +567,9 @@ void RememberWebPageMedia(
 		const auto from = result->text.text.size();
 		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
 			return false;
+		}
+		if (context->dropRichTextClickHandlers) {
+			return true;
 		}
 		auto flags = FormattedDateFlags();
 		if (data.is_relative()) {
@@ -577,6 +604,9 @@ void RememberWebPageMedia(
 		if (result->text.text.size() == from) {
 			result->text.append(phone);
 		}
+		if (context->dropRichTextClickHandlers) {
+			return true;
+		}
 		const auto target = u"tel:"_q + phone;
 		return AddEntity(&result->text, from, EntityType::CustomUrl, target);
 	}, [&](const MTPDtextAnchor &data) {
@@ -595,11 +625,22 @@ void RememberWebPageMedia(
 
 [[nodiscard]] RichText ParseRichText(
 		const MTPRichText &text,
-		ParseContext *context) {
+		ParseContext *context,
+		RichTextParseMode mode) {
 	auto result = RichText();
 	auto anchorId = QString();
 	auto anchorIds = std::vector<QString>();
-	(void)AppendRichText(text, &result, context, &anchorId, &anchorIds);
+	const auto wasDropClickHandlers = context->dropRichTextClickHandlers;
+	context->dropRichTextClickHandlers
+		= (mode == RichTextParseMode::DropClickHandlers);
+	const auto parsed = AppendRichText(
+		text,
+		&result,
+		context,
+		&anchorId,
+		&anchorIds);
+	context->dropRichTextClickHandlers = wasDropClickHandlers;
+	(void)parsed;
 	result.anchorId = std::move(anchorId);
 	result.anchorIds = std::move(anchorIds);
 	return result;
@@ -702,7 +743,10 @@ void AppendBlock(
 	}, [&](const MTPDpageBlockPreformatted &data) {
 		auto parsed = MakeBlock(BlockKind::Code);
 		parsed.language = qs(data.vlanguage()).trimmed();
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseRichText(
+			data.vtext(),
+			context,
+			RichTextParseMode::DropClickHandlers);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockFooter &data) {

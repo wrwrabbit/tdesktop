@@ -777,6 +777,27 @@ void MarkdownDocumentWidget::copySelectedText() {
 	}
 }
 
+void MarkdownDocumentWidget::copyCodeBlock(
+		const MarkdownArticleHitTestResult &state) {
+	if (!_article) {
+		return;
+	}
+	auto text = _article->textForContext(state);
+	if (text.empty()) {
+		return;
+	}
+	if (!text.rich.text.endsWith('\n')) {
+		text.rich.text.append('\n');
+	}
+	if (!text.expanded.endsWith('\n')) {
+		text.expanded.append('\n');
+	}
+	if (Ui::Integration::Instance().copyPreOnClick(
+			viewerToastClickHandlerContext())) {
+		TextUtilities::SetClipboardText(std::move(text));
+	}
+}
+
 void MarkdownDocumentWidget::syncArticleVisibleTopBottom() {
 	if (!_article) {
 		return;
@@ -815,7 +836,8 @@ void MarkdownDocumentWidget::updateHover(
 	const auto changed = ClickHandler::setActive(state.state.link, this);
 	auto cursor = style::cur_default;
 	if (_dragAction == NoDrag) {
-		if (state.state.link
+		if (state.codeHeaderCopy
+			|| state.state.link
 			|| (state.preparedLink
 				&& state.preparedLink->kind == PreparedLinkKind::ToggleDetails)
 			|| state.mediaActivation.kind != MediaActivationKind::None) {
@@ -985,6 +1007,13 @@ void MarkdownDocumentWidget::dragActionStart(
 	if (button != Qt::LeftButton) {
 		return;
 	}
+	if (state.codeHeaderCopy) {
+		clearSelection();
+		_dragStartPosition = point;
+		_selectionClickPreparedLink = std::nullopt;
+		_dragAction = PrepareDrag;
+		return;
+	}
 	if (state.mediaActivation.kind == MediaActivationKind::Embed
 		&& state.mediaActivation.placeholderId) {
 		_pressedPlaceholderId = state.mediaActivation.placeholderId;
@@ -1049,6 +1078,8 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 	stopPressedPlaceholderRipple();
 	auto activated = ClickHandler::unpressed();
 	const auto dragStartHadSelection = _dragStartHadSelection;
+	const auto wasClick = (_dragAction == NoDrag)
+		|| (_dragAction == PrepareDrag);
 	const auto toggleFromDetailsClick = !dragStartHadSelection
 		&& _selection.empty()
 		&& _selectionClickPreparedLink
@@ -1071,6 +1102,12 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::dragActionFinish(
 	_selectionType = TextSelectType::Letters;
 	_dragExpandedSelection = {};
 	updateHover(state);
+	if (state.codeHeaderCopy
+		&& (button == Qt::LeftButton || button == Qt::MiddleButton)
+		&& wasClick) {
+		copyCodeBlock(state);
+		return state;
+	}
 	if (activated
 		&& (button == Qt::LeftButton || button == Qt::MiddleButton)) {
 		if (state.mediaActivation.kind != MediaActivationKind::None

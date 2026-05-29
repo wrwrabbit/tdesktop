@@ -167,6 +167,11 @@ void Toolbar::addInsertButtons() {
 		&st::ivEditorToolbarBlockquoteIcon,
 		[=] { insertType(State::InsertBlockType::Blockquote); });
 	addButton(
+		tr::lng_article_insert_code(tr::now),
+		[] { return tr::lng_article_insert_code(tr::marked); },
+		&st::ivEditorToolbarCodeIcon,
+		[=] { insertType(State::InsertBlockType::Code); });
+	addButton(
 		tr::lng_article_insert_math(tr::now),
 		[] { return tr::lng_article_insert_math(tr::marked); },
 		&st::ivEditorToolbarMathIcon,

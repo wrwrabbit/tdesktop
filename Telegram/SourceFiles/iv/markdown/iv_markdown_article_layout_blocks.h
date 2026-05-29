@@ -69,6 +69,8 @@ struct LaidOutBlock {
 	Ui::Text::String marker;
 	Ui::Text::String fallbackLeaf;
 	QString copyText;
+	TextWithEntities codeText;
+	std::vector<PreparedLink> codeLinks;
 	QString labelText;
 	QString codeLanguage;
 	std::optional<PreparedLink> preparedLink;
@@ -194,6 +196,7 @@ struct TableRowLayoutData {
 	const style::TextStyle &textStyle,
 	const style::Markdown &st);
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text);
+[[nodiscard]] TextWithEntities CodeBlockDisplayText(TextWithEntities text);
 [[nodiscard]] int BlockSkip(
 	const PreparedBlock &block,
 	const style::Markdown &st);
@@ -221,6 +224,9 @@ void LayoutMediaCaption(
 	LayoutContext context = {});
 void RepopulateCodeBlockLeaf(
 	LaidOutBlock &block,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &st,
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
@@ -237,6 +243,9 @@ void RepopulateCodeBlockLeaf(
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutCodeBlock(
 	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &st,
 	int left,
 	int top,

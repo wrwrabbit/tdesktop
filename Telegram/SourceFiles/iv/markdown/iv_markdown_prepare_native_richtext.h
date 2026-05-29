@@ -24,6 +24,7 @@ struct NativeIvRichTextContext {
 	int textSize = 0;
 	int renderWidthCap = 0;
 	int renderHeightCap = 0;
+	bool dropClickHandlers = false;
 };
 
 [[nodiscard]] bool PrepareNativeIvPlainPlaceholderBlock(

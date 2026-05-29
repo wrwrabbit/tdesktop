@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/message_field.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
+#include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/painter.h"
@@ -166,6 +167,13 @@ Widget::Widget(
 
 	setMouseTracking(true);
 	setFocusPolicy(Qt::StrongFocus);
+
+	Spellchecker::HighlightReady(
+	) | rpl::on_next([=](Spellchecker::HighlightProcessId processId) {
+		if (_article && _article->highlightProcessDone(processId)) {
+			update();
+		}
+	}, _highlightReadyLifetime);
 
 	const auto weak = QPointer<Widget>(this);
 	_article->setTextRepaintCallbacks(
@@ -331,11 +339,15 @@ void Widget::mouseMoveEvent(QMouseEvent *e) {
 		const auto hit = _article->hitTest(
 			e->pos() - articleTopLeft(),
 			Ui::Text::StateRequest::Flag::LookupSymbol);
-		setCursor((hit.valid()
+		auto cursor = style::cur_default;
+		if (hit.valid() && hit.codeHeaderCopy) {
+			cursor = style::cur_pointer;
+		} else if (hit.valid()
 			&& hit.direct
-			&& _article->segmentIsText(hit.segmentIndex))
-			? style::cur_text
-			: style::cur_default);
+			&& _article->segmentIsText(hit.segmentIndex)) {
+			cursor = style::cur_text;
+		}
+		setCursor(cursor);
 		Ui::RpWidget::mouseMoveEvent(e);
 		return;
 	}
@@ -356,6 +368,12 @@ void Widget::mousePressEvent(QMouseEvent *e) {
 	auto hit = _article->hitTest(
 		articlePoint,
 		Ui::Text::StateRequest::Flag::LookupSymbol);
+	if (hit.codeHeaderCopy) {
+		clearTextSelection();
+		_selectingText = false;
+		e->accept();
+		return;
+	}
 	if (hit.valid() && hit.direct && _article->segmentIsText(hit.segmentIndex)) {
 		_dragSegment = hit.segmentIndex;
 		_dragOffset = _article->selectionOffsetFromHit(
@@ -402,7 +420,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 	};
 	const auto commitVisibleInlineField = [&] {
 		if (_field->isHidden()) {
-			return;
+			return false;
 		}
 		commitInlineField();
 		_pendingOrdinal = -1;
@@ -410,6 +428,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		hideInlineField();
 		_article->clearTextLeafHeightOverride();
 		refreshPreparedContent();
+		return true;
 	};
 	const auto focusOrActivateInitial = [&] {
 		if (_field->isHidden()) {
@@ -418,6 +437,34 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			_field->setFocusFast();
 		}
 	};
+	if (hit.codeHeaderCopy) {
+		clearTextSelection();
+		auto languageHit = hit;
+		if (commitVisibleInlineField()) {
+			languageHit = _article->hitTest(
+				articlePoint,
+				Ui::Text::StateRequest::Flag::LookupSymbol);
+		}
+		const auto ordinal = languageHit.codeHeaderCopy
+			? editableOrdinalForSegment(languageHit.segmentIndex)
+			: -1;
+		if (const auto now = _state->codeBlockLanguage(ordinal)) {
+			const auto weak = QPointer<Widget>(this);
+			DefaultEditLanguageCallback(_controller->uiShow())(
+				*now,
+				[=](QString language) {
+					if (!weak) {
+						return;
+					}
+					if (_state->setCodeBlockLanguage(ordinal, language)) {
+						refreshPreparedContent();
+						update();
+					}
+				});
+		}
+		e->accept();
+		return;
+	}
 	if (_selectingText) {
 		updateTextSelection(hit);
 		const auto selection = _selection;

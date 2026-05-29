@@ -26,6 +26,7 @@ public:
 	enum class InsertBlockType : uchar {
 		Heading,
 		Blockquote,
+		Code,
 		Math,
 		Footer,
 		Divider,
@@ -169,6 +170,8 @@ public:
 	[[nodiscard]] FieldMode activeFieldMode() const;
 	[[nodiscard]] QString activeRawText() const;
 	void applyActiveRawText(QString text);
+	[[nodiscard]] std::optional<QString> codeBlockLanguage(int ordinal) const;
+	[[nodiscard]] bool setCodeBlockLanguage(int ordinal, QString language);
 	[[nodiscard]] int activeTextLength() const;
 	[[nodiscard]] std::optional<int> previousEditableOrdinal() const;
 	[[nodiscard]] std::optional<int> nextEditableOrdinal() const;
@@ -254,6 +257,7 @@ private:
 	[[nodiscard]] static RichPage::Block MakeFooterBlock();
 	[[nodiscard]] static RichPage::Block MakeHeadingBlock(int level);
 	[[nodiscard]] static RichPage::Block MakeQuoteBlock(bool pullquote);
+	[[nodiscard]] static RichPage::Block MakeCodeBlock();
 	[[nodiscard]] static RichPage::Block MakeMathBlock();
 	[[nodiscard]] static RichPage::Block MakeDividerBlock();
 	[[nodiscard]] static RichPage::Block MakeAnchorBlock(QString anchorId);

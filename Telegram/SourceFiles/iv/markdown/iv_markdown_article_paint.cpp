@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_image.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/effects/toggle_arrow.h"
+#include "ui/integration.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
 
@@ -1472,6 +1473,69 @@ void PaintQuoteBlock(
 		local);
 }
 
+void PaintCodeBlock(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	const auto clip = context.clip.intersected(block.outer);
+	if (clip.isEmpty()) {
+		return;
+	}
+
+	const auto &pre = st.code.pre;
+	if (context.caches.pre) {
+		Ui::Text::ValidateQuotePaintCache(*context.caches.pre, pre);
+
+		p.save();
+		p.setClipRect(clip);
+		Ui::Text::FillQuotePaint(
+			p,
+			block.outer,
+			*context.caches.pre,
+			pre);
+		p.restore();
+	}
+
+	if (!block.headerRect.isEmpty()) {
+		const auto headerText = block.codeLanguage.isEmpty()
+			? Ui::Integration::Instance().phraseQuoteHeaderCopy()
+			: block.codeLanguage;
+		const auto font = st.code.font->monospace();
+		const auto availableWidth = block.outer.width()
+			- pre.headerPosition.x()
+			- pre.iconPosition.x()
+			- (!pre.icon.empty() ? pre.icon.width() : 0);
+		if (availableWidth > 0) {
+			const auto position = block.outer.topLeft()
+				+ pre.headerPosition;
+			p.save();
+			p.setClipRect(clip);
+			p.setFont(font);
+			p.setPen(p.textPalette().monoFg->c);
+			p.drawText(
+				position + QPoint(0, font->ascent),
+				font->elided(headerText, availableWidth));
+			p.restore();
+		}
+	}
+
+	p.save();
+	p.setPen(p.textPalette().monoFg->c);
+	PaintSelectableTextLeaf(
+		p,
+		block.leaf,
+		context,
+		block.textRect,
+		block.textWidth,
+		block.segmentIndex,
+		style::al_left,
+		TextSelectionForSegmentIndex(
+			context.selectionState,
+			block.segmentIndex));
+	p.restore();
+}
+
 void PaintPlaceholderBlock(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -2222,18 +2286,7 @@ void PaintBlock(
 				block.segmentIndex));
 		break;
 	case PreparedBlockKind::CodeBlock:
-		p.setPen(paintSt.textColor->c);
-		PaintSelectableTextLeaf(
-			p,
-			block.leaf,
-			context,
-			block.textRect,
-			block.textWidth,
-			block.segmentIndex,
-			style::al_left,
-			TextSelectionForSegmentIndex(
-				context.selectionState,
-				block.segmentIndex));
+		PaintCodeBlock(p, block, st, context);
 		break;
 	case PreparedBlockKind::Rule:
 		PaintRevealBand(
