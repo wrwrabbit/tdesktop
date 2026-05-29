@@ -175,6 +175,24 @@ struct NormalizedIntegerRange {
 	};
 }
 
+[[nodiscard]] PreparedEditSelection BlockSelectionFromIndexes(
+		PreparedEditBlockContainerPath container,
+		int first,
+		int second) {
+	const auto range = NormalizeIntegerRange(first, second);
+	if (range.empty()) {
+		return {};
+	}
+	return {
+		.kind = PreparedEditSelectionKind::Blocks,
+		.blocks = {
+			.container = std::move(container),
+			.from = range.from,
+			.till = range.till,
+		},
+	};
+}
+
 [[nodiscard]] int CompareIntegers(int a, int b) {
 	return (a < b) ? -1 : (a > b) ? 1 : 0;
 }
@@ -393,6 +411,10 @@ struct StructuralOwner {
 	return owner.listItem;
 }
 
+[[nodiscard]] bool IsBlockOwner(const StructuralOwner &owner) {
+	return (owner.kind == StructuralOwnerKind::Block);
+}
+
 [[nodiscard]] std::optional<PreparedEditBlockPath> BlockPathFromOwner(
 		const StructuralOwner &owner) {
 	if (owner.kind == StructuralOwnerKind::Block && owner.block) {
@@ -475,6 +497,19 @@ LiftPreparedEditBlocksToCommonContainer(
 	return result;
 }
 
+[[nodiscard]] PreparedEditSelection LiftedBlockSelection(
+		const PreparedEditBlockPath &anchor,
+		const PreparedEditBlockPath &focus) {
+	const auto lifted = LiftPreparedEditBlocksToCommonContainer(anchor, focus);
+	if (!lifted) {
+		return {};
+	}
+	return BlockSelectionFromIndexes(
+		lifted->container,
+		lifted->first,
+		lifted->second);
+}
+
 [[nodiscard]] auto ListItemSourcesFromBlockPath(
 		const PreparedEditBlockPath &path)
 -> std::vector<PreparedEditListItemSource> {
@@ -545,6 +580,13 @@ LiftPreparedEditBlocksToCommonContainer(
 		}
 	}
 	return {};
+}
+
+[[nodiscard]] bool IsMultiListItemSelection(
+		const PreparedEditSelection &selection) {
+	return !selection.empty()
+		&& (selection.kind == PreparedEditSelectionKind::ListItems)
+		&& (selection.listItems.till > selection.listItems.from + 1);
 }
 
 [[nodiscard]] int FieldNaturalHeight(not_null<Ui::InputField*> field) {
@@ -2009,44 +2051,33 @@ PreparedEditSelection Widget::structuralSelectionFromHits(
 	if (ComparePreparedEditBlockContainerPaths(
 			anchorBlock->container,
 			focusBlock->container) == 0) {
-		const auto range = NormalizeIntegerRange(
+		const auto blockSelection = BlockSelectionFromIndexes(
+			anchorBlock->container,
 			anchorBlock->index,
 			focusBlock->index);
-		if (!range.empty()) {
-			return {
-				.kind = PreparedEditSelectionKind::Blocks,
-				.blocks = {
-					.container = anchorBlock->container,
-					.from = range.from,
-					.till = range.till,
-				},
-			};
+		if (!blockSelection.empty()) {
+			return blockSelection;
 		}
 	}
 	const auto listItemsFromChildren = ListItemSelectionFromSources(
 		ListItemSourcesFromOwner(anchorOwner, anchorBlock),
 		ListItemSourcesFromOwner(focusOwner, focusBlock));
+	const auto liftedBlockSelection = LiftedBlockSelection(
+		*anchorBlock,
+		*focusBlock);
+	if (IsBlockOwner(anchorOwner)
+		&& IsBlockOwner(focusOwner)
+		&& !liftedBlockSelection.empty()
+		&& !IsMultiListItemSelection(listItemsFromChildren)) {
+		return liftedBlockSelection;
+	}
 	if (!listItemsFromChildren.empty()) {
 		return listItemsFromChildren;
 	}
-	const auto lifted = LiftPreparedEditBlocksToCommonContainer(
-		*anchorBlock,
-		*focusBlock);
-	if (!lifted) {
-		return {};
+	if (!liftedBlockSelection.empty()) {
+		return liftedBlockSelection;
 	}
-	const auto range = NormalizeIntegerRange(lifted->first, lifted->second);
-	if (range.empty()) {
-		return {};
-	}
-	return {
-		.kind = PreparedEditSelectionKind::Blocks,
-		.blocks = {
-			.container = lifted->container,
-			.from = range.from,
-			.till = range.till,
-		},
-	};
+	return {};
 }
 
 int Widget::editableOrdinalForSegment(int segmentIndex) const {

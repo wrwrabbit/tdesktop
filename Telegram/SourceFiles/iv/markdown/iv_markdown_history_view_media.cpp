@@ -321,7 +321,6 @@ void IvHistoryViewBlock::paint(
 	p.translate(_geometry.topLeft());
 	auto local = context.translated(-_geometry.topLeft());
 	local.clip = visible.translated(-_geometry.topLeft());
-	local.outbg = _host->view()->hasOutLayout();
 	_media->draw(p, local);
 	p.restore();
 }
