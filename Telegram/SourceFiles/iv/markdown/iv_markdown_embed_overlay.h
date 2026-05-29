@@ -37,6 +37,8 @@ class RpWidget;
 } // namespace Ui
 
 namespace Webview {
+struct DataRequest;
+enum class DataResult;
 class Window;
 struct WindowConfig;
 } // namespace Webview
@@ -118,6 +120,9 @@ private:
 	[[nodiscard]] QRect bodyRectInContent() const;
 	[[nodiscard]] QMargins contentPadding() const;
 	[[nodiscard]] int cssPixelsToQt(int value) const;
+	[[nodiscard]] QByteArray htmlRequestId();
+	[[nodiscard]] Webview::DataResult handleDataRequest(
+		Webview::DataRequest request);
 
 	const QPointer<QWidget> _webviewParent;
 	const std::function<void(QString)> _linkActivationCallback;
@@ -133,10 +138,12 @@ private:
 	QRect _contentGeometry;
 	QSize _preferredBodySize;
 	QSize _pendingPreferredBodySize;
+	QByteArray _htmlRequestId;
 	QPointer<QWidget> _focusRestore;
 	std::function<void()> _shownCallback;
 	std::function<void()> _failedCallback;
 	int _contentWidth = 0;
+	int _dataResourceGeneration = 0;
 	int _webviewGeneration = 0;
 	double _cssToQtScale = 1.;
 	Mode _mode = Mode::Hidden;

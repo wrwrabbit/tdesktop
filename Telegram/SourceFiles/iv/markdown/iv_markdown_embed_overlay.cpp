@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/padding_wrap.h"
+#include "webview/webview_data_stream_memory.h"
 #include "webview/webview_embed.h"
 #include "webview/webview_interface.h"
 
@@ -42,6 +43,7 @@ namespace Iv::Markdown {
 namespace {
 
 constexpr auto kReadyRevealDelay = crl::time(1000);
+constexpr auto kHtmlRequestPrefix = "html/";
 
 [[nodiscard]] TextWithEntities GenericWebviewErrorText() {
 	return { u"Error: Could not initialize WebView."_q };
@@ -167,9 +169,15 @@ enum class LayoutMode {
 		"})();");
 }
 
-[[nodiscard]] QString HtmlDataUrl(const QByteArray &html) {
-	return u"data:text/html;charset=utf-8;base64,"_q
-		+ QString::fromLatin1(html.toBase64());
+[[nodiscard]] QByteArray NormalizeDataRequestId(const std::string &id) {
+	auto result = QByteArray::fromStdString(id);
+	if (const auto hash = result.indexOf('#'); hash >= 0) {
+		result = result.left(hash);
+	}
+	while (result.startsWith('/')) {
+		result.remove(0, 1);
+	}
+	return result;
 }
 
 } // namespace
@@ -269,6 +277,7 @@ bool EmbedOverlay::startEmbed(
 	_request = request;
 	_preferredBodySize = QSize();
 	_pendingPreferredBodySize = QSize();
+	_htmlRequestId = htmlRequestId();
 	_cssToQtScale = 1.;
 	_ready = false;
 	_mode = mode;
@@ -284,8 +293,8 @@ bool EmbedOverlay::startEmbed(
 		_loadingAnimation.start();
 	}
 	_content->update();
+	const auto available = Webview::Availability();
 	if (!_webview) {
-		const auto available = Webview::Availability();
 		if (available.error != Webview::Available::Error::None) {
 			showWebviewError(Ui::BotWebView::ErrorText(available));
 			return true;
@@ -295,7 +304,11 @@ bool EmbedOverlay::startEmbed(
 	if (_webview && _webview->widget()) {
 		updateWebviewGeometry();
 		if (!request.html.isEmpty()) {
-			_webview->navigate(HtmlDataUrl(request.html));
+			if (available.customSchemeRequests) {
+				_webview->navigateToData(QString::fromUtf8(_htmlRequestId));
+			} else {
+				showWebviewError(GenericWebviewErrorText());
+			}
 		} else if (!request.url.isEmpty()) {
 			_webview->navigate(request.url);
 		} else {
@@ -463,6 +476,7 @@ void EmbedOverlay::resetState() {
 	_request = EmbedRequest();
 	_preferredBodySize = QSize();
 	_pendingPreferredBodySize = QSize();
+	_htmlRequestId = QByteArray();
 	_cssToQtScale = 1.;
 	_ready = false;
 	_externalWindowCloseReported = false;
@@ -551,6 +565,9 @@ void EmbedOverlay::ensureWebview() {
 			&& (_webview.get() == raw)) {
 			_externalWindowCloseReported = true;
 		}
+	});
+	raw->setDataRequestHandler([=](Webview::DataRequest request) {
+		return handleDataRequest(std::move(request));
 	});
 	raw->init(EmbedInitScript());
 	raw->setNavigationStartHandler([=](const QString &uri, bool newWindow) {
@@ -994,6 +1011,27 @@ int EmbedOverlay::cssPixelsToQt(int value) const {
 	return (value > 0)
 		? std::max(static_cast<int>(std::round(value * _cssToQtScale)), 1)
 		: 0;
+}
+
+QByteArray EmbedOverlay::htmlRequestId() {
+	return !_request.html.isEmpty()
+		? QByteArray(kHtmlRequestPrefix)
+			+ QByteArray::number(++_dataResourceGeneration)
+		: QByteArray();
+}
+
+Webview::DataResult EmbedOverlay::handleDataRequest(
+		Webview::DataRequest request) {
+	const auto id = NormalizeDataRequestId(request.id);
+	if (id != _htmlRequestId || _request.html.isEmpty()) {
+		return Webview::DataResult::Failed;
+	}
+	request.done({
+		.stream = std::make_unique<Webview::DataStreamFromMemory>(
+			_request.html,
+			"text/html; charset=utf-8"),
+	});
+	return Webview::DataResult::Done;
 }
 
 } // namespace Iv::Markdown
