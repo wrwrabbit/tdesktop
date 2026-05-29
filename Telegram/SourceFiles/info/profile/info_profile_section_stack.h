@@ -62,7 +62,7 @@ private:
 	void addPlainMarkerSlot(
 		int markerIndex,
 		not_null<std::vector<rpl::variable<bool>>*> candidates,
-		bool suppressedByText);
+		rpl::producer<bool> textVisible);
 	void addTextSeparatorSlot(int sectionIndex, SectionSeparator &trailing);
 
 	const not_null<Ui::VerticalLayout*> _layout;

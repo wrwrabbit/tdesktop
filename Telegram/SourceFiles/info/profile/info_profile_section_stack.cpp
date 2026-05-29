@@ -169,7 +169,7 @@ rpl::producer<bool> SectionStack::computePlainMarkerCandidate(
 void SectionStack::addPlainMarkerSlot(
 		int markerIndex,
 		not_null<std::vector<rpl::variable<bool>>*> candidates,
-		bool suppressedByText) {
+		rpl::producer<bool> textVisible) {
 	auto inner = object_ptr<Ui::VerticalLayout>(_layout);
 	Ui::AddSkip(inner.data(), st::infoProfileSkip);
 	inner->add(object_ptr<Ui::BoxContentDivider>(
@@ -182,16 +182,14 @@ void SectionStack::addPlainMarkerSlot(
 			_layout,
 			std::move(inner)));
 
-	auto shown = rpl::producer<bool>();
-	if (suppressedByText) {
-		shown = rpl::single(false);
-	} else if (markerIndex == 0) {
-		shown = (*candidates)[0].value();
+	auto candidateShown = rpl::producer<bool>();
+	if (markerIndex == 0) {
+		candidateShown = (*candidates)[0].value();
 	} else {
 		const auto position = _plainMarkerAfter[markerIndex];
 		const auto prevPosition = _plainMarkerAfter[markerIndex - 1];
 		auto sameGap = anyShownInRange(prevPosition + 1, position);
-		shown = rpl::combine(
+		candidateShown = rpl::combine(
 			(*candidates)[markerIndex].value(),
 			(*candidates)[markerIndex - 1].value(),
 			std::move(sameGap)
@@ -200,6 +198,12 @@ void SectionStack::addPlainMarkerSlot(
 			return here && !(sameGapAsPrev && prev);
 		}) | rpl::distinct_until_changed();
 	}
+	auto shown = rpl::combine(
+		std::move(candidateShown),
+		std::move(textVisible)
+	) | rpl::map([](bool candidate, bool text) {
+		return candidate && !text;
+	}) | rpl::distinct_until_changed();
 	wrap->setDuration(st::infoSlideDuration)->toggleOn(std::move(shown));
 }
 
@@ -227,13 +231,15 @@ void SectionStack::addTextSeparatorSlot(
 	if (trailing.textSetup) {
 		trailing.textSetup(rawLabel);
 	}
+	auto self = rpl::duplicate(_sections[sectionIndex].shown);
 	auto upper = anyShownAtOrBefore(sectionIndex);
 	auto lower = anyShownAfter(sectionIndex);
 	auto shown = rpl::combine(
+		std::move(self),
 		std::move(upper),
 		std::move(lower)
-	) | rpl::map([](bool u, bool l) {
-		return u && l;
+	) | rpl::map([](bool s, bool u, bool l) {
+		return s && u && l;
 	}) | rpl::distinct_until_changed();
 	wrap->setDuration(st::infoSlideDuration)->toggleOn(std::move(shown));
 }
@@ -272,13 +278,16 @@ void SectionStack::finalize() {
 		if (hasText && i + 1 < sectionCount) {
 			addTextSeparatorSlot(i, section.trailing);
 		}
+		auto textVisible = hasText
+			? (rpl::duplicate(_sections[i].shown) | rpl::type_erased)
+			: (rpl::single(false) | rpl::type_erased);
 
 		while (nextMarker != int(_plainMarkerAfter.size())
 			&& _plainMarkerAfter[nextMarker] == i) {
 			addPlainMarkerSlot(
 				nextMarker,
 				markerCandidates,
-				hasText);
+				rpl::duplicate(textVisible));
 			++nextMarker;
 		}
 	}
