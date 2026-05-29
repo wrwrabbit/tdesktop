@@ -44,6 +44,16 @@ using TableVerticalAlignment = RichPage::TableVerticalAlignment;
 using TaskState = RichPage::TaskState;
 
 const auto PhotoLargeLevels = u"ydxcwmbsa"_q;
+constexpr auto kDefaultMapWidth = 400;
+constexpr auto kDefaultMapHeight = 200;
+
+[[nodiscard]] int NonZeroMapWidth(int width) {
+	return (width > 0) ? width : kDefaultMapWidth;
+}
+
+[[nodiscard]] int NonZeroMapHeight(int height) {
+	return (height > 0) ? height : kDefaultMapHeight;
+}
 
 [[nodiscard]] Block MakeBlock(BlockKind kind) {
 	auto result = Block();
@@ -1100,8 +1110,8 @@ void AppendBlock(
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockMap &data) {
 		auto parsed = MakeBlock(BlockKind::Map);
-		parsed.width = data.vw().v;
-		parsed.height = data.vh().v;
+		parsed.width = NonZeroMapWidth(data.vw().v);
+		parsed.height = NonZeroMapHeight(data.vh().v);
 		parsed.zoom = data.vzoom().v;
 		data.vgeo().match([&](const MTPDgeoPoint &row) {
 			parsed.latitude = row.vlat().v;

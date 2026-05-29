@@ -397,6 +397,11 @@ IvHistoryViewHit IvHistoryViewBlock::classifyHandler(
 		result.link = handler;
 		return result;
 	}
+	if (_kind == IvHistoryViewMediaKind::Audio
+		&& std::dynamic_pointer_cast<DocumentOpenClickHandler>(handler)) {
+		result.link = handler;
+		return result;
+	}
 	if (std::dynamic_pointer_cast<PhotoOpenClickHandler>(handler)
 		&& _photoRuntime) {
 		result.activation.kind = MediaActivationKind::Photo;

@@ -2029,7 +2029,8 @@ bool State::BlockIsEmpty(const Block &block) {
 		|| block.channelId
 		|| block.accessHash
 		|| block.latitude != 0.
-		|| block.longitude != 0.) {
+		|| block.longitude != 0.
+		|| !block.mediaItems.empty()) {
 		return false;
 	}
 	for (const auto &child : block.blocks) {

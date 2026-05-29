@@ -1804,7 +1804,6 @@ void PaintEmbedPostBlock(
 			const auto avatarPath = RoundedRectPath(
 				block.thumbnailRect,
 				style.avatarRadius);
-			p.fillPath(avatarPath, st.photo.fallbackBg->c);
 			p.save();
 			p.setClipPath(
 				avatarPath,

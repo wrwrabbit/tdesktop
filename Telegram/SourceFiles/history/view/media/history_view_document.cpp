@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "core/click_handler_types.h" // kDocumentFilenameTooltipProperty.
 #include "history/view/history_view_element.h"
+#include "history/view/history_view_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "history/view/history_view_transcribe_button.h"
 #include "history/view/media/history_view_media_common.h"
@@ -46,6 +47,10 @@ namespace HistoryView {
 namespace {
 
 constexpr auto kAudioVoiceMsgUpdateView = crl::time(100);
+
+[[nodiscard]] bool IsHostedInstantViewMedia(not_null<const Element*> parent) {
+	return parent->Get<InstantViewMediaRuntime>() != nullptr;
+}
 
 [[nodiscard]] QRect TTLRectFromInner(const QRect &inner) {
 	return QRect(
@@ -610,8 +615,13 @@ QSize Document::countCurrentSize(int newWidth) {
 	const auto hasTranscribe = voice && !voice->transcribeText.isEmpty();
 	const auto thumbed = Get<HistoryDocumentThumbed>();
 	const auto &st = thumbed ? st::msgFileThumbLayout : st::msgFileLayout;
+	const auto hostedInstantViewAudio = IsHostedInstantViewMedia(_parent)
+		&& (_data->isAudioFile() || _data->isVoiceMessage());
 	if (!captioned && !hasTranscribe) {
 		auto result = File::countCurrentSize(newWidth);
+		if (hostedInstantViewAudio) {
+			result.setWidth(std::max(newWidth, result.width()));
+		}
 		if (isBubbleBottom()) {
 			const auto thumbedWidth = thumbedLinkMaxWidth();
 			const auto statusWidth = thumbedWidth
@@ -640,7 +650,9 @@ QSize Document::countCurrentSize(int newWidth) {
 		return result;
 	}
 
-	accumulate_min(newWidth, maxWidth());
+	if (!hostedInstantViewAudio) {
+		accumulate_min(newWidth, maxWidth());
+	}
 	auto newHeight = st.padding.top() + st.thumbSize + st.padding.bottom();
 	if (!isBubbleTop()) {
 		newHeight -= st::msgFileTopMinus;

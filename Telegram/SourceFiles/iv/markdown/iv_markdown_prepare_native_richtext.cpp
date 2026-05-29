@@ -23,6 +23,9 @@ struct GeoPointLocation;
 namespace Iv::Markdown {
 namespace {
 
+constexpr auto kDefaultMapWidth = 400;
+constexpr auto kDefaultMapHeight = 200;
+
 [[nodiscard]] uint64 GeneratePreparedBlockIdValue(
 		NativeIvPrepareState *state) {
 	return uint64(++state->nextGeneratedId);
@@ -523,8 +526,9 @@ bool PrepareNativeIvMapBlock(
 		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
-	if (data.width <= 0 || data.height <= 0 || data.zoom <= 0
-		|| (!data.accessHash && !state->editMode)) {
+	const auto width = (data.width > 0) ? data.width : kDefaultMapWidth;
+	const auto height = (data.height > 0) ? data.height : kDefaultMapHeight;
+	if (data.zoom <= 0 || (!data.accessHash && !state->editMode)) {
 		return state->editMode
 			? PrepareNativeIvCanonicalPlaceholderBlock(
 				u"Map"_q,
@@ -552,8 +556,8 @@ bool PrepareNativeIvMapBlock(
 	block.map.latitude = data.latitude;
 	block.map.longitude = data.longitude;
 	block.map.accessHash = data.accessHash;
-	block.map.width = data.width;
-	block.map.height = data.height;
+	block.map.width = width;
+	block.map.height = height;
 	block.map.zoom = data.zoom;
 	block.map.url = LocationClickHandler::Url(Data::LocationPoint(
 		data.latitude,

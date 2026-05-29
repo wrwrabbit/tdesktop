@@ -503,6 +503,21 @@ using PrepareCanonicalMediaBlock = bool (*)(
 	return true;
 }
 
+[[nodiscard]] bool PrepareCanonicalNativeIvGroupedMediaBlock(
+		const RichPageBlock &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state,
+		PreparedEditBlockPath path) {
+	const auto count = result->size();
+	if (!PrepareNativeIvGroupedMediaBlock(data, result, state)) {
+		return false;
+	}
+	if (result->size() > count) {
+		result->back().editBlock = BlockSource(std::move(path));
+	}
+	return true;
+}
+
 void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	for (auto &block : *blocks) {
 		block.editBlock.reset();
@@ -1229,7 +1244,11 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	case RichPageBlockKind::EmbedPost:
 		return PrepareCanonicalNativeIvEmbedPostBlock(block, result, state);
 	case RichPageBlockKind::GroupedMedia:
-		return PrepareNativeIvGroupedMediaBlock(block, result, state);
+		return PrepareCanonicalNativeIvGroupedMediaBlock(
+			block,
+			result,
+			state,
+			path);
 	case RichPageBlockKind::Channel:
 		return PrepareNativeIvChannelBlock(block, result, state);
 	case RichPageBlockKind::Audio:

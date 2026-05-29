@@ -28,12 +28,16 @@ namespace {
 
 using Block = RichPage::Block;
 using BlockKind = RichPage::BlockKind;
+using GroupedMediaItem = RichPage::GroupedMediaItem;
 using ListKind = RichPage::ListKind;
 using RichText = RichPage::RichText;
 using TableAlignment = RichPage::TableAlignment;
 using TableCell = RichPage::TableCell;
 using TableVerticalAlignment = RichPage::TableVerticalAlignment;
 using TaskState = RichPage::TaskState;
+
+constexpr auto kDefaultMapWidth = 400;
+constexpr auto kDefaultMapHeight = 200;
 
 struct SerializeContext {
 	not_null<Main::Session*> session;
@@ -517,6 +521,75 @@ struct SerializeContext {
 		: std::nullopt;
 }
 
+[[nodiscard]] std::optional<MTPPageBlock> SerializeGroupedMediaItem(
+		const GroupedMediaItem &item,
+		SerializeContext *context) {
+	const auto caption = SerializeCaption(RichText(), QString(), context);
+	if (!caption) {
+		return std::nullopt;
+	}
+	switch (item.kind) {
+	case BlockKind::Photo: {
+		const auto photoId = CollectPhoto(context, item.photoId, item.photo);
+		if (!photoId) {
+			return std::nullopt;
+		}
+		using Flag = MTPDpageBlockPhoto::Flag;
+		auto flags = MTPDpageBlockPhoto::Flags();
+		if (item.spoiler) {
+			flags |= Flag::f_spoiler;
+		}
+		return MTP_pageBlockPhoto(
+			MTP_flags(flags),
+			MTP_long(*photoId),
+			*caption,
+			MTPstring(),
+			MTPlong());
+	}
+	case BlockKind::Video: {
+		const auto documentId = CollectDocument(
+			context,
+			item.documentId,
+			item.document);
+		if (!documentId) {
+			return std::nullopt;
+		}
+		using Flag = MTPDpageBlockVideo::Flag;
+		auto flags = MTPDpageBlockVideo::Flags();
+		if (item.autoplay) {
+			flags |= Flag::f_autoplay;
+		}
+		if (item.loop) {
+			flags |= Flag::f_loop;
+		}
+		if (item.spoiler) {
+			flags |= Flag::f_spoiler;
+		}
+		return MTP_pageBlockVideo(
+			MTP_flags(flags),
+			MTP_long(*documentId),
+			*caption);
+	}
+	default:
+		return std::nullopt;
+	}
+}
+
+[[nodiscard]] std::optional<QVector<MTPPageBlock>> SerializeGroupedMediaItems(
+		const std::vector<GroupedMediaItem> &items,
+		SerializeContext *context) {
+	auto result = QVector<MTPPageBlock>();
+	result.reserve(items.size());
+	for (const auto &item : items) {
+		const auto serialized = SerializeGroupedMediaItem(item, context);
+		if (!serialized) {
+			return std::nullopt;
+		}
+		result.push_back(*serialized);
+	}
+	return result;
+}
+
 [[nodiscard]] std::optional<QVector<MTPPageBlock>> SerializeBlocks(
 		const std::vector<Block> &blocks,
 		SerializeContext *context);
@@ -910,7 +983,13 @@ struct SerializeContext {
 			: std::nullopt;
 	}
 	case BlockKind::Map: {
-		if (block.width <= 0 || block.height <= 0 || block.zoom <= 0) {
+		const auto width = (block.width > 0)
+			? block.width
+			: kDefaultMapWidth;
+		const auto height = (block.height > 0)
+			? block.height
+			: kDefaultMapHeight;
+		if (block.zoom <= 0) {
 			return std::nullopt;
 		}
 		const auto caption = SerializeCaption(block.caption, block.anchorId, context);
@@ -922,8 +1001,8 @@ struct SerializeContext {
 					MTP_double(block.longitude),
 					MTPint()),
 				MTP_int(block.zoom),
-				MTP_int(block.width),
-				MTP_int(block.height),
+				MTP_int(width),
+				MTP_int(height),
 				*caption))
 			: std::nullopt;
 	}
@@ -941,12 +1020,31 @@ struct SerializeContext {
 				MTP_string(block.language)))
 			: std::nullopt;
 	}
+	case BlockKind::GroupedMedia: {
+		const auto items = SerializeGroupedMediaItems(
+			block.mediaItems,
+			context);
+		const auto caption = SerializeCaption(
+			block.caption,
+			block.anchorId,
+			context);
+		if (!items || items->isEmpty() || !caption) {
+			return std::nullopt;
+		}
+		if (block.mediaIntent == RichPage::GroupedMediaIntent::Slideshow) {
+			return MTP_pageBlockSlideshow(
+				MTP_vector<MTPPageBlock>(std::move(*items)),
+				*caption);
+		}
+		return MTP_pageBlockCollage(
+			MTP_vector<MTPPageBlock>(std::move(*items)),
+			*caption);
+	}
 	case BlockKind::Unsupported:
 	case BlockKind::Thinking:
 	case BlockKind::AuthorDate:
 	case BlockKind::Embed:
 	case BlockKind::EmbedPost:
-	case BlockKind::GroupedMedia:
 	case BlockKind::Channel:
 	case BlockKind::RelatedArticles:
 		break;
