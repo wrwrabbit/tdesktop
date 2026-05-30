@@ -26,6 +26,7 @@ public:
 	void setColors(QColor gradient1, QColor gradient2);
 	void setShownProgress(float64 progress);
 	void setPaused(bool paused);
+	void startEnter();
 
 	[[nodiscard]] rpl::producer<float64> flungStrength() const;
 
@@ -38,13 +39,50 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 
 private:
+	enum class Channel {
+		Yaw,
+		Pitch,
+		Bob,
+	};
+	enum class Easing {
+		Linear,
+		Default,
+		EaseOut,
+		EaseOutQuint,
+		Overshoot,
+	};
+	struct Track {
+		Channel channel = Channel::Yaw;
+		std::vector<float64> values;
+		crl::time delay = 0;
+		crl::time duration = 0;
+		Easing easing = Easing::Linear;
+	};
+	struct Gesture {
+		std::vector<Track> tracks;
+		crl::time start = 0;
+		crl::time total = 0;
+	};
+
 	void ensureSurface();
 	[[nodiscard]] QWidget *surfaceWidget() const;
 	void startAnimation();
 	void stopAnimation();
 	void frame();
 	void advance(float64 dt);
+	void tick(crl::time now);
 	void pushState();
+
+	void applyChannel(Channel channel, float64 value);
+	void play(Gesture gesture);
+	void scheduleIdle(crl::time delay);
+	void cancelIdle();
+	void startIdleGesture();
+	void startBackSpring();
+	void pullGesture();
+	void slowFlipGesture();
+	void flipGesture();
+	void sleepGesture();
 
 	StarRenderer *_renderer = nullptr;
 	std::unique_ptr<RpWidgetWrap> _surface;
@@ -56,19 +94,17 @@ private:
 
 	float64 _yaw = 0.;
 	float64 _pitch = 0.;
-	float64 _yawVelocity = 0.;
-	float64 _pitchVelocity = 0.;
+	float64 _bob = 0.;
 	float64 _shimmer = 0.;
 	float64 _fadeIn = 0.;
 	float64 _opacity = 1.;
 
+	std::optional<Gesture> _gesture;
+	crl::time _idleAt = 0;
+	std::vector<int> _idleBag;
+
 	bool _dragging = false;
 	QPoint _lastDragPos;
-	crl::time _lastDragTime = 0;
-	float64 _dragYawVelocity = 0.;
-	float64 _dragPitchVelocity = 0.;
-	float64 _dragYawTotal = 0.;
-	float64 _dragPitchTotal = 0.;
 
 	rpl::event_stream<float64> _flung;
 

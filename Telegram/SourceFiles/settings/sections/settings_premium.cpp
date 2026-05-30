@@ -1562,6 +1562,7 @@ base::weak_qptr<Ui::RpWidget> Premium::createPinnedToTop(
 				.title = std::move(title),
 				.about = std::move(about),
 				.use3dStar = true,
+				.showFinished = _showFinished.events(),
 			});
 	}();
 	_state->setPaused = [=](bool paused) {

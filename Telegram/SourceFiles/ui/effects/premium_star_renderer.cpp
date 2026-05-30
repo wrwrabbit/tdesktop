@@ -267,6 +267,7 @@ void StarRenderer::render(
 		QVector3D(0.f, 1.f, 0.f));
 
 	auto world = QMatrix4x4();
+	world.translate(0.f, _state.bob, 0.f);
 	world.rotate(-_state.pitch, 1.f, 0.f, 0.f);
 	world.rotate(-_state.yaw, 0.f, 1.f, 0.f);
 

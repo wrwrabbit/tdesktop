@@ -35,6 +35,7 @@ public:
 	struct State {
 		float yaw = 0.;
 		float pitch = 0.;
+		float bob = 0.;
 		float shimmer = 0.;
 		float alpha = 1.;
 	};

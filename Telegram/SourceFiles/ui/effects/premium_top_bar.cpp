@@ -133,6 +133,15 @@ TopBar::TopBar(
 		_star3d->flungStrength() | rpl::on_next([=](float64 strength) {
 			_starParticles3d->fling(strength);
 		}, lifetime());
+		if (descriptor.showFinished) {
+			std::move(
+				descriptor.showFinished
+			) | rpl::on_next([=] {
+				if (_star3d) {
+					_star3d->startEnter();
+				}
+			}, lifetime());
+		}
 	}
 
 	std::move(

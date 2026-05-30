@@ -76,6 +76,7 @@ struct TopBarDescriptor {
 	bool optimizeMinistars = true;
 	bool use3dStar = false;
 	std::optional<QGradientStops> gradientStops;
+	rpl::producer<> showFinished;
 };
 
 class TopBar final : public TopBarAbstract {
