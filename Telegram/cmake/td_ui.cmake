@@ -487,6 +487,12 @@ PRIVATE
     ui/effects/premium_bubble.h
     ui/effects/premium_graphics.cpp
     ui/effects/premium_graphics.h
+    ui/effects/premium_star.cpp
+    ui/effects/premium_star.h
+    ui/effects/premium_star_model.cpp
+    ui/effects/premium_star_model.h
+    ui/effects/premium_star_renderer.cpp
+    ui/effects/premium_star_renderer.h
     ui/effects/premium_stars.cpp
     ui/effects/premium_stars.h
     ui/effects/premium_stars_colored.cpp

@@ -2012,6 +2012,7 @@ PRIVATE
 )
 
 include(cmake/qrhi_shaders.cmake)
+include(cmake/generate_models.cmake)
 
 if (APPLE AND NOT build_macstore)
     nice_target_sources(Telegram ${res_loc}
