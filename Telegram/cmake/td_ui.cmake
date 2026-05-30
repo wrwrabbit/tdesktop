@@ -491,6 +491,8 @@ PRIVATE
     ui/effects/premium_star.h
     ui/effects/premium_star_model.cpp
     ui/effects/premium_star_model.h
+    ui/effects/premium_star_particles.cpp
+    ui/effects/premium_star_particles.h
     ui/effects/premium_star_renderer.cpp
     ui/effects/premium_star_renderer.h
     ui/effects/premium_stars.cpp
