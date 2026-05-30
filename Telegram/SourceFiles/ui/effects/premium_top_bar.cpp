@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/color_contrast.h"
 #include "ui/painter.h"
 #include "ui/effects/premium_graphics.h"
+#include "ui/effects/premium_star.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/rect.h"
@@ -25,6 +26,8 @@ namespace {
 constexpr auto kBodyAnimationPart = 0.90;
 constexpr auto kTitleAdditionalScale = 0.15;
 constexpr auto kMinAcceptableContrast = 4.5; // 1.14;
+
+constexpr auto kStar3dScale = 2.;
 
 [[nodiscard]] QImage ScaleTo(QImage image) {
 	using namespace style;
@@ -118,6 +121,10 @@ TopBar::TopBar(
 		(_logo == u"diamond"_q)
 			? MiniStarsType::DiamondStars
 			: MiniStarsType::BiStars) {
+	if (descriptor.use3dStar && Star::Supported()) {
+		_star3d = CreateChild<Star>(this);
+	}
+
 	std::move(
 		descriptor.title
 	) | rpl::on_next([=](QString text) {
@@ -171,6 +178,20 @@ TopBar::TopBar(
 				: Ui::Premium::ButtonGradientStops()));
 			_ministars.setColorOverride(descriptor.gradientStops);
 		}
+		if (_star3d) {
+			if (!_light && !TopBarAbstract::isDark()) {
+				_star3d->setColors(
+					QColor(255, 255, 255),
+					QColor(0xE3, 0xEC, 0xFA));
+			} else {
+				const auto stops = descriptor.gradientStops
+					? (*descriptor.gradientStops)
+					: Ui::Premium::ButtonGradientStops();
+				_star3d->setColors(
+					stops.front().second,
+					stops.back().second);
+			}
+		}
 		auto event = QResizeEvent(size(), size());
 		resizeEvent(&event);
 	}, lifetime());
@@ -194,6 +215,9 @@ TopBar::~TopBar() = default;
 
 void TopBar::setPaused(bool paused) {
 	_ministars.setPaused(paused);
+	if (_star3d) {
+		_star3d->setPaused(paused);
+	}
 }
 
 void TopBar::setTextPosition(int x, int y) {
@@ -223,10 +247,16 @@ void TopBar::resizeEvent(QResizeEvent *e) {
 
 	_starRect = starRect(_progress.top, _progress.body);
 
+	if (_star3d) {
+		auto enlarged = Rect(_starRect.size() * kStar3dScale);
+		enlarged.moveCenter(rect::center(_starRect));
+		_star3d->setGeometry(enlarged.toRect());
+		_star3d->setShownProgress(_progress.body);
+	}
+
 	const auto &padding = st::boxRowPadding;
 	const auto availableWidth = width() - padding.left() - padding.right();
-	const auto titleTop = _starRect.top()
-		+ _starRect.height()
+	const auto titleTop = rect::bottom(_starRect)
 		+ _titlePadding.top();
 	const auto titlePathRect = _titlePath.boundingRect();
 	const auto aboutTop = titleTop
@@ -286,7 +316,7 @@ void TopBar::paintEvent(QPaintEvent *e) {
 	if (!_dollar.isNull()) {
 		auto hq = PainterHighQualityEnabler(p);
 		p.drawImage(_starRect, _dollar);
-	} else {
+	} else if (!_star3d) {
 		_star.render(&p, _starRect);
 	}
 
@@ -310,9 +340,9 @@ void TopBar::paintEvent(QPaintEvent *e) {
 			_progress.title),
 		anim::interpolate(fullTitleTop, _titlePosition.y(), _progress.title));
 
-	p.translate(titlePathRect.center());
+	p.translate(rect::center(titlePathRect));
 	p.scale(_progress.scaleTitle, _progress.scaleTitle);
-	p.translate(-titlePathRect.center());
+	p.translate(-rect::center(titlePathRect));
 	p.fillPath(_titlePath, color);
 }
 
