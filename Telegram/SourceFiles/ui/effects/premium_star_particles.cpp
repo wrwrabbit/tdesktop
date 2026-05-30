@@ -39,6 +39,13 @@ constexpr auto kMsPerSecond = 1000.;
 constexpr auto kDegreesToRadians = M_PI / 180.;
 constexpr auto k2Pi = 2. * M_PI;
 constexpr auto kRandomBuffer = 1024;
+constexpr auto kFlingRampUpMs = crl::time(600);
+constexpr auto kFlingTotalMs = crl::time(2000);
+constexpr auto kFlingThresholdLow = 60.;
+constexpr auto kFlingThresholdHigh = 180.;
+constexpr auto kFlingSpeedLow = 5.;
+constexpr auto kFlingSpeedMedium = 9.;
+constexpr auto kFlingSpeedHigh = 15.;
 
 constexpr auto kSizesDp = std::array{ 4., 12., 10. };
 constexpr auto kRotationDegPerSec = std::array{ 9., 7.2, 6. };
@@ -105,6 +112,9 @@ void StarParticles::setPaused(bool paused) {
 				particle.birthTime += delta;
 				particle.deathTime += delta;
 			}
+			if (_flingStart) {
+				_flingStart += delta;
+			}
 			_pausedAt = 0;
 		}
 		_lastTime = crl::now();
@@ -113,6 +123,40 @@ void StarParticles::setPaused(bool paused) {
 
 float64 StarParticles::driftStep(crl::time delta) const {
 	return style::ConvertScale(kDriftDp) * (delta / kDriftDivisor);
+}
+
+void StarParticles::fling(float64 strength) {
+	_flingMax = (strength < kFlingThresholdLow)
+		? kFlingSpeedLow
+		: (strength < kFlingThresholdHigh)
+		? kFlingSpeedMedium
+		: kFlingSpeedHigh;
+	const auto now = crl::now();
+	_flingStart = now;
+	_idleCounter = 0;
+	if (!_paused && !_animation.animating()) {
+		_lastTime = now;
+		_animation.start();
+	}
+}
+
+void StarParticles::updateSpeedScale(crl::time now) {
+	if (!_flingStart) {
+		_speedScale = 1.;
+		return;
+	}
+	const auto elapsed = std::max<crl::time>(0, now - _flingStart);
+	if (elapsed >= kFlingTotalMs) {
+		_flingStart = 0;
+		_speedScale = 1.;
+	} else if (elapsed < kFlingRampUpMs) {
+		_speedScale = 1.
+			+ (_flingMax - 1.) * (elapsed / float64(kFlingRampUpMs));
+	} else {
+		const auto progress = (elapsed - kFlingRampUpMs)
+			/ float64(kFlingTotalMs - kFlingRampUpMs);
+		_speedScale = _flingMax + (1. - _flingMax) * progress;
+	}
 }
 
 void StarParticles::createParticle(crl::time now, Particle &particle) {
@@ -154,12 +198,13 @@ void StarParticles::tick(crl::time now) {
 	ensureParticles();
 	const auto delta = std::clamp(now - _lastTime, kMinDelta, kMaxDelta);
 	_lastTime = now;
+	updateSpeedScale(now);
 
 	const auto radius = _field.isEmpty()
 		? 0.
 		: std::min(_field.width(), _field.height()) / 2.;
 	const auto bound = radius * kBoundsFactor;
-	const auto step = driftStep(delta);
+	const auto step = driftStep(delta) * _speedScale;
 	for (auto &particle : _particles) {
 		if (now >= particle.deathTime) {
 			createParticle(now, particle);

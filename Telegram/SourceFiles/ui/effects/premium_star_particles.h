@@ -19,6 +19,7 @@ public:
 	void setColor(QColor color);
 	void paint(QPainter &p, const QRectF &field);
 	void setPaused(bool paused);
+	void fling(float64 strength);
 
 private:
 	struct Particle {
@@ -39,6 +40,7 @@ private:
 	void createParticle(crl::time now, Particle &particle);
 	void rebuildSprites(int ratio);
 	void tick(crl::time now);
+	void updateSpeedScale(crl::time now);
 	[[nodiscard]] float64 driftStep(crl::time delta) const;
 
 	const Fn<void(const QRect &)> _update;
@@ -57,6 +59,9 @@ private:
 	std::array<float64, 3> _fieldAngle = { { 0., 0., 0. } };
 	QRectF _field;
 
+	float64 _speedScale = 1.;
+	float64 _flingMax = 1.;
+	crl::time _flingStart = 0;
 	crl::time _lastTime = 0;
 	crl::time _pausedAt = 0;
 

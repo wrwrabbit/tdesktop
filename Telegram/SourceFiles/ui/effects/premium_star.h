@@ -27,6 +27,8 @@ public:
 	void setShownProgress(float64 progress);
 	void setPaused(bool paused);
 
+	[[nodiscard]] rpl::producer<float64> flungStrength() const;
+
 protected:
 	void resizeEvent(QResizeEvent *e) override;
 	void showEvent(QShowEvent *e) override;
@@ -65,6 +67,10 @@ private:
 	crl::time _lastDragTime = 0;
 	float64 _dragYawVelocity = 0.;
 	float64 _dragPitchVelocity = 0.;
+	float64 _dragYawTotal = 0.;
+	float64 _dragPitchTotal = 0.;
+
+	rpl::event_stream<float64> _flung;
 
 	bool _paused = false;
 

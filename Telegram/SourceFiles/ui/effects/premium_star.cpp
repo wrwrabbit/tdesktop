@@ -145,6 +145,10 @@ void Star::setPaused(bool paused) {
 	}
 }
 
+rpl::producer<float64> Star::flungStrength() const {
+	return _flung.events();
+}
+
 QWidget *Star::surfaceWidget() const {
 	return _surface ? _surface->rpWidget() : nullptr;
 }
@@ -253,6 +257,7 @@ void Star::mousePressEvent(QMouseEvent *e) {
 	_lastDragTime = crl::now();
 	_yawVelocity = _pitchVelocity = 0.;
 	_dragYawVelocity = _dragPitchVelocity = 0.;
+	_dragYawTotal = _dragPitchTotal = 0.;
 }
 
 void Star::mouseMoveEvent(QMouseEvent *e) {
@@ -269,6 +274,8 @@ void Star::mouseMoveEvent(QMouseEvent *e) {
 	_pitch = std::clamp(_pitch + pitchShift, -kMaxPitch, kMaxPitch);
 	_dragYawVelocity = yawShift / dt;
 	_dragPitchVelocity = pitchShift / dt;
+	_dragYawTotal += yawShift;
+	_dragPitchTotal += pitchShift;
 	_lastDragPos = pos;
 	_lastDragTime = now;
 }
@@ -286,6 +293,10 @@ void Star::mouseReleaseEvent(QMouseEvent *e) {
 		_dragPitchVelocity,
 		-kMaxDragVelocity,
 		kMaxDragVelocity);
+	const auto magnitude = std::abs(_dragYawTotal) + std::abs(_dragPitchTotal);
+	if (magnitude > 0.) {
+		_flung.fire_copy(magnitude);
+	}
 }
 
 } // namespace Ui::Premium
