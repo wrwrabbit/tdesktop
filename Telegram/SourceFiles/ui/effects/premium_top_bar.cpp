@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/effects/premium_graphics.h"
 #include "ui/effects/premium_star.h"
+#include "ui/effects/premium_star_particles.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/rect.h"
@@ -28,6 +29,8 @@ constexpr auto kTitleAdditionalScale = 0.15;
 constexpr auto kMinAcceptableContrast = 4.5; // 1.14;
 
 constexpr auto kStar3dScale = 2.;
+
+constexpr auto kStarParticlesFieldScale = 2.2;
 
 [[nodiscard]] QImage ScaleTo(QImage image) {
 	using namespace style;
@@ -123,6 +126,13 @@ TopBar::TopBar(
 			: MiniStarsType::BiStars) {
 	if (descriptor.use3dStar && Star::Supported()) {
 		_star3d = CreateChild<Star>(this);
+		_starParticles3d = std::make_unique<StarParticles>([=](
+				const QRect &area) {
+			update(area);
+		});
+		_star3d->flungStrength() | rpl::on_next([=](float64 strength) {
+			_starParticles3d->fling(strength);
+		}, lifetime());
 	}
 
 	std::move(
@@ -183,13 +193,14 @@ TopBar::TopBar(
 				_star3d->setColors(
 					QColor(255, 255, 255),
 					QColor(0xE3, 0xEC, 0xFA));
+				_starParticles3d->setColor(QColor(255, 255, 255));
 			} else {
 				const auto stops = descriptor.gradientStops
 					? (*descriptor.gradientStops)
 					: Ui::Premium::ButtonGradientStops();
-				_star3d->setColors(
-					stops.front().second,
-					stops.back().second);
+				const auto middle = stops[stops.size() / 2].second;
+				_star3d->setColors(stops.front().second, middle);
+				_starParticles3d->setColor(middle);
 			}
 		}
 		auto event = QResizeEvent(size(), size());
@@ -217,6 +228,9 @@ void TopBar::setPaused(bool paused) {
 	_ministars.setPaused(paused);
 	if (_star3d) {
 		_star3d->setPaused(paused);
+	}
+	if (_starParticles3d) {
+		_starParticles3d->setPaused(paused);
 	}
 }
 
@@ -289,28 +303,40 @@ void TopBar::paintEvent(QPaintEvent *e) {
 		TopBarAbstract::paintEdges(p);
 	}
 
-	p.setOpacity(_progress.body);
-	p.translate(_starRect.center());
-	p.scale(_progress.body, _progress.body);
-	p.translate(-_starRect.center());
-	if (_progress.top) {
-		_ministars.paint(p);
-	}
-	if (_lottie) {
-		_lottie->paint(
-			p,
-			_starRect.left()
-				+ (_starRect.width() - _lottie->width()) / 2
-				- st::lineWidth * 6,
-			_starRect.top());
-		if (!_lottie->animating() && _lottie->frameIndex() > 0) {
-			_lottie->animate(
-				[=] { update(_starRect.toRect() + Margins(st::lineWidth)); },
-				0,
-				_lottie->framesCount() - 1);
+	if (_starParticles3d) {
+		if (_progress.top) {
+			auto field = Rect(_starRect.size() * kStarParticlesFieldScale);
+			field.moveCenter(rect::center(_starRect));
+			p.setOpacity(_progress.body);
+			_starParticles3d->paint(p, field);
+			p.setOpacity(1.);
 		}
+	} else {
+		p.setOpacity(_progress.body);
+		p.translate(rect::center(_starRect));
+		p.scale(_progress.body, _progress.body);
+		p.translate(-rect::center(_starRect));
+		if (_progress.top) {
+			_ministars.paint(p);
+		}
+		if (_lottie) {
+			_lottie->paint(
+				p,
+				_starRect.left()
+					+ (_starRect.width() - _lottie->width()) / 2
+					- st::lineWidth * 6,
+				_starRect.top());
+			if (!_lottie->animating() && _lottie->frameIndex() > 0) {
+				_lottie->animate(
+					[=] {
+						update(_starRect.toRect() + Margins(st::lineWidth));
+					},
+					0,
+					_lottie->framesCount() - 1);
+			}
+		}
+		p.resetTransform();
 	}
-	p.resetTransform();
 
 
 	if (!_dollar.isNull()) {

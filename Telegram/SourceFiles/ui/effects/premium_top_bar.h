@@ -30,6 +30,7 @@ class Icon;
 namespace Ui::Premium {
 
 class Star;
+class StarParticles;
 
 class TopBarAbstract : public RpWidget {
 public:
@@ -106,6 +107,7 @@ private:
 	QImage _dollar;
 	std::unique_ptr<Lottie::Icon> _lottie;
 	Star *_star3d = nullptr;
+	std::unique_ptr<StarParticles> _starParticles3d;
 
 	struct {
 		float64 top = 0.;
