@@ -2722,6 +2722,22 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		return;
 	}
 	const auto controller = _controller;
+	const auto canViewMessageStats = [&](HistoryItem *item) {
+		if (!item
+			|| item->isService()
+			|| !peerIsChannel(item->fullId().peer)
+			|| _peer->isMegagroup()) {
+			return false;
+		}
+		const auto channel = _peer->asChannel();
+		if (!channel) {
+			return false;
+		}
+		constexpr auto kMinViewsCount = 10;
+		return ((channel->flags() & ChannelDataFlag::CanGetStatistics)
+			|| (channel->canPostMessages()
+				&& item->viewsCount() >= kMinViewsCount));
+	};
 	const auto addItemActions = [&](
 			HistoryItem *item,
 			HistoryItem *albumPartItem) {
@@ -2806,24 +2822,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				Window::ToggleMessagePinned(controller, pinItemId, !isPinned);
 			}), isPinned ? &st::menuIconUnpin : &st::menuIconPin);
 		}
-		if (!item->isService()
-			&& peerIsChannel(itemId.peer)
-			&& !_peer->isMegagroup()) {
-			constexpr auto kMinViewsCount = 10;
-			if (const auto channel = _peer->asChannel()) {
-				if ((channel->flags() & ChannelDataFlag::CanGetStatistics)
-					|| (channel->canPostMessages()
-						&& item->viewsCount() >= kMinViewsCount)) {
-					auto callback = crl::guard(controller, [=] {
-						controller->showSection(
-							Info::Statistics::Make(channel, itemId, {}));
-					});
-					_menu->addAction(
-						tr::lng_stats_title(tr::now),
-						std::move(callback),
-						&st::menuIconStats);
-				}
-			}
+		if (canViewMessageStats(item)) {
+			const auto channel = _peer->asChannel();
+			auto callback = crl::guard(controller, [=] {
+				controller->showSection(
+					Info::Statistics::Make(channel, itemId, {}));
+			});
+			_menu->addAction(
+				tr::lng_stats_title(tr::now),
+				std::move(callback),
+				&st::menuIconStats);
 		}
 	};
 	const auto addPhotoActions = [&](not_null<PhotoData*> photo, HistoryItem *item) {
@@ -3323,7 +3331,8 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 							item,
 							HistoryView::Context::History,
 							_controller,
-							!pollOptionLink.isEmpty());
+							!pollOptionLink.isEmpty(),
+							canViewMessageStats(item));
 					} else if (const auto contact = media->sharedContact()) {
 						const auto phone = contact->phoneNumber;
 						_menu->addAction(tr::lng_profile_copy_phone(tr::now), [=] {

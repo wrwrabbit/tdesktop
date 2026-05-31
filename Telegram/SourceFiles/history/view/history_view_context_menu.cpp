@@ -1932,7 +1932,8 @@ void AddPollActions(
 		not_null<HistoryItem*> item,
 		Context context,
 		not_null<Window::SessionController*> controller,
-		bool skipRetractVote) {
+		bool skipRetractVote,
+		bool skipViewStats) {
 	{
 		constexpr auto kRadio = "\xf0\x9f\x94\x98";
 		const auto radio = QString::fromUtf8(kRadio);
@@ -1959,7 +1960,7 @@ void AddPollActions(
 		return;
 	}
 	const auto itemId = item->fullId();
-	if (poll->canViewStats() && item->isRegular()) {
+	if (poll->canViewStats() && item->isRegular() && !skipViewStats) {
 		menu->addAction(tr::lng_polls_view_stats(tr::now), [=] {
 			ShowPollStatsBox(controller, itemId);
 		}, &st::menuIconStats);
