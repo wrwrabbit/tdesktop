@@ -4511,13 +4511,7 @@ std::unique_ptr<QMimeData> ListWidget::prepareDrag() {
 				pressedHandler->property(
 					kPhotoLinkMediaProperty).toULongLong());
 			if (lnkPhoto) {
-				photoData = PreparePhotoDragData(
-					lnkPhoto,
-					exactItem ? exactItem->date() : TimeId(0));
-				if (!photoData.tempPath.isEmpty()) {
-					urls.push_back(
-						QUrl::fromLocalFile(photoData.tempPath));
-				}
+				photoData = PreparePhotoDragData(lnkPhoto);
 			}
 		}
 
@@ -4527,8 +4521,7 @@ std::unique_ptr<QMimeData> ListWidget::prepareDrag() {
 			return nullptr;
 		}
 
-		auto result = std::make_unique<DragMimeData>(
-			std::move(photoData.tempPath));
+		auto result = std::make_unique<QMimeData>();
 		if (!forwardIds.empty()) {
 			session().data().setMimeForwardIds(std::move(forwardIds));
 			result->setData(u"application/x-td-forward"_q, "1");
@@ -4536,9 +4529,7 @@ std::unique_ptr<QMimeData> ListWidget::prepareDrag() {
 		if (!urls.isEmpty()) {
 			result->setUrls(urls);
 		}
-		if (!photoData.image.isNull()) {
-			result->setImageData(std::move(photoData.image));
-		}
+		FillDragMimeWithPhoto(result.get(), std::move(photoData));
 		return result;
 	}
 	return nullptr;
