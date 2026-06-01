@@ -313,6 +313,11 @@ Photo::Photo(
 			maybeClearSensitiveSpoiler();
 		})),
 		parent)
+	: _spoiler
+	? std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+		clearSpoiler();
+		_link = makeOpenPhotoHandler();
+	}))
 	: makeOpenPhotoHandler()) {
 	if (_data->inlineThumbnailBytes().isEmpty()
 		&& (_data->hasExact(Data::PhotoSize::Small)
@@ -515,6 +520,11 @@ Video::Video(
 				setDocumentLinks(_data);
 			})),
 			parent);
+	} else if (_spoiler) {
+		_openl = std::make_shared<LambdaClickHandler>(crl::guard(this, [=] {
+			clearSpoiler();
+			setDocumentLinks(_data);
+		}));
 	}
 	if (!_videoCover) {
 		_data->loadThumbnail(parent->fullId());
