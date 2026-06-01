@@ -1713,7 +1713,7 @@ void Panel::sendExternalShellBootstrap() {
 	const auto params = _delegate->botThemeParams();
 	sendExternalShellMethod("bootstrap", {
 		{ u"url"_q, _externalUrl },
-		{ u"sameOrigin"_q, _sameOrigin },
+		{ u"sameOrigin"_q, bool(_sameOrigin) },
 		{ u"initialOrigin"_q, _initialOrigin },
 		{ u"title"_q, _externalTitle },
 		{ u"metrics"_q, LinuxShell::Metrics() },

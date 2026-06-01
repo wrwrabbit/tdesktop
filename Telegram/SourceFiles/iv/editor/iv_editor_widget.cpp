@@ -1425,7 +1425,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			cursor.setPosition(std::clamp(
 				offset,
 				0,
-				_field->getLastText().size()));
+				int(_field->getLastText().size())));
 			_field->setTextCursor(cursor);
 			_field->setFocusFast();
 		} else if (targetOrdinal >= 0) {
@@ -1666,7 +1666,7 @@ void Widget::recreateInlineField(const style::InputField &st) {
 	refreshInlineFieldPlaceholder();
 	_field->setTextWithTags(text, Ui::InputField::HistoryAction::Clear);
 	auto restored = _field->textCursor();
-	const auto size = _field->getLastText().size();
+	const auto size = int(_field->getLastText().size());
 	const auto restoredAnchor = std::clamp(anchor, 0, size);
 	const auto restoredPosition = std::clamp(position, 0, size);
 	restored.setPosition(restoredAnchor);
@@ -1751,7 +1751,7 @@ void Widget::activateTextOrdinal(
 			Ui::InputField::HistoryAction::Clear);
 	}
 	auto cursor = _field->textCursor();
-	const auto size = _field->getLastText().size();
+	const auto size = int(_field->getLastText().size());
 	const auto from = std::clamp(selectionFrom, 0, size);
 	const auto to = std::clamp(selectionTo, 0, size);
 	cursor.setPosition(from);

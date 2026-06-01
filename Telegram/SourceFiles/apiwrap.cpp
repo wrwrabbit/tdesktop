@@ -4118,7 +4118,7 @@ void ApiWrap::sendRichMessage(
 			draftTopicRootId,
 			draftMonoforumPeerId);
 	}
-	if (const auto sendAs = action.options.sendAs) {
+	if (action.options.sendAs) {
 		sendFlags |= Flag::f_send_as;
 	}
 	if (action.options.scheduled) {
