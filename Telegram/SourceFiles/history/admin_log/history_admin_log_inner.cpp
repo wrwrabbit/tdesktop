@@ -1286,7 +1286,7 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 		}
 	}
 
-	for (const auto item : newItems) {
+	for (const auto &item : newItems) {
 		const auto replyTo = item->replyToFullId();
 		if (replyTo.peer != _history->peer->id) {
 			continue;
