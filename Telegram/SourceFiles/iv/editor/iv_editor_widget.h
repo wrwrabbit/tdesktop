@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <vector>
 
 class QEvent;
+class QInputMethodEvent;
 class QKeyEvent;
 class QObject;
 class QTouchEvent;
@@ -68,7 +69,10 @@ protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 	bool eventHook(QEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
+	bool focusNextPrevChild(bool next) override;
 	void keyPressEvent(QKeyEvent *e) override;
+	void inputMethodEvent(QInputMethodEvent *e) override;
+	QVariant inputMethodQuery(Qt::InputMethodQuery query) const override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
@@ -158,11 +162,20 @@ private:
 	void acceptInlineField();
 	void hideInlineFieldAndRefresh();
 	void activateTextOrdinalAtEnd(int ordinal);
+	[[nodiscard]] bool redirectKeyToField(QKeyEvent *e) const;
+	[[nodiscard]] bool redirectImeToField() const;
+	[[nodiscard]] bool prepareFieldForInput();
+	[[nodiscard]] std::optional<int> removeCurrentStructuralSelection(
+		bool forward);
+	[[nodiscard]] bool replayKeyIntoField(QKeyEvent *e);
+	[[nodiscard]] bool replayImeIntoField(QInputMethodEvent *e);
+	[[nodiscard]] bool handleTabNavigation(QKeyEvent *e);
 	[[nodiscard]] bool handleFieldKey(QKeyEvent *e);
 	[[nodiscard]] bool moveBoundary(bool forward, bool allowTrailing);
 	[[nodiscard]] bool moveBoundaryAfterCommit(
 		bool forward,
 		bool allowTrailing);
+	[[nodiscard]] bool moveTabBoundary(bool forward);
 	[[nodiscard]] bool removeBoundaryOwner(bool forward);
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();

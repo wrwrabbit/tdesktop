@@ -23,6 +23,11 @@ namespace tr {
 struct now_t;
 } // namespace tr
 
+class DocumentData;
+class HistoryItem;
+class PeerData;
+class UserData;
+
 namespace Main {
 class Session;
 class SessionShow;

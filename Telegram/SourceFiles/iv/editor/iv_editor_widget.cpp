@@ -8,38 +8,41 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_widget.h"
 
 #include "base/qt/qt_common_adapters.h"
-#include "data/data_msg_id.h"
-#include "ui/image/image_location.h"
-#include "data/data_types.h"
 #include "chat_helpers/message_field.h"
+#include "data/data_msg_id.h"
+#include "data/data_types.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
+#include "ui/image/image_location.h"
 #include "ui/painter.h"
 #include "ui/text/text_entity.h"
 #include "ui/ui_utility.h"
 #include "ui/widgets/fields/input_field.h"
+#include "window/window_session_controller.h"
+
 #include "styles/palette.h"
 #include "styles/style_chat.h"
 #include "styles/style_iv.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtCore/QDate>
 #include <QtCore/QEvent>
 #include <QtCore/QPointer>
 #include <QtGui/QFocusEvent>
+#include <QtGui/QInputMethodEvent>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
+#include <QtGui/QTextBlock>
 #include <QtGui/QTouchEvent>
 #include <QtGui/QWheelEvent>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
-
-#include "window/window_session_controller.h"
 
 #include <algorithm>
 #include <cmath>
@@ -141,6 +144,23 @@ void EnableQTextEditLineMetrics(style::Markdown &style) {
 		.segment = hit.segmentIndex,
 		.direct = hit.direct,
 	};
+}
+
+[[nodiscard]] bool RedirectTextToField(const QString &text) {
+	for (const auto &ch : text) {
+		if (ch.unicode() >= 32) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] bool ImeEventProducesInput(
+		const QInputMethodEvent &e,
+		const QTextCursor &cursor) {
+	return !e.commitString().isEmpty()
+		|| e.preeditString() != cursor.block().layout()->preeditAreaText()
+		|| e.replacementLength() > 0;
 }
 
 using PreparedEditBlockContainerPath
@@ -641,6 +661,16 @@ Widget::Widget(
 	setMouseTracking(true);
 	setAttribute(Qt::WA_AcceptTouchEvents);
 	setFocusPolicy(Qt::StrongFocus);
+	setAttribute(Qt::WA_InputMethodEnabled);
+
+	_controller->imeCompositionStarts(
+	) | rpl::filter([=] {
+		return redirectImeToField();
+	}) | rpl::on_next([=] {
+		if (prepareFieldForInput()) {
+			_field->setFocusFast();
+		}
+	}, lifetime());
 
 	Spellchecker::HighlightReady(
 	) | rpl::on_next([=](Spellchecker::HighlightProcessId processId) {
@@ -700,6 +730,38 @@ void Widget::activateSegment(int segmentIndex, int cursorOffset) {
 		return;
 	}
 	activateTextOrdinal(ordinal, cursorOffset);
+}
+
+bool Widget::prepareFieldForInput() {
+	if (hasStructuralSelection()) {
+		if (const auto target = removeCurrentStructuralSelection(true)) {
+			activateTextOrdinal(*target, 0);
+		} else {
+			activateInitialNode();
+		}
+	} else if (_field->isHidden()) {
+		activateInitialNode();
+	}
+	return !_field->isHidden();
+}
+
+bool Widget::replayKeyIntoField(QKeyEvent *e) {
+	if (!RedirectTextToField(e->text()) || !prepareFieldForInput()) {
+		return false;
+	}
+	_field->setFocusFast();
+	QCoreApplication::sendEvent(_field->rawTextEdit(), e);
+	return true;
+}
+
+bool Widget::replayImeIntoField(QInputMethodEvent *e) {
+	const auto cursor = _field->rawTextEdit()->textCursor();
+	if (!ImeEventProducesInput(*e, cursor) || !prepareFieldForInput()) {
+		return false;
+	}
+	_field->setFocusFast();
+	QCoreApplication::sendEvent(_field->rawTextEdit(), e);
+	return true;
 }
 
 void Widget::commitInlineField() {
@@ -821,7 +883,8 @@ bool Widget::eventFilter(QObject *object, QEvent *event) {
 				}
 			} else if (type == QEvent::KeyPress) {
 				const auto keyEvent = static_cast<QKeyEvent*>(event);
-				if (handleStructuralSelectionKey(keyEvent)
+				if (handleTabNavigation(keyEvent)
+					|| handleStructuralSelectionKey(keyEvent)
 					|| handleFieldKey(keyEvent)) {
 					return true;
 				}
@@ -862,8 +925,20 @@ void Widget::focusInEvent(QFocusEvent *e) {
 	}
 }
 
+bool Widget::focusNextPrevChild(bool next) {
+	if (hasFocus() && _field->isHidden() && moveTabBoundary(next)) {
+		return true;
+	}
+	return Ui::RpWidget::focusNextPrevChild(next);
+}
+
 void Widget::keyPressEvent(QKeyEvent *e) {
 	if (handleStructuralSelectionKey(e)) {
+		return;
+	} else if (_field->isHidden() && handleTabNavigation(e)) {
+		return;
+	} else if (redirectKeyToField(e) && replayKeyIntoField(e)) {
+		e->accept();
 		return;
 	}
 	Ui::RpWidget::keyPressEvent(e);
@@ -989,6 +1064,39 @@ void Widget::wheelEvent(QWheelEvent *e) {
 		return;
 	}
 	e->ignore();
+}
+
+bool Widget::redirectKeyToField(QKeyEvent *e) const {
+	if (!hasFocus()) {
+		return false;
+	}
+	const auto modifiers = e->modifiers()
+		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
+	return (modifiers == Qt::NoModifier || modifiers == Qt::ShiftModifier)
+		&& (e->key() != Qt::Key_Shift)
+		&& RedirectTextToField(e->text());
+}
+
+void Widget::inputMethodEvent(QInputMethodEvent *e) {
+	const auto cursor = _field->rawTextEdit()->textCursor();
+	if (!ImeEventProducesInput(*e, cursor) || !redirectImeToField()) {
+		Ui::RpWidget::inputMethodEvent(e);
+		return;
+	}
+	if (!replayImeIntoField(e)) {
+		Ui::RpWidget::inputMethodEvent(e);
+		return;
+	}
+	e->accept();
+	return;
+}
+
+QVariant Widget::inputMethodQuery(Qt::InputMethodQuery query) const {
+	return _field->rawTextEdit()->inputMethodQuery(query);
+}
+
+bool Widget::redirectImeToField() const {
+	return hasFocus() && (hasStructuralSelection() || _field->isHidden());
 }
 
 void Widget::mouseMoveEvent(QMouseEvent *e) {
@@ -1625,9 +1733,6 @@ void Widget::activateTextOrdinalAtEnd(int ordinal) {
 }
 
 bool Widget::handleFieldKey(QKeyEvent *e) {
-	if (handleStructuralSelectionKey(e)) {
-		return true;
-	}
 	if (_field->isHidden()) {
 		return false;
 	}
@@ -1668,6 +1773,25 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 		e->accept();
 	}
 	return handled;
+}
+
+bool Widget::handleTabNavigation(QKeyEvent *e) {
+	const auto key = e->key();
+	if (key != Qt::Key_Tab && key != Qt::Key_Backtab) {
+		return false;
+	}
+	const auto modifiers = e->modifiers()
+		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
+	if (modifiers != Qt::NoModifier && modifiers != Qt::ShiftModifier) {
+		return false;
+	}
+	const auto forward = (key != Qt::Key_Backtab)
+		&& (modifiers != Qt::ShiftModifier);
+	if (!moveTabBoundary(forward)) {
+		return false;
+	}
+	e->accept();
+	return true;
 }
 
 bool Widget::moveBoundary(bool forward, bool allowTrailing) {
@@ -1717,6 +1841,28 @@ bool Widget::moveBoundaryAfterCommit(bool forward, bool allowTrailing) {
 		return true;
 	}
 	return false;
+}
+
+bool Widget::moveTabBoundary(bool forward) {
+	if (!_field->isHidden()) {
+		commitInlineField();
+	}
+	const auto target = forward
+		? _state->nextEditableOrdinal()
+		: _state->previousEditableOrdinal();
+	if (target) {
+		clearSelection();
+		refreshPreparedContent();
+		activateTextOrdinalAtEnd(*target);
+		return true;
+	} else if (!forward || _state->isActiveTopLevelParagraph()) {
+		return false;
+	}
+	clearSelection();
+	const auto ordinal = _state->ensureTrailingParagraphActive();
+	refreshPreparedContent();
+	activateTextOrdinalAtEnd(ordinal);
+	return true;
 }
 
 bool Widget::removeBoundaryOwner(bool forward) {
@@ -2111,17 +2257,7 @@ bool Widget::handleStructuralSelectionKey(QKeyEvent *e) {
 	if (!forward && key != Qt::Key_Backspace) {
 		return false;
 	}
-	const auto selection = _structuralSelection;
-	commitInlineField();
-	_pendingOrdinal = -1;
-	_pendingCursorOffset = 0;
-	hideInlineField();
-	_article->clearTextLeafHeightOverride();
-	const auto target = _state->removeStructuralSelection(
-		selection,
-		forward);
-	clearSelection();
-	refreshPreparedContent();
+	const auto target = removeCurrentStructuralSelection(forward);
 	if (target) {
 		if (forward) {
 			activateTextOrdinal(*target, 0);
@@ -2133,6 +2269,24 @@ bool Widget::handleStructuralSelectionKey(QKeyEvent *e) {
 	}
 	e->accept();
 	return true;
+}
+
+std::optional<int> Widget::removeCurrentStructuralSelection(bool forward) {
+	if (!hasStructuralSelection()) {
+		return std::nullopt;
+	}
+	const auto selection = _structuralSelection;
+	commitInlineField();
+	_pendingOrdinal = -1;
+	_pendingCursorOffset = 0;
+	hideInlineField();
+	_article->clearTextLeafHeightOverride();
+	const auto target = _state->removeStructuralSelection(
+		selection,
+		forward);
+	clearSelection();
+	refreshPreparedContent();
+	return target;
 }
 
 bool Widget::handleFieldMouseEvent(QEvent *event) {

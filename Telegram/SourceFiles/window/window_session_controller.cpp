@@ -1850,6 +1850,10 @@ not_null<::MainWindow*> SessionController::widget() const {
 	return _window->widget();
 }
 
+rpl::producer<> SessionController::imeCompositionStarts() const {
+	return widget()->imeCompositionStarts();
+}
+
 auto SessionController::sendingAnimation() const
 -> Ui::MessageSendingAnimationController & {
 	return *_sendingAnimation;
