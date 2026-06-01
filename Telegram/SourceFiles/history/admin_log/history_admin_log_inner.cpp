@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/admin_log/history_admin_log_filter.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_message.h"
+#include "history/view/history_view_reply.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_cursor_state.h"
 #include "chat_helpers/message_field.h"
@@ -270,6 +271,10 @@ InnerWidget::InnerWidget(
 	HistoryView::MakePathShiftGradient(
 		controller->chatStyle(),
 		[=] { update(); }))
+, _highlighter(
+	&_history->owner(),
+	[=](const HistoryItem *item) { return viewForItem(item); },
+	[=](const Element *view) { repaintItem(view); })
 , _scrollDateCheck([=] { scrollDateCheck(); })
 , _emptyText(
 		st::historyAdminLogEmptyWidth
@@ -858,6 +863,74 @@ not_null<Ui::PathShiftGradient*> InnerWidget::elementPathShiftGradient() {
 }
 
 void InnerWidget::elementReplyTo(const FullReplyTo &to) {
+}
+
+void InnerWidget::jumpToMessageInLog(
+		not_null<HistoryItem*> item,
+		MessageHighlightId highlight) {
+	if (!viewForItem(item)) {
+		expandGroupContaining(item);
+	}
+	const auto view = viewForItem(item);
+	if (!view) {
+		return;
+	}
+	_highlighter.highlight({ item, highlight });
+
+	const auto top = itemTop(view);
+	const auto height = view->height();
+	const auto viewport = _visibleBottom - _visibleTop;
+	if (top >= _visibleTop && top + height <= _visibleBottom) {
+		return;
+	}
+	const auto from = _visibleTop;
+	const auto target = std::clamp(
+		top - std::max(0, (viewport - height) / 2),
+		0,
+		std::max(0, this->height() - viewport));
+	if (from == target) {
+		return;
+	}
+	_scrollToAnimation.stop();
+	_scrollToAnimation.start(
+		[=] {
+			_scrollToSignal.fire_copy(
+				anim::interpolate(
+					from,
+					target,
+					_scrollToAnimation.value(1.)));
+		},
+		0.,
+		1.,
+		st::slideDuration,
+		anim::easeOutCubic);
+}
+
+void InnerWidget::expandGroupContaining(not_null<HistoryItem*> item) {
+	auto index = -1;
+	for (auto i = 0, count = int(_items.size()); i != count; ++i) {
+		if (_items[i]->data() == item) {
+			index = i;
+			break;
+		}
+	}
+	if (index < 0) {
+		return;
+	}
+	for (const auto &group : _deleteGroups) {
+		if (index < group.startIndex || index >= group.endIndex) {
+			continue;
+		}
+		if (group.eventCount > 3
+			&& !_expandedGroups.contains(group.eventId)) {
+			_expandedGroups.insert(group.eventId);
+			clearDisplayPointers(DisplayPointerScope::All);
+			_skipScrollRestore = true;
+			rebuildDisplayItems();
+			_skipScrollRestore = false;
+		}
+		return;
+	}
 }
 
 void InnerWidget::elementStartInteraction(not_null<const Element*> view) {
@@ -1811,6 +1884,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 
 	auto clip = e->rect();
 	auto context = preparePaintContext(clip);
+	context.highlightPathCache = &_highlightPathCache;
 	if (_items.empty() && _upLoaded && _downLoaded) {
 		paintEmpty(p, context.st);
 	} else {
@@ -1836,6 +1910,7 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 				context.selection = (view == _selectedItem)
 					? _selectedText
 					: TextSelection();
+				context.highlight = _highlighter.state(view->data());
 				view->draw(p, context);
 
 				const auto height = view->height();
@@ -1926,6 +2001,7 @@ void InnerWidget::clearAfterFilterChange() {
 	_eventIds.clear();
 	_itemsByData.clear();
 	_itemsByRealMsgId.clear();
+	_highlighter.clear();
 	updateEmptyText();
 	updateSize();
 }
@@ -2609,7 +2685,8 @@ void InnerWidget::mouseActionFinish(const QPoint &screenPos, Qt::MouseButton but
 		// Intercept inline keyboard button clicks on items
 		// with our expand button markup.
 		if (_mouseActionItem) {
-			const auto item = _mouseActionItem->data();
+			const auto view = _mouseActionItem;
+			const auto item = view->data();
 			if (dynamic_cast<ReplyMarkupClickHandler*>(activated.get())
 				&& _expandMarkupItems.contains(item)) {
 				const auto it = _itemEventIds.find(item);
@@ -2617,6 +2694,25 @@ void InnerWidget::mouseActionFinish(const QPoint &screenPos, Qt::MouseButton but
 					mouseActionCancel();
 					toggleDeleteGroup(it->second);
 					return;
+				}
+			}
+			if (const auto reply = view->Get<HistoryView::Reply>()
+				; reply && (activated == reply->link())) {
+				if (const auto data = item->Get<HistoryMessageReply>()) {
+					const auto to = data->resolvedMessage.get();
+					if (to && to->isAdminLogEntry()) {
+						const auto &fields = data->fields();
+						mouseActionCancel();
+						jumpToMessageInLog(to, {
+							.quote = (fields.manualQuote
+								? fields.quote
+								: TextWithEntities()),
+							.quoteOffset = int(fields.quoteOffset),
+							.todoItemId = fields.todoItemId,
+							.pollOption = fields.pollOption,
+						});
+						return;
+					}
 				}
 			}
 		}
