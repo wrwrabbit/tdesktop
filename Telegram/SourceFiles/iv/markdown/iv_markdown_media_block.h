@@ -65,12 +65,15 @@ public:
 	[[nodiscard]] virtual ClickHandlerPtr linkAt(QPoint point) const = 0;
 	[[nodiscard]] virtual MediaActivation activationAt(QPoint point) const = 0;
 	[[nodiscard]] virtual MediaBlockSelectionData selectionData() const = 0;
+	[[nodiscard]] virtual bool hasHeavyPart() const;
+	virtual void unloadHeavyPart();
 
 protected:
 	void requestRepaint(QRect articleRect) const;
 	void requestRelayout(QRect articleRect) const;
 	[[nodiscard]] const style::Markdown &layoutStyle() const;
 	virtual void layoutStyleUpdated();
+	virtual void hostUpdated();
 
 private:
 	MediaBlockHost *_host = nullptr;

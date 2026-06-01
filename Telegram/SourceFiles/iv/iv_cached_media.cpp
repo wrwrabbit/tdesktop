@@ -927,6 +927,11 @@ public:
 		FullMsgId itemId,
 		Fn<void(QString)> openChannel,
 		Fn<void(QString)> joinChannel);
+	CachedPageMediaRuntime(
+		not_null<Main::Session*> session,
+		not_null<HistoryView::Element*> view,
+		Fn<void(QString)> openChannel,
+		Fn<void(QString)> joinChannel);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> resolveInlineImage(
 			uint64 documentId,
@@ -972,6 +977,8 @@ private:
 	const ::Data::FileOrigin _origin;
 	const FullMsgId _itemId;
 	const QString _pageUrl;
+	const bool _useExistingView = false;
+	const base::weak_ptr<HistoryView::Element> _view;
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
 	mutable std::shared_ptr<Markdown::IvHistoryViewMediaHost> _hostedMediaHost;
@@ -1002,6 +1009,20 @@ CachedPageMediaRuntime::CachedPageMediaRuntime(
 , _origin(itemId)
 , _itemId(itemId)
 , _pageUrl()
+, _openChannel(std::move(openChannel))
+, _joinChannel(std::move(joinChannel)) {
+}
+
+CachedPageMediaRuntime::CachedPageMediaRuntime(
+	not_null<Main::Session*> session,
+	not_null<HistoryView::Element*> view,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+: _session(session)
+, _origin(view->data()->fullId())
+, _itemId(view->data()->fullId())
+, _useExistingView(true)
+, _view(base::make_weak(view.get()))
 , _openChannel(std::move(openChannel))
 , _joinChannel(std::move(joinChannel)) {
 }
@@ -1094,6 +1115,18 @@ QString CachedPageMediaRuntime::mentionNameEntityData(uint64 userId) const {
 auto CachedPageMediaRuntime::hostedMediaHost(
 		not_null<Window::SessionController*> controller) const
 -> std::shared_ptr<Markdown::IvHistoryViewMediaHost> {
+	if (_useExistingView) {
+		const auto view = _view.get();
+		if (!view) {
+			return nullptr;
+		}
+		if (!_hostedMediaHost) {
+			_hostedMediaHost
+				= std::make_shared<Markdown::IvHistoryViewMediaHost>(
+					not_null{ view });
+		}
+		return _hostedMediaHost;
+	}
 	if (_itemId) {
 		const auto item = _session->data().message(_itemId);
 		if (!item) {
@@ -1333,6 +1366,19 @@ auto CreateMessageMediaRuntime(
 	return std::make_shared<CachedPageMediaRuntime>(
 		session,
 		itemId,
+		std::move(openChannel),
+		std::move(joinChannel));
+}
+
+auto CreateMessageMediaRuntime(
+	not_null<Main::Session*> session,
+	not_null<HistoryView::Element*> view,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+-> std::shared_ptr<Markdown::MediaRuntime> {
+	return std::make_shared<CachedPageMediaRuntime>(
+		session,
+		view,
 		std::move(openChannel),
 		std::move(joinChannel));
 }

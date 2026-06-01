@@ -1841,7 +1841,9 @@ auto Element::contextDependentServiceText() -> TextWithLinks {
 void Element::validateText() {
 	const auto clearRichPage = [&] {
 		if (Has<HistoryMessageRichPage>()) {
-			RemoveComponents(HistoryMessageRichPage::Bit());
+			RemoveComponents(0
+				| HistoryMessageRichPage::Bit()
+				| InstantViewMediaRuntime::Bit());
 			invalidateTextSizeCache();
 		}
 	};
@@ -1853,7 +1855,9 @@ void Element::validateText() {
 			return;
 		}
 		if (!Has<HistoryMessageRichPage>()) {
-			AddComponents(HistoryMessageRichPage::Bit());
+			AddComponents(0
+				| HistoryMessageRichPage::Bit()
+				| InstantViewMediaRuntime::Bit());
 		}
 		const auto runtime = Get<HistoryMessageRichPage>();
 		const auto needsBinding = (runtime->article.mediaBlockHost()
@@ -1898,7 +1902,7 @@ void Element::validateText() {
 		runtime->page = std::move(page);
 		runtime->mediaRuntime = Iv::CreateMessageMediaRuntime(
 			session,
-			data()->fullId(),
+			not_null<Element*>{ this },
 			[](QString) {}, // openChannel
 			[](QString) {}); // joinChannel
 		auto prepared = Iv::Markdown::TryPrepareNativeInstantView({
@@ -2566,8 +2570,10 @@ auto Element::verticalRepaintRange() const -> VerticalRepaintRange {
 }
 
 bool Element::hasHeavyPart() const {
+	const auto rich = richpage();
 	return (_flags & Flag::HeavyCustomEmoji)
-		|| (_media && _media->hasHeavyPart());
+		|| (_media && _media->hasHeavyPart())
+		|| (rich && rich->article.hasHeavyPart());
 }
 
 void Element::checkHeavyPart() {
@@ -2737,6 +2743,9 @@ void Element::unloadHeavyPart() {
 	}
 	if (_media) {
 		_media->unloadHeavyPart();
+	}
+	if (const auto rich = richpage()) {
+		rich->article.unloadHeavyPart();
 	}
 	if (_flags & Flag::HeavyCustomEmoji) {
 		_flags &= ~Flag::HeavyCustomEmoji;
@@ -3162,6 +3171,10 @@ Element::~Element() {
 	if (_flags & Flag::HeavyCustomEmoji) {
 		_flags &= ~Flag::HeavyCustomEmoji;
 		_text.unloadPersistentAnimation();
+		checkHeavyPart();
+	}
+	if (const auto rich = richpage(); rich && rich->article.hasHeavyPart()) {
+		rich->article.unloadHeavyPart();
 		checkHeavyPart();
 	}
 	if (_data->mainView() == this) {

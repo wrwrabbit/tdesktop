@@ -189,6 +189,10 @@ public:
 
 	[[nodiscard]] MediaBlockSelectionData selectionData() const override;
 
+	[[nodiscard]] bool hasHeavyPart() const override;
+
+	void unloadHeavyPart() override;
+
 private:
 	[[nodiscard]] IvHistoryViewHit resolveHit(QPoint point) const;
 
@@ -204,11 +208,7 @@ private:
 
 	[[nodiscard]] bool supportsHitClassification();
 
-	void handleViewRepaint(QRect rect);
-
-	void handleItemRepaint();
-
-	void handleViewResize();
+	void hostUpdated() override;
 
 	const uint64 _stableId = 0;
 	const IvHistoryViewMediaKind _kind = IvHistoryViewMediaKind::Map;
@@ -218,12 +218,11 @@ private:
 	const std::shared_ptr<DocumentRuntime> _documentRuntime;
 	const std::shared_ptr<IvHistoryViewMediaHost> _host;
 	const std::vector<std::shared_ptr<void>> _keepAlive;
-	const not_null<::Data::Session*> _session;
 	std::unique_ptr<HistoryView::Media> _media;
-	rpl::lifetime _lifetime;
 	QRect _geometry;
 	int _requestedWidth = 0;
 	bool _supported = false;
+	MediaBlockHost *_registeredBridgeHost = nullptr;
 };
 
 IvHistoryViewBlock::IvHistoryViewBlock(
@@ -235,8 +234,7 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 , _photoRuntime(std::move(descriptor.photo))
 , _documentRuntime(std::move(descriptor.document))
 , _host(std::move(descriptor.host))
-, _keepAlive(std::move(descriptor.keepAlive))
-, _session(_host->session()) {
+, _keepAlive(std::move(descriptor.keepAlive)) {
 	if (descriptor.mediaFactory) {
 		_media = descriptor.mediaFactory(_host->view());
 	}
@@ -244,30 +242,6 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 		_media->initDimensions();
 	}
 	_supported = _media && probeSupport();
-	_session->itemRepaintRequest(
-	) | rpl::filter([=](not_null<const HistoryItem*> item) {
-		return (item == _host->item());
-	}) | rpl::on_next([=](not_null<const HistoryItem*>) {
-		handleItemRepaint();
-	}, _lifetime);
-	_session->itemResizeRequest(
-	) | rpl::filter([=](not_null<const HistoryItem*> item) {
-		return (item == _host->item());
-	}) | rpl::on_next([=](not_null<const HistoryItem*>) {
-		handleViewResize();
-	}, _lifetime);
-	_session->viewRepaintRequest(
-	) | rpl::filter([=](::Data::RequestViewRepaint data) {
-		return (data.view == _host->view());
-	}) | rpl::on_next([=](::Data::RequestViewRepaint data) {
-		handleViewRepaint(data.rect);
-	}, _lifetime);
-	_session->viewResizeRequest(
-	) | rpl::filter([=](not_null<HistoryView::Element*> view) {
-		return (view == _host->view());
-	}) | rpl::on_next([=](not_null<HistoryView::Element*>) {
-		handleViewResize();
-	}, _lifetime);
 }
 
 uint64 IvHistoryViewBlock::stableId() const {
@@ -337,6 +311,20 @@ MediaBlockSelectionData IvHistoryViewBlock::selectionData() const {
 	return {
 		.copyText = _copyText,
 	};
+}
+
+bool IvHistoryViewBlock::hasHeavyPart() const {
+	return _media && _media->hasHeavyPart();
+}
+
+void IvHistoryViewBlock::unloadHeavyPart() {
+	const auto had = hasHeavyPart();
+	if (_media) {
+		_media->unloadHeavyPart();
+	}
+	if (had) {
+		_host->view()->checkHeavyPart();
+	}
 }
 
 IvHistoryViewHit IvHistoryViewBlock::resolveHit(QPoint point) const {
@@ -466,30 +454,17 @@ bool IvHistoryViewBlock::supportsHitClassification() {
 	return true;
 }
 
-void IvHistoryViewBlock::handleViewRepaint(QRect rect) {
-	Q_UNUSED(rect);
-	requestRepaint(QRect());
-}
-
-void IvHistoryViewBlock::handleItemRepaint() {
-	requestRepaint(QRect());
-}
-
-void IvHistoryViewBlock::handleViewResize() {
-	if (!_media) {
+void IvHistoryViewBlock::hostUpdated() {
+	const auto current = host();
+	if (_registeredBridgeHost == current) {
 		return;
 	}
-	const auto previous = _media->currentSize();
-	if (_requestedWidth > 0) {
-		_media->resizeGetHeight(_requestedWidth);
+	if (_registeredBridgeHost) {
+		_host->unregisterViewRequestBridge(_registeredBridgeHost);
 	}
-	if (_geometry.isEmpty()) {
-		return;
-	}
-	if (_media->currentSize() != previous) {
-		requestRelayout(_geometry);
-	} else {
-		requestRepaint(QRect());
+	_registeredBridgeHost = current;
+	if (_registeredBridgeHost) {
+		_host->registerViewRequestBridge(_registeredBridgeHost);
 	}
 }
 
@@ -503,6 +478,7 @@ struct IvHistoryViewMediaHost::State {
 	State(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item);
+	explicit State(not_null<HistoryView::Element*> view);
 
 	const not_null<::Data::Session*> session;
 	const QString pageUrl;
@@ -510,7 +486,11 @@ struct IvHistoryViewMediaHost::State {
 	const not_null<HistoryItem*> item;
 	AdminLog::OwnedItem owned;
 	std::unique_ptr<HistoryView::Element> realView;
-	HistoryView::Message *view = nullptr;
+	HistoryView::Element *view = nullptr;
+	bool needsViewRequestBridge = true;
+	MediaBlockHost *bridgeHost = nullptr;
+	int bridgeHostReferences = 0;
+	rpl::lifetime bridgeLifetime;
 };
 
 IvHistoryViewMediaHost::State::State(
@@ -530,7 +510,8 @@ IvHistoryViewMediaHost::State::State(
 , item(CreateIvHostMessage(history, this->pageUrl))
 , owned(delegate.get(), item)
 , view(static_cast<HistoryView::Message*>(owned.get())) {
-	view->setInstantViewMediaRuntime(this->pageUrl);
+	static_cast<HistoryView::Message*>(view)->setInstantViewMediaRuntime(
+		this->pageUrl);
 }
 
 IvHistoryViewMediaHost::State::State(
@@ -548,7 +529,16 @@ IvHistoryViewMediaHost::State::State(
 , item(item)
 , realView(this->item->createView(delegate.get()))
 , view(static_cast<HistoryView::Message*>(realView.get())) {
-	view->setInstantViewMediaRuntime(this->pageUrl);
+	static_cast<HistoryView::Message*>(view)->setInstantViewMediaRuntime(
+		this->pageUrl);
+}
+
+IvHistoryViewMediaHost::State::State(
+	not_null<HistoryView::Element*> view)
+: session(&view->history()->owner())
+, item(view->data())
+, view(view.get())
+, needsViewRequestBridge(false) {
 }
 
 IvHistoryViewMediaHost::IvHistoryViewMediaHost(
@@ -567,6 +557,11 @@ IvHistoryViewMediaHost::IvHistoryViewMediaHost(
 : _state(std::make_unique<State>(controller, item)) {
 }
 
+IvHistoryViewMediaHost::IvHistoryViewMediaHost(
+	not_null<HistoryView::Element*> view)
+: _state(std::make_unique<State>(view)) {
+}
+
 IvHistoryViewMediaHost::~IvHistoryViewMediaHost() = default;
 
 not_null<::Data::Session*> IvHistoryViewMediaHost::session() const {
@@ -577,12 +572,60 @@ not_null<HistoryItem*> IvHistoryViewMediaHost::item() const {
 	return _state->item;
 }
 
-not_null<HistoryView::Message*> IvHistoryViewMediaHost::view() const {
-	return not_null<HistoryView::Message*>{ _state->view };
+not_null<HistoryView::Element*> IvHistoryViewMediaHost::view() const {
+	return not_null<HistoryView::Element*>{ _state->view };
 }
 
 const QString &IvHistoryViewMediaHost::pageUrl() const {
 	return _state->pageUrl;
+}
+
+bool IvHistoryViewMediaHost::needsViewRequestBridge() const {
+	return _state->needsViewRequestBridge;
+}
+
+void IvHistoryViewMediaHost::registerViewRequestBridge(MediaBlockHost *host) {
+	if (!host || !_state->needsViewRequestBridge) {
+		return;
+	}
+	if (_state->bridgeHost == host) {
+		++_state->bridgeHostReferences;
+		return;
+	}
+	_state->bridgeLifetime.destroy();
+	_state->bridgeHost = host;
+	_state->bridgeHostReferences = 1;
+	_state->session->viewRepaintRequest(
+	) | rpl::filter([=](::Data::RequestViewRepaint data) {
+		return (data.view == _state->view);
+	}) | rpl::on_next([=](::Data::RequestViewRepaint) {
+		if (_state->bridgeHost) {
+			_state->bridgeHost->requestRepaint(QRect());
+		}
+	}, _state->bridgeLifetime);
+	_state->session->viewResizeRequest(
+	) | rpl::filter([=](not_null<HistoryView::Element*> view) {
+		return (view == _state->view);
+	}) | rpl::on_next([=](not_null<HistoryView::Element*>) {
+		if (_state->bridgeHost) {
+			_state->bridgeHost->requestRelayout(QRect());
+		}
+	}, _state->bridgeLifetime);
+}
+
+void IvHistoryViewMediaHost::unregisterViewRequestBridge(MediaBlockHost *host) {
+	if (!host
+		|| !_state->needsViewRequestBridge
+		|| _state->bridgeHost != host) {
+		return;
+	}
+	--_state->bridgeHostReferences;
+	if (_state->bridgeHostReferences > 0) {
+		return;
+	}
+	_state->bridgeHostReferences = 0;
+	_state->bridgeHost = nullptr;
+	_state->bridgeLifetime.destroy();
 }
 
 void IvHistoryViewMediaHost::registerPhoto(not_null<PhotoData*> photo) const {

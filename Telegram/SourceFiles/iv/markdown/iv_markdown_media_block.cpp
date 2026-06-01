@@ -1770,11 +1770,22 @@ const GroupedMediaBlock::ItemState *GroupedMediaBlock::activeItem() const {
 MediaBlock::~MediaBlock() = default;
 
 void MediaBlock::setHost(MediaBlockHost *host) {
+	if (_host == host) {
+		return;
+	}
 	_host = host;
+	hostUpdated();
 }
 
 MediaBlockHost *MediaBlock::host() const {
 	return _host;
+}
+
+bool MediaBlock::hasHeavyPart() const {
+	return false;
+}
+
+void MediaBlock::unloadHeavyPart() {
 }
 
 void MediaBlock::setLayoutStyle(const style::Markdown &st) {
@@ -1802,6 +1813,9 @@ void MediaBlock::requestRelayout(QRect articleRect) const {
 }
 
 void MediaBlock::layoutStyleUpdated() {
+}
+
+void MediaBlock::hostUpdated() {
 }
 
 std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(

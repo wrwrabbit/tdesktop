@@ -1785,6 +1785,10 @@ public:
 
 	void invalidateRasterCache();
 
+	[[nodiscard]] bool hasHeavyPart() const;
+
+	void unloadHeavyPart();
+
 	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 
 	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
@@ -1990,6 +1994,9 @@ void MarkdownArticle::Impl::setTextRepaintCallbacks(
 }
 
 void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
+	if (hasHeavyPart()) {
+		unloadHeavyPart();
+	}
 	auto reusedMediaBlocks = MediaBlockStorage();
 	const auto reuseMediaBlocks = (_content.mediaRuntime == content.mediaRuntime);
 	if (reuseMediaBlocks) {
@@ -2433,6 +2440,24 @@ void MarkdownArticle::Impl::invalidateRasterCache() {
 	resetFormulaRasterCache();
 	InvalidateInlineFormulaRasterCache(_inlineFormulaObjects);
 	ClearColorizedFormulaImages(&_blocks);
+}
+
+bool MarkdownArticle::Impl::hasHeavyPart() const {
+	for (const auto &entry : _mediaBlocks) {
+		const auto &block = entry.second;
+		if (block && block->hasHeavyPart()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void MarkdownArticle::Impl::unloadHeavyPart() {
+	for (const auto &entry : _mediaBlocks) {
+		if (const auto &block = entry.second) {
+			block->unloadHeavyPart();
+		}
+	}
 }
 
 MediaBlockHost *MarkdownArticle::Impl::mediaBlockHost() const {
@@ -3611,6 +3636,14 @@ void MarkdownArticle::invalidatePaletteCache() {
 
 void MarkdownArticle::invalidateRasterCache() {
 	_impl->invalidateRasterCache();
+}
+
+bool MarkdownArticle::hasHeavyPart() const {
+	return _impl->hasHeavyPart();
+}
+
+void MarkdownArticle::unloadHeavyPart() {
+	_impl->unloadHeavyPart();
 }
 
 MediaBlockHost *MarkdownArticle::mediaBlockHost() const {

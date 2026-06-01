@@ -348,6 +348,8 @@ public:
 		Spellchecker::HighlightProcessId processId);
 	void invalidatePaletteCache();
 	void invalidateRasterCache();
+	[[nodiscard]] bool hasHeavyPart() const;
+	void unloadHeavyPart();
 	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
 	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);

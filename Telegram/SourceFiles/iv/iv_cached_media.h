@@ -16,6 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 struct WebPageData;
 
+namespace HistoryView {
+class Element;
+} // namespace HistoryView
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -36,6 +40,13 @@ namespace Iv {
 [[nodiscard]] auto CreateMessageMediaRuntime(
 	not_null<Main::Session*> session,
 	FullMsgId itemId,
+	Fn<void(QString)> openChannel,
+	Fn<void(QString)> joinChannel)
+-> std::shared_ptr<Markdown::MediaRuntime>;
+
+[[nodiscard]] auto CreateMessageMediaRuntime(
+	not_null<Main::Session*> session,
+	not_null<HistoryView::Element*> view,
 	Fn<void(QString)> openChannel,
 	Fn<void(QString)> joinChannel)
 -> std::shared_ptr<Markdown::MediaRuntime>;

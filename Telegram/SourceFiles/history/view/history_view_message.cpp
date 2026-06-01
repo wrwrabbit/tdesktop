@@ -581,6 +581,11 @@ HistoryMessageRichPage::HistoryMessageRichPage()
 }
 
 void Message::setInstantViewMediaRuntime(QString pageUrl) {
+	Expects(Has<InstantViewMediaRuntime>()
+		|| !Has<HistoryMessageRichPage>());
+	// We mustn't add the component here if we're in rich message,
+	// because we call this method where we remember RichPage reference.
+
 	AddComponents(InstantViewMediaRuntime::Bit());
 	Get<InstantViewMediaRuntime>()->pageUrl = std::move(pageUrl);
 }
