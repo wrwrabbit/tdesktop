@@ -351,6 +351,7 @@ private:
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpics;
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpicsCache;
 	base::flat_map<FullMsgId, MsgId> _realIdsForReport;
+	base::flat_map<MsgId, not_null<HistoryItem*>> _itemsByRealMsgId;
 
 	// Delete event grouping.
 	struct DisplayEntry {

@@ -541,6 +541,8 @@ public:
 	[[nodiscard]] FullReplyTo replyTo() const;
 	[[nodiscard]] bool inThread(MsgId rootId) const;
 
+	void resolveAdminLogReplyTo(not_null<HistoryItem*> replyTo);
+
 	[[nodiscard]] not_null<PeerData*> author() const;
 
 	[[nodiscard]] TimeId originalDate() const;

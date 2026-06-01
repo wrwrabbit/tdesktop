@@ -341,6 +341,10 @@ struct HistoryMessageReply
 		bool topicPost);
 	void updateData(not_null<HistoryItem*> holder, bool force = false);
 
+	void setInLogReplyTo(
+		not_null<HistoryItem*> holder,
+		not_null<HistoryItem*> message);
+
 	// Must be called before destructor.
 	void clearData(not_null<HistoryItem*> holder);
 

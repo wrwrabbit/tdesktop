@@ -1151,6 +1151,7 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 
 	const auto canRestrict = InnerWidget::canRestrict();
 	const auto antiSpamUserId = _antiSpamValidator.userId();
+	auto newItems = std::vector<not_null<HistoryItem*>>();
 	for (const auto &event : events) {
 		const auto &data = event.data();
 		const auto id = data.vid().v;
@@ -1188,7 +1189,11 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 				if (canRestrict) {
 					_realIdsForReport[item->data()->fullId()] = realId;
 				}
+				if (!item->data()->isService()) {
+					_itemsByRealMsgId.insert_or_assign(realId, item->data());
+				}
 			}
+			newItems.push_back(item->data());
 			addToItems.push_back(std::move(item));
 			++count;
 		};
@@ -1207,6 +1212,18 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 			}
 		}
 	}
+
+	for (const auto item : newItems) {
+		const auto replyTo = item->replyToFullId();
+		if (replyTo.peer != _history->peer->id) {
+			continue;
+		}
+		const auto i = _itemsByRealMsgId.find(replyTo.msg);
+		if (i != _itemsByRealMsgId.end() && i->second != item) {
+			item->resolveAdminLogReplyTo(i->second);
+		}
+	}
+
 	auto newItemsCount = _items.size() + ((direction == Direction::Up) ? 0 : newItemsForDownDirection.size());
 	if (newItemsCount != oldItemsCount) {
 		// _visibleTopItem may end up absorbed and have a stale y() after
@@ -1908,6 +1925,7 @@ void InnerWidget::clearAfterFilterChange() {
 	_items.clear();
 	_eventIds.clear();
 	_itemsByData.clear();
+	_itemsByRealMsgId.clear();
 	updateEmptyText();
 	updateSize();
 }
