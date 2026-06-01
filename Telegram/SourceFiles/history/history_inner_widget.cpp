@@ -664,8 +664,37 @@ void HistoryInner::setupSwipeReplyAndBack() {
 		}
 	};
 
+	const auto canConsumeHorizontalScroll = [=](QPoint position, int delta) {
+		auto result = false;
+		enumerateItems<EnumItemsDirection::BottomToTop>([&](
+				not_null<Element*> view,
+				int itemtop,
+				int itembottom) {
+			if ((position.y() < itemtop)
+				|| (position.y() > itembottom)
+				|| !view->data()->isRegular()
+				|| view->data()->isService()) {
+				return true;
+			}
+			result = view->canConsumeHorizontalScroll(
+				mapPointToItem(position, view),
+				delta);
+			return false;
+		});
+		return result;
+	};
+
 	auto init = [=, show = _controller->uiShow()](
 			Ui::Controls::SwipeHandlerInitData data) {
+		auto result = Ui::Controls::SwipeHandlerFinishData();
+		const auto horizontalScrollDelta = (data.direction == Qt::LeftToRight)
+			? 1
+			: -1;
+		if (canConsumeHorizontalScroll(
+				data.cursorPosition,
+				horizontalScrollDelta)) {
+			return result;
+		}
 		if (data.direction == Qt::RightToLeft) {
 			auto good = true;
 			enumerateItems<EnumItemsDirection::BottomToTop>([&](
@@ -686,7 +715,6 @@ void HistoryInner::setupSwipeReplyAndBack() {
 				return Ui::Controls::SwipeHandlerFinishData();
 			}
 		}
-		auto result = Ui::Controls::SwipeHandlerFinishData();
 		if (inSelectionMode().inSelectionMode
 			|| (peer->isChannel() && !peer->isMegagroup())) {
 			return result;
@@ -747,6 +775,15 @@ void HistoryInner::setupSwipeReplyAndBack() {
 		.update = std::move(update),
 		.init = std::move(init),
 		.dontStart = _touchMaybeSelecting.value(),
+		.skipWheelEvent = [=](not_null<QWheelEvent*> event) {
+			const auto delta = Ui::ScrollDelta(event);
+			if (std::abs(delta.x()) <= std::abs(delta.y())) {
+				return false;
+			}
+			return canConsumeHorizontalScroll(
+				mapFromGlobal(event->globalPosition().toPoint()),
+				delta.x());
+		},
 	});
 }
 

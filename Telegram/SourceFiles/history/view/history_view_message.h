@@ -89,6 +89,10 @@ struct HistoryMessageRichPage
 	int paletteVersion = -1;
 	Host host;
 	mutable ClickHandlerPtr handler;
+	mutable std::optional<Iv::Markdown::MarkdownArticleHorizontalScrollHit> handlerHorizontalScrollHit;
+	mutable QPoint handlerHorizontalScrollPoint;
+	mutable bool handlerHorizontalScrollActive = false;
+	mutable ClickHandlerPtr handlerHorizontalScrollPressed;
 	mutable std::optional<Iv::Markdown::PreparedLink> handlerPreparedLink;
 	mutable Iv::Markdown::MediaActivation handlerMediaActivation;
 	mutable Iv::Markdown::PreparedPlaceholderBlockId handlerPlaceholderId;
@@ -167,6 +171,10 @@ public:
 		QPoint point,
 		StateRequest request) const override;
 	void updatePressed(QPoint point) override;
+	bool consumeHorizontalScroll(QPoint position, int delta) override;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint position,
+		int delta) const override;
 	void drawInfo(
 		Painter &p,
 		const PaintContext &context,
@@ -445,7 +453,11 @@ private:
 
 	void updateViewButtonExistence();
 	[[nodiscard]] int viewButtonHeight() const;
+	[[nodiscard]] bool prepareRichPageTextRect(QRect &trect) const;
 	[[nodiscard]] QRect richPageRect(QRect trect) const;
+	[[nodiscard]] QPoint prepareRichPageStateRect(
+		QPoint point,
+		QRect &trect) const;
 	void activateRichPagePreparedLink(
 		const Iv::Markdown::PreparedLink &link,
 		ClickContext context) const;

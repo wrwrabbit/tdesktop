@@ -193,6 +193,13 @@ struct MarkdownArticleHitTestResult {
 	}
 };
 
+struct MarkdownArticleHorizontalScrollHit {
+	bool scrollable = false;
+	bool overViewport = false;
+	bool overScrollbar = false;
+	bool overScrollbarThumb = false;
+};
+
 struct MarkdownArticleTextLeafStyle {
 	const style::TextStyle *textStyle = nullptr;
 	style::color textColor;
@@ -240,6 +247,15 @@ public:
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;
 	[[nodiscard]] PreparedEditHit editHitTest(QPoint point) const;
+	[[nodiscard]] MarkdownArticleHorizontalScrollHit horizontalScrollHit(
+		QPoint point) const;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint point,
+		int delta) const;
+	[[nodiscard]] bool consumeHorizontalScroll(QPoint point, int delta);
+	[[nodiscard]] bool beginHorizontalScroll(QPoint point, bool fromTouch);
+	[[nodiscard]] bool updateHorizontalScroll(QPoint point);
+	void endHorizontalScroll();
 	[[nodiscard]] int anchorTop(const QString &anchorId) const;
 	[[nodiscard]] MarkdownArticleAnchorExpansion expandDetailsToAnchor(
 		const QString &anchorId);

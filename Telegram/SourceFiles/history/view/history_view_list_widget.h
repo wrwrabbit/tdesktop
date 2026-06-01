@@ -373,6 +373,9 @@ public:
 	[[nodiscard]] not_null<HistoryItem*> lookupItemByPoint(
 		QPoint point,
 		not_null<Element*> view) const;
+	[[nodiscard]] bool canConsumeHorizontalScroll(
+		QPoint position,
+		int delta) const;
 
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
 		int top) const;

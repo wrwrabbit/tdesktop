@@ -563,6 +563,35 @@ void CollectSelectableSegments(
 	}
 }
 
+void RefreshScrollableSegmentRects(
+		const std::vector<LaidOutBlock> &blocks,
+		std::vector<SelectableSegment> *segments) {
+	if (!segments) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		if (block.kind == PreparedBlockKind::Table) {
+			if (block.segmentIndex >= 0
+				&& block.segmentIndex < int(segments->size())) {
+				auto &segment = (*segments)[block.segmentIndex];
+				segment.outerRect = block.visibleTableRect;
+			}
+			for (const auto &row : block.tableRows) {
+				for (const auto &cell : row.cells) {
+					if (cell.segmentIndex < 0
+						|| cell.segmentIndex >= int(segments->size())) {
+						continue;
+					}
+					auto &segment = (*segments)[cell.segmentIndex];
+					segment.outerRect = cell.outer;
+					segment.textRect = cell.textRect;
+				}
+			}
+		}
+		RefreshScrollableSegmentRects(block.children, segments);
+	}
+}
+
 void CollectAnchors(
 		const std::vector<LaidOutBlock> &blocks,
 		std::vector<std::pair<QString, int>> *anchors) {

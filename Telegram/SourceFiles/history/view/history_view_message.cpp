@@ -662,6 +662,129 @@ QRect Message::richPageRect(QRect trect) const {
 		{ st::msgPadding.left(), 0, st::msgPadding.right(), 0 });
 }
 
+bool Message::prepareRichPageTextRect(QRect &trect) const {
+	if (!hasVisibleText()) {
+		return false;
+	}
+	const auto item = data();
+	const auto media = this->media();
+	auto g = countGeometry();
+	if (g.width() < 1 || isHidden() || !drawBubble()) {
+		return false;
+	}
+	const auto reactionsInBubble = _reactions && embedReactionsInBubble();
+	const auto mediaDisplayed = media && media->isDisplayed();
+	if (_reactions && !reactionsInBubble) {
+		g.setHeight(g.height() - st::mediaInBubbleSkip - _reactions->height());
+	}
+	if (const auto keyboard = item->inlineReplyKeyboard()) {
+		g.setHeight(
+			g.height()
+			- st::msgBotKbButton.margin
+			- keyboard->naturalHeight());
+	}
+	auto inner = g;
+	if (_comments) {
+		inner.setHeight(inner.height() - st::historyCommentsButtonHeight);
+	}
+	trect = inner.marginsRemoved(st::msgPadding);
+	const auto additionalInfoSkip = (mediaDisplayed
+		&& !media->additionalInfoString().isEmpty())
+		? st::msgDateFont->height
+		: 0;
+	const auto reactionsTop = (reactionsInBubble && !_viewButton)
+		? (additionalInfoSkip + st::mediaInBubbleSkip)
+		: additionalInfoSkip;
+	const auto reactionsHeight = reactionsInBubble
+		? (reactionsTop + _reactions->height())
+		: 0;
+	if (reactionsInBubble) {
+		trect.setHeight(trect.height() - reactionsHeight);
+	}
+	if (_viewButton) {
+		trect.setHeight(trect.height() - _viewButton->height());
+		if (reactionsInBubble) {
+			trect.setHeight(
+				trect.height()
+				- st::mediaInBubbleSkip
+				+ st::msgPadding.bottom());
+		} else if (mediaDisplayed) {
+			trect.setHeight(trect.height() - st::mediaInBubbleSkip);
+		}
+	}
+	const auto check = factcheckBlock();
+	const auto entry = logEntryOriginal();
+	const auto mediaOnBottom = (mediaDisplayed && media->isBubbleBottom())
+		|| check
+		|| entry;
+	const auto mediaOnTop = (mediaDisplayed && media->isBubbleTop())
+		|| (entry && entry->isBubbleTop());
+	if (mediaOnBottom) {
+		trect.setHeight(trect.height() + st::msgPadding.bottom());
+	}
+	if (mediaOnTop) {
+		trect.setY(trect.y() - st::msgPadding.top());
+	} else {
+		if (displayFromName()) {
+			trect.setTop(trect.top() + st::msgNameFont->height);
+		}
+		if (displayedTopicButton()) {
+			trect.setTop(trect.top()
+				+ st::topicButtonSkip
+				+ st::topicButtonPadding.top()
+				+ st::msgNameFont->height
+				+ st::topicButtonPadding.bottom()
+				+ st::topicButtonSkip);
+		}
+		if (displayForwardedFrom()) {
+			const auto forwarded = item->Get<HistoryMessageForwarded>();
+			const auto skip = forwarded->psaType.isEmpty()
+				? 0
+				: st::historyPsaIconSkip1;
+			const auto fits = (forwarded->text.maxWidth()
+				<= (trect.width() - skip));
+			trect.setTop(trect.top()
+				+ ((fits ? 1 : 2) * st::semiboldFont->height));
+		}
+		if (item->Has<HistoryMessageVia>()
+			&& !displayFromName()
+			&& !displayForwardedFrom()) {
+			trect.setTop(trect.top() + st::msgNameFont->height);
+		}
+		if (const auto reply = Get<Reply>()) {
+			trect.setTop(trect.top() + reply->height());
+		}
+		if (const auto summaryHeader = Get<SummaryHeader>()) {
+			trect.setTop(trect.top() + summaryHeader->height());
+		}
+	}
+	if (entry) {
+		trect.setHeight(trect.height() - entry->height());
+	}
+	if (check) {
+		trect.setHeight(
+			trect.height()
+			- check->height()
+			- st::mediaInBubbleSkip);
+	}
+	if (mediaDisplayed && _invertMedia) {
+		const auto mediaTop = trect.y()
+			+ (mediaOnTop ? 0 : st::mediaInBubbleSkip);
+		trect.setY(mediaTop
+			+ media->height()
+			+ (mediaOnBottom ? 0 : st::mediaInBubbleSkip));
+	}
+	return true;
+}
+
+QPoint Message::prepareRichPageStateRect(QPoint point, QRect &trect) const {
+	if (const auto botTop = Get<FakeBotAboutTop>()) {
+		trect.setY(trect.y() + botTop->height);
+	}
+	trect = richPageRect(trect);
+	return point - trect.topLeft();
+}
+
 void Message::activateRichPageMedia(
 		const MediaActivation &activation,
 		ClickContext context) const {
@@ -3072,8 +3195,25 @@ void Message::clickHandlerPressedChanged(
 		&& !text().linkRangeFor(handler).empty()) {
 		startLinkRipple();
 	} else if (const auto rich = richpage()
-		; rich && (handler == rich->handler)) {
-		if (rich->handlerPlaceholderId) {
+		; rich
+		&& ((handler == rich->handler)
+			|| (handler == rich->handlerHorizontalScrollPressed))) {
+		if (pressed) {
+			if ((handler == rich->handler)
+				&& rich->handlerHorizontalScrollHit
+				&& rich->article.beginHorizontalScroll(
+					rich->handlerHorizontalScrollPoint,
+					false)) {
+				rich->handlerHorizontalScrollActive = true;
+				rich->handlerHorizontalScrollPressed = handler;
+			}
+		} else if (rich->handlerHorizontalScrollActive
+			&& (handler == rich->handlerHorizontalScrollPressed)) {
+			rich->article.endHorizontalScroll();
+			rich->handlerHorizontalScrollActive = false;
+			rich->handlerHorizontalScrollPressed = nullptr;
+		}
+		if ((handler == rich->handler) && rich->handlerPlaceholderId) {
 			if (pressed) {
 				rich->article.addPlaceholderRipple(
 					rich->handlerPlaceholderId,
@@ -4209,89 +4349,118 @@ bool Message::getStateText(
 		StateRequest request) const {
 	if (!hasVisibleText()) {
 		return false;
-	} else if (const auto botTop = Get<FakeBotAboutTop>()) {
-		trect.setY(trect.y() + botTop->height);
 	}
 	const auto item = this->textItem();
-	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
-		if (const auto rich = richpage()) {
-			const auto local = point - richPageRect(trect).topLeft();
-			const auto hit = rich->article.hitTest(
-				local,
-				request.flags | Ui::Text::StateRequest::Flag::LookupSymbol);
-			if (!hit.valid()) {
-				return false;
-			}
-			const auto offset = rich->article.selectionOffsetFromHit(
-				hit,
-				TextSelectType::Letters);
-			*outResult = TextState(item);
-			SetRichPageSelectionCursor(
-				outResult,
-				hit.segmentIndex,
-				offset,
-				hit.direct);
-			if (hit.codeHeaderCopy) {
-				const auto text = rich->article.textForContext(hit);
-				rich->handlerPreparedLink = std::nullopt;
-				rich->handlerMediaActivation = {};
-				rich->handlerPlaceholderId = {};
-				rich->handlerPlaceholderPoint = {};
+	if (const auto rich = richpage()) {
+		const auto local = prepareRichPageStateRect(point, trect);
+		if (!base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
+			return false;
+		}
+		const auto clearHorizontalScrollHandler = [&] {
+			rich->handlerHorizontalScrollHit = std::nullopt;
+			rich->handlerHorizontalScrollPoint = {};
+		};
+		const auto horizontalScrollHit = rich->article.horizontalScrollHit(local);
+		*outResult = TextState(item);
+		outResult->horizontalScroll = horizontalScrollHit.scrollable;
+		const auto hit = rich->article.hitTest(
+			local,
+			request.flags | Ui::Text::StateRequest::Flag::LookupSymbol);
+		if (horizontalScrollHit.overScrollbar) {
+			rich->handlerPreparedLink = std::nullopt;
+			rich->handlerMediaActivation = {};
+			rich->handlerPlaceholderId = {};
+			rich->handlerPlaceholderPoint = {};
+			if (!rich->handlerHorizontalScrollHit || !rich->handler) {
 				rich->handler = std::make_shared<RichPageActionClickHandler>(
-					[text](ClickContext context) {
-						CopyRichPageCodeBlockText(text, std::move(context));
+					[](ClickContext) {
 					});
-				outResult->link = rich->handler;
-			} else if (hit.preparedLink
-				|| hit.mediaActivation.kind != MediaActivationKind::None) {
-				const auto prepared = hit.preparedLink;
-				const auto activation = hit.mediaActivation;
-				const auto reuse = SamePreparedLink(
-						rich->handlerPreparedLink,
-						prepared)
-					&& SameMediaActivation(
-						rich->handlerMediaActivation,
-						activation);
-				rich->handlerPlaceholderId = hit.mediaActivation.placeholderId;
-				rich->handlerPlaceholderPoint = hit.placeholderLocalPoint;
-				if (!reuse) {
-					rich->handlerPreparedLink = prepared;
-					rich->handlerMediaActivation = activation;
-					rich->handler = std::make_shared<RichPageActionClickHandler>(
-						[weak = base::make_weak(const_cast<Message*>(this)),
-							prepared,
-							activation](ClickContext context) {
-							if (const auto owner = weak.get()) {
-								if (prepared) {
-									owner->activateRichPagePreparedLink(
-										*prepared,
-										std::move(context));
-								} else {
-									owner->activateRichPageMedia(
-										activation,
-										std::move(context));
-								}
+			}
+			rich->handlerHorizontalScrollHit = horizontalScrollHit;
+			rich->handlerHorizontalScrollPoint = local;
+			outResult->link = rich->handler;
+			return true;
+		}
+		if (!hit.valid()) {
+			clearHorizontalScrollHandler();
+			return horizontalScrollHit.scrollable;
+		}
+		const auto offset = rich->article.selectionOffsetFromHit(
+			hit,
+			TextSelectType::Letters);
+		SetRichPageSelectionCursor(
+			outResult,
+			hit.segmentIndex,
+			offset,
+			hit.direct);
+		if (hit.codeHeaderCopy) {
+			const auto text = rich->article.textForContext(hit);
+			clearHorizontalScrollHandler();
+			rich->handlerPreparedLink = std::nullopt;
+			rich->handlerMediaActivation = {};
+			rich->handlerPlaceholderId = {};
+			rich->handlerPlaceholderPoint = {};
+			rich->handler = std::make_shared<RichPageActionClickHandler>(
+				[text](ClickContext context) {
+					CopyRichPageCodeBlockText(text, std::move(context));
+				});
+			outResult->link = rich->handler;
+		} else if (hit.preparedLink
+			|| hit.mediaActivation.kind != MediaActivationKind::None) {
+			const auto prepared = hit.preparedLink;
+			const auto activation = hit.mediaActivation;
+			const auto reuse = SamePreparedLink(
+					rich->handlerPreparedLink,
+					prepared)
+				&& SameMediaActivation(
+					rich->handlerMediaActivation,
+					activation);
+			clearHorizontalScrollHandler();
+			rich->handlerPlaceholderId = hit.mediaActivation.placeholderId;
+			rich->handlerPlaceholderPoint = hit.placeholderLocalPoint;
+			if (!reuse) {
+				rich->handlerPreparedLink = prepared;
+				rich->handlerMediaActivation = activation;
+				rich->handler = std::make_shared<RichPageActionClickHandler>(
+					[weak = base::make_weak(const_cast<Message*>(this)),
+						prepared,
+						activation](ClickContext context) {
+						if (const auto owner = weak.get()) {
+							if (prepared) {
+								owner->activateRichPagePreparedLink(
+									*prepared,
+									std::move(context));
+							} else {
+								owner->activateRichPageMedia(
+									activation,
+									std::move(context));
 							}
-						},
-						prepared);
-				}
-				outResult->link = rich->handler;
-			} else {
-				outResult->link = hit.state.link;
+						}
+					},
+					prepared);
 			}
-			outResult->cursor = (!outResult->link && hit.direct)
-				? CursorState::Text
-				: CursorState::None;
+			outResult->link = rich->handler;
 		} else {
-			*outResult = TextState(item, text().getState(
-				point - trect.topLeft(),
-				std::max(textRealWidth(), trect.width()),
-				request.forText()));
-			if (outResult->link
-				&& IsRippleLink(outResult->link)
-				&& !text().linkRangeFor(outResult->link).empty()) {
-				recordLinkRipplePoint(point, trect.topLeft());
-			}
+			clearHorizontalScrollHandler();
+			outResult->link = hit.state.link;
+		}
+		outResult->cursor = (!outResult->link && hit.direct)
+			? CursorState::Text
+			: CursorState::None;
+		return true;
+	}
+	if (const auto botTop = Get<FakeBotAboutTop>()) {
+		trect.setY(trect.y() + botTop->height);
+	}
+	if (base::in_range(point.y(), trect.y(), trect.y() + trect.height())) {
+		*outResult = TextState(item, text().getState(
+			point - trect.topLeft(),
+			std::max(textRealWidth(), trect.width()),
+			request.forText()));
+		if (outResult->link
+			&& IsRippleLink(outResult->link)
+			&& !text().linkRangeFor(outResult->link).empty()) {
+			recordLinkRipplePoint(point, trect.topLeft());
 		}
 		return true;
 	}
@@ -4300,6 +4469,17 @@ bool Message::getStateText(
 
 // Forward to media.
 void Message::updatePressed(QPoint point) {
+	if (const auto rich = richpage()
+		; rich
+		&& rich->handlerHorizontalScrollActive
+		&& (ClickHandler::getPressed()
+			== rich->handlerHorizontalScrollPressed)) {
+		auto trect = QRect();
+		if (prepareRichPageTextRect(trect)) {
+			(void)rich->article.updateHorizontalScroll(
+				prepareRichPageStateRect(point, trect));
+		}
+	}
 	const auto item = data();
 	const auto media = this->media();
 	if (!media) {
@@ -4367,6 +4547,28 @@ void Message::updatePressed(QPoint point) {
 	} else {
 		media->updatePressed(point - g.topLeft());
 	}
+}
+
+bool Message::consumeHorizontalScroll(QPoint position, int delta) {
+	const auto rich = richpage();
+	auto trect = QRect();
+	if (!rich || !prepareRichPageTextRect(trect)) {
+		return false;
+	}
+	return rich->article.consumeHorizontalScroll(
+		prepareRichPageStateRect(position, trect),
+		delta);
+}
+
+bool Message::canConsumeHorizontalScroll(QPoint position, int delta) const {
+	const auto rich = richpage();
+	auto trect = QRect();
+	if (!rich || !prepareRichPageTextRect(trect)) {
+		return false;
+	}
+	return rich->article.canConsumeHorizontalScroll(
+		prepareRichPageStateRect(position, trect),
+		delta);
 }
 
 MessageSelection Message::selectionFromStates(

@@ -1050,12 +1050,20 @@ void ChatWidget::setupSwipeReplyAndBack() {
 
 	auto init = [=, show = controller()->uiShow()](
 			Ui::Controls::SwipeHandlerInitData data) {
+		auto result = Ui::Controls::SwipeHandlerFinishData();
+		const auto horizontalScrollDelta = (data.direction == Qt::LeftToRight)
+			? 1
+			: -1;
+		if (_inner->canConsumeHorizontalScroll(
+				data.cursorPosition,
+				horizontalScrollDelta)) {
+			return result;
+		}
 		if (data.direction == Qt::RightToLeft) {
 			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
 				controller()->showBackFromStack();
 			});
 		}
-		auto result = Ui::Controls::SwipeHandlerFinishData();
 		if (_inner->elementInSelectionMode(nullptr).inSelectionMode) {
 			return result;
 		}
@@ -1107,6 +1115,15 @@ void ChatWidget::setupSwipeReplyAndBack() {
 		.update = std::move(update),
 		.init = std::move(init),
 		.dontStart = _inner->touchMaybeSelectingValue(),
+		.skipWheelEvent = [=](not_null<QWheelEvent*> event) {
+			const auto delta = Ui::ScrollDelta(event);
+			if (std::abs(delta.x()) <= std::abs(delta.y())) {
+				return false;
+			}
+			return _inner->canConsumeHorizontalScroll(
+				_inner->mapFromGlobal(event->globalPosition().toPoint()),
+				delta.x());
+		},
 	});
 }
 

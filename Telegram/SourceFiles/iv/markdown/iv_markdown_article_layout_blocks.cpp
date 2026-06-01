@@ -1195,11 +1195,12 @@ LaidOutBlock LayoutTableBlock(
 		auto row = LaidOutTableRow();
 		row.header = rowData.header;
 		row.editRow = prepared.tableRows[rowIndex].editRow;
-		row.outer = QRect(
+		row.logicalOuter = QRect(
 			left + border,
 			y,
 			std::max(tableWidth - (2 * border), 0),
 			rowHeight);
+		row.outer = row.logicalOuter;
 
 		row.cells.reserve(rowData.cells.size());
 		for (auto &cellData : rowData.cells) {
@@ -1233,16 +1234,18 @@ LaidOutBlock LayoutTableBlock(
 			case PreparedTableCellVerticalAlignment::Top:
 				break;
 			}
-			cell.outer = QRect(
+			cell.logicalOuter = QRect(
 				columnLefts[column],
 				cellTop,
 				spanWidth,
 				spanHeight);
-			cell.textRect = QRect(
+			cell.logicalTextRect = QRect(
 				columnLefts[column] + padding.left(),
 				textTop,
 				cell.textWidth,
 				cellData.textHeight);
+			cell.outer = cell.logicalOuter;
+			cell.textRect = cell.logicalTextRect;
 			row.cells.push_back(std::move(cell));
 		}
 		block.tableRows.push_back(std::move(row));
@@ -1256,11 +1259,26 @@ LaidOutBlock LayoutTableBlock(
 		tableTop,
 		std::min(tableWidth, std::max(width, 1)),
 		tableHeight);
+	block.horizontalScrollMax = std::max(
+		block.tableRect.width() - block.visibleTableRect.width(),
+		0);
+	auto tableContentRect = block.visibleTableRect;
+	if (block.horizontalScrollMax > 0) {
+		block.tableScrollbarTrackRect = QRect(
+			block.visibleTableRect.x(),
+			block.tableRect.y()
+				+ block.tableRect.height()
+				+ st.table.scrollbarSkip,
+			block.visibleTableRect.width(),
+			st.table.scrollbarHeight);
+		block.tableScrollbarThumbRect = QRect();
+		tableContentRect = tableContentRect.united(block.tableScrollbarTrackRect);
+	}
 	block.contentRect = block.textRect.isEmpty()
-		? block.visibleTableRect
-		: block.visibleTableRect.isEmpty()
+		? tableContentRect
+		: tableContentRect.isEmpty()
 		? block.textRect
-		: block.textRect.united(block.visibleTableRect);
+		: block.textRect.united(tableContentRect);
 	block.outer = block.contentRect;
 	if (!block.textRect.isEmpty()) {
 		return block;

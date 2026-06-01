@@ -21,6 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class QEvent;
 class QKeyEvent;
 class QObject;
+class QTouchEvent;
+class QWheelEvent;
 
 namespace Ui {
 class ChatStyle;
@@ -64,6 +66,7 @@ public:
 
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
+	bool eventHook(QEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
@@ -71,6 +74,7 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
 
 private:
 	struct InlineFieldStyleData {
@@ -126,6 +130,12 @@ private:
 		DragSelectionMode mode = DragSelectionMode::None;
 	};
 
+	enum class HorizontalScrollDrag {
+		None,
+		Mouse,
+		Touch,
+	};
+
 	void setDocument(const Markdown::MarkdownArticleContent &prepared);
 	void activateTextOrdinal(int ordinal, int cursorOffset);
 	void activateTextOrdinal(int ordinal, int selectionFrom, int selectionTo);
@@ -174,6 +184,9 @@ private:
 	void finishArticleSelection();
 	[[nodiscard]] bool handleStructuralSelectionKey(QKeyEvent *e);
 	[[nodiscard]] bool handleFieldMouseEvent(QEvent *event);
+	[[nodiscard]] bool handleHorizontalScrollWheel(
+		QWheelEvent *e,
+		QPoint articlePoint);
 	[[nodiscard]] Markdown::PreparedEditSelection structuralSelectionFromHits(
 		const Markdown::PreparedEditHit &anchor,
 		const Markdown::PreparedEditHit &focus) const;
@@ -181,6 +194,7 @@ private:
 	[[nodiscard]] int segmentIndexForEditableOrdinal(int ordinal) const;
 	[[nodiscard]] QPoint articleTopLeft() const;
 	[[nodiscard]] int articleWidth(int outerWidth) const;
+	void touchEvent(QTouchEvent *e);
 	[[nodiscard]] QRect outerEditableSegmentRect(int segmentIndex) const;
 	[[nodiscard]] Markdown::MarkdownArticlePaintContext textPaintContext(
 		QRect clip);
@@ -207,8 +221,11 @@ private:
 	Markdown::MarkdownArticleSelectionEndpoints _selectionEndpoints;
 	Markdown::PreparedEditSelection _structuralSelection;
 	ArticleSelectionDrag _articleSelectionDrag;
+	std::optional<Qt::Orientation> _horizontalScrollLock;
 	bool _settingField = false;
 	bool _trackingPointerPress = false;
+	HorizontalScrollDrag _horizontalScrollDrag = HorizontalScrollDrag::None;
+	std::optional<QPoint> _pendingTouchHorizontalScrollPoint;
 	bool _syncingInlineFieldGeometry = false;
 	bool _pendingHeightOverrideUpdate = false;
 };

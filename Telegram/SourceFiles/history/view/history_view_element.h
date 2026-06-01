@@ -714,6 +714,11 @@ public:
 	virtual bool consumeHorizontalScroll(QPoint position, int delta) {
 		return false;
 	}
+	[[nodiscard]] virtual bool canConsumeHorizontalScroll(
+			QPoint position,
+			int delta) const {
+		return false;
+	}
 
 	virtual ~Element();
 

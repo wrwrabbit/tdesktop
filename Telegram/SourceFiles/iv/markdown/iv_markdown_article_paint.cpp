@@ -878,13 +878,13 @@ using TableOwnershipGrid = std::vector<std::vector<TableOwnershipSlot>>;
 		int border,
 		int radius) {
 	auto path = QPainterPath();
-	if (block.tableRect.isEmpty()) {
+	if (block.visibleTableRect.isEmpty()) {
 		return path;
 	}
 	if (border > 0) {
 		const auto half = border / 2.;
 		path.addRoundedRect(
-			QRectF(block.tableRect).marginsRemoved({
+			QRectF(block.visibleTableRect).marginsRemoved({
 				half,
 				half,
 				half,
@@ -893,7 +893,7 @@ using TableOwnershipGrid = std::vector<std::vector<TableOwnershipSlot>>;
 			radius,
 			radius);
 	} else {
-		path.addRect(block.tableRect);
+		path.addRect(block.visibleTableRect);
 	}
 	return path;
 }
@@ -904,8 +904,10 @@ using TableOwnershipGrid = std::vector<std::vector<TableOwnershipSlot>>;
 		int border) -> std::vector<int> {
 	auto result = std::vector<int>(
 		std::max(columnCount, 0),
-		block.tableRect.x() + border);
-	auto separatorLeft = block.tableRect.x() + border;
+		block.visibleTableRect.x() + border - block.horizontalScrollLeft);
+	auto separatorLeft = block.visibleTableRect.x()
+		+ border
+		- block.horizontalScrollLeft;
 	for (auto column = 0; column != columnCount; ++column) {
 		result[column] = separatorLeft;
 		if (column < int(block.tableColumnWidths.size())) {
@@ -1007,7 +1009,7 @@ void AddTableVerticalBorderSegments(
 	}
 	const auto half = border / 2.;
 	const auto columnLefts = TableColumnLefts(block, columnCount, border);
-	const auto inner = QRectF(block.tableRect).marginsRemoved({
+	const auto inner = QRectF(block.visibleTableRect).marginsRemoved({
 		half,
 		half,
 		half,
@@ -1222,6 +1224,96 @@ void PaintTableCaption(
 	}
 }
 
+void PaintTableOverflowIndicators(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const style::Markdown &paintSt,
+		const QPainterPath &shapePath) {
+	if (block.horizontalScrollMax <= 0 || block.visibleTableRect.isEmpty()) {
+		return;
+	}
+	const auto indicatorWidth = std::min(
+		std::max(st.table.overflowWidth, 1),
+		block.visibleTableRect.width());
+	if (indicatorWidth <= 0) {
+		return;
+	}
+	const auto left = (block.horizontalScrollLeft > 0);
+	const auto right = (block.horizontalScrollLeft < block.horizontalScrollMax);
+	if (!left && !right) {
+		return;
+	}
+	p.save();
+	p.setClipPath(shapePath, Qt::IntersectClip);
+	if (left) {
+		p.fillRect(
+			QRect(
+				block.visibleTableRect.x(),
+				block.visibleTableRect.y(),
+				indicatorWidth,
+				block.visibleTableRect.height()),
+			paintSt.table.overflowFg->c);
+	}
+	if (right) {
+		p.fillRect(
+			QRect(
+				block.visibleTableRect.x()
+					+ block.visibleTableRect.width()
+					- indicatorWidth,
+				block.visibleTableRect.y(),
+				indicatorWidth,
+				block.visibleTableRect.height()),
+			paintSt.table.overflowFg->c);
+	}
+	p.restore();
+}
+
+void PaintTableScrollbar(
+		Painter &p,
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	if (block.horizontalScrollMax <= 0
+		|| block.tableScrollbarTrackRect.isEmpty()) {
+		return;
+	}
+	const auto scrollbarRect = block.tableScrollbarTrackRect.united(
+		block.tableScrollbarThumbRect);
+	const auto scrollbarClip = context.clip.intersected(scrollbarRect);
+	if (scrollbarClip.isEmpty()) {
+		return;
+	}
+	const auto &paintSt = PaintStyle(context, st);
+	const auto trackBg = EffectiveTableHeaderBg(paintSt, context);
+	const auto thumbBg = EffectiveTableBorderFg(paintSt, context);
+	const auto radius = block.tableScrollbarTrackRect.height() / 2.;
+	p.save();
+	p.setClipRect(scrollbarClip, Qt::IntersectClip);
+	if (radius > 0.) {
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(trackBg);
+		p.drawRoundedRect(
+			QRectF(block.tableScrollbarTrackRect),
+			radius,
+			radius);
+		if (!block.tableScrollbarThumbRect.isEmpty()) {
+			p.setBrush(thumbBg);
+			p.drawRoundedRect(
+				QRectF(block.tableScrollbarThumbRect),
+				radius,
+				radius);
+		}
+	} else {
+		p.fillRect(block.tableScrollbarTrackRect, trackBg);
+		if (!block.tableScrollbarThumbRect.isEmpty()) {
+			p.fillRect(block.tableScrollbarThumbRect, thumbBg);
+		}
+	}
+	p.restore();
+}
+
 void PaintWholeTable(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1247,7 +1339,7 @@ void PaintWholeTable(
 	for (auto rowIndex = 0, rowCount = int(block.tableRows.size()); rowIndex != rowCount; ++rowIndex) {
 		const auto striped = block.tableStriped && ((rowIndex % 2) == 0);
 		for (const auto &cell : block.tableRows[rowIndex].cells) {
-			if (!cell.outer.intersects(block.visibleTableRect)) {
+			if (!cell.outer.intersects(tableClip)) {
 				continue;
 			}
 			if (!cell.header && !striped) {
@@ -1258,7 +1350,7 @@ void PaintWholeTable(
 	}
 	p.restore();
 
-	if (border > 0 && !block.tableRect.isEmpty()) {
+	if (border > 0 && !block.visibleTableRect.isEmpty()) {
 		const auto path = TableBorderPath(block, border, shapePath);
 		auto hq = PainterHighQualityEnabler(p);
 		auto pen = QPen(borderFg, border);
@@ -1269,11 +1361,11 @@ void PaintWholeTable(
 
 	p.setPen(paintSt.textColor->c);
 	for (const auto &row : block.tableRows) {
-		if (!row.outer.intersects(block.visibleTableRect)) {
+		if (!row.outer.intersects(tableClip)) {
 			continue;
 		}
 		for (const auto &cell : row.cells) {
-			if (!cell.textRect.intersects(block.visibleTableRect)) {
+			if (!cell.textRect.intersects(tableClip)) {
 				continue;
 			}
 			PaintSelectableTextLeaf(
@@ -1296,7 +1388,7 @@ void PaintWholeTable(
 			block.segmentIndex)) {
 		p.save();
 		p.setClipPath(shapePath, Qt::IntersectClip);
-		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
+		p.fillRect(block.visibleTableRect, p.textPalette().selectOverlay);
 		p.restore();
 	}
 	PaintStructuralTableOverlays(
@@ -1306,23 +1398,7 @@ void PaintWholeTable(
 		tableClip,
 		context);
 
-	if (block.overflowed) {
-		const auto indicatorWidth = std::min(
-			std::max(st.table.overflowWidth, 1),
-			block.visibleTableRect.width());
-		p.save();
-		p.setClipPath(shapePath, Qt::IntersectClip);
-		p.fillRect(
-			QRect(
-				block.visibleTableRect.x()
-					+ block.visibleTableRect.width()
-					- indicatorWidth,
-				block.visibleTableRect.y(),
-				indicatorWidth,
-				block.visibleTableRect.height()),
-			paintSt.table.overflowFg->c);
-		p.restore();
-	}
+	PaintTableOverflowIndicators(p, block, st, paintSt, shapePath);
 
 	p.restore();
 }
@@ -1356,6 +1432,9 @@ void PaintTableRowBand(
 	p.save();
 	p.setClipPath(shapePath, Qt::IntersectClip);
 	for (const auto cell : cells) {
+		if (!cell || !cell->outer.intersects(rowClip)) {
+			continue;
+		}
 		const auto originRow = TableCellOriginRow(block, cell);
 		const auto striped = block.tableStriped
 			&& (originRow >= 0)
@@ -1367,7 +1446,7 @@ void PaintTableRowBand(
 	}
 	p.restore();
 
-	if (border > 0 && !block.tableRect.isEmpty()) {
+	if (border > 0 && !block.visibleTableRect.isEmpty()) {
 		const auto path = TableBorderPath(block, border, shapePath);
 		auto hq = PainterHighQualityEnabler(p);
 		auto pen = QPen(borderFg, border);
@@ -1378,7 +1457,7 @@ void PaintTableRowBand(
 
 	p.setPen(paintSt.textColor->c);
 	for (const auto cell : cells) {
-		if (!cell->textRect.intersects(rowBand)) {
+		if (!cell || !cell->textRect.intersects(rowClip)) {
 			continue;
 		}
 		PaintSelectableTextLeaf(
@@ -1400,7 +1479,7 @@ void PaintTableRowBand(
 			block.segmentIndex)) {
 		p.save();
 		p.setClipPath(shapePath, Qt::IntersectClip);
-		p.fillRect(block.tableRect, p.textPalette().selectOverlay);
+		p.fillRect(block.visibleTableRect, p.textPalette().selectOverlay);
 		p.restore();
 	}
 	PaintStructuralTableRowBandOverlays(
@@ -1412,23 +1491,7 @@ void PaintTableRowBand(
 		rowClip,
 		context);
 
-	if (block.overflowed) {
-		const auto indicatorWidth = std::min(
-			std::max(st.table.overflowWidth, 1),
-			block.visibleTableRect.width());
-		p.save();
-		p.setClipPath(shapePath, Qt::IntersectClip);
-		p.fillRect(
-			QRect(
-				block.visibleTableRect.x()
-					+ block.visibleTableRect.width()
-					- indicatorWidth,
-				block.visibleTableRect.y(),
-				indicatorWidth,
-				block.visibleTableRect.height()),
-			paintSt.table.overflowFg->c);
-		p.restore();
-	}
+	PaintTableOverflowIndicators(p, block, st, paintSt, shapePath);
 
 	p.restore();
 }
@@ -1441,29 +1504,29 @@ void PaintTableBlock(
 	PaintTableCaption(p, block, st, context);
 	if (!context.reveal) {
 		PaintWholeTable(p, block, st, context);
-		return;
+	} else {
+		const auto ownership = BuildTableOwnershipGrid(block);
+		for (auto rowIndex = 0;
+			rowIndex != int(block.tableRows.size());
+			++rowIndex) {
+			const auto rowBand = TableRowRevealBand(block, st, rowIndex);
+			PaintRevealBand(
+				p,
+				context,
+				rowBand,
+				[&](Painter &p, const MarkdownArticlePaintContext &rowContext) {
+					PaintTableRowBand(
+						p,
+						block,
+						ownership,
+						rowIndex,
+						rowBand,
+						st,
+						rowContext);
+				});
+		}
 	}
-
-	const auto ownership = BuildTableOwnershipGrid(block);
-	for (auto rowIndex = 0;
-		rowIndex != int(block.tableRows.size());
-		++rowIndex) {
-		const auto rowBand = TableRowRevealBand(block, st, rowIndex);
-		PaintRevealBand(
-			p,
-			context,
-			rowBand,
-			[&](Painter &p, const MarkdownArticlePaintContext &rowContext) {
-				PaintTableRowBand(
-					p,
-					block,
-					ownership,
-					rowIndex,
-					rowBand,
-					st,
-					rowContext);
-			});
-	}
+	PaintTableScrollbar(p, block, st, context);
 }
 
 void PaintDisplayMathBlock(

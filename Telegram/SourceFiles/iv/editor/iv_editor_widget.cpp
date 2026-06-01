@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/editor/iv_editor_widget.h"
 
+#include "base/qt/qt_common_adapters.h"
 #include "data/data_msg_id.h"
 #include "ui/image/image_location.h"
 #include "data/data_types.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_theme.h"
 #include "ui/painter.h"
 #include "ui/text/text_entity.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/fields/input_field.h"
 #include "styles/palette.h"
 #include "styles/style_chat.h"
@@ -30,8 +32,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QResizeEvent>
+#include <QtGui/QTouchEvent>
+#include <QtGui/QWheelEvent>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QTextEdit>
 
 #include "window/window_session_controller.h"
@@ -598,6 +603,22 @@ LiftPreparedEditBlocksToCommonContainer(
 		1);
 }
 
+[[nodiscard]] QPoint LocalPosition(QWheelEvent *e) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	return e->position().toPoint();
+#else // Qt >= 6.0
+	return e->pos();
+#endif // Qt >= 6.0
+}
+
+[[nodiscard]] QPoint GlobalPosition(QWheelEvent *e) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	return e->globalPosition().toPoint();
+#else // Qt >= 6.0
+	return e->globalPos();
+#endif // Qt >= 6.0
+}
+
 } // namespace
 
 Widget::Widget(
@@ -618,6 +639,7 @@ Widget::Widget(
 	_highlightColors = HighlightColors(_style.get());
 
 	setMouseTracking(true);
+	setAttribute(Qt::WA_AcceptTouchEvents);
 	setFocusPolicy(Qt::StrongFocus);
 
 	Spellchecker::HighlightReady(
@@ -774,7 +796,30 @@ bool Widget::eventFilter(QObject *object, QEvent *event) {
 		const auto raw = _field->rawTextEdit();
 		if (object == raw.get() || object == raw->viewport()) {
 			const auto type = event->type();
-			if (type == QEvent::KeyPress) {
+			if (type == QEvent::Wheel) {
+				if (_article && _activeSegmentIndex >= 0) {
+					const auto wheel = static_cast<QWheelEvent*>(event);
+					auto articlePoint = std::optional<QPoint>();
+					if (const auto widget = qobject_cast<QWidget*>(object)) {
+						articlePoint = widget->mapTo(this, LocalPosition(wheel))
+							- articleTopLeft();
+					} else {
+						articlePoint = mapFromGlobal(GlobalPosition(wheel))
+							- articleTopLeft();
+					}
+					if (!articlePoint) {
+						const auto segmentRect = _article->segmentRect(
+							_activeSegmentIndex);
+						if (!segmentRect.isEmpty()) {
+							articlePoint = segmentRect.center();
+						}
+					}
+					if (articlePoint
+						&& handleHorizontalScrollWheel(wheel, *articlePoint)) {
+						return true;
+					}
+				}
+			} else if (type == QEvent::KeyPress) {
 				const auto keyEvent = static_cast<QKeyEvent*>(event);
 				if (handleStructuralSelectionKey(keyEvent)
 					|| handleFieldKey(keyEvent)) {
@@ -791,6 +836,25 @@ bool Widget::eventFilter(QObject *object, QEvent *event) {
 	return Ui::RpWidget::eventFilter(object, event);
 }
 
+bool Widget::eventHook(QEvent *e) {
+	if (e->type() == QEvent::TouchBegin
+		|| e->type() == QEvent::TouchUpdate
+		|| e->type() == QEvent::TouchEnd
+		|| e->type() == QEvent::TouchCancel) {
+		auto *ev = static_cast<QTouchEvent*>(e);
+		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
+			const auto active = (_horizontalScrollDrag
+				== HorizontalScrollDrag::Touch);
+			touchEvent(ev);
+			if (active
+				|| (_horizontalScrollDrag == HorizontalScrollDrag::Touch)) {
+				return true;
+			}
+		}
+	}
+	return Ui::RpWidget::eventHook(e);
+}
+
 void Widget::focusInEvent(QFocusEvent *e) {
 	Ui::RpWidget::focusInEvent(e);
 	if (!_settingField && !_field->isHidden()) {
@@ -805,8 +869,137 @@ void Widget::keyPressEvent(QKeyEvent *e) {
 	Ui::RpWidget::keyPressEvent(e);
 }
 
+bool Widget::handleHorizontalScrollWheel(
+		QWheelEvent *e,
+		QPoint articlePoint) {
+	const auto phase = e->phase();
+	if (phase == Qt::NoScrollPhase) {
+		_horizontalScrollLock = std::nullopt;
+	} else if (phase == Qt::ScrollBegin) {
+		_horizontalScrollLock = std::nullopt;
+	}
+	if (!_article) {
+		return false;
+	}
+	const auto delta = Ui::ScrollDeltaF(e);
+	const auto horizontal = (std::abs(delta.x()) > std::abs(delta.y()));
+	if (phase != Qt::NoScrollPhase
+		&& phase != Qt::ScrollBegin
+		&& !_horizontalScrollLock) {
+		_horizontalScrollLock = horizontal ? Qt::Horizontal : Qt::Vertical;
+	}
+	if (!_article->horizontalScrollHit(articlePoint).scrollable) {
+		return false;
+	}
+	if (horizontal) {
+		if (_horizontalScrollLock == Qt::Vertical) {
+			return false;
+		}
+		if (_article->consumeHorizontalScroll(
+				articlePoint,
+				int(std::round(delta.x())))) {
+			syncInlineFieldGeometry();
+		}
+		e->accept();
+		return true;
+	}
+	if (_horizontalScrollLock == Qt::Horizontal) {
+		e->accept();
+		return true;
+	}
+	return false;
+}
+
+void Widget::touchEvent(QTouchEvent *e) {
+	if (e->type() == QEvent::TouchCancel) {
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		if (_horizontalScrollDrag != HorizontalScrollDrag::Touch) {
+			return;
+		}
+		_horizontalScrollDrag = HorizontalScrollDrag::None;
+		if (_article) {
+			_article->endHorizontalScroll();
+		}
+		e->accept();
+		return;
+	}
+	if (!_article || e->touchPoints().isEmpty()) {
+		return;
+	}
+	const auto articlePoint = mapFromGlobal(
+		e->touchPoints().cbegin()->screenPos().toPoint()) - articleTopLeft();
+	switch (e->type()) {
+	case QEvent::TouchBegin: {
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		const auto hit = _article->horizontalScrollHit(articlePoint);
+		if (hit.overScrollbar
+			&& _article->beginHorizontalScroll(articlePoint, false)) {
+			_horizontalScrollDrag = HorizontalScrollDrag::Touch;
+			syncInlineFieldGeometry();
+			e->accept();
+		} else if (hit.overViewport) {
+			_pendingTouchHorizontalScrollPoint = articlePoint;
+		}
+	} break;
+	case QEvent::TouchUpdate:
+		if (_horizontalScrollDrag == HorizontalScrollDrag::Touch) {
+			if (_article->updateHorizontalScroll(articlePoint)) {
+				syncInlineFieldGeometry();
+			}
+			e->accept();
+		} else if (_pendingTouchHorizontalScrollPoint) {
+			const auto delta = articlePoint - *_pendingTouchHorizontalScrollPoint;
+			if (delta.manhattanLength() < QApplication::startDragDistance()) {
+				break;
+			}
+			const auto horizontal = (std::abs(delta.x()) > std::abs(delta.y()));
+			if (!horizontal) {
+				_pendingTouchHorizontalScrollPoint = std::nullopt;
+				break;
+			}
+			if (_article->beginHorizontalScroll(
+					*_pendingTouchHorizontalScrollPoint,
+					true)) {
+				_horizontalScrollDrag = HorizontalScrollDrag::Touch;
+				if (_article->updateHorizontalScroll(articlePoint)) {
+					syncInlineFieldGeometry();
+				}
+				e->accept();
+			}
+			_pendingTouchHorizontalScrollPoint = std::nullopt;
+		}
+		break;
+	case QEvent::TouchEnd:
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		if (_horizontalScrollDrag == HorizontalScrollDrag::Touch) {
+			_horizontalScrollDrag = HorizontalScrollDrag::None;
+			_article->endHorizontalScroll();
+			e->accept();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+void Widget::wheelEvent(QWheelEvent *e) {
+	if (handleHorizontalScrollWheel(
+			e,
+			LocalPosition(e) - articleTopLeft())) {
+		return;
+	}
+	e->ignore();
+}
+
 void Widget::mouseMoveEvent(QMouseEvent *e) {
 	const auto articlePoint = e->pos() - articleTopLeft();
+	if (_horizontalScrollDrag == HorizontalScrollDrag::Mouse) {
+		if (_article->updateHorizontalScroll(articlePoint)) {
+			syncInlineFieldGeometry();
+		}
+		e->accept();
+		return;
+	}
 	if (!_articleSelectionDrag.active) {
 		const auto hit = _article->hitTest(
 			articlePoint,
@@ -838,6 +1031,15 @@ void Widget::mousePressEvent(QMouseEvent *e) {
 	}
 	_trackingPointerPress = true;
 	auto articlePoint = e->pos() - articleTopLeft();
+	const auto horizontalScrollHit = _article->horizontalScrollHit(
+		articlePoint);
+	if (horizontalScrollHit.overScrollbar
+		&& _article->beginHorizontalScroll(articlePoint, false)) {
+		_horizontalScrollDrag = HorizontalScrollDrag::Mouse;
+		syncInlineFieldGeometry();
+		e->accept();
+		return;
+	}
 	auto hit = _article->hitTest(
 		articlePoint,
 		Ui::Text::StateRequest::Flag::LookupSymbol);
@@ -888,6 +1090,16 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		finishArticleSelection();
 	});
 	const auto articlePoint = e->pos() - articleTopLeft();
+	if (_horizontalScrollDrag == HorizontalScrollDrag::Mouse) {
+		const auto changed = _article->updateHorizontalScroll(articlePoint);
+		_article->endHorizontalScroll();
+		_horizontalScrollDrag = HorizontalScrollDrag::None;
+		if (changed) {
+			syncInlineFieldGeometry();
+		}
+		e->accept();
+		return;
+	}
 	const auto hit = _article->hitTest(
 		articlePoint,
 		Ui::Text::StateRequest::Flag::LookupSymbol);

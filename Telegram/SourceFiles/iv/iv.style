@@ -196,6 +196,9 @@ MarkdownTable {
 	minColumnWidth: pixels;
 	overflowWidth: pixels;
 	overflowFg: color;
+	scrollbarSkip: pixels;
+	scrollbarHeight: pixels;
+	scrollbarMinThumbWidth: pixels;
 }
 MarkdownDetails {
 	headerPadding: margins;
@@ -466,6 +469,9 @@ defaultMarkdownTable: MarkdownTable {
 	minColumnWidth: 96px;
 	overflowWidth: 4px;
 	overflowFg: windowSubTextFg;
+	scrollbarSkip: 4px;
+	scrollbarHeight: 6px;
+	scrollbarMinThumbWidth: 24px;
 }
 defaultMarkdownDetailsSummaryStyle: TextStyle(defaultTextStyle) {
 	font: font(12px);
@@ -865,6 +871,9 @@ messageMarkdownTable: MarkdownTable(defaultMarkdownTable) {
 	captionSkip: 6px;
 	overflowWidth: 3px;
 	overflowFg: msgInDateFg;
+	scrollbarSkip: 3px;
+	scrollbarHeight: 5px;
+	scrollbarMinThumbWidth: 20px;
 }
 messageMarkdownDisplayMath: MarkdownDisplayMath(defaultMarkdownDisplayMath) {
 	padding: margins(8px, 10px, 8px, 10px);

@@ -57,6 +57,9 @@ struct SegmentSpan {
 void CollectSelectableSegments(
 	std::vector<LaidOutBlock> *blocks,
 	std::vector<SelectableSegment> *segments);
+void RefreshScrollableSegmentRects(
+	const std::vector<LaidOutBlock> &blocks,
+	std::vector<SelectableSegment> *segments);
 void CollectAnchors(
 	const std::vector<LaidOutBlock> &blocks,
 	std::vector<std::pair<QString, int>> *anchors);

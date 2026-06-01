@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_view_widget.h"
 
+#include "base/qt/qt_common_adapters.h"
 #include "base/weak_ptr.h"
 #include "core/click_handler_types.h"
 #include "core/credits_amount.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_theme.h"
 #include "ui/layers/show.h"
 #include "ui/text/text_extended_data.h"
+#include "ui/ui_utility.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/color_contrast.h"
 #include "ui/integration.h"
@@ -38,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QKeyEvent>
 #include <QtGui/QKeySequence>
 #include <QtGui/QMouseEvent>
+#include <QtGui/QTouchEvent>
+#include <QtGui/QWheelEvent>
 #include <QtWidgets/QApplication>
 
 #include <algorithm>
@@ -149,6 +153,23 @@ void EnsurePrePaintCache(
 	});
 }
 
+[[nodiscard]] QPoint LocalPosition(QWheelEvent *e) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+	return e->position().toPoint();
+#else // Qt >= 6.0
+	return e->pos();
+#endif // Qt >= 6.0
+}
+
+[[nodiscard]] QPoint ArticlePointFromWidget(QPoint point, double scale) {
+	if (scale != 1.) {
+		point = QPoint(
+			int(std::floor(point.x() / scale)),
+			int(std::floor(point.y() / scale)));
+	}
+	return point;
+}
+
 } // namespace
 
 MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
@@ -159,6 +180,7 @@ MarkdownDocumentWidget::MarkdownDocumentWidget(QWidget *parent)
 	_highlightColors = HighlightColors(_style.get());
 
 	setMouseTracking(true);
+	setAttribute(Qt::WA_AcceptTouchEvents);
 	setFocusPolicy(Qt::StrongFocus);
 
 	Spellchecker::HighlightReady(
@@ -538,12 +560,137 @@ void MarkdownDocumentWidget::contextMenuEvent(QContextMenuEvent *e) {
 	e->accept();
 }
 
+void MarkdownDocumentWidget::wheelEvent(QWheelEvent *e) {
+	const auto phase = e->phase();
+	if (phase == Qt::NoScrollPhase) {
+		_horizontalScrollLock = std::nullopt;
+	} else if (phase == Qt::ScrollBegin) {
+		_horizontalScrollLock = std::nullopt;
+	}
+	if (!_article) {
+		e->ignore();
+		return;
+	}
+	const auto delta = Ui::ScrollDeltaF(e);
+	const auto horizontal = (std::abs(delta.x()) > std::abs(delta.y()));
+	if (phase != Qt::NoScrollPhase
+		&& phase != Qt::ScrollBegin
+		&& !_horizontalScrollLock) {
+		_horizontalScrollLock = horizontal ? Qt::Horizontal : Qt::Vertical;
+	}
+	const auto local = ArticlePointFromWidget(LocalPosition(e), zoomScale());
+	if (!_article->horizontalScrollHit(local).scrollable) {
+		e->ignore();
+		return;
+	}
+	if (horizontal) {
+		if (_horizontalScrollLock == Qt::Vertical) {
+			e->ignore();
+			return;
+		}
+		(void)_article->consumeHorizontalScroll(
+			local,
+			int(std::round(delta.x())));
+		e->accept();
+		return;
+	}
+	if (_horizontalScrollLock == Qt::Horizontal) {
+		e->accept();
+	} else {
+		e->ignore();
+	}
+}
+
+void MarkdownDocumentWidget::touchEvent(QTouchEvent *e) {
+	if (e->type() == QEvent::TouchCancel) {
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		if (!_activeTouchHorizontalScroll) {
+			return;
+		}
+		_activeTouchHorizontalScroll = false;
+		if (_article) {
+			_article->endHorizontalScroll();
+		}
+		e->accept();
+		return;
+	}
+	if (!_article || e->touchPoints().isEmpty()) {
+		return;
+	}
+	const auto point = mapFromGlobal(
+		e->touchPoints().cbegin()->screenPos().toPoint());
+	const auto local = ArticlePointFromWidget(point, zoomScale());
+	switch (e->type()) {
+	case QEvent::TouchBegin: {
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		const auto hit = _article->horizontalScrollHit(local);
+		_activeTouchHorizontalScroll = hit.overScrollbar
+			&& _article->beginHorizontalScroll(local, false);
+		if (!_activeTouchHorizontalScroll && hit.overViewport) {
+			_pendingTouchHorizontalScrollPoint = local;
+		}
+		if (_activeTouchHorizontalScroll) {
+			e->accept();
+		}
+	} break;
+	case QEvent::TouchUpdate:
+		if (_activeTouchHorizontalScroll) {
+			(void)_article->updateHorizontalScroll(local);
+			e->accept();
+		} else if (_pendingTouchHorizontalScrollPoint) {
+			const auto delta = local - *_pendingTouchHorizontalScrollPoint;
+			if (delta.manhattanLength() < QApplication::startDragDistance()) {
+				break;
+			}
+			const auto horizontal = (std::abs(delta.x()) > std::abs(delta.y()));
+			if (!horizontal) {
+				_pendingTouchHorizontalScrollPoint = std::nullopt;
+				break;
+			}
+			_activeTouchHorizontalScroll = _article->beginHorizontalScroll(
+				*_pendingTouchHorizontalScrollPoint,
+				true);
+			_pendingTouchHorizontalScrollPoint = std::nullopt;
+			if (_activeTouchHorizontalScroll) {
+				(void)_article->updateHorizontalScroll(local);
+				e->accept();
+			}
+		}
+		break;
+	case QEvent::TouchEnd:
+		_pendingTouchHorizontalScrollPoint = std::nullopt;
+		if (_activeTouchHorizontalScroll) {
+			_activeTouchHorizontalScroll = false;
+			_article->endHorizontalScroll();
+			e->accept();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 void MarkdownDocumentWidget::mouseMoveEvent(QMouseEvent *e) {
+	if (_activeHorizontalScrollDrag) {
+		if (_article) {
+			(void)_article->updateHorizontalScroll(
+				ArticlePointFromWidget(e->pos(), zoomScale()));
+		}
+		e->accept();
+		return;
+	}
 	dragActionUpdate(e->pos());
 }
 
 void MarkdownDocumentWidget::mousePressEvent(QMouseEvent *e) {
 	if (e->button() == Qt::LeftButton) {
+		if (_article && _article->beginHorizontalScroll(
+				ArticlePointFromWidget(e->pos(), zoomScale()),
+				false)) {
+			_activeHorizontalScrollDrag = true;
+			e->accept();
+			return;
+		}
 		dragActionStart(e->pos(), e->button());
 		return;
 	}
@@ -558,6 +705,27 @@ void MarkdownDocumentWidget::mousePressEvent(QMouseEvent *e) {
 
 void MarkdownDocumentWidget::mouseReleaseEvent(QMouseEvent *e) {
 	const auto weak = base::make_weak(this);
+	if (_activeHorizontalScrollDrag && e->button() == Qt::LeftButton) {
+		if (_article) {
+			(void)_article->updateHorizontalScroll(
+				ArticlePointFromWidget(e->pos(), zoomScale()));
+		}
+		_activeHorizontalScrollDrag = false;
+		if (_article) {
+			_article->endHorizontalScroll();
+		}
+		if (weak && rect().contains(e->pos())) {
+			updateHover(hitTest(
+				e->pos(),
+				Ui::Text::StateRequest::Flag::LookupLink
+					| Ui::Text::StateRequest::Flag::LookupSymbol));
+		} else if (weak) {
+			ClickHandler::clearActive(this);
+			applyCursor(style::cur_default);
+		}
+		e->accept();
+		return;
+	}
 	dragActionFinish(e->pos(), e->button());
 	if (weak && !rect().contains(e->pos())) {
 		ClickHandler::clearActive(this);
@@ -566,6 +734,10 @@ void MarkdownDocumentWidget::mouseReleaseEvent(QMouseEvent *e) {
 }
 
 void MarkdownDocumentWidget::mouseDoubleClickEvent(QMouseEvent *e) {
+	if (_article && _article->horizontalScrollHit(
+			ArticlePointFromWidget(e->pos(), zoomScale())).overScrollbar) {
+		return;
+	}
 	dragActionStart(e->pos(), e->button());
 	if (_dragAction != Selecting || _selectionType != TextSelectType::Letters) {
 		return;
@@ -626,6 +798,23 @@ void MarkdownDocumentWidget::focusInEvent(QFocusEvent *e) {
 	Ui::RpWidget::focusInEvent(e);
 }
 
+bool MarkdownDocumentWidget::eventHook(QEvent *e) {
+	if (e->type() == QEvent::TouchBegin
+		|| e->type() == QEvent::TouchUpdate
+		|| e->type() == QEvent::TouchEnd
+		|| e->type() == QEvent::TouchCancel) {
+		auto *ev = static_cast<QTouchEvent*>(e);
+		if (ev->device()->type() == base::TouchDevice::TouchScreen) {
+			const auto active = _activeTouchHorizontalScroll;
+			touchEvent(ev);
+			if (active || _activeTouchHorizontalScroll) {
+				return true;
+			}
+		}
+	}
+	return Ui::RpWidget::eventHook(e);
+}
+
 void MarkdownDocumentWidget::leaveEventHook(QEvent *e) {
 	ClickHandler::clearActive(this);
 	applyCursor((_dragAction == Selecting)
@@ -659,13 +848,9 @@ MarkdownArticleHitTestResult MarkdownDocumentWidget::hitTest(
 	if (!_article) {
 		return {};
 	}
-	const auto scale = zoomScale();
-	if (scale != 1.) {
-		point = QPoint(
-			int(std::floor(point.x() / scale)),
-			int(std::floor(point.y() / scale)));
-	}
-	return _article->hitTest(point, flags);
+	return _article->hitTest(
+		ArticlePointFromWidget(point, zoomScale()),
+		flags);
 }
 
 MarkdownArticleSelection MarkdownDocumentWidget::selectionForCopy() const {

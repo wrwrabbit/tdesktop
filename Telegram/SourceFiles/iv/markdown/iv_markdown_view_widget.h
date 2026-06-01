@@ -31,6 +31,9 @@ struct QuotePaintCache;
 } // namespace Text
 } // namespace Ui
 
+class QTouchEvent;
+class QWheelEvent;
+
 namespace Iv::Markdown {
 
 class MarkdownDocumentWidget final
@@ -72,12 +75,14 @@ protected:
 	void visibleTopBottomUpdated(int visibleTop, int visibleBottom) override;
 	void keyPressEvent(QKeyEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
+	void wheelEvent(QWheelEvent *e) override;
 	void mouseMoveEvent(QMouseEvent *e) override;
 	void mousePressEvent(QMouseEvent *e) override;
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void mouseDoubleClickEvent(QMouseEvent *e) override;
 	void focusOutEvent(QFocusEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
+	bool eventHook(QEvent *e) override;
 	void leaveEventHook(QEvent *e) override;
 	void clickHandlerActiveChanged(const ClickHandlerPtr &, bool) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &, bool) override;
@@ -122,6 +127,7 @@ private:
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensurePrePaintCache();
 	[[nodiscard]] Ui::Text::QuotePaintCache *ensureBlockquotePaintCache();
 	[[nodiscard]] MarkdownArticlePaintContext textPaintContext(QRect clip);
+	void touchEvent(QTouchEvent *e);
 	void stopPressedPlaceholderRipple();
 	void dragActionStart(QPoint point, Qt::MouseButton button);
 	MarkdownArticleHitTestResult dragActionUpdate(QPoint point);
@@ -160,8 +166,12 @@ private:
 	int _lastRelayoutMs = 0;
 	int _zoom = 100;
 	Ui::VisibleRange _visibleRange;
+	std::optional<Qt::Orientation> _horizontalScrollLock;
 	base::unique_qptr<Ui::PopupMenu> _contextMenu;
+	bool _activeHorizontalScrollDrag = false;
 	bool _articlePainted = false;
+	bool _activeTouchHorizontalScroll = false;
+	std::optional<QPoint> _pendingTouchHorizontalScrollPoint;
 
 };
 

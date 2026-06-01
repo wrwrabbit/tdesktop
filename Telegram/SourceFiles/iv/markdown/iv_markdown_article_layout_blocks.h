@@ -40,6 +40,8 @@ public:
 
 struct LaidOutTableCell {
 	Ui::Text::String leaf;
+	QRect logicalOuter;
+	QRect logicalTextRect;
 	QRect outer;
 	QRect textRect;
 	int textWidth = 0;
@@ -58,6 +60,7 @@ struct LaidOutTableCell {
 
 struct LaidOutTableRow {
 	std::vector<LaidOutTableCell> cells;
+	QRect logicalOuter;
 	QRect outer;
 	bool header = false;
 	std::optional<PreparedEditTableRowSource> editRow;
@@ -99,6 +102,8 @@ struct LaidOutBlock {
 	QRect thumbnailRect;
 	QRect visibleFormulaRect;
 	QRect visibleTableRect;
+	QRect tableScrollbarTrackRect;
+	QRect tableScrollbarThumbRect;
 	QRect visibleMediaRect;
 	QPoint markerCenter;
 	QString anchorId;
@@ -123,6 +128,8 @@ struct LaidOutBlock {
 	bool tableStriped = false;
 	bool supplementary = false;
 	bool pullquote = false;
+	int horizontalScrollLeft = 0;
+	int horizontalScrollMax = 0;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;

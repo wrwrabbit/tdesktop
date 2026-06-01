@@ -1783,6 +1783,14 @@ not_null<HistoryItem*> ListWidget::lookupItemByPoint(
 	return LookupItemByPoint(view, mapPointToItem(point, view));
 }
 
+bool ListWidget::canConsumeHorizontalScroll(QPoint position, int delta) const {
+	const auto view = lookupItemByY(position.y());
+	return view
+		&& view->canConsumeHorizontalScroll(
+			mapPointToItem(position, view),
+			delta);
+}
+
 auto ListWidget::findViewForPinnedTracking(int top) const
 -> std::pair<Element*, int> {
 	const auto findScrollTopItem = [&](int top)
