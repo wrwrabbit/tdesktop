@@ -67,6 +67,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/screen_reader_mode.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
 #include "boxes/delete_messages_box.h"
@@ -2943,7 +2944,7 @@ void ListWidget::keyPressEvent(QKeyEvent *e) {
 	}
 
 	const auto count = accessibilityChildCount();
-	if (count > 0 && QAccessible::isActive()) {
+	if (count > 0 && Ui::ScreenReaderModeActive()) {
 		if (_accessibilityFocusedItem
 			&& _accessibilityFocusedIndex >= 0) {
 			const auto elements = accessibleElements();
