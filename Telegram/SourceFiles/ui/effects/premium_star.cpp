@@ -547,7 +547,7 @@ void Star::hideEvent(QHideEvent *e) {
 
 void Star::mousePressEvent(QMouseEvent *e) {
 	_dragging = true;
-	_lastDragPos = e->position().toPoint();
+	_lastDragPos = e->pos();
 	_gesture.reset();
 	cancelIdle();
 }
@@ -556,7 +556,7 @@ void Star::mouseMoveEvent(QMouseEvent *e) {
 	if (!_dragging) {
 		return;
 	}
-	const auto pos = e->position().toPoint();
+	const auto pos = e->pos();
 	const auto shift = pos - _lastDragPos;
 	_yaw += -shift.x() * kDragYaw;
 	_pitch = std::clamp(

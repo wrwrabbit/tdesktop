@@ -12,6 +12,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rect.h"
 #include "ui/style/style_core.h"
 
+#include <QtMath>
+
 namespace Ui::Premium {
 namespace {
 
