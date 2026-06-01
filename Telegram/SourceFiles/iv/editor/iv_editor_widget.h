@@ -156,6 +156,8 @@ private:
 	void ensureInlineFieldForSegment(int segmentIndex);
 	void setupInlineField();
 	void recreateInlineField(const style::InputField &st);
+	void refreshInlineFieldPlaceholder();
+	void refreshInlineFieldPlaceholderColor();
 	void activateTrailingParagraph();
 	void applyFieldTextToState();
 	void hideInlineField();
@@ -223,6 +225,7 @@ private:
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	rpl::lifetime _highlightReadyLifetime;
 	std::vector<CachedInlineFieldStyle> _fieldStyles;
+	std::optional<style::owned_color> _inlineFieldPlaceholderColorOverride;
 	std::optional<InlineFieldStyleKey> _activeFieldStyleKey;
 	State::FieldMode _fieldMode = State::FieldMode::Rich;
 	int _articleHeight = 0;

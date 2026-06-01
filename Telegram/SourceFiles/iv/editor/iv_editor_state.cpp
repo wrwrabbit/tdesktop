@@ -309,6 +309,50 @@ QString State::activeRawText() const {
 	return QString();
 }
 
+QString State::activePlaceholderText() const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return QString();
+	}
+	const auto owner = block(descriptor->leaf.block);
+	if (!owner) {
+		return QString();
+	}
+	switch (descriptor->leaf.kind) {
+	case LeafKind::BlockText:
+		switch (owner->kind) {
+		case BlockKind::Paragraph:
+		case BlockKind::Footer:
+		case BlockKind::Code:
+		case BlockKind::Quote:
+			return u"Text"_q;
+		case BlockKind::Heading:
+		case BlockKind::Details:
+			return u"Header"_q;
+		default:
+			return QString();
+		}
+	case LeafKind::BlockCaption:
+		switch (owner->kind) {
+		case BlockKind::Quote:
+		case BlockKind::Photo:
+		case BlockKind::Video:
+		case BlockKind::Audio:
+		case BlockKind::Map:
+			return u"Caption"_q;
+		default:
+			return QString();
+		}
+	case LeafKind::ListItemText:
+		return u"Text"_q;
+	case LeafKind::TableCellText:
+		return u"Cell"_q;
+	case LeafKind::MathFormula:
+		return u"x^2 + y^2"_q;
+	}
+	return QString();
+}
+
 void State::applyActiveRawText(QString text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
@@ -1251,6 +1295,96 @@ std::optional<State::LeafPath> State::plannedFocusForRange(
 	return fallbackFocusLeaf();
 }
 
+State::InsertionAnchor State::resolveActiveInsertionTarget() const {
+	auto result = InsertionAnchor{
+		.container = BlockContainerPath(),
+		.blockIndex = int(_richPage->blocks.size()) - 1,
+	};
+	if (const auto descriptor = textNode(_activeTextOrdinal)) {
+		result = descriptor->insertionAnchor;
+	}
+	return blockContainer(result.container)
+		? result
+		: InsertionAnchor{
+			.container = BlockContainerPath(),
+			.blockIndex = int(_richPage->blocks.size()) - 1,
+		};
+}
+
+std::optional<int> State::normalizeTextOnlyListItemForInsertion(
+		const BlockContainerPath &container) {
+	if (container.steps.empty()) {
+		return std::nullopt;
+	}
+	const auto &step = container.steps.back();
+	if (step.kind != BlockContainerKind::ListItemChildren) {
+		return std::nullopt;
+	}
+	auto parent = container;
+	parent.steps.pop_back();
+	auto itemPath = BlockPath{
+		.container = parent,
+		.index = step.blockIndex,
+	};
+	auto item = listItem(itemPath, step.listItemIndex);
+	if (!item || (item->anchorId.isEmpty() && RichTextIsEmpty(item->text))) {
+		return std::nullopt;
+	}
+	auto paragraph = MakeParagraphBlock();
+	paragraph.anchorId = std::move(item->anchorId);
+	paragraph.text = std::move(item->text);
+	item->anchorId.clear();
+	item->text = RichText();
+	if (!BlockIsEmpty(paragraph)) {
+		item->blocks.insert(item->blocks.begin(), std::move(paragraph));
+		return 0;
+	}
+	return -1;
+}
+
+std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
+		const BlockContainerPath &container) {
+	if (container.steps.empty()) {
+		return std::nullopt;
+	}
+	const auto &step = container.steps.back();
+	if (step.kind != BlockContainerKind::BlockChildren) {
+		return std::nullopt;
+	}
+	auto parent = container;
+	parent.steps.pop_back();
+	auto owner = block({
+		.container = parent,
+		.index = step.blockIndex,
+	});
+	if (!owner
+		|| owner->kind != BlockKind::Quote
+		|| owner->pullquote
+		|| !owner->blocks.empty()) {
+		return std::nullopt;
+	}
+	auto paragraph = MakeParagraphBlock();
+	paragraph.text = std::move(owner->text);
+	owner->text = RichText();
+	if (!BlockIsEmpty(paragraph)) {
+		owner->blocks.push_back(std::move(paragraph));
+		return 0;
+	}
+	return -1;
+}
+
+bool State::shouldReplaceActiveParagraph(
+		const TextNodeDescriptor &descriptor) const {
+	if (descriptor.leaf.kind != LeafKind::BlockText
+		|| descriptor.removalTarget.kind != RemovalKind::Block) {
+		return false;
+	}
+	const auto owner = block(descriptor.removalTarget.block);
+	return owner
+		&& owner->kind == BlockKind::Paragraph
+		&& BlockIsEmpty(*owner);
+}
+
 int State::ensureTrailingParagraphActive() {
 	if (_richPage->blocks.empty()
 		|| _richPage->blocks.back().kind != BlockKind::Paragraph) {
@@ -1304,17 +1438,36 @@ void State::insertBlocksAfterActive(std::vector<Block> blocks) {
 	if (blocks.empty()) {
 		return;
 	}
-	auto anchor = InsertionAnchor{
-		.container = BlockContainerPath(),
-		.blockIndex = int(_richPage->blocks.size()) - 1,
-	};
 	const auto descriptor = textNode(_activeTextOrdinal);
-	if (descriptor) {
-		anchor = descriptor->insertionAnchor;
+	if (descriptor && shouldReplaceActiveParagraph(*descriptor)) {
+		const auto path = descriptor->removalTarget.block;
+		const auto container = blockContainer(path.container);
+		if (container
+			&& path.index >= 0
+			&& path.index < int(container->size())) {
+			const auto insertAt = path.index;
+			const auto count = int(blocks.size());
+			container->erase(container->begin() + insertAt);
+			container->insert(
+				container->begin() + insertAt,
+				std::make_move_iterator(blocks.begin()),
+				std::make_move_iterator(blocks.end()));
+			rebuild();
+			focusInsertedBlocks(path.container, insertAt, count);
+			return;
+		}
+	}
+	auto anchor = resolveActiveInsertionTarget();
+	if (const auto normalized = normalizeTextOnlyListItemForInsertion(
+			anchor.container)) {
+		anchor.blockIndex = *normalized;
+	} else if (const auto normalized = normalizeTextOnlyQuoteForInsertion(
+			anchor.container)) {
+		anchor.blockIndex = *normalized;
 	}
 	auto *container = blockContainer(anchor.container);
 	if (!container) {
-		anchor = {
+		anchor = InsertionAnchor{
 			.container = BlockContainerPath(),
 			.blockIndex = int(_richPage->blocks.size()) - 1,
 		};
@@ -1578,7 +1731,16 @@ void State::rebuildTextNodes(
 			break;
 		case BlockKind::Quote:
 			if (block.blocks.empty()) {
-				appendBlockTextNode(path, LeafKind::BlockText);
+				appendBlockTextNode(
+					path,
+					LeafKind::BlockText,
+					FieldMode::Rich,
+					!block.pullquote
+						? std::make_optional(InsertionAnchor{
+							.container = BlockChildrenContainer(path),
+							.blockIndex = -1,
+						})
+						: std::nullopt);
 			}
 			appendBlockTextNode(path, LeafKind::BlockCaption);
 			rebuildTextNodes(block.blocks, BlockChildrenContainer(path));
@@ -1912,14 +2074,12 @@ TextWithEntities State::MakeText(QString text) {
 Block State::MakeParagraphBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Paragraph;
-	block.text.text = MakeText(u"Text"_q);
 	return block;
 }
 
 Block State::MakeFooterBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Footer;
-	block.text.text = MakeText(u"Text"_q);
 	return block;
 }
 
@@ -1927,7 +2087,6 @@ Block State::MakeHeadingBlock(int level) {
 	auto block = Block();
 	block.kind = BlockKind::Heading;
 	block.headingLevel = std::clamp(level, 1, 6);
-	block.text.text = MakeText(u"Header"_q);
 	return block;
 }
 
@@ -1935,22 +2094,18 @@ Block State::MakeQuoteBlock(bool pullquote) {
 	auto block = Block();
 	block.kind = BlockKind::Quote;
 	block.pullquote = pullquote;
-	block.text.text = MakeText(u"Text"_q);
-	block.caption.text = MakeText(u"Caption"_q);
 	return block;
 }
 
 Block State::MakeCodeBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Code;
-	block.text.text = MakeText(u"Text"_q);
 	return block;
 }
 
 Block State::MakeMathBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Math;
-	block.formula = u"x^2 + y^2"_q;
 	return block;
 }
 
@@ -1975,7 +2130,6 @@ Block State::MakeListBlock(ListKind kind, TaskState taskState) {
 	for (auto i = 0; i != 3; ++i) {
 		auto item = ListItem();
 		item.taskState = taskState;
-		item.text.text = MakeText(u"Text"_q);
 		block.listItems.push_back(std::move(item));
 	}
 	return block;
@@ -1984,7 +2138,6 @@ Block State::MakeListBlock(ListKind kind, TaskState taskState) {
 Block State::MakeDetailsBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Details;
-	block.text.text = MakeText(u"Header"_q);
 	block.blocks.push_back(MakeParagraphBlock());
 	return block;
 }
@@ -1999,7 +2152,6 @@ Block State::MakeTableBlock() {
 		for (auto cellIndex = 0; cellIndex != 3; ++cellIndex) {
 			auto cell = TableCell();
 			cell.header = (rowIndex == 0);
-			cell.text.text = MakeText(u"Cell"_q);
 			row.cells.push_back(std::move(cell));
 		}
 		block.tableRows.push_back(std::move(row));
@@ -2010,7 +2162,6 @@ Block State::MakeTableBlock() {
 Block State::MakeMediaBlock(BlockKind kind) {
 	auto block = Block();
 	block.kind = kind;
-	block.caption.text = MakeText(u"Caption"_q);
 	return block;
 }
 
@@ -2019,12 +2170,13 @@ Block State::MakeMapBlock(double latitude, double longitude) {
 	block.kind = BlockKind::Map;
 	block.latitude = latitude;
 	block.longitude = longitude;
-	block.caption.text = MakeText(u"Caption"_q);
 	return block;
 }
 
 bool State::RichTextIsEmpty(const RichText &text) {
-	return StringIsEmpty(text.text.text);
+	return StringIsEmpty(text.text.text)
+		&& text.anchorId.isEmpty()
+		&& text.anchorIds.empty();
 }
 
 bool State::ListItemIsEmpty(const ListItem &item) {

@@ -479,6 +479,7 @@ struct PreparedTableCell {
 	int rowspan = 1;
 	std::optional<PreparedEditTableCellSource> editCell;
 	std::optional<PreparedEditLeafSource> editLeaf;
+	QString editPlaceholderText;
 };
 
 struct PreparedTableRow {
@@ -625,6 +626,7 @@ struct PreparedBlock {
 	std::optional<PreparedEditBlockSource> editBlock;
 	std::optional<PreparedEditListItemSource> editListItem;
 	std::optional<PreparedEditLeafSource> editLeaf;
+	QString editPlaceholderText;
 };
 
 struct PreparedRenderDocument {

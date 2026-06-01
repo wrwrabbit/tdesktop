@@ -148,6 +148,13 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return text;
 }
 
+[[nodiscard]] bool RichTextHasMeaningfulContent(
+		const RichPage::RichText &text) {
+	return !text.text.text.trimmed().isEmpty()
+		|| !text.anchorId.isEmpty()
+		|| !text.anchorIds.empty();
+}
+
 [[nodiscard]] PreparedBlock EmptyParagraphBlock() {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Paragraph;
@@ -191,6 +198,8 @@ void WrapPreparedIvRichTextItalic(PreparedIvRichText *prepared) {
 		prepared->text.text.size()));
 }
 
+void ApplyNativeIvEditPlaceholderText(PreparedBlock *block);
+
 bool AppendPreparedQuoteParagraph(
 		std::vector<PreparedBlock> *result,
 		PreparedIvRichText prepared,
@@ -214,9 +223,14 @@ bool AppendPreparedQuoteParagraph(
 			std::move(editLeaf))) {
 		return false;
 	}
-	if (pullquote && (result->size() > count)) {
-		result->back().flowAlignment = TableAlignment::Center;
-		result->back().pullquote = true;
+	if (result->size() > count) {
+		if (allowEmpty) {
+			ApplyNativeIvEditPlaceholderText(&result->back());
+		}
+		if (pullquote) {
+			result->back().flowAlignment = TableAlignment::Center;
+			result->back().pullquote = true;
+		}
 	}
 	return true;
 }
@@ -496,6 +510,45 @@ void ApplyBlockCaptionEditSource(
 	block->editLeaf = BlockCaptionLeafSource(path);
 }
 
+[[nodiscard]] QString NativeIvEditPlaceholderText(
+		PreparedBlockKind kind,
+		PreparedEditLeafKind leafKind) {
+	switch (leafKind) {
+	case PreparedEditLeafKind::BlockCaption:
+		return u"Caption"_q;
+	case PreparedEditLeafKind::TableCellText:
+		return u"Cell"_q;
+	case PreparedEditLeafKind::MathFormula:
+		return u"x^2 + y^2"_q;
+	case PreparedEditLeafKind::ListItemText:
+		return u"Text"_q;
+	case PreparedEditLeafKind::BlockText:
+		return (kind == PreparedBlockKind::Heading)
+			|| (kind == PreparedBlockKind::Details)
+			? u"Header"_q
+			: u"Text"_q;
+	}
+	return QString();
+}
+
+void ApplyNativeIvEditPlaceholderText(PreparedBlock *block) {
+	if (!block->editLeaf) {
+		return;
+	}
+	block->editPlaceholderText = NativeIvEditPlaceholderText(
+		block->kind,
+		block->editLeaf->kind);
+}
+
+void ApplyNativeIvEditPlaceholderText(PreparedTableCell *cell) {
+	if (!cell->editLeaf) {
+		return;
+	}
+	cell->editPlaceholderText = NativeIvEditPlaceholderText(
+		PreparedBlockKind::Table,
+		cell->editLeaf->kind);
+}
+
 using PrepareCanonicalMediaBlock = bool (*)(
 	const RichPageBlock &data,
 	std::vector<PreparedBlock> *result,
@@ -513,6 +566,9 @@ using PrepareCanonicalMediaBlock = bool (*)(
 	}
 	if (result->size() > count) {
 		ApplyBlockCaptionEditSource(&result->back(), std::move(path));
+		if (state->editMode) {
+			ApplyNativeIvEditPlaceholderText(&result->back());
+		}
 	}
 	return true;
 }
@@ -631,7 +687,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		editBlock = BlockSource(*path);
 		editLeaf = BlockTextLeafSource(*path);
 	}
-	return AppendPreparedIvRichBlock(
+	const auto count = result->size();
+	const auto appended = AppendPreparedIvRichBlock(
 		result,
 		kind,
 		headingLevel,
@@ -641,6 +698,10 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		false,
 		std::move(editBlock),
 		std::move(editLeaf));
+	if (appended && state->editMode && (result->size() > count)) {
+		ApplyNativeIvEditPlaceholderText(&result->back());
+	}
+	return appended;
 }
 
 [[nodiscard]] bool PrepareCanonicalNativeIvQuoteBlock(
@@ -750,7 +811,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 				firstNumber = false;
 			}
 		}
-		if (!item.text.text.empty()) {
+		if (RichTextHasMeaningfulContent(item.text)) {
 			auto prepared = PreparedIvRichText();
 			auto anchorId = item.anchorId;
 			if (!PrepareNativeIvRichText(
@@ -773,6 +834,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 					ListItemTextLeafSource(path, i))) {
 				return false;
 			}
+			if (state->editMode && !block.children.empty()) {
+				ApplyNativeIvEditPlaceholderText(&block.children.back());
+			}
 		}
 		auto childContext = depthContext;
 		++childContext.listDepth;
@@ -787,6 +851,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		if (block.children.empty()) {
 			block.children.push_back(EmptyParagraphBlock());
 			block.children.back().editLeaf = ListItemTextLeafSource(path, i);
+			if (state->editMode) {
+				ApplyNativeIvEditPlaceholderText(&block.children.back());
+			}
 		}
 		result->children.push_back(std::move(block));
 	}
@@ -898,6 +965,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 				path,
 				rowIndex,
 				cellIndex);
+			if (state->editMode) {
+				ApplyNativeIvEditPlaceholderText(&preparedCell);
+			}
 			if (!cell.text.text.empty()) {
 				auto rich = PreparedIvRichText();
 				const auto context = NativeIvRichTextContextForTextSize(
@@ -989,6 +1059,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	block.anchorIds = std::move(summary.anchorIds);
 	block.editBlock = BlockSource(path);
 	block.editLeaf = BlockTextLeafSource(path);
+	if (state->editMode) {
+		ApplyNativeIvEditPlaceholderText(&block);
+	}
 	return PrepareCanonicalNativeIvBlocks(
 		data.blocks,
 		&block.children,
@@ -1213,6 +1286,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		code.anchorIds = std::move(prepared.anchorIds);
 		code.editBlock = BlockSource(path);
 		code.editLeaf = BlockTextLeafSource(path);
+		if (state->editMode) {
+			ApplyNativeIvEditPlaceholderText(&code);
+		}
 		result->push_back(std::move(code));
 		return true;
 	}
@@ -1306,16 +1382,19 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			path,
 			PrepareNativeIvAudioBlock);
 	case RichPageBlockKind::Math:
-		if (block.formula.trimmed().isEmpty()) {
+		if (block.formula.trimmed().isEmpty() && !state->editMode) {
 			return true;
 		} else {
 			auto prepared = PreparedBlock();
 			prepared.kind = PreparedBlockKind::DisplayMath;
 			prepared.formulaTex = block.formula;
 			prepared.mathKind = MathKind::Display;
-			prepared.formulaIndex = state->rememberFormula(prepared);
 			prepared.editBlock = BlockSource(path);
 			prepared.editLeaf = MathFormulaLeafSource(path);
+			if (state->editMode) {
+				ApplyNativeIvEditPlaceholderText(&prepared);
+			}
+			prepared.formulaIndex = state->rememberFormula(prepared);
 			result->push_back(std::move(prepared));
 			return true;
 		}

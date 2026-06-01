@@ -34,6 +34,13 @@ constexpr auto kReadableTextColumns = 12;
 constexpr auto kReadableTextLineHeights = 4;
 constexpr auto kReadableCodeColumns = 16;
 
+void SetEditPlaceholderLeaf(
+	QString *placeholderText,
+	Ui::Text::String *placeholderLeaf,
+	const QString &text,
+	const style::TextStyle &textStyle,
+	int width);
+
 [[nodiscard]] style::align CellAlign(TableAlignment alignment) {
 	switch (alignment) {
 	case TableAlignment::Center:
@@ -97,9 +104,22 @@ constexpr auto kReadableCodeColumns = 16;
 		mediaRuntime,
 		TableCellTextMinResizeWidth(textStyle, st));
 	BindLinks(&result.cell.leaf, prepared.links);
-	result.preferredWidth = result.cell.leaf.maxWidth();
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		SetEditPlaceholderLeaf(
+			&result.cell.placeholderText,
+			&result.cell.placeholderLeaf,
+			prepared.editPlaceholderText,
+			textStyle,
+			TableCellTextMinResizeWidth(textStyle, st));
+	}
+	const auto &displayLeaf = usePlaceholder
+		? result.cell.placeholderLeaf
+		: result.cell.leaf;
+	result.preferredWidth = displayLeaf.maxWidth();
 	result.preferredHeight = std::max(
-		result.cell.leaf.countHeight(std::max(result.preferredWidth, 1), true),
+		displayLeaf.countHeight(std::max(result.preferredWidth, 1), true),
 		TextLineHeight(textStyle));
 	return result;
 }
@@ -304,6 +324,23 @@ void SetPlainTextLeaf(
 		kIvMarkedTextOptions);
 }
 
+void SetEditPlaceholderLeaf(
+		QString *placeholderText,
+		Ui::Text::String *placeholderLeaf,
+		const QString &text,
+		const style::TextStyle &textStyle,
+		int width) {
+	if (text.isEmpty()) {
+		return;
+	}
+	*placeholderText = text;
+	SetPlainTextLeaf(
+		placeholderLeaf,
+		textStyle,
+		*placeholderText,
+		width);
+}
+
 [[nodiscard]] int LeafHeight(
 		const Ui::Text::String &leaf,
 		const style::TextStyle &textStyle,
@@ -478,6 +515,14 @@ void LayoutMediaCaption(
 		top + skip,
 		textBand.width(),
 		context);
+	if (prepared.text.text.isEmpty() && !prepared.editPlaceholderText.isEmpty()) {
+		SetEditPlaceholderLeaf(
+			&block->placeholderText,
+			&block->placeholderLeaf,
+			prepared.editPlaceholderText,
+			st.body,
+			block->textWidth);
+	}
 	*bottom = block->textRect.y() + block->textRect.height();
 }
 
@@ -970,11 +1015,25 @@ LaidOutBlock LayoutFlowBlock(
 		mediaRuntime,
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		SetEditPlaceholderLeaf(
+			&block.placeholderText,
+			&block.placeholderLeaf,
+			prepared.editPlaceholderText,
+			textStyle,
+			block.textWidth);
+	}
+	const auto &displayLeaf = usePlaceholder
+		? block.placeholderLeaf
+		: block.leaf;
 
 	const auto height = ResolveTextLeafHeight(
-		std::max(
-			block.leaf.countHeight(block.textWidth, true),
-			TextLineHeight(textStyle)),
+		LeafHeight(
+			displayLeaf,
+			textStyle,
+			block.textWidth),
 		context);
 	block.textRect = QRect(left, top, block.textWidth, height);
 	block.contentRect = QRect(left, top, visibleWidth, height);
@@ -1002,7 +1061,7 @@ LaidOutBlock LayoutFlowBlock(
 			block.horizontalScrollMax,
 			st));
 	block.firstLineBaseline = LeafFirstLineBaseline(
-		block.leaf,
+		displayLeaf,
 		block.textRect,
 		textStyle);
 	return FinalizeLaidOutBlock(std::move(block));
@@ -1054,10 +1113,24 @@ LaidOutBlock LayoutCodeBlock(
 		st,
 		allowAsyncSyntaxHighlighting,
 		syntaxHighlightTracker);
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		SetEditPlaceholderLeaf(
+			&block.placeholderText,
+			&block.placeholderLeaf,
+			prepared.editPlaceholderText,
+			st.code,
+			block.textWidth);
+	}
+	const auto &displayLeaf = usePlaceholder
+		? block.placeholderLeaf
+		: block.leaf;
 	const auto height = ResolveTextLeafHeight(
-		std::max(
-			block.leaf.countHeight(block.textWidth, true),
-			TextLineHeight(st.code)),
+		LeafHeight(
+			displayLeaf,
+			st.code,
+			block.textWidth),
 		context);
 	block.overflowed = (block.textWidth > viewportWidth);
 	block.horizontalScrollMax = scrollOwner
@@ -1101,7 +1174,7 @@ LaidOutBlock LayoutCodeBlock(
 		}
 	}
 	block.firstLineBaseline = LeafFirstLineBaseline(
-		block.leaf,
+		displayLeaf,
 		block.textRect,
 		st.code);
 	return FinalizeLaidOutBlock(std::move(block));
@@ -1154,6 +1227,8 @@ LaidOutBlock LayoutDisplayMathBlock(
 			- padding.right(),
 		1);
 	const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
+	const auto usePlaceholder = prepared.formulaTex.trimmed().isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
 
 	auto formulaWidth = 0;
 	auto formulaHeight = 0;
@@ -1164,33 +1239,47 @@ LaidOutBlock LayoutDisplayMathBlock(
 		const auto &fallbackPadding = st.displayMath.fallbackPadding;
 		const auto fallbackPaddingWidth = fallbackPadding.left()
 			+ fallbackPadding.right();
-		auto fallbackText = TextWithEntities::Simple(u"Invalid formula"_q);
-		fallbackText.entities.push_back(EntityInText(
-			EntityType::Italic,
-			0,
-			fallbackText.text.size()));
 		block.textWidth = std::max(
 			contentLogicalWidth - fallbackPaddingWidth,
 			1);
-		block.fallbackLeaf = Ui::Text::String(
-			TextMinResizeWidth(block.textWidth));
-		block.fallbackLeaf.setMarkedText(
-			st.displayMath.fallbackStyle,
-			std::move(fallbackText),
-			kIvMarkedTextOptions);
+		if (usePlaceholder) {
+			SetEditPlaceholderLeaf(
+				&block.placeholderText,
+				&block.placeholderLeaf,
+				prepared.editPlaceholderText,
+				st.displayMath.fallbackStyle,
+				block.textWidth);
+		} else {
+			auto fallbackText = TextWithEntities::Simple(u"Invalid formula"_q);
+			fallbackText.entities.push_back(EntityInText(
+				EntityType::Italic,
+				0,
+				fallbackText.text.size()));
+			block.fallbackLeaf = Ui::Text::String(
+				TextMinResizeWidth(block.textWidth));
+			block.fallbackLeaf.setMarkedText(
+				st.displayMath.fallbackStyle,
+				std::move(fallbackText),
+				kIvMarkedTextOptions);
+		}
+		const auto &displayLeaf = usePlaceholder
+			? block.placeholderLeaf
+			: block.fallbackLeaf;
 		block.textWidth = std::min(
 			block.textWidth,
-			std::max(block.fallbackLeaf.maxWidth(), 1));
-		auto textHeight = std::max(
-			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(st.displayMath.fallbackStyle));
+			std::max(displayLeaf.maxWidth(), 1));
+		auto textHeight = LeafHeight(
+			displayLeaf,
+			st.displayMath.fallbackStyle,
+			block.textWidth);
 		formulaWidth = std::min(
 			block.textWidth + fallbackPaddingWidth,
 			contentLogicalWidth);
 		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
-		textHeight = std::max(
-			block.fallbackLeaf.countHeight(block.textWidth, true),
-			TextLineHeight(st.displayMath.fallbackStyle));
+		textHeight = LeafHeight(
+			displayLeaf,
+			st.displayMath.fallbackStyle,
+			block.textWidth);
 		formulaHeight = fallbackPadding.top()
 			+ textHeight
 			+ fallbackPadding.bottom();
@@ -1247,11 +1336,14 @@ LaidOutBlock LayoutDisplayMathBlock(
 
 	if (!(formula && formula->measured.success)) {
 		const auto &fallbackPadding = st.displayMath.fallbackPadding;
+		const auto &displayLeaf = usePlaceholder
+			? block.placeholderLeaf
+			: block.fallbackLeaf;
 		block.textRect.moveTo(
 			block.formulaRect.x() + fallbackPadding.left(),
 			block.formulaRect.y() + fallbackPadding.top());
 		block.firstLineBaseline = LeafFirstLineBaseline(
-			block.fallbackLeaf,
+			displayLeaf,
 			block.textRect,
 			st.displayMath.fallbackStyle);
 	}
@@ -1370,11 +1462,14 @@ LaidOutBlock LayoutTableBlock(
 				spanWidth - padding.left() - padding.right(),
 				1);
 			const auto &textStyle = TableCellTextStyle(cellData.cell, st);
+			const auto &displayLeaf = cellData.cell.placeholderLeaf.isEmpty()
+				? cellData.cell.leaf
+				: cellData.cell.placeholderLeaf;
 			const auto naturalTextHeight = (cellData.cell.textWidth
 				>= cellData.preferredWidth)
 				? cellData.preferredHeight
 				: std::max(
-					cellData.cell.leaf.countHeight(
+					displayLeaf.countHeight(
 						cellData.cell.textWidth,
 						true),
 					TextLineHeight(textStyle));
@@ -1539,11 +1634,14 @@ LaidOutBlock LayoutTableBlock(
 	}
 	for (const auto &row : block.tableRows) {
 		for (const auto &cell : row.cells) {
-			if (cell.leaf.isEmpty()) {
+			const auto &displayLeaf = cell.placeholderLeaf.isEmpty()
+				? cell.leaf
+				: cell.placeholderLeaf;
+			if (displayLeaf.isEmpty()) {
 				continue;
 			}
 			block.firstLineBaseline = LeafFirstLineBaseline(
-				cell.leaf,
+				displayLeaf,
 				cell.textRect,
 				TableCellTextStyle(cell, st));
 			return FinalizeLaidOutBlock(std::move(block));

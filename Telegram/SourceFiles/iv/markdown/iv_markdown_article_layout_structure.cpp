@@ -32,6 +32,27 @@ namespace {
 	return TextLineBaseline(st.body, top);
 }
 
+void SetEditPlaceholderLeaf(
+		LaidOutBlock *block,
+		const QString &text,
+		const style::TextStyle &textStyle,
+		int width) {
+	if (text.isEmpty()) {
+		return;
+	}
+	block->placeholderText = text;
+	block->placeholderLeaf = Ui::Text::String(TextMinResizeWidth(width));
+	block->placeholderLeaf.setMarkedText(
+		textStyle,
+		TextWithEntities::Simple(block->placeholderText),
+		TextParseOptions{
+			TextParseMultiline,
+			0,
+			0,
+			Qt::LayoutDirectionAuto,
+		});
+}
+
 [[nodiscard]] int BlockBottom(const LaidOutBlock &block) {
 	return block.outer.y() + block.outer.height();
 }
@@ -1100,10 +1121,22 @@ void FinalizeOwnerSelection(
 		mediaRuntime,
 		block.textWidth);
 	BindLinks(&block.leaf, prepared.links);
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		SetEditPlaceholderLeaf(
+			&block,
+			prepared.editPlaceholderText,
+			details.summaryStyle,
+			block.textWidth);
+	}
+	const auto &displayLeaf = usePlaceholder
+		? block.placeholderLeaf
+		: block.leaf;
 
 	const auto summaryHeight = ResolveTextLeafHeight(
 		std::max(
-			block.leaf.countHeight(block.textWidth, true),
+			displayLeaf.countHeight(block.textWidth, true),
 			TextLineHeight(details.summaryStyle)),
 		context);
 	auto actionHeight = 0;
@@ -1150,7 +1183,7 @@ void FinalizeOwnerSelection(
 			actionHeight);
 	}
 	block.firstLineBaseline = LeafFirstLineBaseline(
-		block.leaf,
+		displayLeaf,
 		block.textRect,
 		details.summaryStyle);
 	const auto childActiveScrollOwner = NextActiveScrollOwner(

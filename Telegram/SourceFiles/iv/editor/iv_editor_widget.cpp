@@ -1490,6 +1490,8 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 	fieldStyle->style.lineHeight = data.lineHeight;
 	fieldStyle->textFg = data.textFg;
 	fieldStyle->textAlign = data.align;
+	fieldStyle->placeholderFont = fieldStyle->style.font;
+	fieldStyle->placeholderAlign = data.align;
 	_fieldStyles.push_back({
 		.key = key,
 		.style = std::move(fieldStyle),
@@ -1579,6 +1581,7 @@ void Widget::setupInlineField() {
 	_field->setAdditionalMargins({});
 	_field->setSubmitSettings(Ui::InputField::SubmitSettings::None);
 	_field->setMaxHeight(std::numeric_limits<int>::max());
+	refreshInlineFieldPlaceholderColor();
 	const auto raw = _field->rawTextEdit();
 	raw->installEventFilter(this);
 	raw->viewport()->installEventFilter(this);
@@ -1613,6 +1616,7 @@ void Widget::recreateInlineField(const style::InputField &st) {
 		Ui::InputField::Mode::MultiLine,
 		rpl::single(QString()));
 	setupInlineField();
+	refreshInlineFieldPlaceholder();
 	_field->setTextWithTags(text, Ui::InputField::HistoryAction::Clear);
 	auto restored = _field->textCursor();
 	const auto size = _field->getLastText().size();
@@ -1631,6 +1635,29 @@ void Widget::recreateInlineField(const style::InputField &st) {
 		}
 	}
 	_settingField = false;
+}
+
+void Widget::refreshInlineFieldPlaceholder() {
+	if (!_field) {
+		return;
+	}
+	_field->setPlaceholder(rpl::single(_state->activePlaceholderText()));
+	refreshInlineFieldPlaceholderColor();
+}
+
+void Widget::refreshInlineFieldPlaceholderColor() {
+	if (!_field) {
+		return;
+	}
+	auto color = _articleStyle->supplementaryTextColor->c;
+	color.setAlphaF(color.alphaF() * 0.5);
+	if (_inlineFieldPlaceholderColorOverride) {
+		_inlineFieldPlaceholderColorOverride->update(color);
+	} else {
+		_inlineFieldPlaceholderColorOverride.emplace(color);
+	}
+	_field->setPlaceholderColorOverride(
+		_inlineFieldPlaceholderColorOverride->color());
 }
 
 void Widget::activateTextOrdinal(int ordinal, int cursorOffset) {
@@ -1659,6 +1686,7 @@ void Widget::activateTextOrdinal(
 
 	_activeSegmentIndex = segmentIndex;
 	ensureInlineFieldForSegment(segmentIndex);
+	refreshInlineFieldPlaceholder();
 	_settingField = true;
 	if (_state->activeFieldMode() == State::FieldMode::Raw) {
 		_field->setTextWithTags(

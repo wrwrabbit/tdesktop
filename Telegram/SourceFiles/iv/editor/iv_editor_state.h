@@ -171,6 +171,7 @@ public:
 	void applyActiveText(TextWithEntities text);
 	[[nodiscard]] FieldMode activeFieldMode() const;
 	[[nodiscard]] QString activeRawText() const;
+	[[nodiscard]] QString activePlaceholderText() const;
 	void applyActiveRawText(QString text);
 	[[nodiscard]] std::optional<QString> codeBlockLanguage(int ordinal) const;
 	[[nodiscard]] bool setCodeBlockLanguage(int ordinal, QString language);
@@ -313,6 +314,13 @@ private:
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container);
+	[[nodiscard]] InsertionAnchor resolveActiveInsertionTarget() const;
+	[[nodiscard]] std::optional<int> normalizeTextOnlyListItemForInsertion(
+		const BlockContainerPath &container);
+	[[nodiscard]] std::optional<int> normalizeTextOnlyQuoteForInsertion(
+		const BlockContainerPath &container);
+	[[nodiscard]] bool shouldReplaceActiveParagraph(
+		const TextNodeDescriptor &descriptor) const;
 	void insertBlocksAfterActive(std::vector<RichPage::Block> blocks);
 	void appendBlockTextNode(
 		const BlockPath &path,

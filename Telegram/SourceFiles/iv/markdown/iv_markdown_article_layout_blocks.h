@@ -42,6 +42,8 @@ struct LaidOutTableCell {
 	Ui::Text::String leaf;
 	QRect logicalOuter;
 	QRect logicalTextRect;
+	QString placeholderText;
+	Ui::Text::String placeholderLeaf;
 	QRect outer;
 	QRect textRect;
 	int textWidth = 0;
@@ -87,6 +89,8 @@ struct LaidOutBlockLogicalGeometry {
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
+	QString placeholderText;
+	Ui::Text::String placeholderLeaf;
 	Ui::Text::String labelLeaf;
 	Ui::Text::String subtitleLeaf;
 	Ui::Text::String actionLeaf;
