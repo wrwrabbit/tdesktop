@@ -146,6 +146,7 @@ struct LaidOutBlock {
 	style::align flowTextAlign = style::al_left;
 	style::align formulaAlign = style::al_left;
 	bool collapsed = false;
+	bool detailsOpen = false;
 	bool overflowed = false;
 	bool tableBordered = true;
 	bool tableStriped = false;
@@ -161,6 +162,7 @@ struct LaidOutBlock {
 	std::optional<PreparedEditLeafSource> editLeaf;
 	std::shared_ptr<MediaBlock> mediaBlock;
 	std::shared_ptr<PlaceholderBlockRuntime> placeholderRuntime;
+	std::shared_ptr<TaskMarkerRippleRuntime> taskMarkerRippleRuntime;
 	std::shared_ptr<PhotoRuntime> photoRuntime;
 	MediaActivation activation;
 	uint64 thumbnailPhotoId = 0;
@@ -190,12 +192,15 @@ struct LayoutContext {
 	int articleWidth = 0;
 	bool tightList = false;
 	bool useArticleBands = false;
+	bool editMode = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
 	std::shared_ptr<TextLeafHeightOverride> textLeafHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
 	std::function<std::shared_ptr<PlaceholderBlockRuntime>(
 		PreparedPlaceholderBlockId)> placeholderRuntimeFactory;
+	std::function<std::shared_ptr<TaskMarkerRippleRuntime>(
+		const PreparedEditListItemSource&)> taskMarkerRippleRuntimeFactory;
 };
 
 struct TableCellLayoutData {

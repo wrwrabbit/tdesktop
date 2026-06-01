@@ -350,6 +350,38 @@ bool State::setCodeBlockLanguage(int ordinal, QString language) {
 	return true;
 }
 
+bool State::toggleTaskState(
+		const Markdown::PreparedEditListItemSource &source) {
+	const auto blockPath = convertBlockPath(source.block);
+	if (!blockPath) {
+		return false;
+	}
+	auto item = listItem(*blockPath, source.listItemIndex);
+	if (!item || item->taskState == TaskState::None) {
+		return false;
+	}
+	item->taskState = (item->taskState == TaskState::Unchecked)
+		? TaskState::Checked
+		: TaskState::Unchecked;
+	rebuild();
+	return true;
+}
+
+bool State::toggleDetailsOpen(
+		const Markdown::PreparedEditBlockSource &source) {
+	const auto path = convertBlockPath(source);
+	if (!path) {
+		return false;
+	}
+	auto owner = block(*path);
+	if (!owner || owner->kind != BlockKind::Details) {
+		return false;
+	}
+	owner->open = !owner->open;
+	rebuild();
+	return true;
+}
+
 int State::activeTextLength() const {
 	return activeRawText().size();
 }

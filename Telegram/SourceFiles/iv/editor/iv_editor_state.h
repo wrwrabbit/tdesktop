@@ -184,6 +184,10 @@ public:
 	[[nodiscard]] std::optional<int> removeStructuralSelection(
 		const Markdown::PreparedEditSelection &selection,
 		bool forward);
+	[[nodiscard]] bool toggleTaskState(
+		const Markdown::PreparedEditListItemSource &source);
+	[[nodiscard]] bool toggleDetailsOpen(
+		const Markdown::PreparedEditBlockSource &source);
 	[[nodiscard]] int ensureTrailingParagraphActive();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();

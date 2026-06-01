@@ -792,6 +792,15 @@ void PaintTaskMarker(
 		return;
 	}
 	const auto &paintSt = PaintStyle(context, st);
+	if (block.taskMarkerRippleRuntime && block.taskMarkerRippleRuntime->ripple) {
+		const auto rippleTopLeft = rect.topLeft()
+			+ st::defaultCheckbox.rippleAreaPosition;
+		block.taskMarkerRippleRuntime->ripple->paint(
+			p,
+			rippleTopLeft.x(),
+			rippleTopLeft.y(),
+			outerWidth);
+	}
 	auto view = Ui::CheckView(
 		paintSt.list.taskCheck,
 		block.taskState == TaskState::Checked);
@@ -2375,11 +2384,14 @@ void PaintDetailsBlock(
 		p.fillRect(lineRect, lineFg);
 	}
 	if (!block.iconRect.isEmpty()) {
+		const auto collapsed = block.actionRect.isEmpty()
+			? block.collapsed
+			: !block.detailsOpen;
 		PaintDetailsIcon(
 			p,
 			block.iconRect,
 			paintSt.supplementaryTextColor->c,
-			block.collapsed);
+			collapsed);
 	}
 	p.setPen(paintSt.textColor->c);
 	PaintSelectableTextLeaf(
@@ -2393,6 +2405,16 @@ void PaintDetailsBlock(
 		TextSelectionForSegmentIndex(
 			context.selectionState,
 			block.segmentIndex));
+	if (!block.actionRect.isEmpty()) {
+		p.setPen(paintSt.supplementaryTextColor->c);
+		PaintTextLeaf(
+			p,
+			block.actionLeaf,
+			context,
+			block.actionRect,
+			block.actionRect.width(),
+			style::al_right);
+	}
 	p.restore();
 
 	if (!block.bodyRect.isEmpty()) {

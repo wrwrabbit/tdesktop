@@ -134,6 +134,7 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	auto timer = QElapsedTimer();
 	timer.start();
 	state.result.mediaRuntime = std::move(request.mediaRuntime);
+	state.result.editMode = request.editMode;
 	state.dimensions = request.dimensionsOverride.value_or(
 		CaptureMarkdownPrepareDimensions());
 	state.editMode = request.editMode;

@@ -616,6 +616,7 @@ struct PreparedBlock {
 	bool tableBordered = true;
 	bool tableStriped = false;
 	bool collapsed = false;
+	bool detailsOpen = false;
 	bool depthClamped = false;
 	bool tight = false;
 	bool supplementary = false;
@@ -717,6 +718,7 @@ struct MarkdownArticleContent {
 	std::vector<PreparedFootnote> footnotes;
 	std::vector<PreparedFormulaSlot> formulas;
 	std::shared_ptr<MediaRuntime> mediaRuntime;
+	bool editMode = false;
 	PrepareFailureStatus failure;
 	PrepareDebugStats debug;
 };

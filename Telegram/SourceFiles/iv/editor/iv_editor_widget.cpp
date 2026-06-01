@@ -1001,16 +1001,21 @@ void Widget::mouseMoveEvent(QMouseEvent *e) {
 		return;
 	}
 	if (!_articleSelectionDrag.active) {
-		const auto hit = _article->hitTest(
-			articlePoint,
-			Ui::Text::StateRequest::Flag::LookupSymbol);
 		auto cursor = style::cur_default;
-		if (hit.valid() && hit.codeHeaderCopy) {
+		const auto controlHit = _article->editControlHitTest(articlePoint);
+		if (controlHit.valid()) {
 			cursor = style::cur_pointer;
-		} else if (hit.valid()
-			&& hit.direct
-			&& _article->segmentIsText(hit.segmentIndex)) {
-			cursor = style::cur_text;
+		} else {
+			const auto hit = _article->hitTest(
+				articlePoint,
+				Ui::Text::StateRequest::Flag::LookupSymbol);
+			if (hit.valid() && hit.codeHeaderCopy) {
+				cursor = style::cur_pointer;
+			} else if (hit.valid()
+				&& hit.direct
+				&& _article->segmentIsText(hit.segmentIndex)) {
+				cursor = style::cur_text;
+			}
 		}
 		setCursor(cursor);
 		Ui::RpWidget::mouseMoveEvent(e);
@@ -1030,6 +1035,8 @@ void Widget::mousePressEvent(QMouseEvent *e) {
 		return;
 	}
 	_trackingPointerPress = true;
+	_pressedControl = {};
+	_pressedControlPoint = std::nullopt;
 	auto articlePoint = e->pos() - articleTopLeft();
 	const auto horizontalScrollHit = _article->horizontalScrollHit(
 		articlePoint);
@@ -1037,6 +1044,13 @@ void Widget::mousePressEvent(QMouseEvent *e) {
 		&& _article->beginHorizontalScroll(articlePoint, false)) {
 		_horizontalScrollDrag = HorizontalScrollDrag::Mouse;
 		syncInlineFieldGeometry();
+		e->accept();
+		return;
+	}
+	const auto controlHit = _article->editControlHitTest(articlePoint);
+	if (controlHit.valid()) {
+		_pressedControl = controlHit;
+		_pressedControlPoint = articlePoint;
 		e->accept();
 		return;
 	}
@@ -1096,6 +1110,63 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		_horizontalScrollDrag = HorizontalScrollDrag::None;
 		if (changed) {
 			syncInlineFieldGeometry();
+		}
+		e->accept();
+		return;
+	}
+	const auto controlHit = _article->editControlHitTest(articlePoint);
+	const auto applyControlToggle = [&](auto &&toggle, auto &&afterRefresh) {
+		const auto hadVisibleField = !_field->isHidden();
+		commitInlineField();
+		_pendingOrdinal = -1;
+		_pendingCursorOffset = 0;
+		hideInlineField();
+		_article->clearTextLeafHeightOverride();
+		const auto toggled = toggle();
+		if (toggled || hadVisibleField) {
+			refreshPreparedContent();
+		}
+		clearTextSelection();
+		clearStructuralSelection();
+		setFocus();
+		if (toggled) {
+			afterRefresh();
+		}
+		return toggled;
+	};
+	if (_pressedControl.valid()) {
+		const auto pressedControl = _pressedControl;
+		const auto pressedControlPoint = _pressedControlPoint;
+		_pressedControl = {};
+		_pressedControlPoint = std::nullopt;
+		const auto matchedControl = pressedControlPoint
+			&& ((articlePoint - *pressedControlPoint).manhattanLength()
+				< QApplication::startDragDistance())
+			&& (controlHit == pressedControl);
+		if (matchedControl) {
+			switch (pressedControl.kind) {
+			case Markdown::MarkdownArticleEditControlHitKind::TaskMarker:
+				if (pressedControl.listItem) {
+					applyControlToggle([&] {
+						return _state->toggleTaskState(*pressedControl.listItem);
+					}, [&] {
+						_article->addTaskMarkerRipple(
+							*pressedControl.listItem,
+							articlePoint);
+					});
+				}
+				break;
+			case Markdown::MarkdownArticleEditControlHitKind::DetailsToggle:
+				if (pressedControl.block) {
+					applyControlToggle([&] {
+						return _state->toggleDetailsOpen(*pressedControl.block);
+					}, [] {
+					});
+				}
+				break;
+			case Markdown::MarkdownArticleEditControlHitKind::None:
+				break;
+			}
 		}
 		e->accept();
 		return;

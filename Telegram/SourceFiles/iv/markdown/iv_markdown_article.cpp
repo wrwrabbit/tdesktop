@@ -16,6 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "ui/style/style_core_color.h"
 #include "ui/style/style_core_scale.h"
+#include "ui/widgets/checkbox.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/dynamic_image.h"
 
@@ -24,6 +25,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <limits>
+#include <map>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -177,6 +180,78 @@ void RestoreRelatedArticleImageStates(
 	return segment.isTextLeaf() || IsDisplayMathSegment(segment);
 }
 
+template <typename T>
+[[nodiscard]] int CompareValues(const T &a, const T &b) {
+	return (a < b) ? -1 : (b < a) ? 1 : 0;
+}
+
+[[nodiscard]] int ComparePreparedEditBlockContainerStep(
+		const PreparedEditBlockContainerStep &a,
+		const PreparedEditBlockContainerStep &b) {
+	if (const auto result = CompareValues(int(a.kind), int(b.kind));
+		result != 0) {
+		return result;
+	}
+	if (const auto result = CompareValues(a.blockIndex, b.blockIndex);
+		result != 0) {
+		return result;
+	}
+	return CompareValues(a.listItemIndex, b.listItemIndex);
+}
+
+[[nodiscard]] int ComparePreparedEditBlockContainerPath(
+		const PreparedEditBlockContainerPath &a,
+		const PreparedEditBlockContainerPath &b) {
+	const auto count = std::min(a.steps.size(), b.steps.size());
+	for (auto i = size_t(0); i != count; ++i) {
+		if (const auto result = ComparePreparedEditBlockContainerStep(
+				a.steps[i],
+				b.steps[i]);
+			result != 0) {
+			return result;
+		}
+	}
+	return CompareValues(a.steps.size(), b.steps.size());
+}
+
+[[nodiscard]] int ComparePreparedEditBlockPath(
+		const PreparedEditBlockPath &a,
+		const PreparedEditBlockPath &b) {
+	if (const auto result = ComparePreparedEditBlockContainerPath(
+			a.container,
+			b.container);
+		result != 0) {
+		return result;
+	}
+	return CompareValues(a.index, b.index);
+}
+
+[[nodiscard]] int ComparePreparedEditListItemSource(
+		const PreparedEditListItemSource &a,
+		const PreparedEditListItemSource &b) {
+	if (const auto result = ComparePreparedEditBlockPath(a.block, b.block);
+		result != 0) {
+		return result;
+	}
+	return CompareValues(a.listItemIndex, b.listItemIndex);
+}
+
+struct PreparedEditListItemSourceLess {
+	[[nodiscard]] bool operator()(
+			const PreparedEditListItemSource &a,
+			const PreparedEditListItemSource &b) const {
+		return ComparePreparedEditListItemSource(a, b) < 0;
+	}
+};
+
+using TaskMarkerRippleRuntimeMap = std::map<
+	PreparedEditListItemSource,
+	std::shared_ptr<TaskMarkerRippleRuntime>,
+	PreparedEditListItemSourceLess>;
+using TaskMarkerSourceSet = std::set<
+	PreparedEditListItemSource,
+	PreparedEditListItemSourceLess>;
+
 void CollectPlaceholderIds(
 		const std::vector<LaidOutBlock> &blocks,
 		std::unordered_set<uint64> *result) {
@@ -206,6 +281,72 @@ void CollectPlaceholderIds(
 		}
 	}
 	return nullptr;
+}
+
+void CollectTaskMarkerSources(
+		const std::vector<LaidOutBlock> &blocks,
+		TaskMarkerSourceSet *result) {
+	if (!result) {
+		return;
+	}
+	for (const auto &block : blocks) {
+		if (block.taskState != TaskState::None && block.editListItem) {
+			result->emplace(*block.editListItem);
+		}
+		CollectTaskMarkerSources(block.children, result);
+	}
+}
+
+[[nodiscard]] LaidOutBlock *FindListItemBlock(
+		std::vector<LaidOutBlock> *blocks,
+		const PreparedEditListItemSource &source) {
+	if (!blocks) {
+		return nullptr;
+	}
+	for (auto &block : *blocks) {
+		if (block.kind == PreparedBlockKind::ListItem
+			&& block.editListItem
+			&& (*block.editListItem == source)) {
+			return &block;
+		}
+		if (const auto child = FindListItemBlock(&block.children, source)) {
+			return child;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const LaidOutBlock *FindListItemBlock(
+		const std::vector<LaidOutBlock> &blocks,
+		const PreparedEditListItemSource &source) {
+	for (const auto &block : blocks) {
+		if (block.kind == PreparedBlockKind::ListItem
+			&& block.editListItem
+			&& (*block.editListItem == source)) {
+			return &block;
+		}
+		if (const auto child = FindListItemBlock(block.children, source)) {
+			return child;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] QRect TaskMarkerRippleRect(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	if (block.markerRect.isEmpty()) {
+		return {};
+	}
+	const auto size = (block.taskMarkerRippleRuntime
+			&& !block.taskMarkerRippleRuntime->rippleSize.isEmpty())
+		? block.taskMarkerRippleRuntime->rippleSize
+		: (block.markerRect.size() + QSize(
+			st.list.taskCheck.rippleAreaPadding * 2,
+			st.list.taskCheck.rippleAreaPadding * 2));
+	return QRect(
+		block.markerRect.topLeft() + st::defaultCheckbox.rippleAreaPosition,
+		size);
 }
 
 [[nodiscard]] const LaidOutBlock *FindPlaceholderBlock(
@@ -1177,6 +1318,10 @@ void ApplyOwnerContentGeometry(
 	return {};
 }
 
+[[nodiscard]] MarkdownArticleEditControlHit EditControlHitForBlocks(
+		const std::vector<LaidOutBlock> &blocks,
+		QPoint point);
+
 [[nodiscard]] QRect VisibleTextRectForBlock(const LaidOutBlock &block) {
 	switch (block.kind) {
 	case PreparedBlockKind::CodeBlock:
@@ -1315,6 +1460,78 @@ void ApplyOwnerContentGeometry(
 	return EditFallbackHitForBlock(block);
 }
 
+[[nodiscard]] MarkdownArticleEditControlHit EditControlHitForListItemBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (block.taskState != TaskState::None
+		&& block.editListItem
+		&& ContainsPoint(block.markerRect, point)) {
+		return {
+			.kind = MarkdownArticleEditControlHitKind::TaskMarker,
+			.listItem = *block.editListItem,
+		};
+	}
+	if (!block.children.empty()) {
+		return EditControlHitForBlocks(block.children, point);
+	}
+	return {};
+}
+
+[[nodiscard]] MarkdownArticleEditControlHit EditControlHitForDetailsBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	if (ContainsPoint(block.headerRect, point) && block.editBlock) {
+		const auto leftWidth = std::max(
+			block.textRect.left() - block.headerRect.left(),
+			0);
+		const auto leftToggleRect = QRect(
+			block.headerRect.left(),
+			block.headerRect.top(),
+			leftWidth,
+			block.headerRect.height());
+		if (ContainsPoint(leftToggleRect, point)
+			|| (!block.actionRect.isEmpty()
+				&& ContainsPoint(block.actionRect, point))) {
+			return {
+				.kind = MarkdownArticleEditControlHitKind::DetailsToggle,
+				.block = *block.editBlock,
+			};
+		}
+		return {};
+	}
+	if (!block.children.empty()) {
+		return EditControlHitForBlocks(block.children, point);
+	}
+	return {};
+}
+
+[[nodiscard]] MarkdownArticleEditControlHit EditControlHitForBlock(
+		const LaidOutBlock &block,
+		QPoint point) {
+	switch (block.kind) {
+	case PreparedBlockKind::ListItem:
+		return EditControlHitForListItemBlock(block, point);
+	case PreparedBlockKind::Details:
+		return EditControlHitForDetailsBlock(block, point);
+	default:
+		if (!block.children.empty()) {
+			return EditControlHitForBlocks(block.children, point);
+		}
+		return {};
+	}
+}
+
+[[nodiscard]] MarkdownArticleEditControlHit EditControlHitForBlocks(
+		const std::vector<LaidOutBlock> &blocks,
+		QPoint point) {
+	for (const auto &block : blocks) {
+		if (ContainsPoint(block.outer, point)) {
+			return EditControlHitForBlock(block, point);
+		}
+	}
+	return {};
+}
+
 [[nodiscard]] PreparedEditHit EditHitForBlock(
 		const LaidOutBlock &block,
 		QPoint point) {
@@ -1449,6 +1666,10 @@ PlaceholderBlockRuntime::PlaceholderBlockRuntime(Fn<void()> repaint)
 	st::defaultInfiniteRadialAnimation) {
 }
 
+TaskMarkerRippleRuntime::TaskMarkerRippleRuntime(Fn<void()> repaint)
+: repaint(std::move(repaint)) {
+}
+
 class MarkdownArticle::Impl final : public CodeBlockSyntaxHighlightTracker {
 public:
 	Impl(
@@ -1486,6 +1707,8 @@ public:
 		Ui::Text::StateRequest::Flags flags) const;
 
 	[[nodiscard]] PreparedEditHit editHitTest(QPoint point) const;
+	[[nodiscard]] MarkdownArticleEditControlHit editControlHitTest(
+		QPoint point) const;
 
 	[[nodiscard]] MarkdownArticleHorizontalScrollHit horizontalScrollHit(
 		QPoint point) const;
@@ -1567,6 +1790,9 @@ public:
 	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
 	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);
 	void clearAllPlaceholderLoading();
+	void addTaskMarkerRipple(
+		const PreparedEditListItemSource &source,
+		QPoint point);
 	void addPlaceholderRipple(PreparedPlaceholderBlockId id, QPoint point);
 	void stopPlaceholderRipple(PreparedPlaceholderBlockId id);
 
@@ -1599,6 +1825,15 @@ private:
 	void prunePlaceholderRuntimes();
 
 	void requestPlaceholderRepaint(PreparedPlaceholderBlockId id);
+
+	[[nodiscard]] auto getOrCreateTaskMarkerRippleRuntime(
+		const PreparedEditListItemSource &source)
+	-> std::shared_ptr<TaskMarkerRippleRuntime>;
+
+	void requestTaskMarkerRepaint(
+		const PreparedEditListItemSource &source);
+
+	void pruneTaskMarkerRuntimes();
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> getOrCreateMediaBlock(
 		const PreparedBlock &prepared);
@@ -1695,6 +1930,7 @@ private:
 	MediaBlockStorage _mediaBlocks;
 	std::unordered_map<uint64, std::shared_ptr<PlaceholderBlockRuntime>>
 		_placeholderRuntimes;
+	TaskMarkerRippleRuntimeMap _taskMarkerRippleRuntimes;
 	std::unordered_map<
 		uint64,
 		RelatedArticleImageState> _relatedArticleImages;
@@ -1898,6 +2134,11 @@ MarkdownArticleHitTestResult MarkdownArticle::Impl::hitTest(
 
 PreparedEditHit MarkdownArticle::Impl::editHitTest(QPoint point) const {
 	return EditHitForBlocks(_blocks, point);
+}
+
+MarkdownArticleEditControlHit MarkdownArticle::Impl::editControlHitTest(
+		QPoint point) const {
+	return EditControlHitForBlocks(_blocks, point);
 }
 
 int MarkdownArticle::Impl::anchorTop(const QString &anchorId) const {
@@ -2224,6 +2465,49 @@ void MarkdownArticle::Impl::clearAllPlaceholderLoading() {
 	}
 }
 
+void MarkdownArticle::Impl::addTaskMarkerRipple(
+		const PreparedEditListItemSource &source,
+		QPoint point) {
+	auto block = FindListItemBlock(&_blocks, source);
+	if (!block
+		|| block->taskState == TaskState::None
+		|| block->markerRect.isEmpty()) {
+		return;
+	}
+	auto runtime = block->taskMarkerRippleRuntime
+		? block->taskMarkerRippleRuntime
+		: getOrCreateTaskMarkerRippleRuntime(source);
+	if (!runtime) {
+		return;
+	}
+	block->taskMarkerRippleRuntime = runtime;
+	auto view = Ui::CheckView(
+		layoutStyle().list.taskCheck,
+		block->taskState == TaskState::Checked);
+	const auto mask = view.prepareRippleMask();
+	const auto size = mask.size();
+	if (!runtime->ripple || runtime->rippleSize != size) {
+		runtime->ripple = std::make_unique<Ui::RippleAnimation>(
+			st::defaultCheckbox.ripple,
+			mask,
+			[repaint = runtime->repaint] {
+				if (repaint) {
+					repaint();
+				}
+			});
+		runtime->rippleSize = size;
+	}
+	point -= (block->markerRect.topLeft()
+		+ st::defaultCheckbox.rippleAreaPosition);
+	point.setX(std::clamp(point.x(), 0, std::max(size.width() - 1, 0)));
+	point.setY(std::clamp(point.y(), 0, std::max(size.height() - 1, 0)));
+	runtime->ripple->add(point);
+	runtime->ripple->lastStop();
+	if (runtime->repaint) {
+		runtime->repaint();
+	}
+}
+
 void MarkdownArticle::Impl::addPlaceholderRipple(
 		PreparedPlaceholderBlockId id,
 		QPoint point) {
@@ -2335,6 +2619,20 @@ void MarkdownArticle::Impl::refreshMediaBlockHosts() {
 	}
 }
 
+auto MarkdownArticle::Impl::getOrCreateTaskMarkerRippleRuntime(
+		const PreparedEditListItemSource &source)
+-> std::shared_ptr<TaskMarkerRippleRuntime> {
+	if (const auto i = _taskMarkerRippleRuntimes.find(source);
+		i != end(_taskMarkerRippleRuntimes)) {
+		return i->second;
+	}
+	auto runtime = std::make_shared<TaskMarkerRippleRuntime>([=] {
+		requestTaskMarkerRepaint(source);
+	});
+	_taskMarkerRippleRuntimes.emplace(source, runtime);
+	return runtime;
+}
+
 std::shared_ptr<PlaceholderBlockRuntime>
 MarkdownArticle::Impl::getOrCreatePlaceholderRuntime(
 		PreparedPlaceholderBlockId id) {
@@ -2352,6 +2650,19 @@ MarkdownArticle::Impl::getOrCreatePlaceholderRuntime(
 	return runtime;
 }
 
+void MarkdownArticle::Impl::pruneTaskMarkerRuntimes() {
+	auto live = TaskMarkerSourceSet();
+	CollectTaskMarkerSources(_blocks, &live);
+	for (auto i = _taskMarkerRippleRuntimes.begin();
+		i != _taskMarkerRippleRuntimes.end();) {
+		if (live.find(i->first) != end(live)) {
+			++i;
+		} else {
+			i = _taskMarkerRippleRuntimes.erase(i);
+		}
+	}
+}
+
 void MarkdownArticle::Impl::prunePlaceholderRuntimes() {
 	auto live = std::unordered_set<uint64>();
 	CollectPlaceholderIds(_blocks, &live);
@@ -2361,6 +2672,20 @@ void MarkdownArticle::Impl::prunePlaceholderRuntimes() {
 		} else {
 			i = _placeholderRuntimes.erase(i);
 		}
+	}
+}
+
+void MarkdownArticle::Impl::requestTaskMarkerRepaint(
+		const PreparedEditListItemSource &source) {
+	if (const auto block = FindListItemBlock(_blocks, source)) {
+		const auto rect = TaskMarkerRippleRect(*block, layoutStyle());
+		if (_textRepaintRect && !rect.isEmpty()) {
+			_textRepaintRect(rect);
+		} else if (_textRepaint) {
+			_textRepaint();
+		}
+	} else if (_textRepaint) {
+		_textRepaint();
 	}
 }
 
@@ -3000,6 +3325,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 		.articleLeft = page.left(),
 		.articleWidth = innerWidth,
 		.useArticleBands = true,
+		.editMode = _content.editMode,
 		.syntaxHighlightTracker = this,
 	};
 	if (_textLeafHeightOverrideIndex >= 0 && _textLeafHeightOverride > 0) {
@@ -3016,6 +3342,10 @@ void MarkdownArticle::Impl::relayout(int width) {
 	context.placeholderRuntimeFactory = [=](PreparedPlaceholderBlockId id) {
 		return getOrCreatePlaceholderRuntime(id);
 	};
+	context.taskMarkerRippleRuntimeFactory
+		= [=](const PreparedEditListItemSource &source) {
+			return getOrCreateTaskMarkerRippleRuntime(source);
+		};
 	const auto y = LayoutBlocks(
 		_content.blocks.blocks,
 		&_content.formulas,
@@ -3036,6 +3366,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 		std::max(
 			BlockMaxRight(_blocks) + page.right(),
 			page.left() + page.right() + 1));
+	pruneTaskMarkerRuntimes();
 	prunePlaceholderRuntimes();
 	RestoreRelatedArticleImageStates(
 		&_blocks,
@@ -3127,6 +3458,17 @@ MarkdownArticleHitTestResult MarkdownArticle::hitTest(
 
 PreparedEditHit MarkdownArticle::editHitTest(QPoint point) const {
 	return _impl->editHitTest(point);
+}
+
+MarkdownArticleEditControlHit MarkdownArticle::editControlHitTest(
+		QPoint point) const {
+	return _impl->editControlHitTest(point);
+}
+
+void MarkdownArticle::addTaskMarkerRipple(
+		const PreparedEditListItemSource &source,
+		QPoint point) {
+	_impl->addTaskMarkerRipple(source, point);
 }
 
 MarkdownArticleHorizontalScrollHit MarkdownArticle::horizontalScrollHit(

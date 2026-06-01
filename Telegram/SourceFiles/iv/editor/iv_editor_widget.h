@@ -224,6 +224,8 @@ private:
 	std::optional<Qt::Orientation> _horizontalScrollLock;
 	bool _settingField = false;
 	bool _trackingPointerPress = false;
+	Markdown::MarkdownArticleEditControlHit _pressedControl;
+	std::optional<QPoint> _pressedControlPoint;
 	HorizontalScrollDrag _horizontalScrollDrag = HorizontalScrollDrag::None;
 	std::optional<QPoint> _pendingTouchHorizontalScrollPoint;
 	bool _syncingInlineFieldGeometry = false;

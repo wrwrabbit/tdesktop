@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_layout_structure.h"
 #include "iv/markdown/iv_markdown_article_text.h"
 
+#include "lang/lang_keys.h"
 #include "styles/style_iv.h"
 
 #include <algorithm>
@@ -262,6 +263,20 @@ void FinalizeOwnerSelection(
 		: details.headerPadding;
 }
 
+[[nodiscard]] QString DetailsStateText(bool open) {
+	return open
+		? tr::lng_iv_details_state_expanded(tr::now)
+		: tr::lng_iv_details_state_collapsed(tr::now);
+}
+
+[[nodiscard]] int DetailsStateReserveWidth(const style::Markdown &st) {
+	return std::max({
+		st.details.summaryStyle.font->width(DetailsStateText(false)),
+		st.details.summaryStyle.font->width(DetailsStateText(true)),
+		1,
+	});
+}
+
 [[nodiscard]] QMargins DetailsBodyPadding(
 		LayoutContext context,
 		const style::Markdown &st) {
@@ -468,9 +483,15 @@ void FinalizeOwnerSelection(
 			? 0
 			: TextLineHeight(st.details.summaryStyle);
 		const auto iconSkip = iconWidth ? st.details.iconSkip : 0;
+		const auto actionWidth = context.editMode
+			? DetailsStateReserveWidth(st)
+			: 0;
+		const auto actionSkip = actionWidth ? st.details.stateSkip : 0;
 		const auto headerMinimumWidth = HorizontalMarginsWidth(headerPadding)
 			+ iconWidth
 			+ iconSkip
+			+ actionSkip
+			+ actionWidth
 			+ ReadableTextMinWidth(st.details.summaryStyle);
 		auto bodyMinimumWidth = 1;
 		if (!prepared.collapsed) {
@@ -622,6 +643,12 @@ void FinalizeOwnerSelection(
 	const auto markerText = ordered ? ListMarkerText(prepared) : QString();
 	auto markerTextWidth = 0;
 	auto markerTextHeight = bodyLineHeight;
+	if (task
+		&& prepared.editListItem
+		&& context.taskMarkerRippleRuntimeFactory) {
+		block.taskMarkerRippleRuntime
+			= context.taskMarkerRippleRuntimeFactory(*prepared.editListItem);
+	}
 	if (task) {
 		markerTextWidth = list.taskCheck.diameter;
 		markerTextHeight = list.taskCheck.diameter;
@@ -1028,6 +1055,7 @@ void FinalizeOwnerSelection(
 	block.anchorId = prepared.anchorId;
 	block.anchorIds = prepared.anchorIds;
 	block.collapsed = prepared.collapsed;
+	block.detailsOpen = prepared.detailsOpen;
 	block.supplementary = prepared.supplementary;
 	const auto &details = st.details;
 	const auto headerPadding = DetailsHeaderPadding(context, st);
@@ -1044,6 +1072,11 @@ void FinalizeOwnerSelection(
 	const auto iconWidth = iconSize;
 	const auto iconHeight = iconSize;
 	const auto iconSkip = iconWidth ? details.iconSkip : 0;
+	const auto actionWidth = context.editMode
+		? DetailsStateReserveWidth(st)
+		: 0;
+	const auto actionSkip = actionWidth ? details.stateSkip : 0;
+	const auto actionZoneWidth = actionSkip + actionWidth;
 	const auto textLeft = left
 		+ headerPadding.left()
 		+ iconWidth
@@ -1053,7 +1086,8 @@ void FinalizeOwnerSelection(
 			- headerPadding.left()
 			- headerPadding.right()
 			- iconWidth
-			- iconSkip,
+			- iconSkip
+			- actionZoneWidth,
 		1);
 
 	SetTextLeaf(
@@ -1072,6 +1106,23 @@ void FinalizeOwnerSelection(
 			block.leaf.countHeight(block.textWidth, true),
 			TextLineHeight(details.summaryStyle)),
 		context);
+	auto actionHeight = 0;
+	if (actionWidth > 0) {
+		block.actionWidth = actionWidth;
+		SetTextLeaf(
+			&block.actionLeaf,
+			details.summaryStyle,
+			st,
+			TextWithEntities::Simple(
+				DetailsStateText(prepared.detailsOpen)),
+			nullptr,
+			nullptr,
+			mediaRuntime,
+			block.actionWidth);
+		actionHeight = std::max(
+			block.actionLeaf.countHeight(block.actionWidth, true),
+			TextLineHeight(details.summaryStyle));
+	}
 	const auto headerContentHeight = std::max(summaryHeight, iconHeight);
 	const auto headerHeight = headerPadding.top()
 		+ headerContentHeight
@@ -1090,6 +1141,14 @@ void FinalizeOwnerSelection(
 			+ std::max((headerContentHeight - summaryHeight) / 2, 0),
 		block.textWidth,
 		summaryHeight);
+	if (actionZoneWidth > 0 && actionHeight > 0) {
+		block.actionRect = QRect(
+			left + headerWidth - headerPadding.right() - actionZoneWidth,
+			top + headerPadding.top()
+				+ std::max((headerContentHeight - actionHeight) / 2, 0),
+			actionZoneWidth,
+			actionHeight);
+	}
 	block.firstLineBaseline = LeafFirstLineBaseline(
 		block.leaf,
 		block.textRect,

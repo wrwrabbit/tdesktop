@@ -982,6 +982,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Details;
 	block.anchorId = std::move(anchorId);
+	block.detailsOpen = data.open;
 	block.collapsed = state->editMode ? false : !data.open;
 	block.text = std::move(summary.text);
 	block.links = std::move(summary.links);

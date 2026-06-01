@@ -46,6 +46,14 @@ struct PlaceholderBlockRuntime {
 	QSize rippleSize;
 };
 
+struct TaskMarkerRippleRuntime {
+	explicit TaskMarkerRippleRuntime(Fn<void()> repaint);
+
+	Fn<void()> repaint;
+	std::unique_ptr<Ui::RippleAnimation> ripple;
+	QSize rippleSize;
+};
+
 struct MarkdownArticleSelectionPosition {
 	int segment = -1;
 	int offset = 0;
@@ -200,6 +208,45 @@ struct MarkdownArticleHorizontalScrollHit {
 	bool overScrollbarThumb = false;
 };
 
+enum class MarkdownArticleEditControlHitKind {
+	None,
+	TaskMarker,
+	DetailsToggle,
+};
+
+struct MarkdownArticleEditControlHit {
+	MarkdownArticleEditControlHitKind kind
+		= MarkdownArticleEditControlHitKind::None;
+	std::optional<PreparedEditListItemSource> listItem;
+	std::optional<PreparedEditBlockSource> block;
+
+	[[nodiscard]] bool valid() const {
+		switch (kind) {
+		case MarkdownArticleEditControlHitKind::TaskMarker:
+			return listItem.has_value();
+		case MarkdownArticleEditControlHitKind::DetailsToggle:
+			return block.has_value();
+		case MarkdownArticleEditControlHitKind::None:
+			break;
+		}
+		return false;
+	}
+};
+
+inline bool operator==(
+		MarkdownArticleEditControlHit a,
+		MarkdownArticleEditControlHit b) {
+	return (a.kind == b.kind)
+		&& (a.listItem == b.listItem)
+		&& (a.block == b.block);
+}
+
+inline bool operator!=(
+		MarkdownArticleEditControlHit a,
+		MarkdownArticleEditControlHit b) {
+	return !(a == b);
+}
+
 struct MarkdownArticleTextLeafStyle {
 	const style::TextStyle *textStyle = nullptr;
 	style::color textColor;
@@ -247,6 +294,11 @@ public:
 		QPoint point,
 		Ui::Text::StateRequest::Flags flags) const;
 	[[nodiscard]] PreparedEditHit editHitTest(QPoint point) const;
+	[[nodiscard]] MarkdownArticleEditControlHit editControlHitTest(
+		QPoint point) const;
+	void addTaskMarkerRipple(
+		const PreparedEditListItemSource &source,
+		QPoint point);
 	[[nodiscard]] MarkdownArticleHorizontalScrollHit horizontalScrollHit(
 		QPoint point) const;
 	[[nodiscard]] bool canConsumeHorizontalScroll(

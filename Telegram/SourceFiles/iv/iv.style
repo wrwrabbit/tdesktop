@@ -212,6 +212,7 @@ MarkdownDetails {
 	summaryStyle: TextStyle;
 	icon: icon;
 	iconSkip: pixels;
+	stateSkip: pixels;
 }
 MarkdownEmbedPost {
 	padding: margins;
@@ -490,6 +491,7 @@ defaultMarkdownDetails: MarkdownDetails {
 	summaryStyle: defaultMarkdownDetailsSummaryStyle;
 	icon: icon {{ "history_down_arrow", windowSubTextFg }};
 	iconSkip: 8px;
+	stateSkip: 8px;
 }
 defaultMarkdownEmbedPostAuthorStyle: TextStyle(defaultMarkdownBodyStyle) {
 	font: font(16px semibold);
