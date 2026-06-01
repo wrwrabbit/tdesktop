@@ -471,7 +471,7 @@ defaultMarkdownTable: MarkdownTable {
 	overflowWidth: 4px;
 	overflowFg: windowSubTextFg;
 	scrollbarSkip: 4px;
-	scrollbarHeight: 6px;
+	scrollbarHeight: 12px;
 	scrollbarMinThumbWidth: 24px;
 }
 defaultMarkdownDetailsSummaryStyle: TextStyle(defaultTextStyle) {
@@ -874,7 +874,7 @@ messageMarkdownTable: MarkdownTable(defaultMarkdownTable) {
 	overflowWidth: 3px;
 	overflowFg: msgInDateFg;
 	scrollbarSkip: 3px;
-	scrollbarHeight: 5px;
+	scrollbarHeight: 10px;
 	scrollbarMinThumbWidth: 20px;
 }
 messageMarkdownDisplayMath: MarkdownDisplayMath(defaultMarkdownDisplayMath) {

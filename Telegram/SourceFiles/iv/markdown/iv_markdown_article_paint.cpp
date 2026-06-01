@@ -2856,16 +2856,30 @@ void PaintBlock(
 			});
 		break;
 	case PreparedBlockKind::List:
-		PaintBlocks(
-			p,
-			block.children,
-			formulas,
-			renderedFormulas,
-			renderer,
-			devicePixelRatio,
-			outerWidth,
-			st,
-			context);
+		{
+			const auto childContext = block.scrollViewportRect.isEmpty()
+				? context
+				: ClippedContext(
+					context,
+					context.clip.intersected(block.scrollViewportRect));
+			PaintBlocks(
+				p,
+				block.children,
+				formulas,
+				renderedFormulas,
+				renderer,
+				devicePixelRatio,
+				outerWidth,
+				st,
+				childContext);
+			PaintHorizontalOverflowIndicators(
+				p,
+				block,
+				st,
+				context,
+				block.scrollViewportRect);
+			PaintHorizontalScrollbar(p, block, st, context);
+		}
 		break;
 	case PreparedBlockKind::ListItem:
 		if (!context.reveal
@@ -2886,16 +2900,30 @@ void PaintBlock(
 				PaintBulletMarker(p, block, st, markerContext);
 			}
 		}
-		PaintBlocks(
-			p,
-			block.children,
-			formulas,
-			renderedFormulas,
-			renderer,
-			devicePixelRatio,
-			outerWidth,
-			st,
-			context);
+		{
+			const auto childContext = block.scrollViewportRect.isEmpty()
+				? context
+				: ClippedContext(
+					context,
+					context.clip.intersected(block.scrollViewportRect));
+			PaintBlocks(
+				p,
+				block.children,
+				formulas,
+				renderedFormulas,
+				renderer,
+				devicePixelRatio,
+				outerWidth,
+				st,
+				childContext);
+			PaintHorizontalOverflowIndicators(
+				p,
+				block,
+				st,
+				context,
+				block.scrollViewportRect);
+			PaintHorizontalScrollbar(p, block, st, context);
+		}
 		break;
 	case PreparedBlockKind::Quote:
 		PaintQuoteBlock(

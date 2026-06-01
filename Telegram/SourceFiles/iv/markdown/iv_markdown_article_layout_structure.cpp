@@ -689,10 +689,13 @@ void FinalizeOwnerSelection(
 			bodyLineHeight);
 	}
 
-	const auto scrollOwner = IsActiveScrollOwner(analysis, activeScrollOwner);
+	const auto currentScrollOwner = NextActiveScrollOwner(
+		analysis,
+		activeScrollOwner);
+	const auto scrollOwner = IsActiveScrollOwner(analysis, currentScrollOwner);
 	const auto outerLogicalWidth = LogicalOuterWidth(
 		analysis,
-		activeScrollOwner,
+		currentScrollOwner,
 		logicalWidth);
 	block.markerWidth = std::max(list.markerWidth, markerTextWidth);
 	const auto bodyLeft = left + block.markerWidth + list.markerSkip;
@@ -702,9 +705,7 @@ void FinalizeOwnerSelection(
 	const auto bodyLogicalWidth = std::max(
 		outerLogicalWidth - block.markerWidth - list.markerSkip,
 		1);
-	const auto childActiveScrollOwner = NextActiveScrollOwner(
-		analysis,
-		activeScrollOwner);
+	const auto childActiveScrollOwner = currentScrollOwner;
 
 	auto childContext = context;
 	childContext.tightList = tight;
@@ -826,17 +827,18 @@ void FinalizeOwnerSelection(
 	const auto listWidth = std::max(
 		width - depthDelta * st.list.indent,
 		1);
-	const auto scrollOwner = IsActiveScrollOwner(analysis, activeScrollOwner);
+	const auto currentScrollOwner = NextActiveScrollOwner(
+		analysis,
+		activeScrollOwner);
+	const auto scrollOwner = IsActiveScrollOwner(analysis, currentScrollOwner);
 	const auto outerLogicalWidth = LogicalOuterWidth(
 		analysis,
-		activeScrollOwner,
+		currentScrollOwner,
 		logicalWidth);
 	const auto listLogicalWidth = std::max(
 		outerLogicalWidth - depthDelta * st.list.indent,
 		1);
-	const auto childActiveScrollOwner = NextActiveScrollOwner(
-		analysis,
-		activeScrollOwner);
+	const auto childActiveScrollOwner = currentScrollOwner;
 
 	auto childContext = context;
 	childContext.listDepth = prepared.visualDepth;
@@ -1501,15 +1503,22 @@ void FinalizeOwnerSelection(
 		MathRenderer *renderer,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-	const WidthAnalysisNode &analysis,
-	const WidthAnalysisNode *activeScrollOwner,
+		const WidthAnalysisNode &analysis,
+		const WidthAnalysisNode *activeScrollOwner,
 		const style::Markdown &st,
-	int left,
+		int left,
 		int top,
 		int width,
 		int logicalWidth,
 		LayoutContext context) {
-	const auto scrollOwner = IsActiveScrollOwner(analysis, activeScrollOwner);
+	const auto currentScrollOwner = NextActiveScrollOwner(
+		analysis,
+		activeScrollOwner);
+	const auto scrollOwner = IsActiveScrollOwner(analysis, currentScrollOwner);
+	const auto effectiveLogicalWidth = LogicalOuterWidth(
+		analysis,
+		currentScrollOwner,
+		logicalWidth);
 	switch (prepared.kind) {
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Thinking:
@@ -1523,7 +1532,7 @@ void FinalizeOwnerSelection(
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			scrollOwner,
 			context);
 	case PreparedBlockKind::CodeBlock:
@@ -1536,7 +1545,7 @@ void FinalizeOwnerSelection(
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			scrollOwner,
 			context.allowAsyncSyntaxHighlighting,
 			context.syntaxHighlightTracker,
@@ -1552,12 +1561,12 @@ void FinalizeOwnerSelection(
 			inlineFormulaObjects,
 			mediaRuntime,
 			analysis,
-			activeScrollOwner,
+			currentScrollOwner,
 			st,
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			context);
 	case PreparedBlockKind::ListItem:
 		return LayoutListItemBlock(
@@ -1568,12 +1577,12 @@ void FinalizeOwnerSelection(
 			inlineFormulaObjects,
 			mediaRuntime,
 			analysis,
-			activeScrollOwner,
+			currentScrollOwner,
 			st,
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			context,
 			false);
 	case PreparedBlockKind::Quote:
@@ -1585,12 +1594,12 @@ void FinalizeOwnerSelection(
 			inlineFormulaObjects,
 			mediaRuntime,
 			analysis,
-			activeScrollOwner,
+			currentScrollOwner,
 			st,
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			context);
 	case PreparedBlockKind::DisplayMath:
 		return LayoutDisplayMathBlock(
@@ -1600,7 +1609,7 @@ void FinalizeOwnerSelection(
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			scrollOwner);
 	case PreparedBlockKind::Table:
 		return LayoutTableBlock(
@@ -1612,7 +1621,7 @@ void FinalizeOwnerSelection(
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			scrollOwner,
 			context);
 	case PreparedBlockKind::Photo:
@@ -1709,12 +1718,12 @@ void FinalizeOwnerSelection(
 			inlineFormulaObjects,
 			mediaRuntime,
 			analysis,
-			activeScrollOwner,
+			currentScrollOwner,
 			st,
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			context);
 	case PreparedBlockKind::EmbedPost:
 		return LayoutEmbedPostBlock(
@@ -1725,12 +1734,12 @@ void FinalizeOwnerSelection(
 			inlineFormulaObjects,
 			mediaRuntime,
 			analysis,
-			activeScrollOwner,
+			currentScrollOwner,
 			st,
 			left,
 			top,
 			width,
-			logicalWidth,
+			effectiveLogicalWidth,
 			context);
 	}
 	Unexpected("Unknown markdown article block kind.");
