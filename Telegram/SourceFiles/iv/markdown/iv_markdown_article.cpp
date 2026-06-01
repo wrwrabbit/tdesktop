@@ -70,21 +70,21 @@ struct RelatedArticleImageState {
 	return (accumulator * 1315423911U) ^ value;
 }
 
-struct MarkdownArticleTableIdentity {
+struct MarkdownArticleScrollOwnerIdentity {
 	std::optional<PreparedEditBlockPath> blockPath;
 	std::vector<int> preparedPath;
 
 	friend inline bool operator==(
-			const MarkdownArticleTableIdentity &a,
-			const MarkdownArticleTableIdentity &b) {
+			const MarkdownArticleScrollOwnerIdentity &a,
+			const MarkdownArticleScrollOwnerIdentity &b) {
 		return (a.blockPath == b.blockPath)
 			&& (a.preparedPath == b.preparedPath);
 	}
 };
 
-struct MarkdownArticleTableIdentityHasher {
+struct MarkdownArticleScrollOwnerIdentityHasher {
 	[[nodiscard]] size_t operator()(
-			const MarkdownArticleTableIdentity &value) const noexcept {
+			const MarkdownArticleScrollOwnerIdentity &value) const noexcept {
 		auto result = CombineHash(0, value.blockPath ? 1 : 0);
 		if (value.blockPath) {
 			for (const auto &step : value.blockPath->container.steps) {
@@ -112,7 +112,7 @@ struct MarkdownArticleTableIdentityHasher {
 
 struct MarkdownArticleHorizontalScrollLookup {
 	MarkdownArticleHorizontalScrollHit hit;
-	MarkdownArticleTableIdentity identity;
+	MarkdownArticleScrollOwnerIdentity identity;
 	const LaidOutBlock *block = nullptr;
 };
 
@@ -266,20 +266,32 @@ void AppendGenericRevealBand(
 		false);
 }
 
+[[nodiscard]] QRect ClipRectToViewport(QRect rect, QRect viewport);
+
 void AppendTextRevealLines(
 		std::vector<MarkdownArticleRevealLine> *lines,
 		const Ui::Text::String &leaf,
 		QRect textRect,
+		QRect visibleRect,
 		int textWidth) {
-	if (textRect.isEmpty() || (textWidth <= 0)) {
+	if (textRect.isEmpty() || visibleRect.isEmpty() || (textWidth <= 0)) {
 		return;
 	}
 	const auto geometry = leaf.countLinesGeometry(textWidth, true);
 	for (const auto &line : geometry) {
+		const auto left = textRect.x() + line.left;
+		const auto right = left + line.width;
+		const auto visibleLeft = std::max(left, visibleRect.x());
+		const auto visibleRight = std::min(
+			right,
+			visibleRect.x() + visibleRect.width());
+		if (visibleRight <= visibleLeft) {
+			continue;
+		}
 		AppendRevealLine(
 			lines,
-			textRect.x() + line.left,
-			line.width,
+			visibleLeft,
+			visibleRight - visibleLeft,
 			textRect.y() + line.bottom,
 			textRect.y() + line.baseline,
 			line.rtl);
@@ -326,6 +338,7 @@ void AppendTableRevealLines(
 		lines,
 		block.leaf,
 		block.textRect,
+		ClipRectToViewport(block.textRect, block.outer),
 		block.textWidth);
 	AppendTableRowRevealLines(lines, block, st);
 }
@@ -338,6 +351,7 @@ void AppendMediaRevealLines(
 		lines,
 		block.leaf,
 		block.textRect,
+		ClipRectToViewport(block.textRect, block.outer),
 		block.textWidth);
 }
 
@@ -362,6 +376,7 @@ void AppendEmbedPostRevealLines(
 		lines,
 		block.leaf,
 		block.textRect,
+		ClipRectToViewport(block.textRect, block.outer),
 		block.textWidth);
 }
 
@@ -373,6 +388,7 @@ void AppendDetailsRevealLines(
 		lines,
 		block.leaf,
 		block.textRect,
+		ClipRectToViewport(block.textRect, block.headerRect),
 		block.textWidth);
 	AppendBlocksRevealLines(block.children, st, lines);
 }
@@ -390,6 +406,9 @@ void AppendBlockRevealLines(
 			lines,
 			block.leaf,
 			block.textRect,
+			(block.kind == PreparedBlockKind::CodeBlock)
+				? ClipRectToViewport(block.textRect, block.contentRect)
+				: ClipRectToViewport(block.textRect, block.outer),
 			block.textWidth);
 		break;
 	case PreparedBlockKind::Rule:
@@ -557,6 +576,23 @@ void RebuildVisibleSegmentLookup(
 	};
 }
 
+[[nodiscard]] QRect LogicalTextRectForSegment(const SelectableSegment &segment) {
+	if (segment.cell) {
+		return segment.cell->textRect;
+	} else if (!segment.block) {
+		return segment.textRect;
+	} else if (segment.leaf == &segment.block->leaf) {
+		return segment.block->textRect;
+	} else if (segment.leaf == &segment.block->labelLeaf) {
+		return segment.block->labelRect;
+	} else if (segment.leaf == &segment.block->subtitleLeaf) {
+		return segment.block->subtitleRect;
+	} else if (segment.leaf == &segment.block->actionLeaf) {
+		return segment.block->actionRect;
+	}
+	return segment.textRect;
+}
+
 [[nodiscard]] MarkdownArticleHitTestResult HitSegmentBoundary(
 		const SelectableSegment &segment,
 		int offset) {
@@ -582,9 +618,10 @@ void RebuildVisibleSegmentLookup(
 	}
 	auto result = MarkdownArticleHitTestResult();
 	result.segmentIndex = segment.index;
+	const auto logicalRect = LogicalTextRectForSegment(segment);
 	result.state = TextStateAtLeaf(
 		*segment.leaf,
-		segment.textRect,
+		logicalRect,
 		segment.textWidth,
 		point,
 		flags,
@@ -706,6 +743,254 @@ void RebuildVisibleSegmentLookup(
 
 [[nodiscard]] bool ContainsPoint(QRect rect, QPoint point) {
 	return !rect.isEmpty() && rect.contains(point);
+}
+
+struct ActiveHorizontalScrollOwnerState {
+	QRect viewport;
+	int shift = 0;
+};
+
+[[nodiscard]] QRect TranslateRect(QRect rect, int shift) {
+	return rect.isEmpty() ? rect : rect.translated(shift, 0);
+}
+
+[[nodiscard]] QRect ClipRectToViewport(QRect rect, QRect viewport) {
+	if (rect.isEmpty() || viewport.isEmpty()) {
+		return QRect();
+	}
+	const auto left = std::max(rect.x(), viewport.x());
+	const auto right = std::min(
+		rect.x() + rect.width(),
+		viewport.x() + viewport.width());
+	return QRect(
+		left,
+		rect.y(),
+		std::max(right - left, 0),
+		rect.height());
+}
+
+[[nodiscard]] QPoint TranslatePoint(QPoint point, int shift) {
+	return point + QPoint(shift, 0);
+}
+
+[[nodiscard]] QPoint ClampPointToViewport(QPoint point, QRect viewport) {
+	if (viewport.isEmpty()) {
+		return point;
+	}
+	const auto right = viewport.x() + std::max(viewport.width() - 1, 0);
+	point.setX(std::clamp(point.x(), viewport.x(), right));
+	return point;
+}
+
+[[nodiscard]] QRect BaseVisibleTableRect(const LaidOutBlock &block) {
+	if (!block.scrollViewportRect.isEmpty()) {
+		return block.scrollViewportRect;
+	} else if (block.logicalGeometry.tableRect.isEmpty()) {
+		return QRect();
+	}
+	return QRect(
+		block.logicalGeometry.tableRect.x(),
+		block.logicalGeometry.tableRect.y(),
+		std::min(
+			block.logicalGeometry.tableRect.width(),
+			std::max(block.logicalGeometry.outer.width(), 1)),
+		block.logicalGeometry.tableRect.height());
+}
+
+void RestoreLogicalBlockGeometry(LaidOutBlock *block) {
+	block->outer = block->logicalGeometry.outer;
+	block->headerRect = block->logicalGeometry.headerRect;
+	block->bodyRect = block->logicalGeometry.bodyRect;
+	block->iconRect = block->logicalGeometry.iconRect;
+	block->textRect = block->logicalGeometry.textRect;
+	block->labelRect = block->logicalGeometry.labelRect;
+	block->subtitleRect = block->logicalGeometry.subtitleRect;
+	block->actionRect = block->logicalGeometry.actionRect;
+	block->markerRect = block->logicalGeometry.markerRect;
+	block->contentRect = block->logicalGeometry.contentRect;
+	block->formulaRect = block->logicalGeometry.formulaRect;
+	block->tableRect = block->logicalGeometry.tableRect;
+	block->mediaRect = block->logicalGeometry.mediaRect;
+	block->thumbnailRect = block->logicalGeometry.thumbnailRect;
+	block->markerCenter = block->logicalGeometry.markerCenter;
+	block->visibleFormulaRect = block->formulaRect.intersected(
+		block->contentRect);
+	block->visibleTableRect = BaseVisibleTableRect(*block);
+	block->tableScrollbarTrackRect = block->scrollScrollbarTrackRect;
+	block->tableScrollbarThumbRect = QRect();
+	block->scrollScrollbarThumbRect = QRect();
+	block->visibleMediaRect = block->mediaRect;
+	for (auto &row : block->tableRows) {
+		row.outer = row.logicalOuter;
+		for (auto &cell : row.cells) {
+			cell.outer = cell.logicalOuter;
+			cell.textRect = cell.logicalTextRect;
+		}
+	}
+}
+
+[[nodiscard]] bool ScrollOwnerMovesOwnContent(PreparedBlockKind kind) {
+	switch (kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+	case PreparedBlockKind::DisplayMath:
+	case PreparedBlockKind::Table:
+		return true;
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::EmbedPost:
+	case PreparedBlockKind::Placeholder:
+	case PreparedBlockKind::Details:
+		return false;
+	}
+	return false;
+}
+
+[[nodiscard]] bool ScrollOwnerMovesChildren(PreparedBlockKind kind) {
+	switch (kind) {
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::EmbedPost:
+	case PreparedBlockKind::Details:
+		return true;
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::DisplayMath:
+	case PreparedBlockKind::Table:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::Placeholder:
+		return false;
+	}
+	return false;
+}
+
+void ApplyTranslatedDescendantGeometry(
+		LaidOutBlock *block,
+		const ActiveHorizontalScrollOwnerState &state) {
+	block->outer = ClipRectToViewport(
+		TranslateRect(block->outer, state.shift),
+		state.viewport);
+	block->headerRect = ClipRectToViewport(
+		TranslateRect(block->headerRect, state.shift),
+		state.viewport);
+	block->bodyRect = ClipRectToViewport(
+		TranslateRect(block->bodyRect, state.shift),
+		state.viewport);
+	block->iconRect = ClipRectToViewport(
+		TranslateRect(block->iconRect, state.shift),
+		state.viewport);
+	block->contentRect = ClipRectToViewport(
+		TranslateRect(block->contentRect, state.shift),
+		state.viewport);
+	block->textRect = TranslateRect(block->textRect, state.shift);
+	block->labelRect = TranslateRect(block->labelRect, state.shift);
+	block->subtitleRect = TranslateRect(block->subtitleRect, state.shift);
+	block->actionRect = TranslateRect(block->actionRect, state.shift);
+	block->markerRect = ClipRectToViewport(
+		TranslateRect(block->markerRect, state.shift),
+		state.viewport);
+	block->formulaRect = TranslateRect(block->formulaRect, state.shift);
+	block->tableRect = TranslateRect(block->tableRect, state.shift);
+	block->mediaRect = TranslateRect(block->mediaRect, state.shift);
+	block->thumbnailRect = TranslateRect(block->thumbnailRect, state.shift);
+	block->markerCenter = ClampPointToViewport(
+		TranslatePoint(block->markerCenter, state.shift),
+		state.viewport);
+	block->visibleFormulaRect = ClipRectToViewport(
+		block->formulaRect,
+		state.viewport);
+	block->visibleTableRect = ClipRectToViewport(
+		TranslateRect(BaseVisibleTableRect(*block), state.shift),
+		state.viewport);
+	block->visibleMediaRect = ClipRectToViewport(
+		block->mediaRect,
+		state.viewport);
+	for (auto &row : block->tableRows) {
+		row.outer = ClipRectToViewport(
+			TranslateRect(row.logicalOuter, state.shift),
+			state.viewport);
+		for (auto &cell : row.cells) {
+			cell.outer = ClipRectToViewport(
+				TranslateRect(cell.logicalOuter, state.shift),
+				state.viewport);
+			cell.textRect = TranslateRect(cell.logicalTextRect, state.shift);
+		}
+	}
+}
+
+void ApplyOwnerContentGeometry(
+		LaidOutBlock *block,
+		const ActiveHorizontalScrollOwnerState &state) {
+	switch (block->kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::CodeBlock:
+		block->textRect = TranslateRect(block->logicalGeometry.textRect, state.shift);
+		break;
+	case PreparedBlockKind::DisplayMath:
+		block->formulaRect = TranslateRect(
+			block->logicalGeometry.formulaRect,
+			state.shift);
+		block->textRect = TranslateRect(block->logicalGeometry.textRect, state.shift);
+		block->visibleFormulaRect = ClipRectToViewport(
+			block->formulaRect,
+			state.viewport);
+		break;
+	case PreparedBlockKind::Table:
+		block->visibleTableRect = block->scrollViewportRect;
+		block->tableScrollbarTrackRect = block->scrollScrollbarTrackRect;
+		for (auto &row : block->tableRows) {
+			row.outer = ClipRectToViewport(
+				TranslateRect(row.logicalOuter, state.shift),
+				block->visibleTableRect);
+			for (auto &cell : row.cells) {
+				cell.outer = ClipRectToViewport(
+					TranslateRect(cell.logicalOuter, state.shift),
+					block->visibleTableRect);
+				cell.textRect = TranslateRect(
+					cell.logicalTextRect,
+					state.shift);
+			}
+		}
+		break;
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::EmbedPost:
+	case PreparedBlockKind::Placeholder:
+	case PreparedBlockKind::Details:
+		break;
+	}
 }
 
 [[nodiscard]] bool ValidBlockPath(const PreparedEditBlockPath &path) {
@@ -892,10 +1177,39 @@ void RebuildVisibleSegmentLookup(
 	return {};
 }
 
+[[nodiscard]] QRect VisibleTextRectForBlock(const LaidOutBlock &block) {
+	switch (block.kind) {
+	case PreparedBlockKind::CodeBlock:
+		return ClipRectToViewport(block.textRect, block.contentRect);
+	case PreparedBlockKind::Details:
+		return ClipRectToViewport(block.textRect, block.headerRect);
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::DisplayMath:
+	case PreparedBlockKind::Table:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::EmbedPost:
+	case PreparedBlockKind::Placeholder:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Quote:
+		return ClipRectToViewport(block.textRect, block.outer);
+	}
+	return ClipRectToViewport(block.textRect, block.outer);
+}
+
 [[nodiscard]] PreparedEditHit EditHitForTableCell(
 		const LaidOutTableCell &cell,
 		QPoint point) {
-	auto leaf = ContainsPoint(cell.textRect, point)
+	auto leaf = ContainsPoint(ClipRectToViewport(cell.textRect, cell.outer), point)
 		? cell.editLeaf
 		: std::optional<PreparedEditLeafSource>();
 	if (cell.editCell) {
@@ -909,7 +1223,7 @@ void RebuildVisibleSegmentLookup(
 [[nodiscard]] PreparedEditHit EditHitForTableBlock(
 		const LaidOutBlock &block,
 		QPoint point) {
-	if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+	if (ContainsPoint(VisibleTextRectForBlock(block), point) && block.editLeaf) {
 		if (block.editBlock) {
 			return EditHitFromBlockSource(*block.editBlock, block.editLeaf);
 		}
@@ -984,7 +1298,7 @@ void RebuildVisibleSegmentLookup(
 		const LaidOutBlock &block,
 		QPoint point) {
 	if (ContainsPoint(block.headerRect, point)) {
-		if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+		if (ContainsPoint(VisibleTextRectForBlock(block), point) && block.editLeaf) {
 			if (block.editBlock) {
 				return EditHitFromBlockSource(*block.editBlock, block.editLeaf);
 			}
@@ -1034,7 +1348,8 @@ void RebuildVisibleSegmentLookup(
 	case PreparedBlockKind::RelatedArticle:
 	case PreparedBlockKind::EmbedPost:
 	case PreparedBlockKind::Placeholder:
-		if (ContainsPoint(block.textRect, point) && block.editLeaf) {
+		if (ContainsPoint(VisibleTextRectForBlock(block), point)
+			&& block.editLeaf) {
 			return EditHitFromLeafSource(*block.editLeaf, true);
 		}
 		break;
@@ -1259,7 +1574,7 @@ public:
 
 private:
 	struct ActiveHorizontalScrollDrag {
-		MarkdownArticleTableIdentity table;
+		MarkdownArticleScrollOwnerIdentity owner;
 		QPoint pressPoint;
 		int startScrollLeft = 0;
 		int thumbGrabOffset = 0;
@@ -1319,40 +1634,46 @@ private:
 		bool loading);
 
 	[[nodiscard]] const style::Markdown &layoutStyle() const;
-	[[nodiscard]] MarkdownArticleTableIdentity tableIdentity(
+	[[nodiscard]] MarkdownArticleScrollOwnerIdentity scrollOwnerIdentity(
 		const LaidOutBlock &block,
 		const std::vector<int> &preparedPath) const;
 	[[nodiscard]] MarkdownArticleHorizontalScrollLookup
-	findHorizontalScrollTable(QPoint point) const;
+	findHorizontalScrollOwner(QPoint point) const;
 	[[nodiscard]] MarkdownArticleHorizontalScrollLookup
-	findHorizontalScrollTable(
+	findHorizontalScrollOwner(
 		const std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		QPoint point,
 		std::vector<int> *preparedPath) const;
-	[[nodiscard]] LaidOutBlock *findTableByIdentity(
-		const MarkdownArticleTableIdentity &identity);
-	[[nodiscard]] LaidOutBlock *findTableByIdentity(
+	[[nodiscard]] LaidOutBlock *findScrollOwnerByIdentity(
+		const MarkdownArticleScrollOwnerIdentity &identity);
+	[[nodiscard]] LaidOutBlock *findScrollOwnerByIdentity(
 		std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
-		const MarkdownArticleTableIdentity &identity,
+		const MarkdownArticleScrollOwnerIdentity &identity,
 		std::vector<int> *preparedPath);
-	void captureTableScrollState();
-	void captureTableScrollState(
+	void captureScrollState();
+	void captureScrollState(
 		const std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		std::vector<int> *preparedPath);
-	void restoreTableScrollState();
-	void restoreTableScrollState(
+	void restoreScrollState();
+	void restoreScrollState(
 		std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		std::vector<int> *preparedPath);
-	void refreshScrolledTableGeometry(LaidOutBlock &block);
-	void refreshScrolledTableGeometry(std::vector<LaidOutBlock> &blocks);
-	void updateTableScrollbarThumb(LaidOutBlock &block);
-	[[nodiscard]] bool setTableScrollLeft(
+	void refreshScrolledGeometry(LaidOutBlock &block);
+	void refreshScrolledGeometry(
 		LaidOutBlock &block,
-		const MarkdownArticleTableIdentity &identity,
+		const ActiveHorizontalScrollOwnerState *activeOwner);
+	void refreshScrolledGeometry(std::vector<LaidOutBlock> &blocks);
+	void refreshScrolledGeometry(
+		std::vector<LaidOutBlock> &blocks,
+		const ActiveHorizontalScrollOwnerState *activeOwner);
+	void updateScrollbarThumb(LaidOutBlock &block);
+	[[nodiscard]] bool setScrollLeft(
+		LaidOutBlock &block,
+		const MarkdownArticleScrollOwnerIdentity &identity,
 		int left);
 
 	void relayout(int width);
@@ -1391,9 +1712,9 @@ private:
 	std::vector<int> _segmentTops;
 	std::vector<int> _segmentBottoms;
 	std::unordered_map<
-		MarkdownArticleTableIdentity,
+		MarkdownArticleScrollOwnerIdentity,
 		int,
-		MarkdownArticleTableIdentityHasher> _capturedTableScrollLefts;
+		MarkdownArticleScrollOwnerIdentityHasher> _capturedScrollLefts;
 	std::optional<ActiveHorizontalScrollDrag> _activeHorizontalScrollDrag;
 	int _textLeafHeightOverrideIndex = -1;
 	int _textLeafHeightOverride = 0;
@@ -1954,7 +2275,7 @@ void MarkdownArticle::Impl::invalidateLayout() {
 	_width = -1;
 	_laidOutWidth = 0;
 	_height = 0;
-	captureTableScrollState();
+	captureScrollState();
 	clearPendingHighlightBlockPointers();
 	retainBlocks();
 	_anchors.clear();
@@ -2261,7 +2582,7 @@ const style::Markdown &MarkdownArticle::Impl::layoutStyle() const {
 	return _style;
 }
 
-MarkdownArticleTableIdentity MarkdownArticle::Impl::tableIdentity(
+MarkdownArticleScrollOwnerIdentity MarkdownArticle::Impl::scrollOwnerIdentity(
 		const LaidOutBlock &block,
 		const std::vector<int> &preparedPath) const {
 	if (block.editBlock && ValidBlockPath(block.editBlock->path)) {
@@ -2271,9 +2592,9 @@ MarkdownArticleTableIdentity MarkdownArticle::Impl::tableIdentity(
 }
 
 MarkdownArticleHorizontalScrollLookup
-MarkdownArticle::Impl::findHorizontalScrollTable(QPoint point) const {
+MarkdownArticle::Impl::findHorizontalScrollOwner(QPoint point) const {
 	auto preparedPath = std::vector<int>();
-	return findHorizontalScrollTable(
+	return findHorizontalScrollOwner(
 		_blocks,
 		&_content.blocks.blocks,
 		point,
@@ -2281,7 +2602,7 @@ MarkdownArticle::Impl::findHorizontalScrollTable(QPoint point) const {
 }
 
 MarkdownArticleHorizontalScrollLookup
-MarkdownArticle::Impl::findHorizontalScrollTable(
+MarkdownArticle::Impl::findHorizontalScrollOwner(
 		const std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		QPoint point,
@@ -2292,29 +2613,7 @@ MarkdownArticle::Impl::findHorizontalScrollTable(
 		const auto preparedBlock = (prepared && (i < prepared->size()))
 			? &(*prepared)[i]
 			: nullptr;
-		if (block.kind == PreparedBlockKind::Table) {
-			const auto identity = tableIdentity(block, *preparedPath);
-			if (block.horizontalScrollMax > 0) {
-				auto hit = MarkdownArticleHorizontalScrollHit{
-					.scrollable = true,
-					.overViewport = ContainsPoint(block.visibleTableRect, point),
-					.overScrollbar = ContainsPoint(
-						block.tableScrollbarTrackRect,
-						point),
-					.overScrollbarThumb = ContainsPoint(
-						block.tableScrollbarThumbRect,
-						point),
-				};
-				if (hit.overViewport || hit.overScrollbar) {
-					return {
-						.hit = hit,
-						.identity = identity,
-						.block = &block,
-					};
-				}
-			}
-		}
-		if (const auto result = findHorizontalScrollTable(
+		if (const auto result = findHorizontalScrollOwner(
 				block.children,
 				preparedBlock ? &preparedBlock->children : nullptr,
 				point,
@@ -2322,25 +2621,46 @@ MarkdownArticle::Impl::findHorizontalScrollTable(
 			result.block) {
 			return result;
 		}
+		if (block.horizontalScrollMax > 0
+			&& !block.scrollViewportRect.isEmpty()) {
+			const auto identity = scrollOwnerIdentity(block, *preparedPath);
+			auto hit = MarkdownArticleHorizontalScrollHit{
+				.scrollable = true,
+				.overViewport = ContainsPoint(block.scrollViewportRect, point),
+				.overScrollbar = ContainsPoint(
+					block.scrollScrollbarTrackRect,
+					point),
+				.overScrollbarThumb = ContainsPoint(
+					block.scrollScrollbarThumbRect,
+					point),
+			};
+			if (hit.overViewport || hit.overScrollbar) {
+				return {
+					.hit = hit,
+					.identity = identity,
+					.block = &block,
+				};
+			}
+		}
 		preparedPath->pop_back();
 	}
 	return {};
 }
 
-LaidOutBlock *MarkdownArticle::Impl::findTableByIdentity(
-		const MarkdownArticleTableIdentity &identity) {
+LaidOutBlock *MarkdownArticle::Impl::findScrollOwnerByIdentity(
+		const MarkdownArticleScrollOwnerIdentity &identity) {
 	auto preparedPath = std::vector<int>();
-	return findTableByIdentity(
+	return findScrollOwnerByIdentity(
 		_blocks,
 		&_content.blocks.blocks,
 		identity,
 		&preparedPath);
 }
 
-LaidOutBlock *MarkdownArticle::Impl::findTableByIdentity(
+LaidOutBlock *MarkdownArticle::Impl::findScrollOwnerByIdentity(
 		std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
-		const MarkdownArticleTableIdentity &identity,
+		const MarkdownArticleScrollOwnerIdentity &identity,
 		std::vector<int> *preparedPath) {
 	for (auto i = 0, count = int(blocks.size()); i != count; ++i) {
 		auto &block = blocks[i];
@@ -2348,13 +2668,13 @@ LaidOutBlock *MarkdownArticle::Impl::findTableByIdentity(
 		const auto preparedBlock = (prepared && (i < prepared->size()))
 			? &(*prepared)[i]
 			: nullptr;
-		if (block.kind == PreparedBlockKind::Table) {
-			const auto current = tableIdentity(block, *preparedPath);
+		if (!block.scrollViewportRect.isEmpty()) {
+			const auto current = scrollOwnerIdentity(block, *preparedPath);
 			if (current == identity) {
 				return &block;
 			}
 		}
-		if (const auto child = findTableByIdentity(
+		if (const auto child = findScrollOwnerByIdentity(
 				block.children,
 				preparedBlock ? &preparedBlock->children : nullptr,
 				identity,
@@ -2366,15 +2686,15 @@ LaidOutBlock *MarkdownArticle::Impl::findTableByIdentity(
 	return nullptr;
 }
 
-void MarkdownArticle::Impl::captureTableScrollState() {
+void MarkdownArticle::Impl::captureScrollState() {
 	auto preparedPath = std::vector<int>();
-	captureTableScrollState(
+	captureScrollState(
 		_blocks,
 		&_content.blocks.blocks,
 		&preparedPath);
 }
 
-void MarkdownArticle::Impl::captureTableScrollState(
+void MarkdownArticle::Impl::captureScrollState(
 		const std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		std::vector<int> *preparedPath) {
@@ -2384,12 +2704,15 @@ void MarkdownArticle::Impl::captureTableScrollState(
 		const auto preparedBlock = (prepared && (i < prepared->size()))
 			? &(*prepared)[i]
 			: nullptr;
-		if (block.kind == PreparedBlockKind::Table) {
-			_capturedTableScrollLefts.emplace(
-				tableIdentity(block, *preparedPath),
-				block.horizontalScrollLeft);
+		if (!block.scrollViewportRect.isEmpty()) {
+			const auto identity = scrollOwnerIdentity(block, *preparedPath);
+			if (block.horizontalScrollLeft > 0) {
+				_capturedScrollLefts[identity] = block.horizontalScrollLeft;
+			} else {
+				_capturedScrollLefts.erase(identity);
+			}
 		}
-		captureTableScrollState(
+		captureScrollState(
 			block.children,
 			preparedBlock ? &preparedBlock->children : nullptr,
 			preparedPath);
@@ -2397,15 +2720,15 @@ void MarkdownArticle::Impl::captureTableScrollState(
 	}
 }
 
-void MarkdownArticle::Impl::restoreTableScrollState() {
+void MarkdownArticle::Impl::restoreScrollState() {
 	auto preparedPath = std::vector<int>();
-	restoreTableScrollState(
+	restoreScrollState(
 		_blocks,
 		&_content.blocks.blocks,
 		&preparedPath);
 }
 
-void MarkdownArticle::Impl::restoreTableScrollState(
+void MarkdownArticle::Impl::restoreScrollState(
 		std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		std::vector<int> *preparedPath) {
@@ -2415,14 +2738,14 @@ void MarkdownArticle::Impl::restoreTableScrollState(
 		const auto preparedBlock = (prepared && (i < prepared->size()))
 			? &(*prepared)[i]
 			: nullptr;
-		if (block.kind == PreparedBlockKind::Table) {
-			const auto identity = tableIdentity(block, *preparedPath);
-			const auto j = _capturedTableScrollLefts.find(identity);
-			block.horizontalScrollLeft = (j != end(_capturedTableScrollLefts))
+		if (!block.scrollViewportRect.isEmpty()) {
+			const auto identity = scrollOwnerIdentity(block, *preparedPath);
+			const auto j = _capturedScrollLefts.find(identity);
+			block.horizontalScrollLeft = (j != end(_capturedScrollLefts))
 				? std::clamp(j->second, 0, block.horizontalScrollMax)
 				: 0;
 		}
-		restoreTableScrollState(
+		restoreScrollState(
 			block.children,
 			preparedBlock ? &preparedBlock->children : nullptr,
 			preparedPath);
@@ -2430,47 +2753,73 @@ void MarkdownArticle::Impl::restoreTableScrollState(
 	}
 }
 
-void MarkdownArticle::Impl::refreshScrolledTableGeometry(LaidOutBlock &block) {
-	if (block.kind == PreparedBlockKind::Table) {
+void MarkdownArticle::Impl::refreshScrolledGeometry(
+		LaidOutBlock &block,
+		const ActiveHorizontalScrollOwnerState *activeOwner) {
+	RestoreLogicalBlockGeometry(&block);
+	if (activeOwner) {
+		ApplyTranslatedDescendantGeometry(&block, *activeOwner);
+	}
+
+	std::optional<ActiveHorizontalScrollOwnerState> nextOwner;
+	if (!activeOwner && !block.scrollViewportRect.isEmpty()) {
 		block.horizontalScrollLeft = std::clamp(
 			block.horizontalScrollLeft,
 			0,
 			block.horizontalScrollMax);
-		const auto shift = -block.horizontalScrollLeft;
-		for (auto &row : block.tableRows) {
-			row.outer = row.logicalOuter.translated(shift, 0);
-			for (auto &cell : row.cells) {
-				cell.outer = cell.logicalOuter.translated(shift, 0);
-				cell.textRect = cell.logicalTextRect.translated(shift, 0);
+		if (block.horizontalScrollMax > 0) {
+			const auto owner = ActiveHorizontalScrollOwnerState{
+				.viewport = block.scrollViewportRect,
+				.shift = -block.horizontalScrollLeft,
+			};
+			if (ScrollOwnerMovesOwnContent(block.kind)) {
+				ApplyOwnerContentGeometry(&block, owner);
+			}
+			if (ScrollOwnerMovesChildren(block.kind)) {
+				nextOwner = owner;
 			}
 		}
-		updateTableScrollbarThumb(block);
+		updateScrollbarThumb(block);
 	}
-	refreshScrolledTableGeometry(block.children);
+	refreshScrolledGeometry(
+		block.children,
+		nextOwner ? &*nextOwner : activeOwner);
 }
 
-void MarkdownArticle::Impl::refreshScrolledTableGeometry(
+void MarkdownArticle::Impl::refreshScrolledGeometry(LaidOutBlock &block) {
+	refreshScrolledGeometry(block, nullptr);
+}
+
+void MarkdownArticle::Impl::refreshScrolledGeometry(
 		std::vector<LaidOutBlock> &blocks) {
+	refreshScrolledGeometry(blocks, nullptr);
+}
+
+void MarkdownArticle::Impl::refreshScrolledGeometry(
+		std::vector<LaidOutBlock> &blocks,
+		const ActiveHorizontalScrollOwnerState *activeOwner) {
 	for (auto &block : blocks) {
-		refreshScrolledTableGeometry(block);
+		refreshScrolledGeometry(block, activeOwner);
 	}
 }
 
-void MarkdownArticle::Impl::updateTableScrollbarThumb(LaidOutBlock &block) {
+void MarkdownArticle::Impl::updateScrollbarThumb(LaidOutBlock &block) {
 	if (block.horizontalScrollMax <= 0
-		|| block.tableScrollbarTrackRect.isEmpty()) {
+		|| block.scrollScrollbarTrackRect.isEmpty()) {
+		block.scrollScrollbarThumbRect = QRect();
 		block.tableScrollbarThumbRect = QRect();
 		return;
 	}
-	const auto trackWidth = block.tableScrollbarTrackRect.width();
+	const auto trackWidth = block.scrollScrollbarTrackRect.width();
 	if (trackWidth <= 0) {
+		block.scrollScrollbarThumbRect = QRect();
 		block.tableScrollbarThumbRect = QRect();
 		return;
 	}
-	const auto tableWidth = std::max(block.tableRect.width(), 1);
-	auto thumbWidth = (trackWidth * block.visibleTableRect.width()
-		+ (tableWidth / 2))
-		/ tableWidth;
+	const auto viewportWidth = std::max(block.scrollViewportRect.width(), 1);
+	const auto contentWidth = std::max(block.scrollLogicalContentRect.width(), 1);
+	auto thumbWidth = (trackWidth * viewportWidth + (contentWidth / 2))
+		/ contentWidth;
 	thumbWidth = std::clamp(
 		thumbWidth,
 		std::min(layoutStyle().table.scrollbarMinThumbWidth, trackWidth),
@@ -2481,16 +2830,19 @@ void MarkdownArticle::Impl::updateTableScrollbarThumb(LaidOutBlock &block) {
 			+ (block.horizontalScrollMax / 2))
 			/ block.horizontalScrollMax
 		: 0;
-	block.tableScrollbarThumbRect = QRect(
-		block.tableScrollbarTrackRect.x() + thumbOffset,
-		block.tableScrollbarTrackRect.y(),
+	block.scrollScrollbarThumbRect = QRect(
+		block.scrollScrollbarTrackRect.x() + thumbOffset,
+		block.scrollScrollbarTrackRect.y(),
 		thumbWidth,
-		block.tableScrollbarTrackRect.height());
+		block.scrollScrollbarTrackRect.height());
+	if (block.kind == PreparedBlockKind::Table) {
+		block.tableScrollbarThumbRect = block.scrollScrollbarThumbRect;
+	}
 }
 
-bool MarkdownArticle::Impl::setTableScrollLeft(
+bool MarkdownArticle::Impl::setScrollLeft(
 		LaidOutBlock &block,
-		const MarkdownArticleTableIdentity &identity,
+		const MarkdownArticleScrollOwnerIdentity &identity,
 		int left) {
 	left = std::clamp(left, 0, block.horizontalScrollMax);
 	if (block.horizontalScrollLeft == left) {
@@ -2498,11 +2850,11 @@ bool MarkdownArticle::Impl::setTableScrollLeft(
 	}
 	block.horizontalScrollLeft = left;
 	if (left > 0) {
-		_capturedTableScrollLefts[identity] = left;
+		_capturedScrollLefts[identity] = left;
 	} else {
-		_capturedTableScrollLefts.erase(identity);
+		_capturedScrollLefts.erase(identity);
 	}
-	refreshScrolledTableGeometry(block);
+	refreshScrolledGeometry(block);
 	RefreshScrollableSegmentRects(_blocks, &_segments);
 	if (_textRepaintRect) {
 		_textRepaintRect(block.outer);
@@ -2514,13 +2866,13 @@ bool MarkdownArticle::Impl::setTableScrollLeft(
 
 MarkdownArticleHorizontalScrollHit MarkdownArticle::Impl::horizontalScrollHit(
 		QPoint point) const {
-	return findHorizontalScrollTable(point).hit;
+	return findHorizontalScrollOwner(point).hit;
 }
 
 bool MarkdownArticle::Impl::canConsumeHorizontalScroll(
 		QPoint point,
 		int delta) const {
-	if (const auto lookup = findHorizontalScrollTable(point);
+	if (const auto lookup = findHorizontalScrollOwner(point);
 		lookup.block) {
 		const auto left = std::clamp(
 			lookup.block->horizontalScrollLeft - delta,
@@ -2532,10 +2884,10 @@ bool MarkdownArticle::Impl::canConsumeHorizontalScroll(
 }
 
 bool MarkdownArticle::Impl::consumeHorizontalScroll(QPoint point, int delta) {
-	if (const auto lookup = findHorizontalScrollTable(point);
+	if (const auto lookup = findHorizontalScrollOwner(point);
 		lookup.block) {
-		if (const auto block = findTableByIdentity(lookup.identity)) {
-			return setTableScrollLeft(
+		if (const auto block = findScrollOwnerByIdentity(lookup.identity)) {
+			return setScrollLeft(
 				*block,
 				lookup.identity,
 				block->horizontalScrollLeft - delta);
@@ -2547,7 +2899,7 @@ bool MarkdownArticle::Impl::consumeHorizontalScroll(QPoint point, int delta) {
 bool MarkdownArticle::Impl::beginHorizontalScroll(
 		QPoint point,
 		bool fromTouch) {
-	const auto lookup = findHorizontalScrollTable(point);
+	const auto lookup = findHorizontalScrollOwner(point);
 	if (!lookup.block) {
 		return false;
 	}
@@ -2556,7 +2908,7 @@ bool MarkdownArticle::Impl::beginHorizontalScroll(
 			return false;
 		}
 		_activeHorizontalScrollDrag = ActiveHorizontalScrollDrag{
-			.table = lookup.identity,
+			.owner = lookup.identity,
 			.pressPoint = point,
 			.startScrollLeft = lookup.block->horizontalScrollLeft,
 			.fromTouch = true,
@@ -2566,9 +2918,9 @@ bool MarkdownArticle::Impl::beginHorizontalScroll(
 	if (!lookup.hit.overScrollbar) {
 		return false;
 	}
-	const auto &thumb = lookup.block->tableScrollbarThumbRect;
+	const auto &thumb = lookup.block->scrollScrollbarThumbRect;
 	_activeHorizontalScrollDrag = ActiveHorizontalScrollDrag{
-		.table = lookup.identity,
+		.owner = lookup.identity,
 		.pressPoint = point,
 		.startScrollLeft = lookup.block->horizontalScrollLeft,
 		.thumbGrabOffset = lookup.hit.overScrollbarThumb
@@ -2586,35 +2938,35 @@ bool MarkdownArticle::Impl::updateHorizontalScroll(QPoint point) {
 		return false;
 	}
 	const auto drag = *_activeHorizontalScrollDrag;
-	const auto block = findTableByIdentity(drag.table);
+	const auto block = findScrollOwnerByIdentity(drag.owner);
 	if (!block) {
 		return false;
 	}
 	if (drag.fromTouch) {
-		return setTableScrollLeft(
+		return setScrollLeft(
 			*block,
-			drag.table,
+			drag.owner,
 			drag.startScrollLeft - (point.x() - drag.pressPoint.x()));
 	}
-	if (block->tableScrollbarTrackRect.isEmpty()) {
+	if (block->scrollScrollbarTrackRect.isEmpty()) {
 		return false;
 	}
 	const auto available = std::max(
-		block->tableScrollbarTrackRect.width()
-			- block->tableScrollbarThumbRect.width(),
+		block->scrollScrollbarTrackRect.width()
+			- block->scrollScrollbarThumbRect.width(),
 		0);
 	auto thumbLeft = point.x() - drag.thumbGrabOffset;
 	thumbLeft = std::clamp(
 		thumbLeft,
-		block->tableScrollbarTrackRect.x(),
-		block->tableScrollbarTrackRect.x() + available);
+		block->scrollScrollbarTrackRect.x(),
+		block->scrollScrollbarTrackRect.x() + available);
 	const auto left = (available > 0)
-		? (((thumbLeft - block->tableScrollbarTrackRect.x())
+		? (((thumbLeft - block->scrollScrollbarTrackRect.x())
 			* block->horizontalScrollMax)
 			+ (available / 2))
 		/ available
 		: 0;
-	return setTableScrollLeft(*block, drag.table, left);
+	return setScrollLeft(*block, drag.owner, left);
 }
 
 void MarkdownArticle::Impl::endHorizontalScroll() {
@@ -2677,8 +3029,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 		page.top(),
 		innerWidth,
 		context);
-	restoreTableScrollState();
-	refreshScrolledTableGeometry(_blocks);
+	restoreScrollState();
+	refreshScrolledGeometry(_blocks);
 	_laidOutWidth = std::min(
 		width,
 		std::max(
@@ -2692,6 +3044,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 	registerPendingHighlightBlocks(_blocks);
 	CollectAnchors(_blocks, &_anchors);
 	CollectSelectableSegments(&_blocks, &_segments);
+	RefreshScrollableSegmentRects(_blocks, &_segments);
 	rebuildVisibleSegmentLookup();
 }
 

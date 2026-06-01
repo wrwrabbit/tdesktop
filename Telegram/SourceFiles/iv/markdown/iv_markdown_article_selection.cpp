@@ -24,6 +24,83 @@ struct TableCopySlot {
 	bool origin = false;
 };
 
+[[nodiscard]] QRect ClipRectHorizontally(QRect rect, QRect clip) {
+	if (rect.isEmpty() || clip.isEmpty()) {
+		return QRect();
+	}
+	const auto left = std::max(rect.x(), clip.x());
+	const auto right = std::min(
+		rect.x() + rect.width(),
+		clip.x() + clip.width());
+	return QRect(
+		left,
+		rect.y(),
+		std::max(right - left, 0),
+		rect.height());
+}
+
+[[nodiscard]] QRect VisibleTextRect(QRect textRect, QRect outerRect) {
+	return ClipRectHorizontally(textRect, outerRect);
+}
+
+void RefreshBlockSegmentRect(
+		const LaidOutBlock &block,
+		SelectableSegment *segment) {
+	if (!segment) {
+		return;
+	}
+	switch (segment->kind) {
+	case SelectableSegmentKind::DisplayMath:
+		segment->outerRect = block.visibleFormulaRect;
+		break;
+	case SelectableSegmentKind::Table:
+		segment->outerRect = block.visibleTableRect;
+		break;
+	case SelectableSegmentKind::Placeholder:
+	case SelectableSegmentKind::Photo:
+	case SelectableSegmentKind::Media:
+		segment->outerRect = block.visibleMediaRect;
+		break;
+	case SelectableSegmentKind::CodeBlock:
+		segment->outerRect = block.outer;
+		segment->textRect = VisibleTextRect(
+			block.textRect,
+			block.contentRect.isEmpty() ? block.outer : block.contentRect);
+		break;
+	case SelectableSegmentKind::TextLeaf: {
+		auto sourceRect = QRect();
+		auto containerRect = block.outer;
+		auto interactionRect = QRect();
+		if (segment->leaf == &block.leaf) {
+			sourceRect = block.textRect;
+			if (block.kind == PreparedBlockKind::Details) {
+				interactionRect = block.headerRect;
+				containerRect = block.headerRect;
+			} else if (block.kind == PreparedBlockKind::CodeBlock) {
+				containerRect = block.contentRect;
+			}
+		} else if (segment->leaf == &block.labelLeaf) {
+			sourceRect = block.labelRect;
+			containerRect = block.headerRect.isEmpty()
+				? block.outer
+				: block.headerRect;
+		} else if (segment->leaf == &block.subtitleLeaf) {
+			sourceRect = block.subtitleRect;
+			containerRect = block.headerRect.isEmpty()
+				? block.outer
+				: block.headerRect;
+		} else if (segment->leaf == &block.actionLeaf) {
+			sourceRect = block.actionRect;
+		}
+		const auto visibleRect = VisibleTextRect(sourceRect, containerRect);
+		segment->outerRect = interactionRect.isEmpty()
+			? visibleRect
+			: interactionRect;
+		segment->textRect = visibleRect;
+	} break;
+	}
+}
+
 [[nodiscard]] TextForMimeData CopyTextForDisplayMath(const LaidOutBlock &block) {
 	return TextForMimeData::Simple(u"$$"_q + block.copyText + u"$$"_q);
 }
@@ -570,12 +647,16 @@ void RefreshScrollableSegmentRects(
 		return;
 	}
 	for (const auto &block : blocks) {
-		if (block.kind == PreparedBlockKind::Table) {
-			if (block.segmentIndex >= 0
-				&& block.segmentIndex < int(segments->size())) {
-				auto &segment = (*segments)[block.segmentIndex];
-				segment.outerRect = block.visibleTableRect;
+		const auto refreshIndex = [&](int index) {
+			if (index < 0 || index >= int(segments->size())) {
+				return;
 			}
+			RefreshBlockSegmentRect(block, &(*segments)[index]);
+		};
+		refreshIndex(block.segmentIndex);
+		refreshIndex(block.secondarySegmentIndex);
+		refreshIndex(block.tertiarySegmentIndex);
+		if (block.kind == PreparedBlockKind::Table) {
 			for (const auto &row : block.tableRows) {
 				for (const auto &cell : row.cells) {
 					if (cell.segmentIndex < 0
@@ -584,7 +665,9 @@ void RefreshScrollableSegmentRects(
 					}
 					auto &segment = (*segments)[cell.segmentIndex];
 					segment.outerRect = cell.outer;
-					segment.textRect = cell.textRect;
+					segment.textRect = VisibleTextRect(
+						cell.textRect,
+						cell.outer);
 				}
 			}
 		}

@@ -717,6 +717,12 @@ void PaintSelectableTextLeaf(
 		0.9);
 }
 
+[[nodiscard]] QRect FlowTextViewportRect(const LaidOutBlock &block) {
+	return block.scrollViewportRect.isEmpty()
+		? block.outer
+		: block.scrollViewportRect;
+}
+
 void SetTextLeafPen(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1224,18 +1230,65 @@ void PaintTableCaption(
 	}
 }
 
-void PaintTableOverflowIndicators(
+[[nodiscard]] int OverflowIndicatorWidth(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	return (block.kind == PreparedBlockKind::DisplayMath)
+		? st.displayMath.overflowWidth
+		: st.table.overflowWidth;
+}
+
+[[nodiscard]] QColor ScrollOwnerAccentColor(
+		const LaidOutBlock &block,
+		const style::Markdown &st,
+		const MarkdownArticlePaintContext &context) {
+	const auto &paintSt = PaintStyle(context, st);
+	switch (block.kind) {
+	case PreparedBlockKind::Table:
+		return paintSt.table.overflowFg->c;
+	case PreparedBlockKind::DisplayMath:
+		return paintSt.displayMath.overflowFg->c;
+	case PreparedBlockKind::CodeBlock:
+		return paintSt.textPalette.monoFg->c;
+	case PreparedBlockKind::Quote:
+		return QuoteSupplementaryColor(context).value_or(
+			paintSt.supplementaryTextColor->c);
+	case PreparedBlockKind::Details:
+		return paintSt.supplementaryTextColor->c;
+	case PreparedBlockKind::EmbedPost:
+		return paintSt.embedPost.accentFg->c;
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::Placeholder:
+		return paintSt.table.overflowFg->c;
+	}
+	return paintSt.table.overflowFg->c;
+}
+
+void PaintHorizontalOverflowIndicators(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
-		const style::Markdown &paintSt,
-		const QPainterPath &shapePath) {
-	if (block.horizontalScrollMax <= 0 || block.visibleTableRect.isEmpty()) {
+		const MarkdownArticlePaintContext &context,
+		QRect viewport,
+		const QPainterPath *clipPath = nullptr) {
+	if (block.horizontalScrollMax <= 0 || viewport.isEmpty()) {
 		return;
 	}
 	const auto indicatorWidth = std::min(
-		std::max(st.table.overflowWidth, 1),
-		block.visibleTableRect.width());
+		std::max(OverflowIndicatorWidth(block, st), 1),
+		viewport.width());
 	if (indicatorWidth <= 0) {
 		return;
 	}
@@ -1244,50 +1297,62 @@ void PaintTableOverflowIndicators(
 	if (!left && !right) {
 		return;
 	}
+	const auto color = ScrollOwnerAccentColor(block, st, context);
 	p.save();
-	p.setClipPath(shapePath, Qt::IntersectClip);
+	p.setClipRect(viewport, Qt::IntersectClip);
+	if (clipPath) {
+		p.setClipPath(*clipPath, Qt::IntersectClip);
+	}
 	if (left) {
 		p.fillRect(
 			QRect(
-				block.visibleTableRect.x(),
-				block.visibleTableRect.y(),
+				viewport.x(),
+				viewport.y(),
 				indicatorWidth,
-				block.visibleTableRect.height()),
-			paintSt.table.overflowFg->c);
+				viewport.height()),
+			color);
 	}
 	if (right) {
 		p.fillRect(
 			QRect(
-				block.visibleTableRect.x()
-					+ block.visibleTableRect.width()
+				viewport.x()
+					+ viewport.width()
 					- indicatorWidth,
-				block.visibleTableRect.y(),
+				viewport.y(),
 				indicatorWidth,
-				block.visibleTableRect.height()),
-			paintSt.table.overflowFg->c);
+				viewport.height()),
+			color);
 	}
 	p.restore();
 }
 
-void PaintTableScrollbar(
+void PaintHorizontalScrollbar(
 		Painter &p,
 		const LaidOutBlock &block,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
 	if (block.horizontalScrollMax <= 0
-		|| block.tableScrollbarTrackRect.isEmpty()) {
+		|| block.scrollScrollbarTrackRect.isEmpty()) {
 		return;
 	}
-	const auto scrollbarRect = block.tableScrollbarTrackRect.united(
-		block.tableScrollbarThumbRect);
+	const auto scrollbarRect = block.scrollScrollbarTrackRect.united(
+		block.scrollScrollbarThumbRect);
 	const auto scrollbarClip = context.clip.intersected(scrollbarRect);
 	if (scrollbarClip.isEmpty()) {
 		return;
 	}
 	const auto &paintSt = PaintStyle(context, st);
-	const auto trackBg = EffectiveTableHeaderBg(paintSt, context);
-	const auto thumbBg = EffectiveTableBorderFg(paintSt, context);
-	const auto radius = block.tableScrollbarTrackRect.height() / 2.;
+	auto trackBg = QColor();
+	auto thumbBg = QColor();
+	if (block.kind == PreparedBlockKind::Table) {
+		trackBg = EffectiveTableHeaderBg(paintSt, context);
+		thumbBg = EffectiveTableBorderFg(paintSt, context);
+	} else {
+		thumbBg = ScrollOwnerAccentColor(block, st, context);
+		trackBg = thumbBg;
+		trackBg.setAlphaF(trackBg.alphaF() * 0.25);
+	}
+	const auto radius = block.scrollScrollbarTrackRect.height() / 2.;
 	p.save();
 	p.setClipRect(scrollbarClip, Qt::IntersectClip);
 	if (radius > 0.) {
@@ -1295,20 +1360,20 @@ void PaintTableScrollbar(
 		p.setPen(Qt::NoPen);
 		p.setBrush(trackBg);
 		p.drawRoundedRect(
-			QRectF(block.tableScrollbarTrackRect),
+			QRectF(block.scrollScrollbarTrackRect),
 			radius,
 			radius);
-		if (!block.tableScrollbarThumbRect.isEmpty()) {
+		if (!block.scrollScrollbarThumbRect.isEmpty()) {
 			p.setBrush(thumbBg);
 			p.drawRoundedRect(
-				QRectF(block.tableScrollbarThumbRect),
+				QRectF(block.scrollScrollbarThumbRect),
 				radius,
 				radius);
 		}
 	} else {
-		p.fillRect(block.tableScrollbarTrackRect, trackBg);
-		if (!block.tableScrollbarThumbRect.isEmpty()) {
-			p.fillRect(block.tableScrollbarThumbRect, thumbBg);
+		p.fillRect(block.scrollScrollbarTrackRect, trackBg);
+		if (!block.scrollScrollbarThumbRect.isEmpty()) {
+			p.fillRect(block.scrollScrollbarThumbRect, thumbBg);
 		}
 	}
 	p.restore();
@@ -1398,7 +1463,13 @@ void PaintWholeTable(
 		tableClip,
 		context);
 
-	PaintTableOverflowIndicators(p, block, st, paintSt, shapePath);
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.visibleTableRect,
+		&shapePath);
 
 	p.restore();
 }
@@ -1491,7 +1562,13 @@ void PaintTableRowBand(
 		rowClip,
 		context);
 
-	PaintTableOverflowIndicators(p, block, st, paintSt, shapePath);
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.visibleTableRect,
+		&shapePath);
 
 	p.restore();
 }
@@ -1526,7 +1603,7 @@ void PaintTableBlock(
 				});
 		}
 	}
-	PaintTableScrollbar(p, block, st, context);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintDisplayMathBlock(
@@ -1584,21 +1661,16 @@ void PaintDisplayMathBlock(
 					p.textPalette().selectOverlay);
 			}
 
-			if (block.overflowed) {
-				const auto indicatorWidth = std::min(
-					std::max(st.displayMath.overflowWidth, 1),
-					block.visibleFormulaRect.width());
-				p.fillRect(
-					QRect(
-						block.visibleFormulaRect.x()
-							+ block.visibleFormulaRect.width()
-							- indicatorWidth,
-						block.visibleFormulaRect.y(),
-						indicatorWidth,
-						block.visibleFormulaRect.height()),
-					paintSt.displayMath.overflowFg->c);
-			}
 		});
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.scrollViewportRect.isEmpty()
+			? block.visibleFormulaRect
+			: block.scrollViewportRect);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintQuoteBlock(
@@ -1650,6 +1722,13 @@ void PaintQuoteBlock(
 		outerWidth,
 		st,
 		local);
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.scrollViewportRect);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintCodeBlock(
@@ -1699,20 +1778,31 @@ void PaintCodeBlock(
 		}
 	}
 
+	const auto textClip = context.clip.intersected(block.contentRect);
+	const auto textContext = ClippedContext(context, textClip);
 	p.save();
 	p.setPen(p.textPalette().monoFg->c);
 	PaintSelectableTextLeaf(
 		p,
 		block.leaf,
-		context,
+		textContext,
 		block.textRect,
 		block.textWidth,
 		block.segmentIndex,
 		style::al_left,
 		TextSelectionForSegmentIndex(
-			context.selectionState,
+			textContext.selectionState,
 			block.segmentIndex));
 	p.restore();
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.scrollViewportRect.isEmpty()
+			? block.contentRect
+			: block.scrollViewportRect);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintPlaceholderBlock(
@@ -1956,7 +2046,10 @@ void PaintEmbedPostBlock(
 	if (!block.bodyRect.isEmpty()) {
 		const auto bodyContext = ClippedContext(
 			context,
-			context.clip.intersected(block.bodyRect));
+			context.clip.intersected(
+				block.scrollViewportRect.isEmpty()
+					? block.bodyRect
+					: block.scrollViewportRect));
 		PaintBlocks(
 			p,
 			block.children,
@@ -1968,6 +2061,13 @@ void PaintEmbedPostBlock(
 			st,
 			bodyContext);
 	}
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.scrollViewportRect);
+	PaintHorizontalScrollbar(p, block, st, context);
 	if (!block.textRect.isEmpty()) {
 		SetTextLeafPen(p, block, st, context);
 		PaintSelectableTextLeaf(
@@ -2310,6 +2410,13 @@ void PaintDetailsBlock(
 			st,
 			bodyContext);
 	}
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		block.scrollViewportRect);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintThinkingBlock(
@@ -2318,13 +2425,15 @@ void PaintThinkingBlock(
 		int devicePixelRatio,
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
+	const auto viewport = FlowTextViewportRect(block);
+	const auto contentClip = context.clip.intersected(viewport);
 	const auto &paintSt = PaintStyle(context, st);
 	const auto baseColor = paintSt.supplementaryTextColor;
 	const auto selection = TextSelectionForSegmentIndex(
 		context.selectionState,
 		block.segmentIndex);
-	const auto logicalRect = block.outer;
-	const auto visible = context.clip.intersected(logicalRect);
+	const auto logicalRect = viewport;
+	const auto visible = context.clip.intersected(block.outer);
 	if (visible.isEmpty()) {
 		AdvanceRevealLinesForBlock(context, block, st);
 		return;
@@ -2333,11 +2442,37 @@ void PaintThinkingBlock(
 	const auto thinking = context.caches.thinking;
 	const auto pathShiftGradient = context.caches.pathShiftGradient;
 	if (!thinking || !pathShiftGradient) {
-		PaintThinkingTextLeafDirect(p, block, st, context);
+		if (!contentClip.isEmpty()) {
+			PaintThinkingTextLeafDirect(
+				p,
+				block,
+				st,
+				ClippedContext(context, contentClip));
+		}
+		PaintHorizontalOverflowIndicators(
+			p,
+			block,
+			st,
+			context,
+			viewport);
+		PaintHorizontalScrollbar(p, block, st, context);
 		return;
 	}
 	if (selection && !selection->empty()) {
-		PaintThinkingTextLeafDirect(p, block, st, context);
+		if (!contentClip.isEmpty()) {
+			PaintThinkingTextLeafDirect(
+				p,
+				block,
+				st,
+				ClippedContext(context, contentClip));
+		}
+		PaintHorizontalOverflowIndicators(
+			p,
+			block,
+			st,
+			context,
+			viewport);
+		PaintHorizontalScrollbar(p, block, st, context);
 		return;
 	}
 
@@ -2397,16 +2532,30 @@ void PaintThinkingBlock(
 			return true;
 		});
 	if (!painted) {
+		PaintHorizontalOverflowIndicators(
+			p,
+			block,
+			st,
+			context,
+			viewport);
+		PaintHorizontalScrollbar(p, block, st, context);
 		return;
 	}
 
 	p.save();
-	p.setClipRect(visible, Qt::IntersectClip);
+	p.setClipRect(contentClip, Qt::IntersectClip);
 	p.drawImage(
 		QRectF(logicalRect),
 		thinking->gradient,
 		QRectF(0, 0, cacheWidth, cacheHeight));
 	p.restore();
+	PaintHorizontalOverflowIndicators(
+		p,
+		block,
+		st,
+		context,
+		viewport);
+	PaintHorizontalScrollbar(p, block, st, context);
 }
 
 void PaintStructuralBlockOverlay(
@@ -2483,7 +2632,9 @@ void PaintBlock(
 		PaintSelectableTextLeaf(
 			p,
 			block.leaf,
-			context,
+			ClippedContext(
+				context,
+				context.clip.intersected(FlowTextViewportRect(block))),
 			block.textRect,
 			block.textWidth,
 			block.segmentIndex,
@@ -2491,6 +2642,13 @@ void PaintBlock(
 			TextSelectionForSegmentIndex(
 				context.selectionState,
 				block.segmentIndex));
+		PaintHorizontalOverflowIndicators(
+			p,
+			block,
+			st,
+			context,
+			FlowTextViewportRect(block));
+		PaintHorizontalScrollbar(p, block, st, context);
 		break;
 	case PreparedBlockKind::CodeBlock:
 		PaintCodeBlock(p, block, st, context);

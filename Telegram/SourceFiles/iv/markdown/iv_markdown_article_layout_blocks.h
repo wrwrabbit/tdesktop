@@ -66,6 +66,24 @@ struct LaidOutTableRow {
 	std::optional<PreparedEditTableRowSource> editRow;
 };
 
+struct LaidOutBlockLogicalGeometry {
+	QRect outer;
+	QRect headerRect;
+	QRect bodyRect;
+	QRect iconRect;
+	QRect textRect;
+	QRect labelRect;
+	QRect subtitleRect;
+	QRect actionRect;
+	QRect markerRect;
+	QRect contentRect;
+	QRect formulaRect;
+	QRect tableRect;
+	QRect mediaRect;
+	QRect thumbnailRect;
+	QPoint markerCenter;
+};
+
 struct LaidOutBlock {
 	PreparedBlockKind kind = PreparedBlockKind::Paragraph;
 	Ui::Text::String leaf;
@@ -101,11 +119,16 @@ struct LaidOutBlock {
 	QRect mediaRect;
 	QRect thumbnailRect;
 	QRect visibleFormulaRect;
+	QRect scrollViewportRect;
+	QRect scrollLogicalContentRect;
+	QRect scrollScrollbarTrackRect;
+	QRect scrollScrollbarThumbRect;
 	QRect visibleTableRect;
 	QRect tableScrollbarTrackRect;
 	QRect tableScrollbarThumbRect;
 	QRect visibleMediaRect;
 	QPoint markerCenter;
+	LaidOutBlockLogicalGeometry logicalGeometry;
 	QString anchorId;
 	std::vector<QString> anchorIds;
 	int textWidth = 0;
@@ -203,8 +226,28 @@ struct TableRowLayoutData {
 	int baseline,
 	const style::Markdown &st);
 [[nodiscard]] QMargins BlockquotePadding(const style::QuoteStyle &style);
+[[nodiscard]] int HorizontalMarginsWidth(QMargins margins);
 [[nodiscard]] Ui::Text::GeometryDescriptor TextGeometry(int width);
 [[nodiscard]] int TextMinResizeWidth(int width);
+[[nodiscard]] int ReadableTextMinWidth(const style::TextStyle &style);
+[[nodiscard]] int FlowBlockMinimumWidth(
+	const PreparedBlock &prepared,
+	const style::Markdown &st);
+[[nodiscard]] int CodeBlockMinimumWidth(const style::Markdown &st);
+[[nodiscard]] int DisplayMathMinimumWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	const style::Markdown &st);
+[[nodiscard]] int ContainerMinimumWidth(
+	int contentMinimumWidth,
+	QMargins padding);
+[[nodiscard]] int TableMinimumGridWidth(
+	int columnCount,
+	const style::Markdown &st,
+	bool bordered);
+[[nodiscard]] int TableBlockMinimumWidth(
+	const PreparedBlock &prepared,
+	const style::Markdown &st);
 [[nodiscard]] int TableCellTextMinResizeWidth(
 	const style::TextStyle &textStyle,
 	const style::Markdown &st);
@@ -256,6 +299,8 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width,
+	int logicalWidth,
+	bool scrollOwner,
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutCodeBlock(
 	const PreparedBlock &prepared,
@@ -266,6 +311,8 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width,
+	int logicalWidth,
+	bool scrollOwner,
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr,
 	LayoutContext context = {});
@@ -281,7 +328,9 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &st,
 	int left,
 	int top,
-	int width);
+	int width,
+	int logicalWidth,
+	bool scrollOwner);
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -291,6 +340,8 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width,
+	int logicalWidth,
+	bool scrollOwner,
 	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutPlaceholderBlock(
 	const PreparedBlock &prepared,

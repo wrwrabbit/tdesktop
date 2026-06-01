@@ -26,11 +26,25 @@ using RichPageRelatedArticle = Iv::RichPage::RelatedArticle;
 using RichPageTableCell = Iv::RichPage::TableCell;
 using RichPageTableRow = Iv::RichPage::TableRow;
 
+struct NativeIvDepthContext {
+	int listDepth = 0;
+	int quoteDepth = 0;
+};
+
+[[nodiscard]] int CappedNativeIvListDepth(int depth) {
+	return std::min(depth, std::max(PrepareLimitsForIv().visualListDepth, 0));
+}
+
+[[nodiscard]] int CappedNativeIvQuoteDepth(int depth) {
+	return std::min(depth, std::max(PrepareLimitsForIv().visualQuoteDepth, 0));
+}
+
 [[nodiscard]] bool PrepareCanonicalNativeIvBlocks(
 	const std::vector<RichPageBlock> &blocks,
 	std::vector<PreparedBlock> *result,
 	NativeIvPrepareState *state,
-	PreparedEditBlockContainerPath container);
+	PreparedEditBlockContainerPath container,
+	NativeIvDepthContext depthContext);
 
 [[nodiscard]] QString NativeIvDateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
@@ -633,11 +647,15 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state,
-		PreparedEditBlockPath path) {
+		PreparedEditBlockPath path,
+		NativeIvDepthContext depthContext) {
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::Quote;
 	block.anchorId = data.anchorId;
 	block.pullquote = data.pullquote;
+	block.actualDepth = depthContext.quoteDepth;
+	block.visualDepth = CappedNativeIvQuoteDepth(block.actualDepth);
+	block.depthClamped = (block.actualDepth > block.visualDepth);
 	block.editBlock = BlockSource(path);
 	auto body = PreparedIvRichText();
 	if (!PrepareNativeIvRichText(data.text, &body, &block.anchorId, state)) {
@@ -652,11 +670,14 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			BlockTextLeafSource(path))) {
 		return false;
 	}
+	auto childContext = depthContext;
+	++childContext.quoteDepth;
 	if (!data.blocks.empty() && !PrepareCanonicalNativeIvBlocks(
 			data.blocks,
 			&block.children,
 			state,
-			BlockChildrenContainer(path))) {
+			BlockChildrenContainer(path),
+			childContext)) {
 		return false;
 	}
 	auto cite = PreparedIvRichText();
@@ -700,7 +721,11 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		const std::vector<RichPageListItem> &items,
 		PreparedBlock *result,
 		NativeIvPrepareState *state,
-		PreparedEditBlockPath path) {
+		PreparedEditBlockPath path,
+		NativeIvDepthContext depthContext) {
+	result->actualDepth = depthContext.listDepth;
+	result->visualDepth = CappedNativeIvListDepth(result->actualDepth);
+	result->depthClamped = (result->actualDepth > result->visualDepth);
 	result->editBlock = BlockSource(path);
 	auto firstNumber = true;
 	for (auto i = 0, count = int(items.size()); i != count; ++i) {
@@ -710,6 +735,9 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		block.listKind = result->listKind;
 		block.listDelimiter = result->listDelimiter;
 		block.taskState = NativeIvTaskStateFromRichPage(item.taskState);
+		block.actualDepth = result->actualDepth;
+		block.visualDepth = result->visualDepth;
+		block.depthClamped = result->depthClamped;
 		block.editListItem = ListItemSource(path, i);
 		if (result->listKind == ListKind::Ordered) {
 			auto orderedNumber = 0;
@@ -746,11 +774,14 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 				return false;
 			}
 		}
+		auto childContext = depthContext;
+		++childContext.listDepth;
 		if (!item.blocks.empty() && !PrepareCanonicalNativeIvBlocks(
 				item.blocks,
 				&block.children,
 				state,
-				ListItemChildrenContainer(path, i))) {
+				ListItemChildrenContainer(path, i),
+				childContext)) {
 			return false;
 		}
 		if (block.children.empty()) {
@@ -926,7 +957,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state,
-		PreparedEditBlockPath path) {
+		PreparedEditBlockPath path,
+		NativeIvDepthContext depthContext) {
 	auto summary = PreparedIvRichText();
 	auto anchorId = NativeIvDetailsAnchorId(state);
 	if (!PrepareNativeIvRichText(
@@ -960,7 +992,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		data.blocks,
 		&block.children,
 		state,
-		BlockChildrenContainer(path))
+		BlockChildrenContainer(path),
+		depthContext)
 		? (result->push_back(std::move(block)), true)
 		: false;
 }
@@ -1053,7 +1086,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 [[nodiscard]] bool PrepareCanonicalNativeIvEmbedPostBlock(
 		const RichPageBlock &data,
 		std::vector<PreparedBlock> *result,
-		NativeIvPrepareState *state) {
+		NativeIvPrepareState *state,
+		NativeIvDepthContext depthContext) {
 	auto caption = PreparedIvRichText();
 	auto block = PreparedBlock();
 	block.kind = PreparedBlockKind::EmbedPost;
@@ -1080,7 +1114,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			data.blocks,
 			&block.children,
 			state,
-			PreparedEditBlockContainerPath())) {
+			PreparedEditBlockContainerPath(),
+			depthContext)) {
 		return false;
 	} else {
 		ClearPreparedEditSources(&block.children);
@@ -1093,7 +1128,8 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		const RichPageBlock &block,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state,
-		PreparedEditBlockPath path) {
+		PreparedEditBlockPath path,
+		NativeIvDepthContext depthContext) {
 	if (state->blocked()) {
 		return false;
 	}
@@ -1213,12 +1249,18 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			block.listItems,
 			&prepared,
 			state,
-			path)
+			path,
+			depthContext)
 			? (result->push_back(std::move(prepared)), true)
 			: false;
 	}
 	case RichPageBlockKind::Quote:
-		return PrepareCanonicalNativeIvQuoteBlock(block, result, state, path);
+		return PrepareCanonicalNativeIvQuoteBlock(
+			block,
+			result,
+			state,
+			path,
+			depthContext);
 	case RichPageBlockKind::Photo:
 		return PrepareCanonicalNativeIvMediaBlock(
 			block,
@@ -1242,7 +1284,11 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			result,
 			state);
 	case RichPageBlockKind::EmbedPost:
-		return PrepareCanonicalNativeIvEmbedPostBlock(block, result, state);
+		return PrepareCanonicalNativeIvEmbedPostBlock(
+			block,
+			result,
+			state,
+			depthContext);
 	case RichPageBlockKind::GroupedMedia:
 		return PrepareCanonicalNativeIvGroupedMediaBlock(
 			block,
@@ -1275,7 +1321,12 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	case RichPageBlockKind::Table:
 		return PrepareCanonicalNativeIvTableBlock(block, result, state, path);
 	case RichPageBlockKind::Details:
-		return PrepareCanonicalNativeIvDetailsBlock(block, result, state, path);
+		return PrepareCanonicalNativeIvDetailsBlock(
+			block,
+			result,
+			state,
+			path,
+			depthContext);
 	case RichPageBlockKind::RelatedArticles:
 		return PrepareCanonicalNativeIvRelatedArticlesBlock(block, result, state);
 	case RichPageBlockKind::Map:
@@ -1295,13 +1346,19 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 		const std::vector<RichPageBlock> &blocks,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state,
-		PreparedEditBlockContainerPath container) {
+		PreparedEditBlockContainerPath container,
+		NativeIvDepthContext depthContext) {
 	for (auto i = 0, count = int(blocks.size()); i != count; ++i) {
 		const auto path = PreparedEditBlockPath{
 			.container = container,
 			.index = i,
 		};
-		if (!PrepareCanonicalNativeIvBlock(blocks[i], result, state, path)) {
+		if (!PrepareCanonicalNativeIvBlock(
+				blocks[i],
+				result,
+				state,
+				path,
+				depthContext)) {
 			if (state->result.failure.failed()) {
 				return false;
 			}
@@ -1323,7 +1380,8 @@ bool PrepareNativeIvBlocks(
 		page.blocks,
 		result,
 		state,
-		PreparedEditBlockContainerPath());
+		PreparedEditBlockContainerPath(),
+		NativeIvDepthContext());
 }
 
 } // namespace Iv::Markdown

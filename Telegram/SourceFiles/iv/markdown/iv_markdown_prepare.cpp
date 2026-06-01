@@ -73,6 +73,8 @@ const MarkdownPrepareLimits &PrepareLimitsForIv() {
 			.maxColumns = 16,
 			.maxCells = 1024,
 		},
+		.visualListDepth = 16,
+		.visualQuoteDepth = 16,
 		.maxPreparedBlocks = 4096,
 	};
 	return result;

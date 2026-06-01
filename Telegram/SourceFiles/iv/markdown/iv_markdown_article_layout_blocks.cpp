@@ -30,6 +30,9 @@ constexpr auto kIvMarkedTextOptions = TextParseOptions{
 
 constexpr auto kCodeTabColumns = 4;
 constexpr auto kCodeTrailingGuard = 0x2060;
+constexpr auto kReadableTextColumns = 12;
+constexpr auto kReadableTextLineHeights = 4;
+constexpr auto kReadableCodeColumns = 16;
 
 [[nodiscard]] style::align CellAlign(TableAlignment alignment) {
 	switch (alignment) {
@@ -227,8 +230,10 @@ struct TableSpannedCellLayout {
 	}
 
 	const auto availableWidth = std::max(width, 1);
-	const auto minimumGridWidth = border
-		+ columnCount * (minimum + border);
+	const auto minimumGridWidth = TableMinimumGridWidth(
+		columnCount,
+		st,
+		bordered);
 	*overflowed = (minimumGridWidth > availableWidth);
 	if (*overflowed || !columnCount) {
 		return result;
@@ -403,6 +408,41 @@ void LayoutMediaCaptionText(
 				block->leaf.countHeight(block->textWidth, true),
 				TextLineHeight(textStyle)),
 			context));
+}
+
+[[nodiscard]] LaidOutBlockLogicalGeometry ExtractLogicalGeometry(
+		const LaidOutBlock &block) {
+	return {
+		.outer = block.outer,
+		.headerRect = block.headerRect,
+		.bodyRect = block.bodyRect,
+		.iconRect = block.iconRect,
+		.textRect = block.textRect,
+		.labelRect = block.labelRect,
+		.subtitleRect = block.subtitleRect,
+		.actionRect = block.actionRect,
+		.markerRect = block.markerRect,
+		.contentRect = block.contentRect,
+		.formulaRect = block.formulaRect,
+		.tableRect = block.tableRect,
+		.mediaRect = block.mediaRect,
+		.thumbnailRect = block.thumbnailRect,
+		.markerCenter = block.markerCenter,
+	};
+}
+
+[[nodiscard]] LaidOutBlock FinalizeLaidOutBlock(LaidOutBlock block) {
+	block.logicalGeometry = ExtractLogicalGeometry(block);
+	return block;
+}
+
+[[nodiscard]] int ScrollbarReserveHeight(
+		bool scrollOwner,
+		int horizontalScrollMax,
+		const style::Markdown &st) {
+	return (scrollOwner && (horizontalScrollMax > 0))
+		? (st.table.scrollbarSkip + st.table.scrollbarHeight)
+		: 0;
 }
 
 } // namespace
@@ -625,6 +665,10 @@ QMargins BlockquotePadding(const style::QuoteStyle &style) {
 		+ QMargins(0, style.header + style.verticalSkip, 0, style.verticalSkip);
 }
 
+int HorizontalMarginsWidth(QMargins margins) {
+	return std::max(margins.left(), 0) + std::max(margins.right(), 0);
+}
+
 Ui::Text::GeometryDescriptor TextGeometry(int width) {
 	auto result = Ui::Text::SimpleGeometry(std::max(width, 1), 0, 0, false);
 	result.breakEverywhere = true;
@@ -633,6 +677,95 @@ Ui::Text::GeometryDescriptor TextGeometry(int width) {
 
 int TextMinResizeWidth(int width) {
 	return std::max(width, 1);
+}
+
+int ReadableTextMinWidth(const style::TextStyle &style) {
+	return std::max({
+		style.font->spacew * kReadableTextColumns,
+		TextLineHeight(style) * kReadableTextLineHeights,
+		1,
+	});
+}
+
+int FlowBlockMinimumWidth(
+		const PreparedBlock &prepared,
+		const style::Markdown &st) {
+	if (IsAnchorOnlyBlock(prepared)
+		|| (prepared.text.text.isEmpty() && !prepared.forceTextSegment)) {
+		return 1;
+	}
+	return ReadableTextMinWidth(TextStyleFor(prepared, st));
+}
+
+int CodeBlockMinimumWidth(const style::Markdown &st) {
+	const auto padding = BlockquotePadding(st.code.pre);
+	const auto content = std::max({
+		st.code.font->spacew * kReadableCodeColumns,
+		ReadableTextMinWidth(st.code),
+		1,
+	});
+	return HorizontalMarginsWidth(padding) + content;
+}
+
+int DisplayMathMinimumWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		const style::Markdown &st) {
+	const auto &padding = st.displayMath.padding;
+	if (const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
+		formula && formula->measured.success) {
+		return HorizontalMarginsWidth(padding)
+			+ std::max(formula->measured.logicalSize.width(), 1);
+	}
+	const auto &fallbackPadding = st.displayMath.fallbackPadding;
+	auto fallbackText = TextWithEntities::Simple(u"Invalid formula"_q);
+	fallbackText.entities.push_back(EntityInText(
+		EntityType::Italic,
+		0,
+		fallbackText.text.size()));
+	auto leaf = Ui::Text::String(ReadableTextMinWidth(st.displayMath.fallbackStyle));
+	leaf.setMarkedText(
+		st.displayMath.fallbackStyle,
+		std::move(fallbackText),
+		kIvMarkedTextOptions);
+	return HorizontalMarginsWidth(padding)
+		+ HorizontalMarginsWidth(fallbackPadding)
+		+ std::max({
+			leaf.maxWidth(),
+			ReadableTextMinWidth(st.displayMath.fallbackStyle),
+			1,
+		});
+}
+
+int ContainerMinimumWidth(
+		int contentMinimumWidth,
+		QMargins padding) {
+	return std::max(contentMinimumWidth, 1) + HorizontalMarginsWidth(padding);
+}
+
+int TableMinimumGridWidth(
+		int columnCount,
+		const style::Markdown &st,
+		bool bordered) {
+	if (columnCount <= 0) {
+		return 0;
+	}
+	const auto border = TableBorder(bordered, st);
+	const auto minimum = st.table.minColumnWidth;
+	return border + columnCount * (minimum + border);
+}
+
+int TableBlockMinimumWidth(
+		const PreparedBlock &prepared,
+		const style::Markdown &st) {
+	return std::max(
+		prepared.text.text.isEmpty()
+			? 1
+			: FlowBlockMinimumWidth(prepared, st),
+		TableMinimumGridWidth(
+			prepared.tableColumnCount,
+			st,
+			prepared.tableBordered));
 }
 
 int TableCellTextMinResizeWidth(
@@ -803,6 +936,8 @@ LaidOutBlock LayoutFlowBlock(
 		int left,
 		int top,
 		int width,
+		int logicalWidth,
+		bool scrollOwner,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
 	ApplyPreparedEditSources(&block, prepared);
@@ -813,11 +948,15 @@ LaidOutBlock LayoutFlowBlock(
 	block.supplementary = prepared.supplementary;
 	block.pullquote = prepared.pullquote;
 	block.flowTextAlign = CellAlign(prepared.flowAlignment);
-	block.textWidth = std::max(width, 1);
+	const auto visibleWidth = std::max(width, 1);
+	block.textWidth = std::max(
+		(logicalWidth > 0) ? logicalWidth : visibleWidth,
+		1);
 	if (IsAnchorOnlyBlock(prepared)) {
 		block.textRect = QRect(left, top, block.textWidth, 0);
-		block.outer = block.textRect;
-		return block;
+		block.contentRect = QRect(left, top, visibleWidth, 0);
+		block.outer = block.contentRect;
+		return FinalizeLaidOutBlock(std::move(block));
 	}
 
 	const auto &textStyle = TextStyleFor(prepared, st);
@@ -838,12 +977,35 @@ LaidOutBlock LayoutFlowBlock(
 			TextLineHeight(textStyle)),
 		context);
 	block.textRect = QRect(left, top, block.textWidth, height);
-	block.outer = QRect(left, top, block.textWidth, height);
+	block.contentRect = QRect(left, top, visibleWidth, height);
+	block.overflowed = (block.textWidth > visibleWidth);
+	block.horizontalScrollMax = scrollOwner
+		? std::max(block.textWidth - visibleWidth, 0)
+		: 0;
+	if (scrollOwner) {
+		block.scrollViewportRect = block.contentRect;
+		block.scrollLogicalContentRect = block.textRect;
+		if (block.horizontalScrollMax > 0) {
+			block.scrollScrollbarTrackRect = QRect(
+				left,
+				top + height + st.table.scrollbarSkip,
+				visibleWidth,
+				st.table.scrollbarHeight);
+		}
+	}
+	block.outer = QRect(
+		left,
+		top,
+		visibleWidth,
+		height + ScrollbarReserveHeight(
+			scrollOwner,
+			block.horizontalScrollMax,
+			st));
 	block.firstLineBaseline = LeafFirstLineBaseline(
 		block.leaf,
 		block.textRect,
 		textStyle);
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutCodeBlock(
@@ -855,6 +1017,8 @@ LaidOutBlock LayoutCodeBlock(
 		int left,
 		int top,
 		int width,
+		int logicalWidth,
+		bool scrollOwner,
 		bool allowAsyncSyntaxHighlighting,
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
 		LayoutContext context) {
@@ -872,7 +1036,15 @@ LaidOutBlock LayoutCodeBlock(
 	const auto outerWidth = std::max(
 		width,
 		padding.left() + padding.right() + 1);
-	block.textWidth = outerWidth - padding.left() - padding.right();
+	const auto logicalOuterWidth = std::max(
+		(logicalWidth > 0) ? logicalWidth : outerWidth,
+		padding.left() + padding.right() + 1);
+	const auto viewportWidth = std::max(
+		outerWidth - padding.left() - padding.right(),
+		1);
+	block.textWidth = std::max(
+		logicalOuterWidth - padding.left() - padding.right(),
+		1);
 	block.leaf = Ui::Text::String(TextMinResizeWidth(block.textWidth));
 	RepopulateCodeBlockLeaf(
 		block,
@@ -887,7 +1059,17 @@ LaidOutBlock LayoutCodeBlock(
 			block.leaf.countHeight(block.textWidth, true),
 			TextLineHeight(st.code)),
 		context);
-	const auto outerHeight = padding.top() + height + padding.bottom();
+	block.overflowed = (block.textWidth > viewportWidth);
+	block.horizontalScrollMax = scrollOwner
+		? std::max(block.textWidth - viewportWidth, 0)
+		: 0;
+	const auto outerHeight = padding.top()
+		+ height
+		+ padding.bottom()
+		+ ScrollbarReserveHeight(
+			scrollOwner,
+			block.horizontalScrollMax,
+			st);
 	block.outer = QRect(left, top, outerWidth, outerHeight);
 	block.headerRect = QRect(left, top, outerWidth, pre.header);
 	block.bodyRect = QRect(
@@ -895,16 +1077,34 @@ LaidOutBlock LayoutCodeBlock(
 		top + pre.header,
 		outerWidth,
 		std::max(outerHeight - pre.header, 0));
+	block.contentRect = QRect(
+		left + padding.left(),
+		top + padding.top(),
+		viewportWidth,
+		height);
 	block.textRect = QRect(
 		left + padding.left(),
 		top + padding.top(),
 		block.textWidth,
 		height);
+	if (scrollOwner) {
+		block.scrollViewportRect = block.contentRect;
+		block.scrollLogicalContentRect = block.textRect;
+		if (block.horizontalScrollMax > 0) {
+			block.scrollScrollbarTrackRect = QRect(
+				block.contentRect.x(),
+				block.contentRect.y()
+					+ block.contentRect.height()
+					+ st.table.scrollbarSkip,
+				block.contentRect.width(),
+				st.table.scrollbarHeight);
+		}
+	}
 	block.firstLineBaseline = LeafFirstLineBaseline(
 		block.leaf,
 		block.textRect,
 		st.code);
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutRuleBlock(
@@ -922,7 +1122,7 @@ LaidOutBlock LayoutRuleBlock(
 		std::max(width, 1),
 		st.rule.height);
 	block.textRect = block.outer;
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutDisplayMathBlock(
@@ -931,7 +1131,9 @@ LaidOutBlock LayoutDisplayMathBlock(
 		const style::Markdown &st,
 		int left,
 		int top,
-		int width) {
+		int width,
+		int logicalWidth,
+		bool scrollOwner) {
 	auto block = LaidOutBlock();
 	ApplyPreparedEditSources(&block, prepared);
 	block.kind = PreparedBlockKind::DisplayMath;
@@ -945,6 +1147,11 @@ LaidOutBlock LayoutDisplayMathBlock(
 	const auto contentTop = top + padding.top();
 	const auto contentWidth = std::max(
 		width - padding.left() - padding.right(),
+		1);
+	const auto contentLogicalWidth = std::max(
+		((logicalWidth > 0) ? logicalWidth : std::max(width, 1))
+			- padding.left()
+			- padding.right(),
 		1);
 	const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
 
@@ -962,7 +1169,9 @@ LaidOutBlock LayoutDisplayMathBlock(
 			EntityType::Italic,
 			0,
 			fallbackText.text.size()));
-		block.textWidth = std::max(contentWidth - fallbackPaddingWidth, 1);
+		block.textWidth = std::max(
+			contentLogicalWidth - fallbackPaddingWidth,
+			1);
 		block.fallbackLeaf = Ui::Text::String(
 			TextMinResizeWidth(block.textWidth));
 		block.fallbackLeaf.setMarkedText(
@@ -977,7 +1186,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 			TextLineHeight(st.displayMath.fallbackStyle));
 		formulaWidth = std::min(
 			block.textWidth + fallbackPaddingWidth,
-			contentWidth);
+			contentLogicalWidth);
 		block.textWidth = std::max(formulaWidth - fallbackPaddingWidth, 1);
 		textHeight = std::max(
 			block.fallbackLeaf.countHeight(block.textWidth, true),
@@ -989,7 +1198,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 	}
 
 	const auto centered = (st.displayMath.align == ::style::al_center)
-		&& (formulaWidth <= contentWidth);
+		&& (formulaWidth <= contentLogicalWidth);
 	block.formulaAlign = centered ? ::style::al_center : ::style::al_left;
 
 	block.contentRect = QRect(
@@ -999,7 +1208,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 		formulaHeight);
 	block.formulaRect = QRect(
 		centered
-			? (contentLeft + ((contentWidth - formulaWidth) / 2))
+			? (contentLeft + ((contentLogicalWidth - formulaWidth) / 2))
 			: contentLeft,
 		contentTop,
 		formulaWidth,
@@ -1009,10 +1218,32 @@ LaidOutBlock LayoutDisplayMathBlock(
 		left,
 		top,
 		std::max(width, 1),
-		padding.top() + formulaHeight + padding.bottom());
-	block.overflowed = formula
-		&& formula->measured.success
-		&& (block.formulaRect.width() > block.visibleFormulaRect.width());
+		padding.top()
+			+ formulaHeight
+			+ padding.bottom());
+	block.overflowed = (block.formulaRect.width() > block.visibleFormulaRect.width());
+	block.horizontalScrollMax = scrollOwner
+		? std::max(block.formulaRect.width() - block.contentRect.width(), 0)
+		: 0;
+	if (scrollOwner) {
+		block.scrollViewportRect = block.contentRect;
+		block.scrollLogicalContentRect = block.formulaRect;
+		if (block.horizontalScrollMax > 0) {
+			block.scrollScrollbarTrackRect = QRect(
+				block.contentRect.x(),
+				block.contentRect.y()
+					+ block.contentRect.height()
+					+ st.table.scrollbarSkip,
+				block.contentRect.width(),
+				st.table.scrollbarHeight);
+			block.outer.setHeight(
+				block.outer.height()
+					+ ScrollbarReserveHeight(
+						scrollOwner,
+						block.horizontalScrollMax,
+						st));
+		}
+	}
 
 	if (!(formula && formula->measured.success)) {
 		const auto &fallbackPadding = st.displayMath.fallbackPadding;
@@ -1024,7 +1255,7 @@ LaidOutBlock LayoutDisplayMathBlock(
 			block.textRect,
 			st.displayMath.fallbackStyle);
 	}
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutTableBlock(
@@ -1036,6 +1267,8 @@ LaidOutBlock LayoutTableBlock(
 		int left,
 		int top,
 		int width,
+		int logicalWidth,
+		bool scrollOwner,
 		LayoutContext context) {
 	auto block = LaidOutBlock();
 	ApplyPreparedEditSources(&block, prepared);
@@ -1072,14 +1305,18 @@ LaidOutBlock LayoutTableBlock(
 	}
 
 	const auto columnCount = prepared.tableColumnCount;
+	const auto visibleWidth = std::max(width, 1);
+	const auto layoutWidth = std::max(
+		(logicalWidth > 0) ? logicalWidth : visibleWidth,
+		1);
 	if (!columnCount || prepared.tableRows.empty()) {
 		if (!block.textRect.isEmpty()) {
 			block.contentRect = block.textRect;
 			block.outer = block.textRect;
 		} else {
-			block.outer = QRect(left, top, std::max(width, 1), 0);
+			block.outer = QRect(left, top, visibleWidth, 0);
 		}
-		return block;
+		return FinalizeLaidOutBlock(std::move(block));
 	}
 
 	auto rows = std::vector<TableRowLayoutData>();
@@ -1102,7 +1339,7 @@ LaidOutBlock LayoutTableBlock(
 	block.tableColumnWidths = ComputeTableColumnWidths(
 		rows,
 		columnCount,
-		width,
+		layoutWidth,
 		st,
 		block.tableBordered,
 		&block.overflowed);
@@ -1257,12 +1494,28 @@ LaidOutBlock LayoutTableBlock(
 	block.visibleTableRect = QRect(
 		left,
 		tableTop,
-		std::min(tableWidth, std::max(width, 1)),
+		std::min(tableWidth, visibleWidth),
 		tableHeight);
-	block.horizontalScrollMax = std::max(
-		block.tableRect.width() - block.visibleTableRect.width(),
-		0);
+	block.overflowed = (block.tableRect.width() > block.visibleTableRect.width());
+	block.horizontalScrollMax = scrollOwner
+		? std::max(
+			block.tableRect.width() - block.visibleTableRect.width(),
+			0)
+		: 0;
 	auto tableContentRect = block.visibleTableRect;
+	if (scrollOwner) {
+		block.scrollLogicalContentRect = block.tableRect;
+		block.scrollViewportRect = block.visibleTableRect;
+		if (block.horizontalScrollMax > 0) {
+			block.scrollScrollbarTrackRect = QRect(
+				block.visibleTableRect.x(),
+				block.tableRect.y()
+					+ block.tableRect.height()
+					+ st.table.scrollbarSkip,
+				block.visibleTableRect.width(),
+				st.table.scrollbarHeight);
+		}
+	}
 	if (block.horizontalScrollMax > 0) {
 		block.tableScrollbarTrackRect = QRect(
 			block.visibleTableRect.x(),
@@ -1272,6 +1525,7 @@ LaidOutBlock LayoutTableBlock(
 			block.visibleTableRect.width(),
 			st.table.scrollbarHeight);
 		block.tableScrollbarThumbRect = QRect();
+		block.scrollScrollbarThumbRect = block.tableScrollbarThumbRect;
 		tableContentRect = tableContentRect.united(block.tableScrollbarTrackRect);
 	}
 	block.contentRect = block.textRect.isEmpty()
@@ -1281,7 +1535,7 @@ LaidOutBlock LayoutTableBlock(
 		: block.textRect.united(tableContentRect);
 	block.outer = block.contentRect;
 	if (!block.textRect.isEmpty()) {
-		return block;
+		return FinalizeLaidOutBlock(std::move(block));
 	}
 	for (const auto &row : block.tableRows) {
 		for (const auto &cell : row.cells) {
@@ -1292,10 +1546,10 @@ LaidOutBlock LayoutTableBlock(
 				cell.leaf,
 				cell.textRect,
 				TableCellTextStyle(cell, st));
-			return block;
+			return FinalizeLaidOutBlock(std::move(block));
 		}
 	}
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutPlaceholderBlock(
@@ -1384,7 +1638,7 @@ LaidOutBlock LayoutPlaceholderBlock(
 		blockWidth,
 		std::max(bottom - top, mediaHeight));
 	block.outer = block.contentRect;
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutRelatedArticleBlock(
@@ -1551,7 +1805,7 @@ LaidOutBlock LayoutRelatedArticleBlock(
 	}
 	block.contentRect = block.mediaRect;
 	block.outer = block.mediaRect;
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutPhotoBlock(
@@ -1624,7 +1878,7 @@ LaidOutBlock LayoutPhotoBlock(
 		top,
 		blockWidth,
 		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutVideoBlock(
@@ -1697,7 +1951,7 @@ LaidOutBlock LayoutVideoBlock(
 		top,
 		blockWidth,
 		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutAudioBlock(
@@ -1756,7 +2010,7 @@ LaidOutBlock LayoutAudioBlock(
 		blockWidth,
 		std::max(bottom - top, cardHeight));
 	block.outer = block.contentRect;
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutMapBlock(
@@ -1824,7 +2078,7 @@ LaidOutBlock LayoutMapBlock(
 		top,
 		blockWidth,
 		std::max(bottom - top, block.mediaRect.bottom() - top + 1));
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutChannelBlock(
@@ -1881,7 +2135,7 @@ LaidOutBlock LayoutChannelBlock(
 		blockWidth,
 		std::max(bottom - top, cardHeight));
 	block.outer = block.contentRect;
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 LaidOutBlock LayoutGroupedMediaBlock(
@@ -1949,7 +2203,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		top,
 		blockWidth,
 		std::max(bottom - top, block.mediaRect.height()));
-	return block;
+	return FinalizeLaidOutBlock(std::move(block));
 }
 
 } // namespace Iv::Markdown

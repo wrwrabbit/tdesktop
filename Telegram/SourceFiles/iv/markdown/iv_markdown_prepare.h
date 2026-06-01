@@ -656,6 +656,8 @@ struct MarkdownPrepareTableRenderLimits {
 
 struct MarkdownPrepareLimits {
 	MarkdownPrepareTableRenderLimits tableRender;
+	int visualListDepth = 0;
+	int visualQuoteDepth = 0;
 	int maxPreparedBlocks = 0;
 };
 
