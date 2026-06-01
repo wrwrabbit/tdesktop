@@ -1102,12 +1102,40 @@ void GenerateItems(
 				tr::lng_admin_log_empty_text(tr::now));
 		}
 
+		auto prevPhoto = (PhotoData*)nullptr;
+		auto prevDocument = (DocumentData*)nullptr;
+		if (changedMedia
+			&& action.vprev_message().type() == mtpc_message) {
+			const auto &prev = action.vprev_message().c_message();
+			if (const auto media = prev.vmedia()) {
+				media->match([&](const MTPDmessageMediaPhoto &data) {
+					if (const auto photo = data.vphoto()) {
+						photo->match([&](const MTPDphoto &fields) {
+							prevPhoto = history->owner().processPhoto(fields);
+						}, [](const MTPDphotoEmpty &) {
+						});
+					}
+				}, [&](const MTPDmessageMediaDocument &data) {
+					if (const auto document = data.vdocument()) {
+						document->match([&](const MTPDdocument &fields) {
+							prevDocument = history->owner().processDocument(
+								fields);
+						}, [](const MTPDdocumentEmpty &) {
+						});
+					}
+				}, [](const auto &) {
+				});
+			}
+		}
+
 		body->addLogEntryOriginal(
 			id,
 			(canHaveCaption
 				? tr::lng_admin_log_previous_caption
 				: tr::lng_admin_log_previous_message)(tr::now),
-			oldValue);
+			oldValue,
+			prevPhoto,
+			prevDocument);
 		addPart(body, sentDate, realId);
 	};
 
