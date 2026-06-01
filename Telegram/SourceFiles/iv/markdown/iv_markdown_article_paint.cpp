@@ -505,9 +505,10 @@ void FillThinkingGradientImage(
 [[nodiscard]] QPen EditPlaceholderPen(
 		const style::Markdown &st,
 		const MarkdownArticlePaintContext &context) {
-	return QPen(WithOpacity(
-		PaintStyle(context, st).supplementaryTextColor,
-		0.5));
+	auto color = context.caches.supplementaryColorOverride.value_or(
+		PaintStyle(context, st).supplementaryTextColor->c);
+	color.setAlphaF(color.alphaF() * 0.5);
+	return QPen(color);
 }
 
 [[nodiscard]] bool PaintEditPlaceholderLeaf(
@@ -766,17 +767,6 @@ void PaintSelectableTextLeaf(
 		align,
 		selection,
 		elisionLines);
-}
-
-[[nodiscard]] std::optional<QColor> QuoteSupplementaryColor(
-		const MarkdownArticlePaintContext &context) {
-	if (!context.caches.blockquote) {
-		return {};
-	}
-	return anim::color(
-		context.caches.blockquote->bg,
-		context.caches.blockquote->outlines[0],
-		0.9);
 }
 
 [[nodiscard]] QRect FlowTextViewportRect(const LaidOutBlock &block) {
@@ -1335,8 +1325,7 @@ void PaintTableCaption(
 	case PreparedBlockKind::CodeBlock:
 		return paintSt.textPalette.monoFg->c;
 	case PreparedBlockKind::Quote:
-		return QuoteSupplementaryColor(context).value_or(
-			paintSt.supplementaryTextColor->c);
+		return NonPullquoteQuoteCaptionColor(context, st);
 	case PreparedBlockKind::Details:
 		return paintSt.supplementaryTextColor->c;
 	case PreparedBlockKind::EmbedPost:
@@ -1832,7 +1821,8 @@ void PaintQuoteBlock(
 		context,
 		context.clip.intersected(block.contentRect));
 	if (!block.pullquote) {
-		local.caches.supplementaryColorOverride = QuoteSupplementaryColor(context);
+		local.caches.supplementaryColorOverride
+			= NonPullquoteQuoteCaptionColor(context, st);
 	}
 	PaintBlocks(
 		p,
@@ -2986,6 +2976,18 @@ void PaintBlock(
 }
 
 } // namespace
+
+QColor NonPullquoteQuoteCaptionColor(
+		const MarkdownArticlePaintContext &context,
+		const style::Markdown &st) {
+	if (!context.caches.blockquote) {
+		return PaintStyle(context, st).supplementaryTextColor->c;
+	}
+	return anim::color(
+		context.caches.blockquote->bg,
+		context.caches.blockquote->outlines[0],
+		0.9);
+}
 
 void PaintBlocks(
 		Painter &p,

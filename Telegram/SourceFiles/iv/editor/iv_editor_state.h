@@ -179,7 +179,12 @@ public:
 	[[nodiscard]] std::optional<int> previousEditableOrdinal() const;
 	[[nodiscard]] std::optional<int> nextEditableOrdinal() const;
 	[[nodiscard]] bool isActiveTopLevelParagraph() const;
+	[[nodiscard]] bool activeLeafUsesQuoteCaptionColor() const;
+	[[nodiscard]] bool activeLeafUsesQuotePlaceholderColor() const;
 	[[nodiscard]] bool activeOwnerIsEmpty() const;
+	[[nodiscard]] std::optional<int> moveActiveQuoteDown();
+	[[nodiscard]] std::optional<int> handleActiveHeadingEnter();
+	[[nodiscard]] std::optional<int> handleActiveListEnter();
 	[[nodiscard]] std::optional<int> removeActiveOwnerAndSelectAdjacent(
 		bool forward);
 	[[nodiscard]] std::optional<int> removeStructuralSelection(
@@ -220,6 +225,16 @@ private:
 		int tableRowIndex = -1;
 		int from = -1;
 		int till = -1;
+	};
+
+	struct ActiveNonPullquoteQuote {
+		BlockPath path;
+		bool activeLeafIsLastEditableBodyLeaf = false;
+	};
+
+	struct ActiveListItemSurface {
+		BlockPath path;
+		int itemIndex = -1;
 	};
 
 	[[nodiscard]] std::optional<BlockContainerPath> convertBlockContainerPath(
@@ -314,6 +329,8 @@ private:
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container);
+	[[nodiscard]] std::optional<int> activateRebuiltLeaf(
+		const LeafPath &path);
 	[[nodiscard]] InsertionAnchor resolveActiveInsertionTarget() const;
 	[[nodiscard]] std::optional<int> normalizeTextOnlyListItemForInsertion(
 		const BlockContainerPath &container);
@@ -321,6 +338,15 @@ private:
 		const BlockContainerPath &container);
 	[[nodiscard]] bool shouldReplaceActiveParagraph(
 		const TextNodeDescriptor &descriptor) const;
+	[[nodiscard]] std::optional<LeafPath> reuseOrInsertParagraph(
+		const BlockContainerPath &container,
+		int index);
+	[[nodiscard]] auto activeNonPullquoteQuote() const
+	-> std::optional<ActiveNonPullquoteQuote>;
+	[[nodiscard]] auto activeListItemSurface() const
+	-> std::optional<ActiveListItemSurface>;
+	[[nodiscard]] auto normalizeActiveListItemSurface()
+	-> std::optional<ActiveListItemSurface>;
 	void insertBlocksAfterActive(std::vector<RichPage::Block> blocks);
 	void appendBlockTextNode(
 		const BlockPath &path,
@@ -365,6 +391,8 @@ private:
 	[[nodiscard]] static RichPage::Block MakeListBlock(
 		RichPage::ListKind kind,
 		RichPage::TaskState taskState = RichPage::TaskState::None);
+	[[nodiscard]] static RichPage::ListItem MakeParagraphListItem(
+		RichPage::TaskState taskState);
 	[[nodiscard]] static RichPage::Block MakeDetailsBlock();
 	[[nodiscard]] static RichPage::Block MakeTableBlock();
 	[[nodiscard]] static RichPage::Block MakeMediaBlock(

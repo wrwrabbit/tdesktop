@@ -114,6 +114,7 @@ private:
 	struct CachedInlineFieldStyle {
 		InlineFieldStyleKey key;
 		std::shared_ptr<style::InputField> style;
+		std::shared_ptr<style::owned_color> ownedTextFg;
 	};
 
 	enum class DragSelectionMode {
@@ -153,6 +154,9 @@ private:
 		const Markdown::MarkdownArticleTextLeafStyle &style) const;
 	[[nodiscard]] InlineFieldStyleKey inlineFieldStyleKey(
 		const InlineFieldStyleData &data) const;
+	void refreshInlineFieldTextColorOverride();
+	[[nodiscard]] std::optional<QColor> activeQuoteCaptionColor();
+	[[nodiscard]] std::optional<QColor> activeQuotePlaceholderColor();
 	void ensureInlineFieldForSegment(int segmentIndex);
 	void setupInlineField();
 	void recreateInlineField(const style::InputField &st);
@@ -225,6 +229,7 @@ private:
 	std::vector<Ui::Text::SpecialColor> _highlightColors;
 	rpl::lifetime _highlightReadyLifetime;
 	std::vector<CachedInlineFieldStyle> _fieldStyles;
+	std::optional<style::owned_color> _inlineFieldTextColorOverride;
 	std::optional<style::owned_color> _inlineFieldPlaceholderColorOverride;
 	std::optional<InlineFieldStyleKey> _activeFieldStyleKey;
 	State::FieldMode _fieldMode = State::FieldMode::Rich;

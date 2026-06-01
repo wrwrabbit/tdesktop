@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_msg_id.h"
 #include "data/data_types.h"
 #include "data/stickers/data_custom_emoji.h"
+#include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
@@ -1475,7 +1476,15 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 
 const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 		const InlineFieldStyleData &data) {
-	const auto key = inlineFieldStyleKey(data);
+	auto key = inlineFieldStyleKey(data);
+	auto textFg = data.textFg;
+	auto ownedTextFg = std::shared_ptr<style::owned_color>();
+	if (_inlineFieldTextColorOverride
+		&& data.textFg.get() == _inlineFieldTextColorOverride->color().get()) {
+		ownedTextFg = std::make_shared<style::owned_color>(data.textFg->c);
+		textFg = ownedTextFg->color();
+		key.textFg = textFg;
+	}
 	for (const auto &cached : _fieldStyles) {
 		if (cached.key == key) {
 			return cached;
@@ -1488,15 +1497,50 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 		? data.textStyle->font->italic()
 		: data.textStyle->font;
 	fieldStyle->style.lineHeight = data.lineHeight;
-	fieldStyle->textFg = data.textFg;
+	fieldStyle->textFg = textFg;
 	fieldStyle->textAlign = data.align;
 	fieldStyle->placeholderFont = fieldStyle->style.font;
 	fieldStyle->placeholderAlign = data.align;
 	_fieldStyles.push_back({
 		.key = key,
 		.style = std::move(fieldStyle),
+		.ownedTextFg = std::move(ownedTextFg),
 	});
 	return _fieldStyles.back();
+}
+
+std::optional<QColor> Widget::activeQuoteCaptionColor() {
+	if (!_state->activeLeafUsesQuoteCaptionColor()) {
+		return std::nullopt;
+	}
+	return Markdown::NonPullquoteQuoteCaptionColor(
+		textPaintContext(QRect()),
+		*_articleStyle);
+}
+
+std::optional<QColor> Widget::activeQuotePlaceholderColor() {
+	if (!_state->activeLeafUsesQuotePlaceholderColor()) {
+		return std::nullopt;
+	}
+	return Markdown::NonPullquoteQuoteCaptionColor(
+		textPaintContext(QRect()),
+		*_articleStyle);
+}
+
+void Widget::refreshInlineFieldTextColorOverride() {
+	const auto color = activeQuoteCaptionColor();
+	if (!color) {
+		if (_inlineFieldTextColorOverride) {
+			_activeFieldStyleKey = std::nullopt;
+			_inlineFieldTextColorOverride.reset();
+		}
+		return;
+	}
+	if (_inlineFieldTextColorOverride) {
+		_inlineFieldTextColorOverride->update(*color);
+	} else {
+		_inlineFieldTextColorOverride.emplace(*color);
+	}
 }
 
 Widget::InlineFieldStyleData Widget::normalizedInlineFieldStyle(
@@ -1511,7 +1555,9 @@ Widget::InlineFieldStyleData Widget::normalizedInlineFieldStyle(
 	return {
 		.textStyle = textStyle,
 		.lineHeight = lineHeight,
-		.textFg = valid ? leafStyle.textColor : _articleStyle->textColor,
+		.textFg = _inlineFieldTextColorOverride
+			? _inlineFieldTextColorOverride->color()
+			: (valid ? leafStyle.textColor : _articleStyle->textColor),
 		.align = valid ? leafStyle.align : style::al_left,
 		.italic = valid ? leafStyle.italic : false,
 	};
@@ -1533,6 +1579,7 @@ Widget::InlineFieldStyleKey Widget::inlineFieldStyleKey(
 }
 
 void Widget::ensureInlineFieldForSegment(int segmentIndex) {
+	refreshInlineFieldTextColorOverride();
 	const auto data = normalizedInlineFieldStyle(
 		inlineFieldStyleForSegment(segmentIndex));
 	const auto key = inlineFieldStyleKey(data);
@@ -1543,7 +1590,7 @@ void Widget::ensureInlineFieldForSegment(int segmentIndex) {
 		return;
 	}
 	const auto &cached = inlineFieldStyleFor(data);
-	_activeFieldStyleKey = key;
+	_activeFieldStyleKey = cached.key;
 	_fieldMode = mode;
 	recreateInlineField(*cached.style);
 }
@@ -1649,7 +1696,8 @@ void Widget::refreshInlineFieldPlaceholderColor() {
 	if (!_field) {
 		return;
 	}
-	auto color = _articleStyle->supplementaryTextColor->c;
+	auto color = activeQuotePlaceholderColor().value_or(
+		_articleStyle->supplementaryTextColor->c);
 	color.setAlphaF(color.alphaF() * 0.5);
 	if (_inlineFieldPlaceholderColorOverride) {
 		_inlineFieldPlaceholderColorOverride->update(color);
@@ -1787,11 +1835,30 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 			|| key == Qt::Key_Up
 			|| key == Qt::Key_PageUp)) {
 		handled = moveBoundary(false, false);
+	} else if (position >= length && key == Qt::Key_Down) {
+		commitInlineField();
+		if (const auto target = _state->moveActiveQuoteDown()) {
+			refreshPreparedContent();
+			activateTextOrdinal(*target, 0);
+			handled = true;
+		} else {
+			handled = moveBoundaryAfterCommit(true, true);
+		}
 	} else if (position >= length
 		&& (key == Qt::Key_Right
-			|| key == Qt::Key_Down
 			|| key == Qt::Key_PageDown)) {
 		handled = moveBoundary(true, true);
+	} else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+		commitInlineField();
+		if (const auto target = _state->handleActiveListEnter()) {
+			refreshPreparedContent();
+			activateTextOrdinal(*target, 0);
+			handled = true;
+		} else if (const auto target = _state->handleActiveHeadingEnter()) {
+			refreshPreparedContent();
+			activateTextOrdinal(*target, 0);
+			handled = true;
+		}
 	} else if (position <= 0 && key == Qt::Key_Backspace) {
 		handled = removeBoundaryOwner(false);
 	} else if (position >= length && key == Qt::Key_Delete) {

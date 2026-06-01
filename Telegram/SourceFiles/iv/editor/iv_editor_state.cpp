@@ -447,6 +447,49 @@ bool State::isActiveTopLevelParagraph() const {
 	return owner && owner->kind == BlockKind::Paragraph;
 }
 
+bool State::activeLeafUsesQuoteCaptionColor() const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor || descriptor->leaf.kind != LeafKind::BlockCaption) {
+		return false;
+	}
+	const auto owner = block(descriptor->leaf.block);
+	return owner && owner->kind == BlockKind::Quote && !owner->pullquote;
+}
+
+bool State::activeLeafUsesQuotePlaceholderColor() const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return false;
+	}
+	const auto &leaf = descriptor->leaf;
+	const auto owner = block(leaf.block);
+	if (owner
+		&& owner->kind == BlockKind::Quote
+		&& !owner->pullquote
+		&& (leaf.kind == LeafKind::BlockText
+			|| leaf.kind == LeafKind::BlockCaption)) {
+		return true;
+	}
+	auto container = leaf.block.container;
+	while (!container.steps.empty()) {
+		const auto step = container.steps.back();
+		container.steps.pop_back();
+		if (step.kind != BlockContainerKind::BlockChildren) {
+			continue;
+		}
+		const auto ancestor = block({
+			.container = container,
+			.index = step.blockIndex,
+		});
+		if (ancestor
+			&& ancestor->kind == BlockKind::Quote
+			&& !ancestor->pullquote) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool State::activeOwnerIsEmpty() const {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	return descriptor && removalTargetIsEmpty(descriptor->removalTarget);
@@ -1385,6 +1428,166 @@ bool State::shouldReplaceActiveParagraph(
 		&& BlockIsEmpty(*owner);
 }
 
+std::optional<int> State::activateRebuiltLeaf(const LeafPath &path) {
+	const auto ordinal = textNodeOrdinal(path);
+	if (setActiveTextByOrdinal(ordinal)) {
+		return _activeTextOrdinal;
+	}
+	ensureActiveTextOrdinal();
+	return (_activeTextOrdinal >= 0)
+		? std::make_optional(_activeTextOrdinal)
+		: std::nullopt;
+}
+
+std::optional<State::LeafPath> State::reuseOrInsertParagraph(
+		const BlockContainerPath &containerPath,
+		int index) {
+	const auto blocks = blockContainer(containerPath);
+	if (!blocks) {
+		return std::nullopt;
+	}
+	const auto insertAt = std::clamp(index, 0, int(blocks->size()));
+	if (insertAt < int(blocks->size())
+		&& (*blocks)[insertAt].kind == BlockKind::Paragraph) {
+		return LeafPath{
+			.kind = LeafKind::BlockText,
+			.block = {
+				.container = containerPath,
+				.index = insertAt,
+			},
+		};
+	}
+	blocks->insert(blocks->begin() + insertAt, MakeParagraphBlock());
+	return LeafPath{
+		.kind = LeafKind::BlockText,
+		.block = {
+			.container = containerPath,
+			.index = insertAt,
+		},
+	};
+}
+
+auto State::activeNonPullquoteQuote() const
+-> std::optional<State::ActiveNonPullquoteQuote> {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return std::nullopt;
+	}
+	const auto direct = block(descriptor->leaf.block);
+	if (direct && direct->kind == BlockKind::Quote) {
+		return direct->pullquote
+			? std::nullopt
+			: std::make_optional(ActiveNonPullquoteQuote{
+				.path = descriptor->leaf.block,
+			});
+	}
+	auto container = descriptor->leaf.block.container;
+	while (!container.steps.empty()) {
+		const auto step = container.steps.back();
+		container.steps.pop_back();
+		if (step.kind != BlockContainerKind::BlockChildren) {
+			continue;
+		}
+		const auto path = BlockPath{
+			.container = container,
+			.index = step.blockIndex,
+		};
+		const auto owner = block(path);
+		if (!owner || owner->kind != BlockKind::Quote) {
+			continue;
+		}
+		if (owner->pullquote) {
+			return std::nullopt;
+		}
+		const auto body = BlockChildrenContainer(path);
+		auto lastBodyLeaf = false;
+		for (auto i = textNodeCount(); i != 0; --i) {
+			const auto &candidate = _textNodes[i - 1].leaf;
+			if (ContainerHasPrefix(candidate.block.container, body)) {
+				lastBodyLeaf = (candidate == descriptor->leaf);
+				break;
+			}
+		}
+		return ActiveNonPullquoteQuote{
+			.path = path,
+			.activeLeafIsLastEditableBodyLeaf = lastBodyLeaf,
+		};
+	}
+	return std::nullopt;
+}
+
+auto State::activeListItemSurface() const
+-> std::optional<State::ActiveListItemSurface> {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return std::nullopt;
+	}
+	auto path = std::optional<BlockPath>();
+	if (descriptor->leaf.kind == LeafKind::ListItemText) {
+		path = descriptor->leaf.block;
+	} else if (descriptor->leaf.kind == LeafKind::BlockText) {
+		const auto owner = block(descriptor->leaf.block);
+		if (!owner || owner->kind != BlockKind::Paragraph) {
+			return std::nullopt;
+		}
+		const auto &container = descriptor->leaf.block.container;
+		if (container.steps.empty()) {
+			return std::nullopt;
+		}
+		const auto &step = container.steps.back();
+		if (step.kind != BlockContainerKind::ListItemChildren) {
+			return std::nullopt;
+		}
+		auto parent = container;
+		parent.steps.pop_back();
+		path = BlockPath{
+			.container = parent,
+			.index = step.blockIndex,
+		};
+	} else {
+		return std::nullopt;
+	}
+	const auto owner = block(*path);
+	if (!owner || owner->kind != BlockKind::List) {
+		return std::nullopt;
+	}
+	const auto itemIndex = ListItemIndexForLeaf(descriptor->leaf, *path);
+	if (!itemIndex) {
+		return std::nullopt;
+	}
+	if (descriptor->leaf.kind == LeafKind::BlockText
+		&& descriptor->leaf.block.container
+			!= ListItemChildrenContainer(*path, *itemIndex)) {
+		return std::nullopt;
+	}
+	return ActiveListItemSurface{
+		.path = *path,
+		.itemIndex = *itemIndex,
+	};
+}
+
+auto State::normalizeActiveListItemSurface()
+-> std::optional<State::ActiveListItemSurface> {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	const auto surface = activeListItemSurface();
+	if (!descriptor
+		|| !surface
+		|| descriptor->leaf.kind != LeafKind::ListItemText) {
+		return surface;
+	}
+	const auto item = listItem(surface->path, surface->itemIndex);
+	if (!item) {
+		return std::nullopt;
+	}
+	auto paragraph = MakeParagraphBlock();
+	paragraph.anchorId = std::move(item->anchorId);
+	paragraph.text = std::move(item->text);
+	item->anchorId.clear();
+	item->text = RichText();
+	item->blocks.insert(item->blocks.begin(), std::move(paragraph));
+	return surface;
+}
+
 int State::ensureTrailingParagraphActive() {
 	if (_richPage->blocks.empty()
 		|| _richPage->blocks.back().kind != BlockKind::Paragraph) {
@@ -1403,6 +1606,129 @@ int State::ensureTrailingParagraphActive() {
 		ensureActiveTextOrdinal();
 	}
 	return _activeTextOrdinal;
+}
+
+std::optional<int> State::moveActiveQuoteDown() {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return std::nullopt;
+	}
+	const auto quote = activeNonPullquoteQuote();
+	if (!quote) {
+		return std::nullopt;
+	}
+	auto target = std::optional<LeafPath>();
+	if (descriptor->leaf.kind == LeafKind::BlockCaption
+		&& descriptor->leaf.block == quote->path) {
+		target = reuseOrInsertParagraph(
+			quote->path.container,
+			quote->path.index + 1);
+	} else if (descriptor->leaf.kind == LeafKind::BlockText
+		&& descriptor->leaf.block == quote->path) {
+		const auto owner = block(quote->path);
+		if (owner
+			&& owner->kind == BlockKind::Quote
+			&& owner->blocks.empty()) {
+			target = LeafPath{
+				.kind = LeafKind::BlockCaption,
+				.block = quote->path,
+			};
+		}
+	} else if (quote->activeLeafIsLastEditableBodyLeaf) {
+		target = LeafPath{
+			.kind = LeafKind::BlockCaption,
+			.block = quote->path,
+		};
+	}
+	if (!target) {
+		return std::nullopt;
+	}
+	rebuild();
+	return activateRebuiltLeaf(*target);
+}
+
+std::optional<int> State::handleActiveHeadingEnter() {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor || descriptor->leaf.kind != LeafKind::BlockText) {
+		return std::nullopt;
+	}
+	const auto path = descriptor->leaf.block;
+	const auto blocks = blockContainer(path.container);
+	if (!blocks
+		|| path.index < 0
+		|| path.index >= int(blocks->size())
+		|| (*blocks)[path.index].kind != BlockKind::Heading) {
+		return std::nullopt;
+	}
+	const auto insertAt = path.index + 1;
+	if (insertAt < 0 || insertAt > int(blocks->size())) {
+		return std::nullopt;
+	}
+	blocks->insert(blocks->begin() + insertAt, MakeParagraphBlock());
+	const auto target = LeafPath{
+		.kind = LeafKind::BlockText,
+		.block = {
+			.container = path.container,
+			.index = insertAt,
+		},
+	};
+	rebuild();
+	return activateRebuiltLeaf(target);
+}
+
+std::optional<int> State::handleActiveListEnter() {
+	const auto surface = normalizeActiveListItemSurface();
+	if (!surface) {
+		return std::nullopt;
+	}
+	const auto owner = block(surface->path);
+	const auto item = listItem(surface->path, surface->itemIndex);
+	if (!owner || owner->kind != BlockKind::List || !item) {
+		return std::nullopt;
+	}
+	auto target = std::optional<LeafPath>();
+	const auto trailingEmpty = (surface->itemIndex + 1
+			== int(owner->listItems.size()))
+		&& (item->blocks.size() == 1)
+		&& (item->blocks.front().kind == BlockKind::Paragraph)
+		&& ListItemIsEmpty(*item);
+	if (trailingEmpty) {
+		owner->listItems.erase(owner->listItems.begin() + surface->itemIndex);
+		if (owner->listItems.empty()) {
+			const auto blocks = blockContainer(surface->path.container);
+			if (!blocks
+				|| surface->path.index < 0
+				|| surface->path.index >= int(blocks->size())) {
+				return std::nullopt;
+			}
+			blocks->erase(blocks->begin() + surface->path.index);
+			target = reuseOrInsertParagraph(
+				surface->path.container,
+				surface->path.index);
+		} else {
+			target = reuseOrInsertParagraph(
+				surface->path.container,
+				surface->path.index + 1);
+		}
+	} else {
+		owner->listItems.insert(
+			owner->listItems.begin() + surface->itemIndex + 1,
+			MakeParagraphListItem(item->taskState));
+		target = LeafPath{
+			.kind = LeafKind::BlockText,
+			.block = {
+				.container = ListItemChildrenContainer(
+					surface->path,
+					surface->itemIndex + 1),
+				.index = 0,
+			},
+		};
+	}
+	if (!target) {
+		return std::nullopt;
+	}
+	rebuild();
+	return activateRebuiltLeaf(*target);
 }
 
 void State::insertHeading1AfterActive() {
@@ -2133,6 +2459,13 @@ Block State::MakeListBlock(ListKind kind, TaskState taskState) {
 		block.listItems.push_back(std::move(item));
 	}
 	return block;
+}
+
+ListItem State::MakeParagraphListItem(TaskState taskState) {
+	auto item = ListItem();
+	item.taskState = taskState;
+	item.blocks.push_back(MakeParagraphBlock());
+	return item;
 }
 
 Block State::MakeDetailsBlock() {
