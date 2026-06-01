@@ -240,7 +240,8 @@ public:
 	}
 	void refreshMainView();
 	void clearMainView();
-	void removeMainView();
+	void removeMainView(
+		Data::ViewRemovalReason reason = Data::ViewRemovalReason::Removed);
 
 	void invalidateChatListEntry();
 

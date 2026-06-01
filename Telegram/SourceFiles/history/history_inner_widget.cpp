@@ -4452,8 +4452,10 @@ void HistoryInner::setupThanosEffect() {
 		lifetime());
 
 	session().data().viewAboutToBeRemoved(
-	) | rpl::on_next([=](not_null<const HistoryView::Element*> view) {
-		_thanosController->captureOnRemoval(view->data());
+	) | rpl::on_next([=](Data::ViewRemoval removal) {
+		if (removal.reason == Data::ViewRemovalReason::Removed) {
+			_thanosController->captureOnRemoval(removal.view->data());
+		}
 	}, lifetime());
 }
 

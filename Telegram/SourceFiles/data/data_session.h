@@ -159,6 +159,11 @@ struct RequestViewRepaint {
 	QRect rect;
 };
 
+struct ViewRemoval {
+	not_null<const HistoryView::Element*> view;
+	ViewRemovalReason reason = ViewRemovalReason::Removed;
+};
+
 class Session final {
 public:
 	using ViewElement = HistoryView::Element;
@@ -431,8 +436,10 @@ public:
 		const std::vector<not_null<HistoryItem*>> &items);
 	[[nodiscard]] auto itemsAboutToBeDestroyed() const
 		-> rpl::producer<std::vector<not_null<HistoryItem*>>>;
-	void notifyViewAboutToBeRemoved(not_null<const ViewElement*> view);
-	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewAboutToBeRemoved() const;
+	void notifyViewAboutToBeRemoved(
+		not_null<const ViewElement*> view,
+		ViewRemovalReason reason);
+	[[nodiscard]] rpl::producer<ViewRemoval> viewAboutToBeRemoved() const;
 	void notifyViewRemoved(not_null<const ViewElement*> view);
 	[[nodiscard]] rpl::producer<not_null<const ViewElement*>> viewRemoved() const;
 	void notifyHistoryCleared(not_null<const History*> history);
@@ -1182,7 +1189,7 @@ private:
 	rpl::event_stream<ReactionsRemoved> _reactionsRemoved;
 	rpl::event_stream<not_null<const HistoryItem*>> _itemRemoved;
 	rpl::event_stream<std::vector<not_null<HistoryItem*>>> _itemsAboutToBeDestroyed;
-	rpl::event_stream<not_null<const ViewElement*>> _viewAboutToBeRemoved;
+	rpl::event_stream<ViewRemoval> _viewAboutToBeRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewRemoved;
 	rpl::event_stream<not_null<const ViewElement*>> _viewPaidReactionSent;
 	rpl::event_stream<not_null<Calls::GroupCall*>> _callPaidReactionSent;

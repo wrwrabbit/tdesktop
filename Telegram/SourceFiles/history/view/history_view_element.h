@@ -638,7 +638,8 @@ public:
 	[[nodiscard]] HistoryBlock *block();
 	[[nodiscard]] const HistoryBlock *block() const;
 	void attachToBlock(not_null<HistoryBlock*> block, int index);
-	void removeFromBlock();
+	void removeFromBlock(
+		Data::ViewRemovalReason reason = Data::ViewRemovalReason::Removed);
 	void refreshInBlock();
 	void setIndexInBlock(int index);
 	[[nodiscard]] int indexInBlock() const;

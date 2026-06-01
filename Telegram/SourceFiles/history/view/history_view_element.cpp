@@ -2627,10 +2627,10 @@ void Element::attachToBlock(not_null<HistoryBlock*> block, int index) {
 	previousInBlocksChanged();
 }
 
-void Element::removeFromBlock() {
+void Element::removeFromBlock(Data::ViewRemovalReason reason) {
 	Expects(_block != nullptr);
 
-	_block->remove(this);
+	_block->remove(this, reason);
 }
 
 void Element::refreshInBlock() {
