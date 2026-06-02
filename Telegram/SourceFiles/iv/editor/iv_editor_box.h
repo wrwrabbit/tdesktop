@@ -23,6 +23,10 @@ namespace Ui {
 class RpWidget;
 } // namespace Ui
 
+namespace Iv {
+enum class RichMessageLimitError : unsigned char;
+} // namespace Iv
+
 namespace Iv::Editor {
 
 class State;
@@ -44,6 +48,7 @@ struct ShowBoxDescriptor {
 	Fn<void(not_null<Ui::RpWidget*>)> setupSubmitButton;
 	Fn<void(not_null<Widget*>)> requestMedia;
 	Fn<void(not_null<Widget*>)> requestMap;
+	Fn<void(RichMessageLimitError)> showLimitToast;
 };
 
 void ShowBox(ShowBoxDescriptor descriptor);

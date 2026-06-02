@@ -372,7 +372,7 @@ struct SerializeContext {
 		return MTP_textUrl(
 			*inner,
 			MTP_string(decoded ? decoded->url : data),
-			MTP_long(decoded ? decoded->webpageId : 0));
+			MTP_long(0));
 	}
 	case EntityType::MentionName: {
 		const auto userId = CollectMentionUser(context, entity.data());
@@ -404,18 +404,10 @@ struct SerializeContext {
 			case Markdown::InlineTextObjectKind::IvImage: {
 				const auto image = std::get_if<
 					Markdown::InlineTextObjectIvImageData>(&parsed->data);
-				const auto documentId = image
-					? CollectDocument(context, image->documentId)
-					: std::nullopt;
-				return (image
-					&& documentId
-					&& image->width > 0
-					&& image->height > 0)
-					? std::make_optional(MTP_textImage(
-						MTP_long(*documentId),
-						MTP_int(image->width),
-						MTP_int(image->height)))
-					: std::nullopt;
+				return std::optional<MTPRichText>(MakePlainRichText(
+					(image && !image->replacementText.isEmpty())
+						? image->replacementText
+						: u"[image]"_q));
 			}
 			}
 		}
@@ -915,15 +907,12 @@ struct SerializeContext {
 		if (block.spoiler) {
 			flags |= Flag::f_spoiler;
 		}
-		if (!block.url.isEmpty()) {
-			flags |= Flag::f_url;
-		}
 		return MTP_pageBlockPhoto(
 			MTP_flags(flags),
 			MTP_long(*photoId),
 			*caption,
-			(block.url.isEmpty() ? MTPstring() : MTP_string(block.url)),
-			(block.url.isEmpty() ? MTPlong() : MTP_long(0)));
+			MTPstring(),
+			MTPlong());
 	}
 	case BlockKind::Video: {
 		const auto documentId = CollectDocument(

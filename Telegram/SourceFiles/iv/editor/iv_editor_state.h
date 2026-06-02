@@ -170,7 +170,8 @@ public:
 	State();
 	State(
 		std::shared_ptr<RichPage> richPage,
-		std::shared_ptr<Markdown::MediaRuntime> mediaRuntime);
+		std::shared_ptr<Markdown::MediaRuntime> mediaRuntime,
+		RichMessageLimits limits = {});
 
 	[[nodiscard]] const RichPage &richPage() const;
 	[[nodiscard]] const Markdown::MarkdownArticleContent &prepared() const;
@@ -181,11 +182,12 @@ public:
 	[[nodiscard]] int activeTextOrdinal() const;
 	[[nodiscard]] bool setActiveTextByOrdinal(int ordinal);
 	[[nodiscard]] TextWithEntities activeText() const;
-	void applyActiveText(TextWithEntities text);
+	[[nodiscard]] bool applyActiveText(TextWithEntities text);
 	[[nodiscard]] FieldMode activeFieldMode() const;
 	[[nodiscard]] QString activeRawText() const;
 	[[nodiscard]] QString activePlaceholderText() const;
-	void applyActiveRawText(QString text);
+	[[nodiscard]] bool applyActiveRawText(QString text);
+	[[nodiscard]] std::optional<RichMessageLimitError> lastLimitError() const;
 	[[nodiscard]] std::optional<QString> codeBlockLanguage(int ordinal) const;
 	[[nodiscard]] bool setCodeBlockLanguage(int ordinal, QString language);
 	[[nodiscard]] int activeTextLength() const;
@@ -207,12 +209,13 @@ public:
 		const Markdown::PreparedEditListItemSource &source);
 	[[nodiscard]] bool toggleDetailsOpen(
 		const Markdown::PreparedEditBlockSource &source);
-	[[nodiscard]] int ensureTrailingParagraphActive();
+	[[nodiscard]] std::optional<int> ensureTrailingParagraphActive();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
-	void insertBlockAfterActive(InsertAction action);
-	void insertPreparedBlockAfterActive(RichPage::Block block);
-	void insertPreparedBlocksAfterActive(std::vector<RichPage::Block> blocks);
+	[[nodiscard]] bool insertBlockAfterActive(InsertAction action);
+	[[nodiscard]] bool insertPreparedBlockAfterActive(RichPage::Block block);
+	[[nodiscard]] bool insertPreparedBlocksAfterActive(
+		std::vector<RichPage::Block> blocks);
 
 private:
 	struct StructuralBlockRange {
@@ -248,6 +251,12 @@ private:
 	struct ActiveListItemSurface {
 		BlockPath path;
 		int itemIndex = -1;
+	};
+
+	template <typename Result>
+	struct CheckedMutationResult {
+		bool apply = false;
+		Result result;
 	};
 
 	[[nodiscard]] std::optional<BlockContainerPath> convertBlockContainerPath(
@@ -342,6 +351,11 @@ private:
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container);
+	void commitCheckedMutation(State state);
+	template <typename Result, typename Callback>
+	[[nodiscard]] Result applyCheckedMutation(
+		Result failure,
+		Callback &&callback);
 	[[nodiscard]] std::optional<int> activateRebuiltLeaf(
 		const LeafPath &path);
 	[[nodiscard]] InsertionAnchor resolveActiveInsertionTarget() const;
@@ -361,7 +375,19 @@ private:
 	-> std::optional<ActiveListItemSurface>;
 	[[nodiscard]] auto normalizeActiveListItemSurface()
 	-> std::optional<ActiveListItemSurface>;
-	void insertBlocksAfterActive(std::vector<RichPage::Block> blocks);
+	[[nodiscard]] bool applyActiveTextUnchecked(TextWithEntities text);
+	[[nodiscard]] bool applyActiveRawTextUnchecked(QString text);
+	[[nodiscard]] bool applyActiveTextWithLocalLimit(TextWithEntities text);
+	[[nodiscard]] bool applyActiveRawTextWithLocalLimit(QString text);
+	[[nodiscard]] bool applySplitParagraphText(
+		const TextNodeDescriptor &descriptor,
+		std::vector<TextWithEntities> chunks);
+	[[nodiscard]] std::optional<int> ensureTrailingParagraphActiveUnchecked();
+	[[nodiscard]] std::optional<int> moveActiveQuoteDownUnchecked();
+	[[nodiscard]] std::optional<int> handleActiveHeadingEnterUnchecked();
+	[[nodiscard]] std::optional<int> handleActiveListEnterUnchecked();
+	[[nodiscard]] bool insertBlocksAfterActiveUnchecked(
+		std::vector<RichPage::Block> blocks);
 	void appendBlockTextNode(
 		const BlockPath &path,
 		LeafKind kind,
@@ -446,9 +472,11 @@ private:
 
 	std::shared_ptr<RichPage> _richPage;
 	std::shared_ptr<Markdown::MediaRuntime> _mediaRuntime;
+	RichMessageLimits _limits;
 	Markdown::MarkdownArticleContent _prepared;
 	std::vector<TextNodeDescriptor> _textNodes;
 	int _activeTextOrdinal = -1;
+	std::optional<RichMessageLimitError> _lastLimitError;
 
 };
 

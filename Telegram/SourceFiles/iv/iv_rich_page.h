@@ -177,11 +177,32 @@ struct RichPage {
 	std::vector<Block> blocks;
 };
 
+struct RichMessageLimits {
+	int lengthLimit = 32768;
+	int maxBlocks = 500;
+	int maxDepth = 16;
+	int maxMedia = 50;
+	int maxTableCols = 20;
+};
+
+enum class RichMessageLimitError : unsigned char {
+	Length,
+	Blocks,
+	Depth,
+	Media,
+	TableColumns,
+};
+
 struct RichPageLinkUrl {
 	QString url;
 	uint64 webpageId = 0;
 };
 
+[[nodiscard]] RichMessageLimits ResolveRichMessageLimits(
+	not_null<Main::Session*> session);
+[[nodiscard]] std::optional<RichMessageLimitError> ValidateRichMessage(
+	const RichPage &page,
+	const RichMessageLimits &limits);
 [[nodiscard]] QString EncodeRichPageLinkUrl(
 	const QString &url,
 	uint64 webpageId);

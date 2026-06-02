@@ -40,6 +40,35 @@ using TableCell = RichPage::TableCell;
 using TaskState = RichPage::TaskState;
 using TextNodeDescriptor = State::TextNodeDescriptor;
 
+constexpr auto kMaxRichTextNodeLength = 16000;
+constexpr auto kMaxCommittedFieldLength = 256 * 1024;
+
+[[nodiscard]] TextWithEntities MakeText(QString text) {
+	auto result = TextWithEntities();
+	result.text = std::move(text);
+	return result;
+}
+
+[[nodiscard]] std::vector<TextWithEntities> SplitFieldText(
+		TextWithEntities text) {
+	auto result = std::vector<TextWithEntities>();
+	auto left = std::move(text);
+	auto consumed = 0;
+	while (!left.text.isEmpty() && consumed < kMaxCommittedFieldLength) {
+		auto part = TextWithEntities();
+		const auto limit = std::min(
+			kMaxRichTextNodeLength,
+			kMaxCommittedFieldLength - consumed);
+		if (!TextUtilities::CutPart(part, left, limit)
+			|| part.text.isEmpty()) {
+			break;
+		}
+		consumed += part.text.size();
+		result.push_back(std::move(part));
+	}
+	return result;
+}
+
 [[nodiscard]] BlockContainerPath BlockChildrenContainer(BlockPath path) {
 	auto result = std::move(path.container);
 	result.steps.push_back({
@@ -240,14 +269,16 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 } // namespace
 
 State::State()
-: State(std::make_shared<RichPage>(), nullptr) {
+: State(std::make_shared<RichPage>(), nullptr, RichMessageLimits()) {
 }
 
 State::State(
 	std::shared_ptr<RichPage> richPage,
-	std::shared_ptr<Markdown::MediaRuntime> mediaRuntime)
+	std::shared_ptr<Markdown::MediaRuntime> mediaRuntime,
+	RichMessageLimits limits)
 : _richPage(richPage ? std::move(richPage) : std::make_shared<RichPage>())
-, _mediaRuntime(std::move(mediaRuntime)) {
+, _mediaRuntime(std::move(mediaRuntime))
+, _limits(std::move(limits)) {
 	if (_richPage->blocks.empty()) {
 		_richPage->blocks.push_back(MakeParagraphBlock());
 	}
@@ -260,6 +291,35 @@ const RichPage &State::richPage() const {
 
 const Markdown::MarkdownArticleContent &State::prepared() const {
 	return _prepared;
+}
+
+template <typename Result, typename Callback>
+Result State::applyCheckedMutation(Result failure, Callback &&callback) {
+	_lastLimitError = std::nullopt;
+	auto candidate = State(
+		std::make_shared<RichPage>(*_richPage),
+		_mediaRuntime,
+		_limits);
+	candidate._activeTextOrdinal = _activeTextOrdinal;
+	candidate._lastLimitError = std::nullopt;
+	const auto outcome = callback(candidate);
+	if (!outcome.apply) {
+		return outcome.result;
+	}
+	if (const auto error = ValidateRichMessage(*candidate._richPage, _limits)) {
+		_lastLimitError = error;
+		return failure;
+	}
+	commitCheckedMutation(std::move(candidate));
+	return outcome.result;
+}
+
+void State::commitCheckedMutation(State state) {
+	_richPage = std::move(state._richPage);
+	_prepared = std::move(state._prepared);
+	_textNodes = std::move(state._textNodes);
+	_activeTextOrdinal = state._activeTextOrdinal;
+	_lastLimitError = std::nullopt;
 }
 
 const std::vector<TextNodeDescriptor> &State::textNodes() const {
@@ -302,20 +362,45 @@ TextWithEntities State::activeText() const {
 	return TextWithEntities();
 }
 
-void State::applyActiveText(TextWithEntities text) {
+bool State::applyActiveText(TextWithEntities text) {
+	_lastLimitError = std::nullopt;
+	return applyActiveTextWithLocalLimit(std::move(text));
+}
+
+bool State::applyActiveTextUnchecked(TextWithEntities text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
-		return;
+		return false;
 	}
 	if (auto current = richText(descriptor->leaf)) {
 		current->text = std::move(text);
 		rebuild();
-		return;
+		return true;
 	}
 	if (auto current = rawText(descriptor->leaf)) {
 		*current = std::move(text.text);
 		rebuild();
+		return true;
 	}
+	return false;
+}
+
+bool State::applyActiveTextWithLocalLimit(TextWithEntities text) {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return false;
+	}
+	auto chunks = SplitFieldText(std::move(text));
+	if (chunks.size() <= 1) {
+		return applyActiveTextUnchecked(chunks.empty()
+			? TextWithEntities()
+			: std::move(chunks.front()));
+	}
+	auto first = chunks.front();
+	if (applySplitParagraphText(*descriptor, std::move(chunks))) {
+		return true;
+	}
+	return applyActiveTextUnchecked(std::move(first));
 }
 
 FieldMode State::activeFieldMode() const {
@@ -381,20 +466,138 @@ QString State::activePlaceholderText() const {
 	return QString();
 }
 
-void State::applyActiveRawText(QString text) {
+bool State::applyActiveRawText(QString text) {
+	_lastLimitError = std::nullopt;
+	return applyActiveRawTextWithLocalLimit(std::move(text));
+}
+
+bool State::applyActiveRawTextUnchecked(QString text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
-		return;
+		return false;
 	}
 	if (auto current = rawText(descriptor->leaf)) {
 		*current = std::move(text);
 		rebuild();
-		return;
+		return true;
 	}
 	if (auto current = richText(descriptor->leaf)) {
 		current->text = MakeText(std::move(text));
 		rebuild();
+		return true;
 	}
+	return false;
+}
+
+bool State::applyActiveRawTextWithLocalLimit(QString text) {
+	auto chunks = SplitFieldText(MakeText(std::move(text)));
+	return applyActiveRawTextUnchecked(chunks.empty()
+		? QString()
+		: std::move(chunks.front().text));
+}
+
+bool State::applySplitParagraphText(
+		const TextNodeDescriptor &descriptor,
+		std::vector<TextWithEntities> chunks) {
+	if (chunks.empty()) {
+		return applyActiveTextUnchecked(TextWithEntities());
+	}
+	const auto makeParagraph = [&](TextWithEntities text) {
+		auto paragraph = MakeParagraphBlock();
+		paragraph.text.text = std::move(text);
+		return paragraph;
+	};
+	const auto focus = [&](LeafPath leaf) {
+		rebuild();
+		if (!activateRebuiltLeaf(leaf)) {
+			ensureActiveTextOrdinal();
+		}
+	};
+	if (descriptor.leaf.kind == LeafKind::BlockText) {
+		const auto path = descriptor.leaf.block;
+		if (auto owner = block(path)) {
+			if (owner->kind == BlockKind::Paragraph) {
+				auto container = blockContainer(path.container);
+				if (!container
+					|| path.index < 0
+					|| path.index >= int(container->size())) {
+					return false;
+				}
+				owner->text.text = std::move(chunks.front());
+				auto blocks = std::vector<Block>();
+				blocks.reserve(chunks.size() - 1);
+				for (auto i = 1; i != int(chunks.size()); ++i) {
+					blocks.push_back(makeParagraph(std::move(chunks[i])));
+				}
+				container->insert(
+					container->begin() + path.index + 1,
+					std::make_move_iterator(blocks.begin()),
+					std::make_move_iterator(blocks.end()));
+				focus(descriptor.leaf);
+				return true;
+			} else if (owner->kind == BlockKind::Quote && !owner->pullquote) {
+				auto firstText = std::move(owner->text);
+				firstText.text = std::move(chunks.front());
+				auto blocks = std::vector<Block>();
+				blocks.reserve(chunks.size());
+				auto first = MakeParagraphBlock();
+				first.text = std::move(firstText);
+				blocks.push_back(std::move(first));
+				for (auto i = 1; i != int(chunks.size()); ++i) {
+					blocks.push_back(makeParagraph(std::move(chunks[i])));
+				}
+				owner->text = RichText();
+				owner->blocks.insert(
+					owner->blocks.begin(),
+					std::make_move_iterator(blocks.begin()),
+					std::make_move_iterator(blocks.end()));
+				focus({
+					.kind = LeafKind::BlockText,
+					.block = {
+						.container = BlockChildrenContainer(path),
+						.index = 0,
+					},
+				});
+				return true;
+			}
+		}
+	} else if (descriptor.leaf.kind == LeafKind::ListItemText) {
+		const auto path = descriptor.leaf.block;
+		if (auto item = listItem(path, descriptor.leaf.listItemIndex)) {
+			auto firstText = std::move(item->text);
+			firstText.text = std::move(chunks.front());
+			auto blocks = std::vector<Block>();
+			blocks.reserve(chunks.size());
+			auto first = MakeParagraphBlock();
+			first.anchorId = std::move(item->anchorId);
+			first.text = std::move(firstText);
+			blocks.push_back(std::move(first));
+			for (auto i = 1; i != int(chunks.size()); ++i) {
+				blocks.push_back(makeParagraph(std::move(chunks[i])));
+			}
+			item->anchorId.clear();
+			item->text = RichText();
+			item->blocks.insert(
+				item->blocks.begin(),
+				std::make_move_iterator(blocks.begin()),
+				std::make_move_iterator(blocks.end()));
+			focus({
+				.kind = LeafKind::BlockText,
+				.block = {
+					.container = ListItemChildrenContainer(
+						path,
+						descriptor.leaf.listItemIndex),
+					.index = 0,
+				},
+			});
+			return true;
+		}
+	}
+	return false;
+}
+
+std::optional<RichMessageLimitError> State::lastLimitError() const {
+	return _lastLimitError;
 }
 
 std::optional<QString> State::codeBlockLanguage(int ordinal) const {
@@ -1710,7 +1913,17 @@ auto State::normalizeActiveListItemSurface()
 	return surface;
 }
 
-int State::ensureTrailingParagraphActive() {
+std::optional<int> State::ensureTrailingParagraphActive() {
+	return applyCheckedMutation(std::optional<int>(), [](State &candidate) {
+		const auto result = candidate.ensureTrailingParagraphActiveUnchecked();
+		return CheckedMutationResult<std::optional<int>>{
+			.apply = result.has_value(),
+			.result = result,
+		};
+	});
+}
+
+std::optional<int> State::ensureTrailingParagraphActiveUnchecked() {
 	if (_richPage->blocks.empty()
 		|| _richPage->blocks.back().kind != BlockKind::Paragraph) {
 		_richPage->blocks.push_back(MakeParagraphBlock());
@@ -1727,10 +1940,22 @@ int State::ensureTrailingParagraphActive() {
 	if (!setActiveTextByOrdinal(ordinal)) {
 		ensureActiveTextOrdinal();
 	}
-	return _activeTextOrdinal;
+	return (_activeTextOrdinal >= 0)
+		? std::make_optional(_activeTextOrdinal)
+		: std::nullopt;
 }
 
 std::optional<int> State::moveActiveQuoteDown() {
+	return applyCheckedMutation(std::optional<int>(), [](State &candidate) {
+		const auto result = candidate.moveActiveQuoteDownUnchecked();
+		return CheckedMutationResult<std::optional<int>>{
+			.apply = result.has_value(),
+			.result = result,
+		};
+	});
+}
+
+std::optional<int> State::moveActiveQuoteDownUnchecked() {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
 		return std::nullopt;
@@ -1770,6 +1995,16 @@ std::optional<int> State::moveActiveQuoteDown() {
 }
 
 std::optional<int> State::handleActiveHeadingEnter() {
+	return applyCheckedMutation(std::optional<int>(), [](State &candidate) {
+		const auto result = candidate.handleActiveHeadingEnterUnchecked();
+		return CheckedMutationResult<std::optional<int>>{
+			.apply = result.has_value(),
+			.result = result,
+		};
+	});
+}
+
+std::optional<int> State::handleActiveHeadingEnterUnchecked() {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor || descriptor->leaf.kind != LeafKind::BlockText) {
 		return std::nullopt;
@@ -1799,6 +2034,16 @@ std::optional<int> State::handleActiveHeadingEnter() {
 }
 
 std::optional<int> State::handleActiveListEnter() {
+	return applyCheckedMutation(std::optional<int>(), [](State &candidate) {
+		const auto result = candidate.handleActiveListEnterUnchecked();
+		return CheckedMutationResult<std::optional<int>>{
+			.apply = result.has_value(),
+			.result = result,
+		};
+	});
+}
+
+std::optional<int> State::handleActiveListEnterUnchecked() {
 	const auto surface = normalizeActiveListItemSurface();
 	if (!surface) {
 		return std::nullopt;
@@ -1854,37 +2099,52 @@ std::optional<int> State::handleActiveListEnter() {
 }
 
 void State::insertHeading1AfterActive() {
-	insertBlockAfterActive({
+	(void)insertBlockAfterActive({
 		.type = InsertBlockType::Heading,
 		.headingLevel = 1,
 	});
 }
 
 void State::insertBlockquoteAfterActive() {
-	insertBlockAfterActive({
+	(void)insertBlockAfterActive({
 		.type = InsertBlockType::Blockquote,
 	});
 }
 
-void State::insertBlockAfterActive(InsertAction action) {
-	auto blocks = std::vector<Block>();
-	blocks.push_back(makeBlock(action));
-	insertBlocksAfterActive(std::move(blocks));
+bool State::insertBlockAfterActive(InsertAction action) {
+	return applyCheckedMutation(false, [action](State &candidate) {
+		auto blocks = std::vector<Block>();
+		blocks.push_back(candidate.makeBlock(action));
+		const auto applied = candidate.insertBlocksAfterActiveUnchecked(
+			std::move(blocks));
+		return CheckedMutationResult<bool>{
+			.apply = applied,
+			.result = applied,
+		};
+	});
 }
 
-void State::insertPreparedBlockAfterActive(Block block) {
+bool State::insertPreparedBlockAfterActive(Block block) {
 	auto blocks = std::vector<Block>();
 	blocks.push_back(std::move(block));
-	insertBlocksAfterActive(std::move(blocks));
+	return insertPreparedBlocksAfterActive(std::move(blocks));
 }
 
-void State::insertPreparedBlocksAfterActive(std::vector<Block> blocks) {
-	insertBlocksAfterActive(std::move(blocks));
+bool State::insertPreparedBlocksAfterActive(std::vector<Block> blocks) {
+	return applyCheckedMutation(false, [blocks = std::move(blocks)](
+			State &candidate) mutable {
+		const auto applied = candidate.insertBlocksAfterActiveUnchecked(
+			std::move(blocks));
+		return CheckedMutationResult<bool>{
+			.apply = applied,
+			.result = applied,
+		};
+	});
 }
 
-void State::insertBlocksAfterActive(std::vector<Block> blocks) {
+bool State::insertBlocksAfterActiveUnchecked(std::vector<Block> blocks) {
 	if (blocks.empty()) {
-		return;
+		return false;
 	}
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (descriptor && shouldReplaceActiveTextOnlyBlock(*descriptor, blocks)) {
@@ -1902,7 +2162,7 @@ void State::insertBlocksAfterActive(std::vector<Block> blocks) {
 				std::make_move_iterator(blocks.end()));
 			rebuild();
 			focusInsertedBlocks(path.container, insertAt, count);
-			return;
+			return true;
 		}
 	}
 	auto anchor = resolveActiveInsertionTarget();
@@ -1932,6 +2192,7 @@ void State::insertBlocksAfterActive(std::vector<Block> blocks) {
 		std::make_move_iterator(blocks.end()));
 	rebuild();
 	focusInsertedBlocks(anchor.container, insertAt, count);
+	return true;
 }
 
 std::vector<Block> *State::blockContainer(const BlockContainerPath &path) {

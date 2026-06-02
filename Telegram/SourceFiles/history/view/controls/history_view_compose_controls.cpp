@@ -2399,6 +2399,11 @@ void ComposeControls::initField() {
 		updateAiButtonVisibility();
 		updateSendAsFileVisibility();
 	}, _field->lifetime());
+	Data::AmPremiumValue(&session()) | rpl::on_next([=] {
+		checkCharsLimitation();
+		updateAiButtonVisibility();
+		updateSendAsFileVisibility();
+	}, _wrap->lifetime());
 #ifdef Q_OS_MAC
 	// Removed an ability to insert text from the menu bar
 	// when the field is hidden.
@@ -3436,7 +3441,7 @@ void ComposeControls::fireSendTextAsFile(
 bool ComposeControls::checkLargeTextPaste(
 		not_null<const QMimeData*> data,
 		Ui::InputField::MimeAction action) {
-	const auto result = Ui::CheckLargeTextPaste(_field, data);
+	const auto result = Ui::CheckLargeTextPaste(&session(), _field, data);
 	if (!result.exceeds) {
 		return false;
 	}
@@ -3840,7 +3845,8 @@ bool ComposeControls::hasEnoughLinesForAi() const {
 bool ComposeControls::textExceedsMaxSize() const {
 	return _history
 		&& !_recording.current()
-		&& _field->getLastText().size() > MaxMessageSize;
+		&& (_field->getLastText().size()
+			> Data::PremiumLimits(&session()).messageLengthCurrent());
 }
 
 bool ComposeControls::updateBotCommandShown() {
@@ -4648,11 +4654,12 @@ void ComposeControls::checkCharsLimitation() {
 	}
 	const auto hasMediaWithCaption = item->media()
 		&& item->media()->allowsEditCaption();
-	const auto maxCaptionSize = !hasMediaWithCaption
-		? MaxMessageSize
-		: Data::PremiumLimits(&session()).captionLengthCurrent();
+	const auto limits = Data::PremiumLimits(&session());
+	const auto maxTextSize = hasMediaWithCaption
+		? limits.captionLengthCurrent()
+		: limits.messageLengthCurrent();
 	const auto remove = Ui::ComputeFieldCharacterCount(_field)
-		- maxCaptionSize;
+		- maxTextSize;
 	if (remove > 0) {
 		if (!_charsLimitation) {
 			using namespace Controls;
@@ -4661,11 +4668,6 @@ void ComposeControls::checkCharsLimitation() {
 				_send.get(),
 				style::al_bottom);
 			_charsLimitation->show();
-			Data::AmPremiumValue(
-				&session()
-			) | rpl::on_next([=] {
-				checkCharsLimitation();
-			}, _charsLimitation->lifetime());
 		}
 		_charsLimitation->setLeft(remove);
 	} else {

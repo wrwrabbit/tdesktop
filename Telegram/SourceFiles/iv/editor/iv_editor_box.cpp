@@ -354,7 +354,8 @@ void SetupBox(
 		box,
 		descriptor.controller,
 		descriptor.peer,
-		descriptor.state),
+		descriptor.state,
+		std::move(descriptor.showLimitToast)),
 		style::margins());
 	const auto tooltipParent = box->getDelegate()->outerContainer();
 	box->setPinnedToTopContent(object_ptr<Toolbar>(
@@ -368,7 +369,9 @@ void SetupBox(
 	const auto submit = box->addButton(
 		rpl::single(SubmitText(descriptor)),
 		[=, confirmed = std::move(descriptor.confirmed)] {
-			editor->commitInlineField();
+			if (!editor->commitInlineField()) {
+				return;
+			}
 			if ((!confirmed || confirmed()) && weak) {
 				weak->closeBox();
 			}

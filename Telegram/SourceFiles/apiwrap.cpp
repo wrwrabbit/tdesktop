@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/data_forum.h"
 #include "data/data_message_reaction_id.h"
+#include "data/data_premium_limits.h"
 #include "data/data_saved_messages.h"
 #include "data/data_saved_music.h"
 #include "data/data_saved_sublist.h"
@@ -73,6 +74,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
+#include "history/view/controls/history_view_forward_panel.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "main/main_account.h"
@@ -3543,6 +3545,10 @@ void ApiWrap::forwardMessages(
 		}
 		return;
 	}
+	draft.options = HistoryView::Controls::NormalizeForwardOptions(
+		_session,
+		draft.items,
+		draft.options);
 
 	struct SharedCallback {
 		int requestsLeft = 0;
@@ -4232,10 +4238,13 @@ void ApiWrap::sendMessage(
 	HistoryItem *lastMessage = nullptr;
 
 	auto &histories = history->owner().histories();
+	const auto messageLengthLimit = Data::PremiumLimits(
+		&history->session()
+	).messageLengthCurrent();
 
 	const auto exactWebPage = !message.webPage.url.isEmpty();
 	auto isFirst = true;
-	while (TextUtilities::CutPart(sending, left, MaxMessageSize)
+	while (TextUtilities::CutPart(sending, left, messageLengthLimit)
 		|| (isFirst && exactWebPage)) {
 		TextUtilities::Trim(left);
 		const auto isLast = left.empty();

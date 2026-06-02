@@ -21,8 +21,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "lang/lang_keys.h"
+#include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "ui/text/text_utilities.h"
+
+#include <algorithm>
 
 #include <QtCore/QSize>
 
@@ -77,8 +80,21 @@ constexpr auto kDefaultMapHeight = 200;
 	return result;
 }
 
+enum class ParseSource {
+	InstantViewPage,
+	RichMessage,
+};
+
 struct ParseContext {
+	ParseContext(
+		not_null<Main::Session*> session,
+		ParseSource source = ParseSource::InstantViewPage)
+	: session(session)
+	, source(source) {
+	}
+
 	not_null<Main::Session*> session;
+	ParseSource source = ParseSource::InstantViewPage;
 	base::flat_map<uint64, PhotoData*> photos;
 	base::flat_map<uint64, DocumentData*> documents;
 	base::flat_map<uint64, QSize> photoSizes;
@@ -96,10 +112,104 @@ struct ParseContext {
 	bool dropRichTextClickHandlers = false;
 };
 
+struct RichMessageMetrics {
+	int textLength = 0;
+	int blockCount = 0;
+	int maxDepth = 0;
+	int mediaCount = 0;
+	int maxTableColumns = 0;
+};
+
 enum class RichTextParseMode {
 	Normal,
 	DropClickHandlers,
 };
+
+void AccumulateTextLength(
+		RichMessageMetrics *metrics,
+		const RichText &text) {
+	metrics->textLength += int(text.text.text.size());
+}
+
+void AccumulateTextLength(
+		RichMessageMetrics *metrics,
+		const QString &text) {
+	metrics->textLength += int(text.size());
+}
+
+[[nodiscard]] bool IsMediaKind(BlockKind kind) {
+	switch (kind) {
+	case BlockKind::Photo:
+	case BlockKind::Video:
+	case BlockKind::Audio:
+		return true;
+	default:
+		return false;
+	}
+}
+
+[[nodiscard]] int EffectiveTableColumns(const TableRow &row) {
+	auto result = 0;
+	for (const auto &cell : row.cells) {
+		result += std::max(cell.colspan, 1);
+	}
+	return result;
+}
+
+void AccumulateBlockMetrics(
+		RichMessageMetrics *metrics,
+		const std::vector<Block> &blocks,
+		int depth);
+
+void AccumulateBlockMetrics(
+		RichMessageMetrics *metrics,
+		const Block &block,
+		int depth) {
+	++metrics->blockCount;
+	metrics->maxDepth = std::max(metrics->maxDepth, depth);
+	AccumulateTextLength(metrics, block.text);
+	AccumulateTextLength(metrics, block.caption);
+	AccumulateTextLength(metrics, block.formula);
+	if (IsMediaKind(block.kind)) {
+		++metrics->mediaCount;
+	}
+	for (const auto &child : block.blocks) {
+		AccumulateBlockMetrics(metrics, child, depth + 1);
+	}
+	for (const auto &item : block.listItems) {
+		AccumulateTextLength(metrics, item.text);
+		AccumulateBlockMetrics(metrics, item.blocks, depth + 1);
+	}
+	for (const auto &item : block.mediaItems) {
+		if (IsMediaKind(item.kind)) {
+			++metrics->mediaCount;
+		}
+	}
+	for (const auto &row : block.tableRows) {
+		metrics->maxTableColumns = std::max(
+			metrics->maxTableColumns,
+			EffectiveTableColumns(row));
+		for (const auto &cell : row.cells) {
+			AccumulateTextLength(metrics, cell.text);
+		}
+	}
+}
+
+void AccumulateBlockMetrics(
+		RichMessageMetrics *metrics,
+		const std::vector<Block> &blocks,
+		int depth) {
+	for (const auto &block : blocks) {
+		AccumulateBlockMetrics(metrics, block, depth);
+	}
+}
+
+[[nodiscard]] RichMessageMetrics ComputeRichMessageMetrics(
+		const RichPage &page) {
+	auto result = RichMessageMetrics();
+	AccumulateBlockMetrics(&result, page.blocks, 1);
+	return result;
+}
 
 [[nodiscard]] QString DateText(TimeId date) {
 	return langDateTimeFull(base::unixtime::parse(date));
@@ -154,9 +264,12 @@ void AppendRich(RichText *to, RichText &&from) {
 }
 
 [[nodiscard]] QString RichPageLinkEntityData(
+		ParseSource source,
 		const QString &url,
 		uint64 webpageId) {
-	return (webpageId && !url.isEmpty())
+	return (source == ParseSource::InstantViewPage
+		&& webpageId
+		&& !url.isEmpty())
 		? EncodeRichPageLinkUrl(url, webpageId)
 		: url;
 }
@@ -407,7 +520,10 @@ void RememberWebPageMedia(
 		return true;
 	}, [&](const MTPDtextImage &data) {
 		const auto replacementText = u"[image]"_q;
-		if (!data.vdocument_id().v || data.vw().v <= 0 || data.vh().v <= 0) {
+		if (context->source == ParseSource::RichMessage
+			|| !data.vdocument_id().v
+			|| data.vw().v <= 0
+			|| data.vh().v <= 0) {
 			result->text.append(replacementText);
 			return true;
 		}
@@ -494,7 +610,10 @@ void RememberWebPageMedia(
 			&result->text,
 			from,
 			EntityType::CustomUrl,
-			RichPageLinkEntityData(target, uint64(data.vwebpage_id().v)));
+			RichPageLinkEntityData(
+				context->source,
+				target,
+				uint64(data.vwebpage_id().v)));
 	}, [&](const MTPDtextEmail &data) {
 		const auto from = result->text.text.size();
 		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
@@ -830,7 +949,9 @@ void AppendBlock(
 		const auto photoId = uint64(data.vphoto_id().v);
 		const auto size = FindPhotoSize(*context, photoId);
 		auto parsed = MakeBlock(BlockKind::Photo);
-		parsed.url = qs(data.vurl().value_or_empty());
+		if (context->source == ParseSource::InstantViewPage) {
+			parsed.url = qs(data.vurl().value_or_empty());
+		}
 		parsed.width = size.width();
 		parsed.height = size.height();
 		parsed.photoId = photoId;
@@ -1358,7 +1479,7 @@ std::shared_ptr<const RichPage> ParsePage(
 		const MTPDwebPage *webpage) {
 	return page.match([&](const MTPDpage &data) {
 		auto result = std::make_shared<RichPage>();
-		auto context = ParseContext{ session };
+		auto context = ParseContext(session, ParseSource::InstantViewPage);
 		result->url = qs(data.vurl());
 		result->rtl = data.is_rtl();
 		result->part = data.is_part();
@@ -1380,6 +1501,45 @@ std::shared_ptr<const RichPage> ParsePage(
 }
 
 } // namespace
+
+RichMessageLimits ResolveRichMessageLimits(not_null<Main::Session*> session) {
+	const auto &config = session->appConfig();
+	auto result = RichMessageLimits();
+	result.lengthLimit = config.get<int>(
+		u"rich_message_length_limit"_q,
+		result.lengthLimit);
+	result.maxBlocks = config.get<int>(
+		u"rich_message_max_blocks"_q,
+		result.maxBlocks);
+	result.maxDepth = config.get<int>(
+		u"rich_message_max_depth"_q,
+		result.maxDepth);
+	result.maxMedia = config.get<int>(
+		u"rich_message_max_media"_q,
+		result.maxMedia);
+	result.maxTableCols = config.get<int>(
+		u"rich_message_max_table_cols"_q,
+		result.maxTableCols);
+	return result;
+}
+
+std::optional<RichMessageLimitError> ValidateRichMessage(
+		const RichPage &page,
+		const RichMessageLimits &limits) {
+	const auto metrics = ComputeRichMessageMetrics(page);
+	if (metrics.textLength > limits.lengthLimit) {
+		return RichMessageLimitError::Length;
+	} else if (metrics.blockCount > limits.maxBlocks) {
+		return RichMessageLimitError::Blocks;
+	} else if (metrics.maxDepth > limits.maxDepth) {
+		return RichMessageLimitError::Depth;
+	} else if (metrics.mediaCount > limits.maxMedia) {
+		return RichMessageLimitError::Media;
+	} else if (metrics.maxTableColumns > limits.maxTableCols) {
+		return RichMessageLimitError::TableColumns;
+	}
+	return std::nullopt;
+}
 
 QString EncodeRichPageLinkUrl(
 		const QString &url,
@@ -1422,7 +1582,7 @@ std::shared_ptr<const RichPage> ParseRichPage(
 		not_null<Main::Session*> session,
 		const MTPRichMessage &message) {
 	auto result = std::make_shared<RichPage>();
-	auto context = ParseContext{ session };
+	auto context = ParseContext(session, ParseSource::RichMessage);
 	const auto &data = message.data();
 	result->rtl = data.is_rtl();
 	result->part = data.is_part();

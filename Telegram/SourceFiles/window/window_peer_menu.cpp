@@ -75,6 +75,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/history_item_components.h"
+#include "history/view/controls/history_view_forward_panel.h"
 #include "history/view/history_view_context_menu.h"
 #include "history/view/history_view_schedule_box.h"
 #include "window/window_separate_id.h"
@@ -2869,6 +2870,16 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 	const auto msgIds = owner->itemsToIds(itemsList);
 	const auto sendersCount = ItemsForwardSendersCount(itemsList);
 	const auto captionsCount = ItemsForwardCaptionsCount(itemsList);
+	const auto hasRichPage = HistoryView::Controls::HasRichPage(itemsList);
+	const auto hasOnlyForcedForwardedInfo = !captionsCount
+		&& HistoryView::Controls::HasOnlyForcedForwardedInfo(itemsList);
+	const auto showForwardOptions = !hasOnlyForcedForwardedInfo
+		&& (!hasRichPage
+			|| HistoryView::Controls::CanHideForwardAuthor(session, itemsList));
+	draft.options = HistoryView::Controls::NormalizeForwardOptions(
+		session,
+		itemsList,
+		draft.options);
 	if (msgIds.empty()) {
 		return nullptr;
 	}
@@ -3090,6 +3101,9 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 		boxRaw->setForwardOptions({
 			.sendersCount = sendersCount,
 			.captionsCount = captionsCount,
+			.dropNames = (draft.options != Data::ForwardOptions::PreserveInfo),
+			.dropCaptions = (draft.options
+				== Data::ForwardOptions::NoNamesAndCaptions),
 		});
 		show->showBox(std::move(box));
 		auto state = State{ boxRaw, controllerRaw };
@@ -3217,6 +3231,10 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			state->submit = nullptr;
 			return true;
 		};
+		auto forwardOptions = HistoryView::Controls::NormalizeForwardOptions(
+			session,
+			itemsList,
+			state->box->forwardOptionsData());
 		send(
 			ranges::views::all(
 				peers
@@ -3227,7 +3245,7 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			checkPaid,
 			std::move(comment),
 			options,
-			state->box->forwardOptionsData());
+			forwardOptions);
 		if (!state->submit && successCallback) {
 			successCallback();
 		}
@@ -3252,7 +3270,6 @@ base::weak_qptr<Ui::BoxContent> ShowForwardMessagesBox(
 			: SendMenu::Type::Scheduled;
 	};
 
-	const auto showForwardOptions = true;
 	const auto showMenu = [=](not_null<Ui::RpWidget*> parent) {
 		if (state->menu) {
 			state->menu = nullptr;

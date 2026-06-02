@@ -50,11 +50,12 @@ public:
 		QWidget *parent,
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer,
-		std::shared_ptr<State> state);
+		std::shared_ptr<State> state,
+		Fn<void(RichMessageLimitError)> showLimitToast = {});
 
 	void activateInitialNode();
 	void activateSegment(int segmentIndex, int cursorOffset);
-	void commitInlineField();
+	[[nodiscard]] bool commitInlineField();
 	void refreshPreparedContent();
 	void syncInlineFieldGeometry();
 	void insertBlock(State::InsertAction action);
@@ -173,7 +174,10 @@ private:
 	void refreshInlineFieldPlaceholder();
 	void refreshInlineFieldPlaceholderColor();
 	void activateTrailingParagraph();
-	void applyFieldTextToState();
+	void setInlineFieldFromActiveState(int selectionFrom, int selectionTo);
+	void revertInlineFieldToState();
+	[[nodiscard]] bool applyFieldTextToState();
+	bool showLastLimitToast();
 	void hideInlineField();
 	void acceptInlineField();
 	void hideInlineFieldAndRefresh();
@@ -237,6 +241,7 @@ private:
 	const not_null<Window::SessionController*> _controller;
 	const not_null<PeerData*> _peer;
 	const std::shared_ptr<State> _state;
+	const Fn<void(RichMessageLimitError)> _showLimitToast;
 	std::shared_ptr<style::Markdown> _articleStyle;
 	std::shared_ptr<Markdown::MarkdownArticle> _article;
 	base::unique_qptr<Ui::InputField> _field;

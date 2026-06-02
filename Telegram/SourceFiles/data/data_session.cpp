@@ -92,6 +92,7 @@ namespace Data {
 namespace {
 
 constexpr auto kNextForUpgradeGiftTimeout = 5 * crl::time(1000);
+constexpr auto kMaxServiceNotificationMessageSize = 4096;
 
 using ViewElement = HistoryView::Element;
 
@@ -5400,7 +5401,10 @@ void Session::insertCheckedServiceNotification(
 	const auto localFlags = MessageFlag::ClientSideUnread
 		| MessageFlag::Local;
 	auto sending = TextWithEntities(), left = message;
-	while (TextUtilities::CutPart(sending, left, MaxMessageSize)) {
+	while (TextUtilities::CutPart(
+			sending,
+			left,
+			kMaxServiceNotificationMessageSize)) {
 		const auto id = nextLocalMessageId();
 		addNewMessage(
 			id,

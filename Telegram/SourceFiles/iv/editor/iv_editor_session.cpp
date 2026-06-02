@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_location.h"
 #include "data/data_photo.h"
 #include "data/data_session.h"
+#include "data/data_user.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_helpers.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "mainwidget.h"
 #include "menu/menu_send.h"
+#include "settings/sections/settings_premium.h"
 #include "storage/file_upload.h"
 #include "storage/localimageloader.h"
 #include "storage/storage_account.h"
@@ -138,6 +140,75 @@ private:
 	return (type == PreparedFileType::Photo)
 		|| (type == PreparedFileType::Video)
 		|| (type == PreparedFileType::Music);
+}
+
+[[nodiscard]] bool CanUseRichMessages(not_null<Main::Session*> session) {
+	return session->premium();
+}
+
+void ShowRichMessagesPremiumToast(
+		not_null<Window::SessionController*> controller) {
+	Settings::ShowPremiumPromoToast(
+		controller->uiShow(),
+		tr::lng_article_premium_required(
+			tr::now,
+			lt_link,
+			tr::link(tr::bold(
+				tr::lng_article_premium_required_link(tr::now))),
+			tr::marked),
+		u"rich_message"_q);
+}
+
+[[nodiscard]] bool IsRichMessageMediaKind(RichPage::BlockKind kind) {
+	switch (kind) {
+	case RichPage::BlockKind::Photo:
+	case RichPage::BlockKind::Video:
+	case RichPage::BlockKind::Audio:
+		return true;
+	default:
+		return false;
+	}
+}
+
+void CountRichPageMedia(
+		const std::vector<RichPage::Block> &blocks,
+		int *result) {
+	for (const auto &block : blocks) {
+		if (IsRichMessageMediaKind(block.kind)) {
+			++(*result);
+		}
+		CountRichPageMedia(block.blocks, result);
+		for (const auto &item : block.listItems) {
+			CountRichPageMedia(item.blocks, result);
+		}
+		for (const auto &item : block.mediaItems) {
+			if (IsRichMessageMediaKind(item.kind)) {
+				++(*result);
+			}
+		}
+	}
+}
+
+[[nodiscard]] int CountRichPageMedia(const RichPage &page) {
+	auto result = 0;
+	CountRichPageMedia(page.blocks, &result);
+	return result;
+}
+
+template <typename Container>
+[[nodiscard]] int CountAcceptedPreparedFiles(const Container &files) {
+	auto result = 0;
+	for (const auto &file : files) {
+		if (AcceptedPreparedFileType(file.type)) {
+			++result;
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] int CountAcceptedPreparedFiles(const PreparedList &list) {
+	return CountAcceptedPreparedFiles(list.files)
+		+ CountAcceptedPreparedFiles(list.filesToProcess);
 }
 
 [[nodiscard]] RichPage::RichText ToRichText(QString text) {
@@ -457,13 +528,38 @@ private:
 		},
 		[](QString) {
 		}))
-	, _state(std::make_shared<State>(_page, _runtime))
+	, _showLimitToast([controller](RichMessageLimitError error) {
+		switch (error) {
+		case RichMessageLimitError::Length:
+			controller->showToast(tr::lng_article_limit_length(tr::now));
+			return;
+		case RichMessageLimitError::Blocks:
+			controller->showToast(tr::lng_article_limit_blocks(tr::now));
+			return;
+		case RichMessageLimitError::Depth:
+			controller->showToast(tr::lng_article_limit_depth(tr::now));
+			return;
+		case RichMessageLimitError::Media:
+			controller->showToast(tr::lng_article_limit_media(tr::now));
+			return;
+		case RichMessageLimitError::TableColumns:
+			controller->showToast(tr::lng_article_limit_columns(tr::now));
+			return;
+		}
+		controller->showToast(tr::lng_edit_error(tr::now));
+	})
+	, _limits(ResolveRichMessageLimits(_session))
+	, _state(std::make_shared<State>(_page, _runtime, _limits))
 	, _submitOptions(_composeAction ? _composeAction->options : Api::SendOptions()) {
 		subscribeToUploader();
 	}
 
 	[[nodiscard]] bool submitRequested() {
 		if (_submittedPage || _submitApiRequested) {
+			return false;
+		}
+		if (!CanUseRichMessages(_session)) {
+			ShowRichMessagesPremiumToast(_controller);
 			return false;
 		}
 		if (hasPendingPreparation()) {
@@ -476,6 +572,10 @@ private:
 		}
 		auto page = std::shared_ptr<const RichPage>(
 			std::make_shared<RichPage>(_state->richPage()));
+		if (const auto error = ValidateRichMessage(*page, _limits)) {
+			showRichMessageLimitToast(*error);
+			return false;
+		}
 		if (!applySubmittedLocalState(page)) {
 			_controller->showToast(tr::lng_edit_error(tr::now));
 			return false;
@@ -833,6 +933,7 @@ private:
 					not_null<Widget*> editor) {
 				session->requestMap(editor);
 			},
+			.showLimitToast = _showLimitToast,
 		};
 		ShowBox(std::move(descriptor));
 	}
@@ -861,6 +962,11 @@ private:
 		QPointer<Widget> editor,
 		PreparedList list,
 		uint64 batchId) {
+		if (const auto accepted = CountAcceptedPreparedFiles(list);
+			accepted && exceedsMediaLimitWith(accepted)) {
+			showRichMessageLimitToast(RichMessageLimitError::Media);
+			return;
+		}
 		for (auto &file : list.files) {
 			applyPreparedFile(editor, std::move(file), batchId);
 		}
@@ -895,6 +1001,7 @@ private:
 		_prepareQueue.pop_front();
 		const auto weak = base::make_weak(this);
 		_preparing = true;
+		_preparingFileType = queued.file.type;
 		const auto sideLimit = PhotoSideLimit();
 		crl::async([weak, queued = std::move(queued), sideLimit]() mutable {
 			Storage::PrepareDetails(
@@ -911,6 +1018,7 @@ private:
 
 	void preparedAsyncFile(QueuedPrepare queued) {
 		_preparing = false;
+		_preparingFileType = PreparedFileType::None;
 		applyPreparedFile(
 			queued.editor,
 			std::move(queued.file),
@@ -924,6 +1032,10 @@ private:
 		uint64 batchId) {
 		if (!AcceptedPreparedFileType(file.type)) {
 			showRejectedToast(batchId);
+			return;
+		}
+		if (exceedsMediaLimitWith(1)) {
+			showRichMessageLimitToast(RichMessageLimitError::Media);
 			return;
 		}
 		prepareAttachment(editor, std::move(file));
@@ -979,6 +1091,10 @@ private:
 		AttachmentMeta meta,
 		std::shared_ptr<FilePrepareResult> prepared) {
 		if (!editor || !prepared) {
+			return;
+		}
+		if (exceedsMediaLimitWith(1)) {
+			showRichMessageLimitToast(RichMessageLimitError::Media);
 			return;
 		}
 		_editor = editor;
@@ -1038,12 +1154,16 @@ private:
 			}
 		}
 
-		_session->uploader().upload(uploadId, prepared);
 		_attachments.push_back(std::move(record));
 		auto &stored = _attachments.back();
-		updateAttachmentProgress(stored);
 		editor->insertPreparedBlock(makeAttachmentBlock(stored));
 		refreshAttachmentLocators(stored);
+		if (stored.blockLocators.empty()) {
+			_attachments.pop_back();
+			return;
+		}
+		_session->uploader().upload(uploadId, prepared);
+		updateAttachmentProgress(stored);
 		requestEditorUpdate();
 	}
 
@@ -1406,11 +1526,30 @@ private:
 	void refreshAttachmentLocators(AttachmentRecord &attachment) {
 		auto locators = std::vector<State::BlockPath>();
 		collectBlockLocators(
-			_page->blocks,
+			_state->richPage().blocks,
 			State::BlockContainerPath(),
 			attachment,
 			locators);
 		attachment.blockLocators = std::move(locators);
+	}
+
+	[[nodiscard]] int pendingAttachmentPlaceholders() const {
+		auto result = _pendingAttachmentPrepareCount;
+		if (AcceptedPreparedFileType(_preparingFileType)) {
+			++result;
+		}
+		for (const auto &queued : _prepareQueue) {
+			if (AcceptedPreparedFileType(queued.file.type)) {
+				++result;
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] bool exceedsMediaLimitWith(int additionalMedia) const {
+		return (CountRichPageMedia(_state->richPage())
+			+ pendingAttachmentPlaceholders()
+			+ additionalMedia) > _limits.maxMedia;
 	}
 
 	[[nodiscard]] bool hasVisibleAttachmentBlock(AttachmentRecord &attachment) {
@@ -1430,6 +1569,10 @@ private:
 
 	void showAttachmentFailedToast() {
 		_controller->showToast(tr::lng_attach_failed(tr::now));
+	}
+
+	void showRichMessageLimitToast(RichMessageLimitError error) const {
+		_showLimitToast(error);
 	}
 
 	void showRejectedToast(uint64 batchId) {
@@ -1485,6 +1628,8 @@ private:
 	const std::optional<EditedItemSnapshot> _edited;
 	const std::shared_ptr<RichPage> _page;
 	const std::shared_ptr<Markdown::MediaRuntime> _runtime;
+	const Fn<void(RichMessageLimitError)> _showLimitToast;
+	const RichMessageLimits _limits;
 	const std::shared_ptr<State> _state;
 	Api::SendOptions _submitOptions;
 	QPointer<Ui::RpWidget> _submitButton;
@@ -1499,6 +1644,7 @@ private:
 	uint64 _rejectedToastBatchId = 0;
 	int _pendingAttachmentPrepareCount = 0;
 	bool _preparing = false;
+	PreparedFileType _preparingFileType = PreparedFileType::None;
 	bool _submitDeferred = false;
 	bool _submitApiRequested = false;
 
@@ -1511,6 +1657,10 @@ void ShowComposeBox(
 		not_null<PeerData*> peer,
 		Api::SendAction action,
 		Fn<SendMenu::Details()> sendMenuDetails) {
+	if (!CanUseRichMessages(&controller->session())) {
+		ShowRichMessagesPremiumToast(controller);
+		return;
+	}
 	ArticleSession::ShowCompose(
 		controller,
 		peer,
@@ -1521,6 +1671,10 @@ void ShowComposeBox(
 void ShowEditBox(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
+	if (!CanUseRichMessages(&controller->session())) {
+		ShowRichMessagesPremiumToast(controller);
+		return;
+	}
 	ArticleSession::ShowEdit(controller, item);
 }
 
