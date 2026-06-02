@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_editing.h"
 #include "apiwrap.h"
 #include "base/weak_ptr.h"
+#include "core/application.h"
 #include "core/shortcuts.h"
 #include "data/data_document.h"
 #include "data/data_location.h"
@@ -31,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_box.h"
 #include "iv/editor/iv_editor_state.h"
 #include "iv/editor/iv_editor_widget.h"
+#include "iv/iv_instance.h"
 #include "iv/iv_rich_message_serializer.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
@@ -449,8 +451,8 @@ public:
 
 	static void ShowEdit(
 		not_null<Window::SessionController*> controller,
-		not_null<HistoryItem*> item) {
-		const auto richPage = item->richPage();
+		not_null<HistoryItem*> item,
+		std::shared_ptr<const RichPage> richPage) {
 		if (!richPage || !CanEditRichPage(richPage)) {
 			controller->showToast(tr::lng_edit_error(tr::now));
 			return;
@@ -465,8 +467,9 @@ public:
 			nullptr,
 			EditedItemSnapshot{
 				.item = item,
-				.page = richPage,
+				.inlinePage = item->richPage(),
 				.summary = item->originalText(),
+				.fullPage = item->fullRichPage(),
 			}));
 		session->showBox();
 	}
@@ -522,8 +525,9 @@ private:
 
 	struct EditedItemSnapshot {
 		not_null<HistoryItem*> item;
-		std::shared_ptr<const RichPage> page;
+		std::shared_ptr<const RichPage> inlinePage;
 		TextWithEntities summary;
+		std::shared_ptr<const RichPage> fullPage;
 	};
 
 	ArticleSession(
@@ -658,6 +662,13 @@ private:
 		}, TextWithEntities(), MTP_messageMediaEmpty());
 	}
 
+	[[nodiscard]] bool keepsInlineRichPage() const {
+		return (_mode == Mode::Edit)
+			&& _edited
+			&& _edited->inlinePage
+			&& _edited->inlinePage->part;
+	}
+
 	[[nodiscard]] bool applySubmittedLocalState(
 			const std::shared_ptr<const RichPage> &page) {
 		const auto item = (_mode == Mode::Compose)
@@ -665,6 +676,10 @@ private:
 			: currentSubmittedItem();
 		if (!item) {
 			return false;
+		}
+		if (keepsInlineRichPage()) {
+			item->setFullRichPage(page);
+			return true;
 		}
 		item->applyLocalRichPage(page);
 		return true;
@@ -675,7 +690,18 @@ private:
 			return;
 		}
 		if (const auto item = currentSubmittedItem()) {
-			item->applyLocalRichPage(_edited->page, _edited->summary);
+			if (keepsInlineRichPage()) {
+				if (_edited->fullPage) {
+					item->setFullRichPage(_edited->fullPage);
+				} else {
+					item->clearFullRichPage();
+				}
+				return;
+			}
+			item->applyLocalRichPage(_edited->inlinePage, _edited->summary);
+			if (_edited->fullPage) {
+				item->setFullRichPage(_edited->fullPage);
+			}
 		}
 	}
 
@@ -1801,7 +1827,26 @@ void ShowEditBox(
 		ShowRichMessagesPremiumToast(controller);
 		return;
 	}
-	ArticleSession::ShowEdit(controller, item);
+	const auto weak = base::make_weak(controller);
+	const auto itemId = item->fullId();
+	Core::App().iv().resolveRichMessage(controller, item, [=](
+			std::shared_ptr<const RichPage> page) {
+		const auto strong = weak.get();
+		const auto current = strong
+			? strong->session().data().message(itemId)
+			: nullptr;
+		if (!strong || !current) {
+			return;
+		}
+		if (!page || !CanEditRichPage(page)) {
+			strong->showToast(tr::lng_edit_error(tr::now));
+			return;
+		}
+		ArticleSession::ShowEdit(
+			not_null{ strong },
+			not_null{ current },
+			std::move(page));
+	});
 }
 
 } // namespace Iv::Editor

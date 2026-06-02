@@ -539,6 +539,8 @@ public:
 		return _media.get();
 	}
 	[[nodiscard]] std::shared_ptr<const Iv::RichPage> richPage() const;
+	[[nodiscard]] std::shared_ptr<const Iv::RichPage> fullRichPage() const;
+	[[nodiscard]] uint64 fullRichPageVersion() const;
 	[[nodiscard]] bool computeDropForwardedInfo() const;
 	void setText(TextWithEntities textWithEntities);
 	void applyLocalRichPage(std::shared_ptr<const Iv::RichPage> page);
@@ -546,6 +548,8 @@ public:
 		std::shared_ptr<const Iv::RichPage> page,
 		const TextWithEntities &summary);
 	void setRichPage(std::shared_ptr<const Iv::RichPage> page);
+	void setFullRichPage(std::shared_ptr<const Iv::RichPage> page);
+	void clearFullRichPage();
 	void clearRichPage();
 
 	[[nodiscard]] MsgId replyToId() const;
@@ -675,7 +679,8 @@ private:
 	void updateSentContent(
 		const TextWithEntities &textWithEntities,
 		const MTPMessageMedia *media,
-		std::shared_ptr<const Iv::RichPage> richPage);
+		std::shared_ptr<const Iv::RichPage> richPage,
+		std::shared_ptr<const Iv::RichPage> preservedFullPage = nullptr);
 
 	void setReplyMarkup(
 		HistoryMessageMarkupData &&markup,

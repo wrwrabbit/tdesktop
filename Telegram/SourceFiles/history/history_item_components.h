@@ -146,6 +146,8 @@ struct HistoryMessageMediaForInstantView
 struct HistoryMessageRichPageSource
 : RuntimeComponent<HistoryMessageRichPageSource, HistoryItem> {
 	std::shared_ptr<const Iv::RichPage> page;
+	std::shared_ptr<const Iv::RichPage> fullPage;
+	uint64 fullPageVersion = 0;
 	bool canEdit = false;
 };
 

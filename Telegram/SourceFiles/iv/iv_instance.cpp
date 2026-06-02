@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_cached_media.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
+#include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "main/session/session_show.h"
@@ -933,6 +934,15 @@ void Instance::trackSession(not_null<Main::Session*> session) {
 		_tracking.remove(session);
 		_joining.remove(session);
 		_fullRequested.remove(session);
+		if (const auto i = _richMessageRequested.find(session)
+			; i != end(_richMessageRequested)) {
+			for (const auto &[itemId, requested] : i->second) {
+				if (requested.requestId) {
+					session->api().request(requested.requestId).cancel();
+				}
+			}
+			_richMessageRequested.erase(i);
+		}
 		_ivCache.remove(session);
 		if (_ivRequestSession == session) {
 			session->api().request(_ivRequestId).cancel();
@@ -1122,14 +1132,110 @@ void Instance::showTonSite(
 	}, _tonSite->lifetime());
 }
 
+Instance::RichMessageGeneration Instance::CaptureRichMessageGeneration(
+		not_null<HistoryItem*> item) {
+	auto generation = RichMessageGeneration();
+	generation.inlinePage = item->richPage();
+	generation.fullPage = item->fullRichPage();
+	generation.fullPageVersion = item->fullRichPageVersion();
+	return generation;
+}
+
+bool Instance::MatchesRichMessageGeneration(
+		not_null<HistoryItem*> item,
+		const RichMessageGeneration &generation) {
+	return (item->richPage() == generation.inlinePage)
+		&& (item->fullRichPage() == generation.fullPage)
+		&& (item->fullRichPageVersion() == generation.fullPageVersion);
+}
+
+void Instance::resolveRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		RichMessageResolved done) {
+	if (const auto page = item->fullRichPage()) {
+		done(page);
+		return;
+	}
+	const auto richPage = item->richPage();
+	if (richPage && !richPage->part) {
+		done(richPage);
+		return;
+	}
+	const auto session = &controller->session();
+	const auto itemId = item->fullId();
+	const auto generation = CaptureRichMessageGeneration(item);
+	trackSession(session);
+	auto &requested = _richMessageRequested[session][itemId];
+	if (requested.requestId) {
+		if (MatchesRichMessageGeneration(item, requested.generation)) {
+			requested.callbacks.push_back(std::move(done));
+			return;
+		}
+		session->api().request(requested.requestId).cancel();
+		requested = RichMessageRequest();
+	}
+	requested.callbacks.push_back(std::move(done));
+	const auto now = crl::now();
+	if (requested.lastRequestedAt
+		&& MatchesRichMessageGeneration(item, requested.generation)
+		&& (now - requested.lastRequestedAt) < kAllowPageReloadAfter) {
+		finishRichMessageRequest(session, itemId, requested.token, nullptr);
+		return;
+	}
+	requested.lastRequestedAt = now;
+	requested.generation = generation;
+	requested.token = ++_nextRichMessageRequestToken;
+	const auto token = requested.token;
+	requested.requestId = session->api().request(MTPmessages_GetRichMessage(
+		item->history()->peer->input(),
+		MTP_int(item->id)
+	)).done([=](const MTPmessages_Messages &result) {
+		const auto processed = processReceivedRichMessage(
+			session,
+			itemId,
+			generation,
+			result);
+		finishRichMessageRequest(
+			session,
+			itemId,
+			token,
+			processed.page,
+			processed.notifyCallbacks);
+	}).fail([=] {
+		finishRichMessageRequest(
+			session,
+			itemId,
+			token,
+			nullptr);
+	}).send();
+}
+
 void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item) {
-	const auto richPage = item->richPage();
-	if (!richPage) {
-		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
-		return;
-	} else if (Platform::IsMac()) {
+	const auto weak = base::make_weak(controller);
+	const auto itemId = item->fullId();
+	resolveRichMessage(controller, item, [=](std::shared_ptr<const RichPage> page) {
+		const auto strong = weak.get();
+		const auto current = strong
+			? strong->session().data().message(itemId)
+			: nullptr;
+		if (!page || !current) {
+			if (strong && !page) {
+				Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+			}
+			return;
+		}
+		showRichMessage(not_null{ strong }, not_null{ current }, std::move(page));
+	});
+}
+
+void Instance::showRichMessage(
+		not_null<Window::SessionController*> controller,
+		not_null<HistoryItem*> item,
+		std::shared_ptr<const RichPage> richPage) {
+	if (Platform::IsMac()) {
 		Core::App().hideMediaView();
 	}
 	const auto session = &controller->session();
@@ -1347,6 +1453,85 @@ Instance::ProcessReceivedPageResult Instance::processReceivedPage(
 		requested.page = processed.page;
 	});
 	return processed;
+}
+
+auto Instance::processReceivedRichMessage(
+	not_null<Main::Session*> session,
+	FullMsgId itemId,
+	const RichMessageGeneration &generation,
+	const MTPmessages_Messages &result)
+-> ProcessReceivedRichMessageResult {
+	const auto owner = &session->data();
+	auto processed = ProcessReceivedRichMessageResult();
+	auto page = std::shared_ptr<const RichPage>();
+	result.match([&](const MTPDmessages_messagesNotModified &) {
+		LOG(("API Error: received messages.messagesNotModified!"));
+	}, [&](const auto &data) {
+		owner->processUsers(data.vusers());
+		owner->processChats(data.vchats());
+		for (const auto &message : data.vmessages().v) {
+			if (message.type() != mtpc_message) {
+				continue;
+			}
+			const auto &parsed = message.c_message();
+			if (MsgId(parsed.vid().v) != itemId.msg) {
+				continue;
+			}
+			const auto richMessage = parsed.vrich_message();
+			page = richMessage ? ParseRichPage(session, *richMessage) : nullptr;
+			break;
+		}
+	});
+	const auto peer = owner->peer(itemId.peer);
+	result.match([&](const MTPDmessages_channelMessages &data) {
+		if (const auto channel = peer->asChannel()) {
+			channel->ptsReceived(data.vpts().v);
+		} else {
+			LOG(("App Error: received messages.channelMessages!"));
+		}
+	}, [](const auto &) {});
+	result.match([&](const MTPDmessages_messagesNotModified &) {
+	}, [&](const auto &data) {
+		peer->processTopics(data.vtopics());
+	});
+	const auto current = owner->message(itemId);
+	if (!current
+		|| !MatchesRichMessageGeneration(not_null{ current }, generation)) {
+		return processed;
+	}
+	if (page) {
+		current->setFullRichPage(page);
+	}
+	processed.page = std::move(page);
+	return processed;
+}
+
+void Instance::finishRichMessageRequest(
+		not_null<Main::Session*> session,
+		FullMsgId itemId,
+		uint64 token,
+		std::shared_ptr<const RichPage> page,
+		bool notifyCallbacks) {
+	const auto sessionIt = _richMessageRequested.find(session);
+	if (sessionIt == end(_richMessageRequested)) {
+		return;
+	}
+	const auto itemIt = sessionIt->second.find(itemId);
+	if (itemIt == end(sessionIt->second)) {
+		return;
+	}
+	if (itemIt->second.token != token) {
+		return;
+	}
+	auto callbacks = std::move(itemIt->second.callbacks);
+	itemIt->second.callbacks.clear();
+	itemIt->second.requestId = 0;
+	if (!notifyCallbacks) {
+		return;
+	}
+	for (auto &callback : callbacks) {
+		callback(page);
+	}
 }
 
 void Instance::processOpenChannel(const QString &context) {

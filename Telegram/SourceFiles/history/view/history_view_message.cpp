@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_view_button.h" // ViewButton.
 #include "history/history.h"
 #include "iv/iv_instance.h"
+#include "iv/iv_rich_page.h"
 #include "boxes/premium_preview_box.h"
 #include "boxes/share_box.h"
 #include "boxes/peers/tag_info_box.h"
@@ -5291,21 +5292,29 @@ int Message::viewButtonHeight() const {
 
 void Message::updateViewButtonExistence() {
 	const auto item = data();
-	const auto media = item->media();
-	const auto has = (media && ViewButton::MediaHasViewButton(media));
-	if (!has) {
-		_viewButton = nullptr;
-		return;
-	} else if (_viewButton) {
-		return;
-	}
-	auto make = [=](auto &&from) {
+	const auto make = [=](auto &&from) {
 		return std::make_unique<ViewButton>(
 			std::forward<decltype(from)>(from),
 			colorIndex(),
 			[=] { repaint(); });
 	};
-	_viewButton = make(media);
+	if (const auto richPage = item->richPage(); richPage && richPage->part) {
+		const auto itemId = item->fullId();
+		if (_viewButton && _viewButton->matches(itemId)) {
+			return;
+		}
+		_viewButton = make(itemId);
+		return;
+	}
+	const auto media = item->media();
+	if (media && ViewButton::MediaHasViewButton(media)) {
+		if (_viewButton && _viewButton->matches(media)) {
+			return;
+		}
+		_viewButton = make(media);
+		return;
+	}
+	_viewButton = nullptr;
 }
 
 void Message::initLogEntryOriginal() {

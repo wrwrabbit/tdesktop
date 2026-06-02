@@ -7528,6 +7528,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_view_button_boost" = "Boost";
 "lng_view_button_giftcode" = "Open";
 "lng_view_button_iv" = "Instant View";
+"lng_view_button_full_article" = "Show full article";
 "lng_view_button_stickerset" = "View stickers";
 "lng_view_button_emojipack" = "View emoji";
 "lng_view_button_style" = "View Style";
