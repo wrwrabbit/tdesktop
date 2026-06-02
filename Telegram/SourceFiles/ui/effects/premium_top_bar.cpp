@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/premium_star.h"
 #include "ui/effects/premium_star_particles.h"
 #include "ui/effects/premium_diamond.h"
+#include "ui/effects/premium_coin.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/fade_wrap.h"
 #include "ui/rect.h"
@@ -31,6 +32,7 @@ constexpr auto kMinAcceptableContrast = 4.5; // 1.14;
 
 constexpr auto kStar3dScale = 2.;
 constexpr auto kDiamond3dScale = 1.58;
+constexpr auto kCoin3dScale = 1.85;
 
 constexpr auto kStarParticlesFieldScale = 2.2;
 
@@ -157,6 +159,15 @@ TopBar::TopBar(
 		_diamond3d->flungStrength() | rpl::on_next([=](float64 strength) {
 			_particles3d->fling(strength);
 		}, lifetime());
+	} else if (descriptor.use3dCoin && Coin::Supported()) {
+		_coin3d = CreateChild<Coin>(this);
+		_particles3d = std::make_unique<StarParticles>([=](
+				const QRect &area) {
+			update(area);
+		});
+		_coin3d->flungStrength() | rpl::on_next([=](float64 strength) {
+			_particles3d->fling(strength);
+		}, lifetime());
 	}
 
 	std::move(
@@ -243,6 +254,10 @@ TopBar::TopBar(
 			_diamond3d->setNight(TopBarAbstract::isDark());
 			_particles3d->setColor(st::windowActiveTextFg->c);
 		}
+		if (_coin3d) {
+			_coin3d->setNight(TopBarAbstract::isDark());
+			_particles3d->setColor(QColor(255, 255, 255));
+		}
 		auto event = QResizeEvent(size(), size());
 		resizeEvent(&event);
 	}, lifetime());
@@ -271,6 +286,9 @@ void TopBar::setPaused(bool paused) {
 	}
 	if (_diamond3d) {
 		_diamond3d->setPaused(paused);
+	}
+	if (_coin3d) {
+		_coin3d->setPaused(paused);
 	}
 	if (_particles3d) {
 		_particles3d->setPaused(paused);
@@ -315,6 +333,12 @@ void TopBar::resizeEvent(QResizeEvent *e) {
 		enlarged.moveCenter(rect::center(_starRect));
 		_diamond3d->setGeometry(enlarged.toRect());
 		_diamond3d->setShownProgress(_progress.body);
+	}
+	if (_coin3d) {
+		auto enlarged = Rect(_starRect.size() * kCoin3dScale);
+		enlarged.moveCenter(rect::center(_starRect));
+		_coin3d->setGeometry(enlarged.toRect());
+		_coin3d->setShownProgress(_progress.body);
 	}
 
 	const auto &padding = st::boxRowPadding;
@@ -388,10 +412,10 @@ void TopBar::paintEvent(QPaintEvent *e) {
 	}
 
 
-	if (!_dollar.isNull()) {
+	if (!_dollar.isNull() && !_coin3d) {
 		auto hq = PainterHighQualityEnabler(p);
 		p.drawImage(_starRect, _dollar);
-	} else if (!_star3d && !_diamond3d) {
+	} else if (!_star3d && !_diamond3d && !_coin3d) {
 		_star.render(&p, _starRect);
 	}
 

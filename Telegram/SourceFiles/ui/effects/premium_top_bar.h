@@ -31,6 +31,7 @@ namespace Ui::Premium {
 
 class Star;
 class Diamond;
+class Coin;
 class StarParticles;
 
 class TopBarAbstract : public RpWidget {
@@ -78,6 +79,7 @@ struct TopBarDescriptor {
 	bool use3dStar = false;
 	bool star3dGolden = false;
 	bool use3dDiamond = false;
+	bool use3dCoin = false;
 	std::optional<QGradientStops> gradientStops;
 	rpl::producer<> showFinished;
 };
@@ -113,6 +115,7 @@ private:
 	Star *_star3d = nullptr;
 	bool _star3dGolden = false;
 	Diamond *_diamond3d = nullptr;
+	Coin *_coin3d = nullptr;
 	std::unique_ptr<StarParticles> _particles3d;
 
 	struct {
