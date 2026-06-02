@@ -83,6 +83,10 @@ void StarRenderer::setColors(QColor gradient1, QColor gradient2) {
 	} };
 }
 
+void StarRenderer::setGolden(bool golden) {
+	_golden = golden;
+}
+
 void StarRenderer::initialize(
 		QRhi *rhi,
 		QRhiRenderTarget *rt,
@@ -280,6 +284,8 @@ void StarRenderer::render(
 	uni.params[3] = kDiffuse;
 	uni.extra[0] = kNormalSpec;
 	uni.extra[1] = _state.alpha;
+	uni.extra[2] = _golden ? 1.f : 0.f;
+	uni.extra[3] = 0.f;
 
 	auto *rub = rhi->nextResourceUpdateBatch();
 	rub->updateDynamicBuffer(_uniformBuffer, 0, sizeof(uni), &uni);
