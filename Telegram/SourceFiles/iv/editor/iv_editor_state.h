@@ -154,6 +154,11 @@ public:
 		FieldMode mode = FieldMode::Rich;
 	};
 
+	struct BoundaryTarget {
+		int textOrdinal = -1;
+		Markdown::PreparedEditSelection structuralSelection;
+	};
+
 	State();
 	State(
 		std::shared_ptr<RichPage> richPage,
@@ -178,6 +183,7 @@ public:
 	[[nodiscard]] int activeTextLength() const;
 	[[nodiscard]] std::optional<int> previousEditableOrdinal() const;
 	[[nodiscard]] std::optional<int> nextEditableOrdinal() const;
+	[[nodiscard]] BoundaryTarget activeBoundaryTarget(bool forward) const;
 	[[nodiscard]] bool isActiveTopLevelParagraph() const;
 	[[nodiscard]] bool activeLeafUsesQuoteCaptionColor() const;
 	[[nodiscard]] bool activeLeafUsesQuotePlaceholderColor() const;
@@ -202,6 +208,17 @@ public:
 	void insertPreparedBlocksAfterActive(std::vector<RichPage::Block> blocks);
 
 private:
+	struct BoundaryElement {
+		enum class Kind : uchar {
+			Text,
+			Block,
+		};
+
+		Kind kind = Kind::Text;
+		int textOrdinal = -1;
+		BlockPath block;
+	};
+
 	struct StructuralBlockRange {
 		BlockContainerPath container;
 		int from = -1;
@@ -336,8 +353,9 @@ private:
 		const BlockContainerPath &container);
 	[[nodiscard]] std::optional<int> normalizeTextOnlyQuoteForInsertion(
 		const BlockContainerPath &container);
-	[[nodiscard]] bool shouldReplaceActiveParagraph(
-		const TextNodeDescriptor &descriptor) const;
+	[[nodiscard]] bool shouldReplaceActiveTextOnlyBlock(
+		const TextNodeDescriptor &descriptor,
+		const std::vector<RichPage::Block> &blocks) const;
 	[[nodiscard]] std::optional<LeafPath> reuseOrInsertParagraph(
 		const BlockContainerPath &container,
 		int index);
@@ -366,6 +384,18 @@ private:
 		int count);
 	[[nodiscard]] std::optional<int> adjacentEditableOrdinal(
 		bool forward) const;
+	void collectBoundaryElements(
+		const std::vector<RichPage::Block> &blocks,
+		const BlockContainerPath &container,
+		std::vector<BoundaryElement> *elements) const;
+	void appendBoundaryTextElement(
+		LeafPath leaf,
+		std::vector<BoundaryElement> *elements) const;
+	void appendBoundaryBlockElement(
+		const BlockPath &path,
+		std::vector<BoundaryElement> *elements) const;
+	[[nodiscard]] Markdown::PreparedEditSelection preparedSelectionForBlock(
+		const BlockPath &path) const;
 	[[nodiscard]] bool descriptorBelongsToBlock(
 		const TextNodeDescriptor &descriptor,
 		const BlockPath &path) const;

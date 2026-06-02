@@ -28,6 +28,9 @@ using ListKind = RichPage::ListKind;
 using PreparedBlockContainerKind = Markdown::PreparedEditBlockContainerKind;
 using PreparedEditLeafKind = Markdown::PreparedEditLeafKind;
 using PreparedEditSelectionKind = Markdown::PreparedEditSelectionKind;
+using PreparedBlockContainerPath = Markdown::PreparedEditBlockContainerPath;
+using PreparedBlockContainerStep = Markdown::PreparedEditBlockContainerStep;
+using PreparedEditSelection = Markdown::PreparedEditSelection;
 using RemovalKind = State::RemovalKind;
 using RemovalTarget = State::RemovalTarget;
 using RichText = RichPage::RichText;
@@ -53,6 +56,29 @@ using TextNodeDescriptor = State::TextNodeDescriptor;
 		.blockIndex = path.index,
 		.listItemIndex = itemIndex,
 	});
+	return result;
+}
+
+[[nodiscard]] PreparedBlockContainerPath ToPreparedBlockContainerPath(
+		const BlockContainerPath &path) {
+	auto result = PreparedBlockContainerPath();
+	result.steps.reserve(path.steps.size());
+	for (const auto &step : path.steps) {
+		auto converted = PreparedBlockContainerStep();
+		converted.blockIndex = step.blockIndex;
+		converted.listItemIndex = step.listItemIndex;
+		switch (step.kind) {
+		case BlockContainerKind::Root:
+			continue;
+		case BlockContainerKind::BlockChildren:
+			converted.kind = PreparedBlockContainerKind::BlockChildren;
+			break;
+		case BlockContainerKind::ListItemChildren:
+			converted.kind = PreparedBlockContainerKind::ListItemChildren;
+			break;
+		}
+		result.steps.push_back(converted);
+	}
 	return result;
 }
 
@@ -436,6 +462,42 @@ std::optional<int> State::previousEditableOrdinal() const {
 
 std::optional<int> State::nextEditableOrdinal() const {
 	return adjacentEditableOrdinal(true);
+}
+
+State::BoundaryTarget State::activeBoundaryTarget(bool forward) const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!descriptor) {
+		return {};
+	}
+	auto elements = std::vector<BoundaryElement>();
+	collectBoundaryElements(
+		_richPage->blocks,
+		BlockContainerPath(),
+		&elements);
+	auto current = -1;
+	for (auto i = 0, count = int(elements.size()); i != count; ++i) {
+		const auto &element = elements[i];
+		if (element.kind == BoundaryElement::Kind::Text
+			&& element.textOrdinal == _activeTextOrdinal) {
+			current = i;
+			break;
+		}
+	}
+	if (current < 0) {
+		return {};
+	}
+	const auto adjacentIndex = current + (forward ? 1 : -1);
+	if (adjacentIndex < 0 || adjacentIndex >= int(elements.size())) {
+		return {};
+	}
+	const auto &adjacent = elements[adjacentIndex];
+	if (adjacent.kind == BoundaryElement::Kind::Text) {
+		return { .textOrdinal = adjacent.textOrdinal };
+	}
+	return {
+		.textOrdinal = -1,
+		.structuralSelection = preparedSelectionForBlock(adjacent.block),
+	};
 }
 
 bool State::isActiveTopLevelParagraph() const {
@@ -1416,16 +1478,23 @@ std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
 	return -1;
 }
 
-bool State::shouldReplaceActiveParagraph(
-		const TextNodeDescriptor &descriptor) const {
+bool State::shouldReplaceActiveTextOnlyBlock(
+		const TextNodeDescriptor &descriptor,
+		const std::vector<Block> &blocks) const {
 	if (descriptor.leaf.kind != LeafKind::BlockText
 		|| descriptor.removalTarget.kind != RemovalKind::Block) {
 		return false;
 	}
 	const auto owner = block(descriptor.removalTarget.block);
-	return owner
-		&& owner->kind == BlockKind::Paragraph
-		&& BlockIsEmpty(*owner);
+	if (!owner || !BlockIsEmpty(*owner)) {
+		return false;
+	}
+	if (owner->kind == BlockKind::Paragraph) {
+		return true;
+	}
+	return owner->kind == BlockKind::Heading
+		&& blocks.size() == 1
+		&& blocks.front().kind == BlockKind::Heading;
 }
 
 std::optional<int> State::activateRebuiltLeaf(const LeafPath &path) {
@@ -1765,7 +1834,7 @@ void State::insertBlocksAfterActive(std::vector<Block> blocks) {
 		return;
 	}
 	const auto descriptor = textNode(_activeTextOrdinal);
-	if (descriptor && shouldReplaceActiveParagraph(*descriptor)) {
+	if (descriptor && shouldReplaceActiveTextOnlyBlock(*descriptor, blocks)) {
 		const auto path = descriptor->removalTarget.block;
 		const auto container = blockContainer(path.container);
 		if (container
@@ -2238,6 +2307,162 @@ std::optional<int> State::adjacentEditableOrdinal(bool forward) const {
 	return (ordinal >= 0 && ordinal < textNodeCount())
 		? std::make_optional(ordinal)
 		: std::nullopt;
+}
+
+void State::collectBoundaryElements(
+		const std::vector<Block> &blocks,
+		const BlockContainerPath &container,
+		std::vector<BoundaryElement> *elements) const {
+	for (auto i = 0, count = int(blocks.size()); i != count; ++i) {
+		const auto path = BlockPath{
+			.container = container,
+			.index = i,
+		};
+		const auto &block = blocks[i];
+		switch (block.kind) {
+		case BlockKind::Heading:
+		case BlockKind::Paragraph:
+		case BlockKind::Footer:
+		case BlockKind::Code:
+			appendBoundaryTextElement({
+				.kind = LeafKind::BlockText,
+				.block = path,
+			}, elements);
+			break;
+		case BlockKind::Quote:
+			if (block.blocks.empty()) {
+				appendBoundaryTextElement({
+					.kind = LeafKind::BlockText,
+					.block = path,
+				}, elements);
+			}
+			appendBoundaryTextElement({
+				.kind = LeafKind::BlockCaption,
+				.block = path,
+			}, elements);
+			collectBoundaryElements(
+				block.blocks,
+				BlockChildrenContainer(path),
+				elements);
+			break;
+		case BlockKind::List:
+			for (auto j = 0, itemCount = int(block.listItems.size());
+					j != itemCount;
+					++j) {
+				const auto &item = block.listItems[j];
+				if (!RichTextIsEmpty(item.text) || item.blocks.empty()) {
+					appendBoundaryTextElement({
+						.kind = LeafKind::ListItemText,
+						.block = path,
+						.listItemIndex = j,
+					}, elements);
+				}
+				if (!item.blocks.empty()) {
+					collectBoundaryElements(
+						item.blocks,
+						ListItemChildrenContainer(path, j),
+						elements);
+				}
+			}
+			break;
+		case BlockKind::Photo:
+		case BlockKind::Video:
+		case BlockKind::Audio:
+		case BlockKind::Map:
+			appendBoundaryTextElement({
+				.kind = LeafKind::BlockCaption,
+				.block = path,
+			}, elements);
+			break;
+		case BlockKind::Math:
+			appendBoundaryTextElement({
+				.kind = LeafKind::MathFormula,
+				.block = path,
+			}, elements);
+			break;
+		case BlockKind::Table:
+			if (!block.text.text.text.isEmpty()) {
+				appendBoundaryTextElement({
+					.kind = LeafKind::BlockText,
+					.block = path,
+				}, elements);
+			}
+			for (auto j = 0, rowCount = int(block.tableRows.size());
+					j != rowCount;
+					++j) {
+				const auto &row = block.tableRows[j];
+				for (auto k = 0, cellCount = int(row.cells.size());
+						k != cellCount;
+						++k) {
+					appendBoundaryTextElement({
+						.kind = LeafKind::TableCellText,
+						.block = path,
+						.tableRowIndex = j,
+						.tableCellIndex = k,
+					}, elements);
+				}
+			}
+			break;
+		case BlockKind::Details:
+			appendBoundaryTextElement({
+				.kind = LeafKind::BlockText,
+				.block = path,
+			}, elements);
+			collectBoundaryElements(
+				block.blocks,
+				BlockChildrenContainer(path),
+				elements);
+			break;
+		default: {
+			const auto before = elements->size();
+			if (!block.blocks.empty()) {
+				collectBoundaryElements(
+					block.blocks,
+					BlockChildrenContainer(path),
+					elements);
+			}
+			if (elements->size() == before) {
+				appendBoundaryBlockElement(path, elements);
+			}
+		} break;
+		}
+	}
+}
+
+void State::appendBoundaryTextElement(
+		LeafPath leaf,
+		std::vector<BoundaryElement> *elements) const {
+	const auto ordinal = textNodeOrdinal(leaf);
+	if (ordinal >= 0) {
+		elements->push_back({
+			.kind = BoundaryElement::Kind::Text,
+			.textOrdinal = ordinal,
+		});
+	}
+}
+
+void State::appendBoundaryBlockElement(
+		const BlockPath &path,
+		std::vector<BoundaryElement> *elements) const {
+	const auto owner = block(path);
+	if (owner && CanEditBlock(*owner)) {
+		elements->push_back({
+			.kind = BoundaryElement::Kind::Block,
+			.block = path,
+		});
+	}
+}
+
+PreparedEditSelection State::preparedSelectionForBlock(
+		const BlockPath &path) const {
+	return {
+		.kind = PreparedEditSelectionKind::Blocks,
+		.blocks = {
+			.container = ToPreparedBlockContainerPath(path.container),
+			.from = path.index,
+			.till = path.index + 1,
+		},
+	};
 }
 
 bool State::descriptorBelongsToBlock(

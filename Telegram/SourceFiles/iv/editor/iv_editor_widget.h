@@ -141,6 +141,11 @@ private:
 		Touch,
 	};
 
+	struct BoundarySelectionOrigin {
+		int ordinal = -1;
+		bool forward = false;
+	};
+
 	void setDocument(const Markdown::MarkdownArticleContent &prepared);
 	void activateTextOrdinal(int ordinal, int cursorOffset);
 	void activateTextOrdinal(int ordinal, int selectionFrom, int selectionTo);
@@ -185,10 +190,14 @@ private:
 	[[nodiscard]] bool removeBoundaryOwner(bool forward);
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
+	void ensureArticleLayoutForInlineField(int width);
 	void syncInlineFieldGeometry(int width);
 	void clearSelection();
 	void clearTextSelection();
 	void clearStructuralSelection();
+	void setStructuralSelection(
+		Markdown::PreparedEditSelection selection,
+		std::optional<BoundarySelectionOrigin> origin = std::nullopt);
 	[[nodiscard]] bool hasStructuralSelection() const;
 	void startArticleSelection(
 		QPoint pressPoint,
@@ -241,6 +250,7 @@ private:
 	Markdown::MarkdownArticleSelection _selection;
 	Markdown::MarkdownArticleSelectionEndpoints _selectionEndpoints;
 	Markdown::PreparedEditSelection _structuralSelection;
+	std::optional<BoundarySelectionOrigin> _boundarySelectionOrigin;
 	ArticleSelectionDrag _articleSelectionDrag;
 	std::optional<Qt::Orientation> _horizontalScrollLock;
 	bool _settingField = false;

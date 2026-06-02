@@ -1397,7 +1397,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			|| hasStructuralSelection();
 		_selection = {};
 		_selectionEndpoints = {};
-		_structuralSelection = {};
+		setStructuralSelection({});
 		if (changed) {
 			update();
 		}
@@ -1719,6 +1719,7 @@ void Widget::activateTextOrdinal(
 	if (!_state->setActiveTextByOrdinal(ordinal)) {
 		return;
 	}
+	_boundarySelectionOrigin = std::nullopt;
 	_activeOrdinal = ordinal;
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
@@ -1827,15 +1828,15 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 	if (cursor.hasSelection()) {
 		return false;
 	}
-	const auto position = cursor.position();
-	const auto length = _field->getLastText().size();
+	const auto atStart = cursor.atStart();
+	const auto atEnd = cursor.atEnd();
 	auto handled = false;
-	if (position <= 0
+	if (atStart
 		&& (key == Qt::Key_Left
 			|| key == Qt::Key_Up
 			|| key == Qt::Key_PageUp)) {
 		handled = moveBoundary(false, false);
-	} else if (position >= length && key == Qt::Key_Down) {
+	} else if (atEnd && key == Qt::Key_Down) {
 		commitInlineField();
 		if (const auto target = _state->moveActiveQuoteDown()) {
 			refreshPreparedContent();
@@ -1844,7 +1845,7 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 		} else {
 			handled = moveBoundaryAfterCommit(true, true);
 		}
-	} else if (position >= length
+	} else if (atEnd
 		&& (key == Qt::Key_Right
 			|| key == Qt::Key_PageDown)) {
 		handled = moveBoundary(true, true);
@@ -1859,9 +1860,9 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 			activateTextOrdinal(*target, 0);
 			handled = true;
 		}
-	} else if (position <= 0 && key == Qt::Key_Backspace) {
+	} else if (atStart && key == Qt::Key_Backspace) {
 		handled = removeBoundaryOwner(false);
-	} else if (position >= length && key == Qt::Key_Delete) {
+	} else if (atEnd && key == Qt::Key_Delete) {
 		handled = removeBoundaryOwner(true);
 	}
 	if (handled) {
@@ -1963,6 +1964,7 @@ bool Widget::moveTabBoundary(bool forward) {
 bool Widget::removeBoundaryOwner(bool forward) {
 	commitInlineField();
 	if (_state->activeOwnerIsEmpty()) {
+		_boundarySelectionOrigin = std::nullopt;
 		const auto target = _state->removeActiveOwnerAndSelectAdjacent(
 			forward);
 		hideInlineField();
@@ -1977,6 +1979,35 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		} else {
 			activateInitialNode();
 		}
+		return true;
+	}
+	const auto target = _state->activeBoundaryTarget(forward);
+	if (target.textOrdinal >= 0) {
+		_boundarySelectionOrigin = std::nullopt;
+		refreshPreparedContent();
+		if (forward) {
+			activateTextOrdinal(target.textOrdinal, 0);
+		} else {
+			activateTextOrdinalAtEnd(target.textOrdinal);
+		}
+		return true;
+	}
+	if (!target.structuralSelection.empty()) {
+		setStructuralSelection(
+			target.structuralSelection,
+			BoundarySelectionOrigin{
+				.ordinal = _activeOrdinal,
+				.forward = forward,
+			});
+		_selection = {};
+		_selectionEndpoints = {};
+		_articleSelectionDrag = {};
+		_pendingOrdinal = -1;
+		_pendingCursorOffset = 0;
+		hideInlineField();
+		_article->clearTextLeafHeightOverride();
+		refreshPreparedContent();
+		update();
 		return true;
 	}
 	return moveBoundaryAfterCommit(forward, forward);
@@ -2021,10 +2052,18 @@ void Widget::updateInlineFieldHeightOverride() {
 	update();
 }
 
+void Widget::ensureArticleLayoutForInlineField(int width) {
+	if (!_article || width <= 0) {
+		return;
+	}
+	_articleHeight = _article->resizeGetHeight(articleWidth(width));
+}
+
 void Widget::syncInlineFieldGeometry(int width) {
 	if (_field->isHidden() || width <= 0) {
 		return;
 	}
+	ensureArticleLayoutForInlineField(width);
 	if (_activeSegmentIndex >= 0) {
 		ensureInlineFieldForSegment(_activeSegmentIndex);
 	}
@@ -2056,6 +2095,13 @@ void Widget::syncInlineFieldGeometry(int width) {
 	}
 }
 
+void Widget::setStructuralSelection(
+		Markdown::PreparedEditSelection selection,
+		std::optional<BoundarySelectionOrigin> origin) {
+	_structuralSelection = std::move(selection);
+	_boundarySelectionOrigin = std::move(origin);
+}
+
 void Widget::clearSelection() {
 	const auto changed = !_selection.empty()
 		|| _selectionEndpoints.from.valid()
@@ -2064,7 +2110,7 @@ void Widget::clearSelection() {
 		|| _articleSelectionDrag.active;
 	_selection = {};
 	_selectionEndpoints = {};
-	_structuralSelection = {};
+	setStructuralSelection({});
 	_articleSelectionDrag = {};
 	if (changed) {
 		update();
@@ -2094,7 +2140,7 @@ void Widget::clearStructuralSelection() {
 	const auto changed = hasStructuralSelection()
 		|| (_articleSelectionDrag.active
 			&& _articleSelectionDrag.mode == DragSelectionMode::Structural);
-	_structuralSelection = {};
+	setStructuralSelection({});
 	if (_articleSelectionDrag.mode == DragSelectionMode::Structural) {
 		finishArticleSelection();
 	}
@@ -2264,14 +2310,14 @@ void Widget::updateArticleSelection(
 	if (_articleSelectionDrag.mode == DragSelectionMode::Structural) {
 		if (directOriginalTextHit()) {
 			const auto forceUpdate = !_structuralSelection.empty();
-			_structuralSelection = {};
+			setStructuralSelection({});
 			_articleSelectionDrag.mode = DragSelectionMode::Text;
 			updateTextSelection(forceUpdate);
 			return;
 		}
 		if (directOriginalEditableHit()) {
 			const auto changed = !_structuralSelection.empty();
-			_structuralSelection = {};
+			setStructuralSelection({});
 			_articleSelectionDrag.mode = DragSelectionMode::None;
 			if (changed) {
 				update();
@@ -2282,7 +2328,7 @@ void Widget::updateArticleSelection(
 			_articleSelectionDrag.anchorHit,
 			editHit);
 		if (_structuralSelection != selection) {
-			_structuralSelection = selection;
+			setStructuralSelection(selection);
 			update();
 		}
 		return;
@@ -2300,7 +2346,7 @@ void Widget::updateArticleSelection(
 			_articleSelectionDrag.anchorHit,
 			editHit);
 		if (_structuralSelection != selection) {
-			_structuralSelection = selection;
+			setStructuralSelection(selection);
 			update();
 		}
 		return;
@@ -2321,7 +2367,7 @@ void Widget::updateArticleSelection(
 		|| (_structuralSelection != selection);
 	_selection = {};
 	_selectionEndpoints = {};
-	_structuralSelection = selection;
+	setStructuralSelection(selection);
 	_articleSelectionDrag.mode = DragSelectionMode::Structural;
 	clearFieldSelection();
 	if (changed) {
@@ -2352,15 +2398,30 @@ bool Widget::handleStructuralSelectionKey(QKeyEvent *e) {
 	if (!forward && key != Qt::Key_Backspace) {
 		return false;
 	}
-	const auto target = removeCurrentStructuralSelection(forward);
-	if (target) {
-		if (forward) {
-			activateTextOrdinal(*target, 0);
-		} else {
-			activateTextOrdinalAtEnd(*target);
+	const auto origin = [&]() -> std::optional<BoundarySelectionOrigin> {
+		if (_boundarySelectionOrigin
+			&& _boundarySelectionOrigin->forward == forward) {
+			return _boundarySelectionOrigin;
 		}
-	} else {
-		activateInitialNode();
+		return std::nullopt;
+	}();
+	const auto target = removeCurrentStructuralSelection(forward);
+	auto activatedOrigin = false;
+	if (origin && _state->setActiveTextByOrdinal(origin->ordinal)) {
+		const auto cursor = origin->forward ? _state->activeTextLength() : 0;
+		activateTextOrdinal(origin->ordinal, cursor);
+		activatedOrigin = true;
+	}
+	if (!activatedOrigin) {
+		if (target) {
+			if (forward) {
+				activateTextOrdinal(*target, 0);
+			} else {
+				activateTextOrdinalAtEnd(*target);
+			}
+		} else {
+			activateInitialNode();
+		}
 	}
 	e->accept();
 	return true;
@@ -2464,7 +2525,7 @@ bool Widget::handleFieldMouseEvent(QEvent *event) {
 			|| hasStructuralSelection();
 		_selection = {};
 		_selectionEndpoints = {};
-		_structuralSelection = {};
+		setStructuralSelection({});
 		if (changed) {
 			update();
 		}
