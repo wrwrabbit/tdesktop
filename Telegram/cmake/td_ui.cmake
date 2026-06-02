@@ -489,6 +489,8 @@ PRIVATE
     ui/effects/premium_3d_support.h
     ui/effects/premium_bubble.cpp
     ui/effects/premium_bubble.h
+    ui/effects/premium_diamond_renderer.cpp
+    ui/effects/premium_diamond_renderer.h
     ui/effects/premium_graphics.cpp
     ui/effects/premium_graphics.h
     ui/effects/premium_star.cpp
