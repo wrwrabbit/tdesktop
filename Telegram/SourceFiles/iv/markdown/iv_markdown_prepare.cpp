@@ -70,7 +70,7 @@ const MarkdownPrepareLimits &PrepareLimitsForIv() {
 	static const auto result = MarkdownPrepareLimits{
 		.tableRender = {
 			.maxRows = 128,
-			.maxColumns = 16,
+			.maxColumns = 20,
 			.maxCells = 1024,
 		},
 		.visualListDepth = 16,

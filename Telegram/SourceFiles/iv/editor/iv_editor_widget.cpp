@@ -1409,7 +1409,9 @@ void Widget::fillTableChangeMenu(
 }
 
 void Widget::applyTableChange(Fn<bool()> change) {
-	commitInlineField();
+	if (!commitInlineField()) {
+		return;
+	}
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 	hideInlineField();

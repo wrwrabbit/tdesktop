@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QtCore/QSize>
 
@@ -118,7 +119,11 @@ struct RichMessageMetrics {
 	int maxDepth = 0;
 	int mediaCount = 0;
 	int maxTableColumns = 0;
+	int tableColumnMeasurementLimit = 0;
 };
+
+using TableOccupancyRow = std::vector<char>;
+using TableOccupancyGrid = std::vector<TableOccupancyRow>;
 
 enum class RichTextParseMode {
 	Normal,
@@ -148,12 +153,180 @@ void AccumulateTextLength(
 	}
 }
 
-[[nodiscard]] int EffectiveTableColumns(const TableRow &row) {
+[[nodiscard]] int NormalizeTableSpan(int span) {
+	return std::max(span, 1);
+}
+
+[[nodiscard]] int ClampTableRowspan(
+		int rawRowspan,
+		int row,
+		int rowCount) {
+	if ((row < 0) || (row >= rowCount) || (rowCount <= 0)) {
+		return 0;
+	}
+	return std::min(NormalizeTableSpan(rawRowspan), rowCount - row);
+}
+
+[[nodiscard]] int ClampTableColspan(
+		int rawColspan,
+		int column,
+		int maxColumns) {
+	if ((column < 0) || (column >= maxColumns) || (maxColumns <= 0)) {
+		return 0;
+	}
+	return std::min(NormalizeTableSpan(rawColspan), maxColumns - column);
+}
+
+[[nodiscard]] bool CanOccupyTableSlots(
+		const TableOccupancyGrid &occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy.size()))) {
+		return false;
+	}
+	const auto rowLimit = std::min(row + rowspan, int(occupancy.size()));
+	const auto columnLimit = column + colspan;
+	for (auto currentRow = row; currentRow != rowLimit; ++currentRow) {
+		const auto &occupied = occupancy[currentRow];
+		const auto occupiedLimit = std::min(columnLimit, int(occupied.size()));
+		for (auto currentColumn = column;
+				currentColumn != occupiedLimit;
+				++currentColumn) {
+			if (occupied[currentColumn]) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] int FirstAvailableTableColumn(
+		const TableOccupancyGrid &occupancy,
+		int row,
+		int rowspan,
+		int colspan,
+		int maxColumns) {
+	if ((row < 0)
+		|| (row >= int(occupancy.size()))
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (maxColumns <= 0)) {
+		return -1;
+	}
+	for (auto column = 0; column != maxColumns; ++column) {
+		const auto effectiveColspan = ClampTableColspan(
+			colspan,
+			column,
+			maxColumns);
+		if (effectiveColspan <= 0) {
+			continue;
+		}
+		if (CanOccupyTableSlots(
+				occupancy,
+				row,
+				column,
+				rowspan,
+				effectiveColspan)) {
+			return column;
+		}
+	}
+	return -1;
+}
+
+void MarkTableSlots(
+		TableOccupancyGrid *occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy->size()))) {
+		return;
+	}
+	const auto rowLimit = std::min(row + rowspan, int(occupancy->size()));
+	const auto columnLimit = column + colspan;
+	for (auto currentRow = row; currentRow != rowLimit; ++currentRow) {
+		auto &occupied = (*occupancy)[currentRow];
+		if (columnLimit > int(occupied.size())) {
+			occupied.resize(columnLimit, false);
+		}
+		for (auto currentColumn = column;
+				currentColumn != columnLimit;
+				++currentColumn) {
+			occupied[currentColumn] = true;
+		}
+	}
+}
+
+[[nodiscard]] int TableColumnCount(const TableOccupancyGrid &occupancy) {
 	auto result = 0;
-	for (const auto &cell : row.cells) {
-		result += std::max(cell.colspan, 1);
+	for (const auto &row : occupancy) {
+		result = std::max(result, int(row.size()));
 	}
 	return result;
+}
+
+[[nodiscard]] int TableColumnMeasurementLimit(int maxTableCols) {
+	if (maxTableCols <= 0) {
+		return 1;
+	}
+	return (maxTableCols == std::numeric_limits<int>::max())
+		? maxTableCols
+		: (maxTableCols + 1);
+}
+
+[[nodiscard]] int EffectiveTableColumns(
+		const std::vector<TableRow> &rows,
+		int maxColumns) {
+	if (rows.empty() || maxColumns <= 0) {
+		return 0;
+	}
+	auto occupancy = TableOccupancyGrid(rows.size());
+	for (auto rowIndex = 0; rowIndex != int(rows.size()); ++rowIndex) {
+		const auto &row = rows[rowIndex];
+		for (const auto &cell : row.cells) {
+			const auto normalizedColspan = NormalizeTableSpan(cell.colspan);
+			const auto rowspan = ClampTableRowspan(
+				cell.rowspan,
+				rowIndex,
+				int(rows.size()));
+			if (rowspan <= 0) {
+				continue;
+			}
+			const auto column = FirstAvailableTableColumn(
+				occupancy,
+				rowIndex,
+				rowspan,
+				normalizedColspan,
+				maxColumns);
+			if (column < 0) {
+				return maxColumns;
+			}
+			const auto colspan = ClampTableColspan(
+				normalizedColspan,
+				column,
+				maxColumns);
+			if (colspan != normalizedColspan) {
+				return maxColumns;
+			}
+			MarkTableSlots(
+				&occupancy,
+				rowIndex,
+				column,
+				rowspan,
+				colspan);
+		}
+	}
+	return TableColumnCount(occupancy);
 }
 
 void AccumulateBlockMetrics(
@@ -188,13 +361,15 @@ void AccumulateBlockMetrics(
 	}
 	for (const auto &row : block.tableRows) {
 		++metrics->blockCount;
-		metrics->maxTableColumns = std::max(
-			metrics->maxTableColumns,
-			EffectiveTableColumns(row));
 		for (const auto &cell : row.cells) {
 			AccumulateTextLength(metrics, cell.text);
 		}
 	}
+	metrics->maxTableColumns = std::max(
+		metrics->maxTableColumns,
+		EffectiveTableColumns(
+			block.tableRows,
+			metrics->tableColumnMeasurementLimit));
 }
 
 void AccumulateBlockMetrics(
@@ -207,8 +382,11 @@ void AccumulateBlockMetrics(
 }
 
 [[nodiscard]] RichMessageMetrics ComputeRichMessageMetrics(
-		const RichPage &page) {
+		const RichPage &page,
+		const RichMessageLimits &limits) {
 	auto result = RichMessageMetrics();
+	result.tableColumnMeasurementLimit = TableColumnMeasurementLimit(
+		limits.maxTableCols);
 	AccumulateBlockMetrics(&result, page.blocks, 1);
 	return result;
 }
@@ -1528,7 +1706,7 @@ RichMessageLimits ResolveRichMessageLimits(not_null<Main::Session*> session) {
 std::optional<RichMessageLimitError> ValidateRichMessage(
 		const RichPage &page,
 		const RichMessageLimits &limits) {
-	const auto metrics = ComputeRichMessageMetrics(page);
+	const auto metrics = ComputeRichMessageMetrics(page, limits);
 	if (metrics.textLength > limits.lengthLimit) {
 		return RichMessageLimitError::Length;
 	} else if (metrics.blockCount > limits.maxBlocks) {
