@@ -111,6 +111,18 @@ Object3dMesh LoadObject3dMesh(
 	return result;
 }
 
+Object3dModel LoadObject3dModel(
+		const std::vector<QString> &paths,
+		float scale,
+		bool withUv) {
+	auto result = Object3dModel();
+	result.shells.reserve(paths.size());
+	for (const auto &path : paths) {
+		result.shells.push_back(LoadObject3dMesh(path, scale, withUv));
+	}
+	return result;
+}
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 QShader LoadObject3dShader(const QString &name) {
 	return Rhi::ShaderFromFile(u":/shaders/"_q + name + u".qsb"_q);

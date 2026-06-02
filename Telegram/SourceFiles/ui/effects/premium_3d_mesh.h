@@ -25,6 +25,27 @@ struct Object3dMesh {
 	float scale,
 	bool withUv);
 
+struct Object3dModel {
+	std::vector<Object3dMesh> shells;
+
+	[[nodiscard]] bool isNull() const {
+		if (shells.empty()) {
+			return true;
+		}
+		for (const auto &shell : shells) {
+			if (shell.vertices.empty()) {
+				return true;
+			}
+		}
+		return false;
+	}
+};
+
+[[nodiscard]] Object3dModel LoadObject3dModel(
+	const std::vector<QString> &paths,
+	float scale,
+	bool withUv);
+
 [[nodiscard]] QShader LoadObject3dShader(const QString &name);
 [[nodiscard]] QImage LoadObject3dFlecksTexture();
 
