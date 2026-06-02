@@ -68,7 +68,7 @@ int PremiumLimits::dialogFiltersDefault() const {
 	return appConfigLimit("dialog_filters_limit_default", 10);
 }
 int PremiumLimits::dialogFiltersPremium() const {
-	return appConfigLimit("dialog_filters_limit_premium", 20);
+	return appConfigLimit("dialog_filters_limit_premium", 30);
 }
 int PremiumLimits::dialogFiltersCurrent() const {
 	return isPremium()
