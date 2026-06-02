@@ -20,6 +20,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/click_handler.h"
 #include "ui/painter.h"
 
+#include <QtGui/QColor>
+
 #include <memory>
 #include <optional>
 #include <span>
@@ -250,6 +252,7 @@ inline bool operator!=(
 struct MarkdownArticleTextLeafStyle {
 	const style::TextStyle *textStyle = nullptr;
 	style::color textColor;
+	QColor markBg;
 	int lineHeight = 0;
 	style::align align = style::al_left;
 	bool italic = false;

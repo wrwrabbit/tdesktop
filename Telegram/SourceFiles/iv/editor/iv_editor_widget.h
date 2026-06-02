@@ -85,6 +85,7 @@ private:
 		const style::TextStyle *textStyle = nullptr;
 		int lineHeight = 0;
 		style::color textFg;
+		QColor textMarkBg;
 		style::align align = style::al_left;
 		bool italic = false;
 	};
@@ -93,6 +94,7 @@ private:
 		style::font font;
 		int lineHeight = 0;
 		style::color textFg;
+		QColor textMarkBg;
 		style::align align = style::al_left;
 
 		friend inline bool operator==(
@@ -101,6 +103,7 @@ private:
 			return (a.font == b.font)
 				&& (a.lineHeight == b.lineHeight)
 				&& (a.textFg == b.textFg)
+				&& (a.textMarkBg == b.textMarkBg)
 				&& (a.align == b.align);
 		}
 
@@ -115,6 +118,7 @@ private:
 		InlineFieldStyleKey key;
 		std::shared_ptr<style::InputField> style;
 		std::shared_ptr<style::owned_color> ownedTextFg;
+		std::shared_ptr<style::owned_color> ownedTextMarkBg;
 	};
 
 	enum class DragSelectionMode {

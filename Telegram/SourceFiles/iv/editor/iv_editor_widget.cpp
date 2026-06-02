@@ -7,12 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/editor/iv_editor_widget.h"
 
+#include "base/qthelp_url.h"
 #include "base/qt/qt_common_adapters.h"
 #include "chat_helpers/message_field.h"
 #include "data/data_msg_id.h"
 #include "data/data_types.h"
 #include "data/stickers/data_custom_emoji.h"
+#include "iv/editor/iv_editor_text_entities.h"
 #include "iv/markdown/iv_markdown_article_paint.h"
+#include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
@@ -154,6 +157,25 @@ void EnableQTextEditLineMetrics(style::Markdown &style) {
 		}
 	}
 	return false;
+}
+
+[[nodiscard]] QString ValidateInstantViewEditorLink(QString link) {
+	const auto normal = qthelp::validate_url(link);
+	if (!normal.isEmpty()) {
+		return normal;
+	}
+	link = link.trimmed();
+	const auto hasPayload = [&](const QString &prefix) {
+		return link.startsWith(prefix)
+			&& !link.mid(prefix.size()).trimmed().isEmpty();
+	};
+	if (hasPayload(u"mailto:"_q)
+		|| hasPayload(u"tel:"_q)
+		|| (link.startsWith(u"#"_q)
+			&& !Markdown::NormalizeFragmentId(link).isEmpty())) {
+		return link;
+	}
+	return QString();
 }
 
 [[nodiscard]] bool ImeEventProducesInput(
@@ -1479,6 +1501,9 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 	auto key = inlineFieldStyleKey(data);
 	auto textFg = data.textFg;
 	auto ownedTextFg = std::shared_ptr<style::owned_color>();
+	auto ownedTextMarkBg = std::make_shared<style::owned_color>(
+		data.textMarkBg);
+	auto textMarkBg = ownedTextMarkBg->color();
 	if (_inlineFieldTextColorOverride
 		&& data.textFg.get() == _inlineFieldTextColorOverride->color().get()) {
 		ownedTextFg = std::make_shared<style::owned_color>(data.textFg->c);
@@ -1498,6 +1523,7 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 		: data.textStyle->font;
 	fieldStyle->style.lineHeight = data.lineHeight;
 	fieldStyle->textFg = textFg;
+	fieldStyle->textMarkBg = textMarkBg;
 	fieldStyle->textAlign = data.align;
 	fieldStyle->placeholderFont = fieldStyle->style.font;
 	fieldStyle->placeholderAlign = data.align;
@@ -1505,6 +1531,7 @@ const Widget::CachedInlineFieldStyle &Widget::inlineFieldStyleFor(
 		.key = key,
 		.style = std::move(fieldStyle),
 		.ownedTextFg = std::move(ownedTextFg),
+		.ownedTextMarkBg = std::move(ownedTextMarkBg),
 	});
 	return _fieldStyles.back();
 }
@@ -1558,6 +1585,9 @@ Widget::InlineFieldStyleData Widget::normalizedInlineFieldStyle(
 		.textFg = _inlineFieldTextColorOverride
 			? _inlineFieldTextColorOverride->color()
 			: (valid ? leafStyle.textColor : _articleStyle->textColor),
+		.textMarkBg = valid
+			? leafStyle.markBg
+			: _articleStyle->textPalette.markBg->c,
 		.align = valid ? leafStyle.align : style::al_left,
 		.italic = valid ? leafStyle.italic : false,
 	};
@@ -1574,6 +1604,7 @@ Widget::InlineFieldStyleKey Widget::inlineFieldStyleKey(
 			: textStyle->font,
 		.lineHeight = data.lineHeight,
 		.textFg = data.textFg,
+		.textMarkBg = data.textMarkBg,
 		.align = data.align,
 	};
 }
@@ -1601,6 +1632,7 @@ void Widget::setupInlineField() {
 				not_null<DocumentData*> emoji) {
 			return Data::AllowEmojiWithoutPremium(peer, emoji);
 		};
+		_field->setInstantViewEditorTagsEnabled(true);
 		InitMessageFieldHandlers({
 			.session = &_controller->session(),
 			.show = _controller->uiShow(),
@@ -1611,11 +1643,13 @@ void Widget::setupInlineField() {
 			},
 			.allowPremiumEmoji = allowPremiumEmoji,
 			.fieldStyle = &_field->st(),
+			.linkValidator = ValidateInstantViewEditorLink,
 		});
 		_field->setMimeDataHook(WrappedMessageFieldMimeHook(
 			Ui::InputField::MimeDataHook(),
 			_field.get()));
 	} else {
+		_field->setInstantViewEditorTagsEnabled(false);
 		_field->setInstantReplacesEnabled(
 			rpl::single(false),
 			rpl::single(false));
@@ -1737,24 +1771,30 @@ void Widget::activateTextOrdinal(
 	ensureInlineFieldForSegment(segmentIndex);
 	refreshInlineFieldPlaceholder();
 	_settingField = true;
+	auto cursorSelectionFrom = selectionFrom;
+	auto cursorSelectionTo = selectionTo;
 	if (_state->activeFieldMode() == State::FieldMode::Raw) {
 		_field->setTextWithTags(
 			{ _state->activeRawText(), {} },
 			Ui::InputField::HistoryAction::Clear);
 		_article->clearTextLeafHeightOverride();
 	} else {
-		const auto activeText = _state->activeText();
+		const auto activeText = ConvertRichTextToEditorTags(
+			_state->activeText());
 		_field->setTextWithTags(
-			{
-				activeText.text,
-				TextUtilities::ConvertEntitiesToTextTags(activeText.entities),
-			},
+			activeText.text,
 			Ui::InputField::HistoryAction::Clear);
+		cursorSelectionFrom = MapRichTextOffsetToEditorOffset(
+			activeText.replacements,
+			selectionFrom);
+		cursorSelectionTo = MapRichTextOffsetToEditorOffset(
+			activeText.replacements,
+			selectionTo);
 	}
 	auto cursor = _field->textCursor();
 	const auto size = int(_field->getLastText().size());
-	const auto from = std::clamp(selectionFrom, 0, size);
-	const auto to = std::clamp(selectionTo, 0, size);
+	const auto from = std::clamp(cursorSelectionFrom, 0, size);
+	const auto to = std::clamp(cursorSelectionTo, 0, size);
 	cursor.setPosition(from);
 	if (to != from) {
 		cursor.setPosition(to, QTextCursor::KeepAnchor);
@@ -1784,10 +1824,7 @@ void Widget::applyFieldTextToState() {
 		return;
 	}
 	const auto text = _field->getTextWithAppliedMarkdown();
-	_state->applyActiveText({
-		.text = text.text,
-		.entities = TextUtilities::ConvertTextTagsToEntities(text.tags),
-	});
+	_state->applyActiveText(ConvertEditorTagsToRichText(text));
 }
 
 void Widget::hideInlineField() {

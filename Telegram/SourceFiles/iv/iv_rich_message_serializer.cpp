@@ -38,6 +38,17 @@ using TaskState = RichPage::TaskState;
 
 constexpr auto kDefaultMapWidth = 400;
 constexpr auto kDefaultMapHeight = 200;
+constexpr auto kNoEntityIndex = -1;
+
+[[nodiscard]] QString FormulaTexFromSource(QString source) {
+	source = source.trimmed();
+	if (source.size() >= 2
+		&& source.front() == QChar('$')
+		&& source.back() == QChar('$')) {
+		source = source.mid(1, source.size() - 2).trimmed();
+	}
+	return source;
+}
 
 struct SerializeContext {
 	not_null<Main::Session*> session;
@@ -250,24 +261,42 @@ struct SerializeContext {
 	return result;
 }
 
-[[nodiscard]] const EntityInText *FindOuterEntityAt(
+[[nodiscard]] bool SkipEntityForRange(
+		const std::vector<EntityInText> &entities,
+		int index,
+		int skipIndex) {
+	if (index == skipIndex) {
+		return true;
+	} else if (skipIndex == kNoEntityIndex) {
+		return false;
+	}
+	const auto &entity = entities[index];
+	const auto &skip = entities[skipIndex];
+	return (index < skipIndex)
+		&& (entity.offset() == skip.offset())
+		&& (entity.length() == skip.length());
+}
+
+[[nodiscard]] int FindOuterEntityAt(
 		const std::vector<EntityInText> &entities,
 		int position,
 		int till,
-		const EntityInText *skip) {
-	for (const auto &entity : entities) {
-		if (&entity == skip) {
+		int skipIndex) {
+	const auto count = int(entities.size());
+	for (auto index = 0; index != count; ++index) {
+		const auto &entity = entities[index];
+		if (SkipEntityForRange(entities, index, skipIndex)) {
 			continue;
 		}
 		if (entity.offset() == position
 			&& entity.offset() + entity.length() <= till) {
-			return &entity;
+			return index;
 		}
 		if (entity.offset() > position) {
 			break;
 		}
 	}
-	return nullptr;
+	return kNoEntityIndex;
 }
 
 [[nodiscard]] std::optional<MTPRichText> SerializeRichTextRange(
@@ -276,13 +305,14 @@ struct SerializeContext {
 		int from,
 		int till,
 		SerializeContext *context,
-		const EntityInText *skip);
+		int skipIndex);
 
 [[nodiscard]] std::optional<MTPRichText> SerializeRichTextEntity(
 		const QString &text,
 		const std::vector<EntityInText> &entities,
-		const EntityInText &entity,
+		int entityIndex,
 		SerializeContext *context) {
+	const auto &entity = entities[entityIndex];
 	const auto from = entity.offset();
 	const auto length = entity.length();
 	const auto segment = text.mid(from, length);
@@ -292,7 +322,7 @@ struct SerializeContext {
 		from,
 		from + length,
 		context,
-		&entity);
+		entityIndex);
 	if (!inner) {
 		return std::nullopt;
 	}
@@ -362,9 +392,9 @@ struct SerializeContext {
 				if (!formula) {
 					return std::nullopt;
 				}
-				const auto source = !formula->copySource.isEmpty()
-					? formula->copySource
-					: formula->trimmedTex;
+				const auto source = !formula->trimmedTex.isEmpty()
+					? formula->trimmedTex
+					: FormulaTexFromSource(formula->copySource);
 				return source.isEmpty()
 					? std::optional<MTPRichText>(
 						MakePlainRichText(segment))
@@ -446,13 +476,15 @@ struct SerializeContext {
 		int from,
 		int till,
 		SerializeContext *context,
-		const EntityInText *skip) {
+		int skipIndex) {
 	auto parts = QVector<MTPRichText>();
 	auto position = from;
 	while (position < till) {
 		auto nextEntityStart = till;
-		for (const auto &entity : entities) {
-			if (&entity == skip) {
+		const auto count = int(entities.size());
+		for (auto index = 0; index != count; ++index) {
+			const auto &entity = entities[index];
+			if (SkipEntityForRange(entities, index, skipIndex)) {
 				continue;
 			}
 			if (entity.offset() >= position
@@ -471,8 +503,8 @@ struct SerializeContext {
 			entities,
 			position,
 			till,
-			skip);
-		if (!entity) {
+			skipIndex);
+		if (entity == kNoEntityIndex) {
 			parts.push_back(MakePlainRichText(text.mid(position, 1)));
 			++position;
 			continue;
@@ -480,13 +512,14 @@ struct SerializeContext {
 		const auto wrapped = SerializeRichTextEntity(
 			text,
 			entities,
-			*entity,
+			entity,
 			context);
 		if (!wrapped) {
 			return std::nullopt;
 		}
 		parts.push_back(*wrapped);
-		position = entity->offset() + entity->length();
+		const auto &wrappedEntity = entities[entity];
+		position = wrappedEntity.offset() + wrappedEntity.length();
 	}
 	return JoinRichTextParts(std::move(parts));
 }
@@ -502,7 +535,7 @@ struct SerializeContext {
 		0,
 		text.text.text.size(),
 		context,
-		nullptr);
+		kNoEntityIndex);
 	if (!result) {
 		return std::nullopt;
 	}

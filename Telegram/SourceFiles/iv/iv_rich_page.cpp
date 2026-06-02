@@ -43,6 +43,16 @@ using TableRow = RichPage::TableRow;
 using TableVerticalAlignment = RichPage::TableVerticalAlignment;
 using TaskState = RichPage::TaskState;
 
+[[nodiscard]] QString FormulaTexFromSource(QString source) {
+	source = source.trimmed();
+	if (source.size() >= 2
+		&& source.front() == QChar('$')
+		&& source.back() == QChar('$')) {
+		source = source.mid(1, source.size() - 2).trimmed();
+	}
+	return source;
+}
+
 const auto PhotoLargeLevels = u"ydxcwmbsa"_q;
 constexpr auto kDefaultMapWidth = 400;
 constexpr auto kDefaultMapHeight = 200;
@@ -423,12 +433,12 @@ void RememberWebPageMedia(
 			entityData));
 		return true;
 	}, [&](const MTPDtextMath &data) {
-		const auto source = qs(data.vsource());
+		const auto source = FormulaTexFromSource(qs(data.vsource()));
 		const auto entityData = Markdown::SerializeInlineTextObjectEntity({
 			.kind = Markdown::InlineTextObjectKind::Formula,
 			.data = Markdown::InlineTextObjectFormulaData{
 				.copySource = Markdown::InlineFormulaCopySource(source),
-				.trimmedTex = source.trimmed(),
+				.trimmedTex = source,
 			},
 		});
 		if (entityData.isEmpty()) {

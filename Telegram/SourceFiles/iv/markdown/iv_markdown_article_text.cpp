@@ -1094,20 +1094,16 @@ auto InlineFormulaObjectCache::lookupOrCreate(
 	if (measuredData) {
 		measured = *measuredData;
 	} else {
-		const auto fallbackAscent = std::max(TextLineAscent(textStyle), 0);
-		const auto fallbackSize = QSize(
-			std::max(textStyle.font->width(signature.trimmedTex), 1),
-			std::max(TextLineHeight(textStyle), 1));
-		measured.logicalSize = fallbackSize;
-		measured.logicalDepth = std::max(
-			fallbackSize.height() - fallbackAscent,
-			0);
-		measured.exact = InlineFormulaExactMetricsFromLogical(
-			fallbackSize,
-			fallbackAscent);
-		measured.fallbackText = signature.trimmedTex;
-		measured.success = false;
-		NormalizeInlineFormulaRasterMetrics(&measured);
+		if (!_renderer) {
+			_renderer = std::make_shared<MathRenderer>();
+		}
+		measured = _renderer->measureFormula({
+			.trimmedTex = signature.trimmedTex,
+			.kind = signature.kind,
+			.textSize = signature.textSize,
+			.renderWidthCap = signature.renderWidthCap,
+			.renderHeightCap = signature.renderHeightCap,
+		});
 		measuredData = std::make_shared<MeasuredFormula>(measured);
 	}
 	const auto fallbackText = InlineFormulaDisplayFallbackText(

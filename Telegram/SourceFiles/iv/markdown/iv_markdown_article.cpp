@@ -180,6 +180,15 @@ void RestoreRelatedArticleImageStates(
 	return segment.isTextLeaf() || IsDisplayMathSegment(segment);
 }
 
+[[nodiscard]] QColor MarkBgColorForStyle(const style::Markdown &st) {
+	auto result = st.textPalette.markBg->c;
+	result.setAlphaF(result.alphaF() * std::clamp(
+		st.markBgOpacity,
+		0.,
+		1.));
+	return result;
+}
+
 template <typename T>
 [[nodiscard]] int CompareValues(const T &a, const T &b) {
 	return (a < b) ? -1 : (b < a) ? 1 : 0;
@@ -2084,11 +2093,7 @@ void MarkdownArticle::Impl::paint(
 	local.selectionState.segments = &_segments;
 	const auto &paintSt = local.paintMarkdownStyle(st);
 	auto textPalette = paintSt.textPalette;
-	auto markBg = textPalette.markBg->c;
-	markBg.setAlphaF(markBg.alphaF() * std::clamp(
-		paintSt.markBgOpacity,
-		0.,
-		1.));
+	auto markBg = MarkBgColorForStyle(paintSt);
 	const auto ownedMarkBg = style::internal::OwnedColor(markBg);
 	textPalette.markBg = ownedMarkBg.color();
 	const auto &previousTextPalette = p.textPalette();
@@ -2305,6 +2310,7 @@ MarkdownArticleTextLeafStyle MarkdownArticle::Impl::textLeafStyleForSegment(
 	return {
 		.textStyle = &textStyle,
 		.textColor = TextColorForSegment(*segment, st),
+		.markBg = MarkBgColorForStyle(st),
 		.lineHeight = TextLineHeight(textStyle),
 		.align = segment->align,
 		.italic = segment->block && segment->block->pullquote,
@@ -2325,6 +2331,7 @@ MarkdownArticleTextLeafStyle MarkdownArticle::Impl::editableStyleForSegment(
 	return {
 		.textStyle = &st.displayMath.fallbackStyle,
 		.textColor = st.displayMath.fg,
+		.markBg = MarkBgColorForStyle(st),
 		.lineHeight = TextLineHeight(st.displayMath.fallbackStyle),
 		.align = segment->align,
 	};

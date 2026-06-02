@@ -15,6 +15,8 @@ PRIVATE
     iv/editor/iv_editor_box.h
     iv/editor/iv_editor_state.cpp
     iv/editor/iv_editor_state.h
+    iv/editor/iv_editor_text_entities.cpp
+    iv/editor/iv_editor_text_entities.h
     iv/editor/iv_editor_widget.cpp
     iv/editor/iv_editor_widget.h
 

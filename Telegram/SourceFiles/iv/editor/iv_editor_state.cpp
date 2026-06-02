@@ -2137,8 +2137,8 @@ void State::rebuildTextNodes(
 						})
 						: std::nullopt);
 			}
-			appendBlockTextNode(path, LeafKind::BlockCaption);
 			rebuildTextNodes(block.blocks, BlockChildrenContainer(path));
+			appendBlockTextNode(path, LeafKind::BlockCaption);
 			break;
 		case BlockKind::List:
 			for (auto j = 0, itemCount = int(block.listItems.size());
