@@ -24,6 +24,7 @@ public:
 	[[nodiscard]] static bool Supported();
 
 	void setColors(QColor gradient1, QColor gradient2);
+	void setGolden(bool golden);
 	void setShownProgress(float64 progress);
 	void setPaused(bool paused);
 	void startEnter();
@@ -91,6 +92,7 @@ private:
 
 	QColor _gradient1;
 	QColor _gradient2;
+	bool _golden = false;
 
 	float64 _yaw = 0.;
 	float64 _pitch = 0.;

@@ -52,6 +52,15 @@ void Star::setColors(QColor gradient1, QColor gradient2) {
 #endif
 }
 
+void Star::setGolden(bool golden) {
+	_golden = golden;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (_renderer) {
+		_renderer->setGolden(_golden);
+	}
+#endif
+}
+
 void Star::setShownProgress(float64 progress) {
 	progress = std::clamp(progress, 0., 1.);
 	if (_opacity == progress) {
@@ -93,6 +102,7 @@ void Star::ensureSurface() {
 	}
 	auto renderer = std::make_unique<StarRenderer>();
 	_renderer = renderer.get();
+	_renderer->setGolden(_golden);
 	if (_gradient1.isValid() && _gradient2.isValid()) {
 		_renderer->setColors(_gradient1, _gradient2);
 	}
