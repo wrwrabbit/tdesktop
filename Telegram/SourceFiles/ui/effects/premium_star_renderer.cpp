@@ -10,7 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 
 #include "ui/effects/premium_star_model.h"
-#include "ui/rhi/rhi_shader.h"
+#include "ui/effects/premium_3d_mesh.h"
 #include "base/debug_log.h"
 
 #include <rhi/qrhi.h>
@@ -45,10 +45,6 @@ struct alignas(16) StarUniforms {
 static_assert(sizeof(StarUniforms) == 192);
 static_assert(sizeof(StarUniforms) % 16 == 0);
 
-[[nodiscard]] QShader LoadShader(const QString &name) {
-	return Rhi::ShaderFromFile(u":/shaders/"_q + name + u".qsb"_q);
-}
-
 [[nodiscard]] QImage RenderBorderTexture() {
 	auto renderer = QSvgRenderer(u":/gui/art/premium/star_texture.svg"_q);
 	auto image = QImage(
@@ -60,12 +56,6 @@ static_assert(sizeof(StarUniforms) % 16 == 0);
 	renderer.render(&p);
 	p.end();
 	return image;
-}
-
-[[nodiscard]] QImage LoadFlecksTexture() {
-	return QImage(
-		u":/gui/art/premium/flecks.png"_q
-	).convertToFormat(QImage::Format_RGBA8888);
 }
 
 } // namespace
@@ -140,7 +130,7 @@ void StarRenderer::initialize(
 		QRhiSampler::ClampToEdge);
 	_borderSampler->create();
 
-	const auto flecks = LoadFlecksTexture();
+	const auto flecks = LoadObject3dFlecksTexture();
 	_flecksTexture = rhi->newTexture(QRhiTexture::RGBA8, flecks.size());
 	_flecksTexture->create();
 	_flecksSampler = rhi->newSampler(
@@ -173,8 +163,8 @@ void StarRenderer::initialize(
 }
 
 bool StarRenderer::createPipeline(QRhiRenderTarget *rt) {
-	const auto vertShader = LoadShader(u"premium_star.vert"_q);
-	const auto fragShader = LoadShader(u"premium_star.frag"_q);
+	const auto vertShader = LoadObject3dShader(u"premium_star.vert"_q);
+	const auto fragShader = LoadObject3dShader(u"premium_star.frag"_q);
 	if (!vertShader.isValid() || !fragShader.isValid()) {
 		return false;
 	}
