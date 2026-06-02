@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/premium_star_particles.h"
 
 #include "base/algorithm.h"
+#include "ui/effects/animation_value.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/style/style_core.h"
@@ -92,10 +93,15 @@ StarParticles::StarParticles(Fn<void(const QRect &)> update)
 }
 
 void StarParticles::setColor(QColor color) {
-	if (_color == color) {
+	setColors(color, color);
+}
+
+void StarParticles::setColors(QColor color1, QColor color2) {
+	if (_color1 == color1 && _color2 == color2) {
 		return;
 	}
-	_color = color;
+	_color1 = color1;
+	_color2 = color2;
 	_spritesDirty = true;
 }
 
@@ -169,6 +175,7 @@ void StarParticles::createParticle(crl::time now, Particle &particle) {
 	particle.alpha = (kAlphaBasePercent
 		+ base::RandomIndex(kAlphaRangePercent, _random)) / 100.;
 	particle.sizeIndex = base::RandomIndex(int(_sprites.size()), _random);
+	particle.colorIndex = base::RandomIndex(kColorSteps, _random);
 	particle.birthTime = now;
 	particle.deathTime = now
 		+ kLifeMin
@@ -239,13 +246,7 @@ void StarParticles::rebuildSprites(int ratio) {
 	_spritesRatio = ratio;
 	const auto round = style::ConvertScale(kRoundDp) * ratio;
 	const auto pad = int(base::SafeRound(round)) + ratio;
-	auto fill = _color;
-	fill.setAlpha(kSpriteAlpha);
-	_maxSpriteExtent = 0.;
-	for (auto i = 0; i != int(_sprites.size()); ++i) {
-		const auto side = std::max(
-			1,
-			int(base::SafeRound(style::ConvertScale(kSizesDp[i]) * ratio)));
+	const auto bake = [&](int side, QColor fill) {
 		const auto full = side + 2 * pad;
 		auto image = QImage(full, full, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::transparent);
@@ -275,17 +276,32 @@ void StarParticles::rebuildSprites(int ratio) {
 			Qt::IgnoreAspectRatio,
 			Qt::SmoothTransformation);
 		image.setDevicePixelRatio(ratio);
-		const auto extent = full / float64(ratio);
-		_sprites[i] = Sprite{
+		return Sprite{
 			.image = std::move(image),
-			.size = Size(extent),
+			.size = Size(full / float64(ratio)),
 		};
-		_maxSpriteExtent = std::max(_maxSpriteExtent, extent);
+	};
+	_maxSpriteExtent = 0.;
+	for (auto i = 0; i != int(_sprites.size()); ++i) {
+		const auto side = std::max(
+			1,
+			int(base::SafeRound(style::ConvertScale(kSizesDp[i]) * ratio)));
+		for (auto j = 0; j != kColorSteps; ++j) {
+			const auto t = (kColorSteps > 1)
+				? (j / float64(kColorSteps - 1))
+				: 0.;
+			auto fill = anim::color(_color1, _color2, t);
+			fill.setAlpha(kSpriteAlpha);
+			_sprites[i][j] = bake(side, fill);
+		}
+		_maxSpriteExtent = std::max(
+			_maxSpriteExtent,
+			_sprites[i][0].size.width());
 	}
 }
 
 void StarParticles::paint(QPainter &p, const QRectF &field) {
-	if (!_color.isValid() || field.isEmpty()) {
+	if (!_color1.isValid() || field.isEmpty()) {
 		return;
 	}
 	ensureParticles();
@@ -325,7 +341,8 @@ void StarParticles::paint(QPainter &p, const QRectF &field) {
 		const auto position = QPointF(
 			center.x() + radial * std::cos(theta),
 			center.y() + radial * std::sin(theta));
-		const auto &sprite = _sprites[particle.sizeIndex];
+		const auto &sprite
+			= _sprites[particle.sizeIndex][particle.colorIndex];
 		const auto width = sprite.size.width() * scale;
 		const auto height = sprite.size.height() * scale;
 		p.setOpacity(baseOpacity * alpha);

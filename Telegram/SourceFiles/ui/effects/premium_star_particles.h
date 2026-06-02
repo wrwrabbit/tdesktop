@@ -17,6 +17,7 @@ public:
 	explicit StarParticles(Fn<void(const QRect &)> update);
 
 	void setColor(QColor color);
+	void setColors(QColor color1, QColor color2);
 	void paint(QPainter &p, const QRectF &field);
 	void setPaused(bool paused);
 	void fling(float64 strength);
@@ -30,6 +31,7 @@ private:
 		float64 distance = 0.;
 		float64 alpha = 0.;
 		int sizeIndex = 0;
+		int colorIndex = 0;
 	};
 	struct Sprite {
 		QImage image;
@@ -45,13 +47,15 @@ private:
 
 	const Fn<void(const QRect &)> _update;
 
-	std::array<Sprite, 3> _sprites;
+	static constexpr int kColorSteps = 20;
+	std::array<std::array<Sprite, kColorSteps>, 3> _sprites;
 	std::vector<Particle> _particles;
 
 	Ui::Animations::Basic _animation;
 	base::BufferedRandom<uint32> _random;
 
-	QColor _color;
+	QColor _color1;
+	QColor _color2;
 	float64 _maxSpriteExtent = 0.;
 	bool _spritesDirty = true;
 	int _spritesRatio = 0;
