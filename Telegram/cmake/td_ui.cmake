@@ -491,6 +491,8 @@ PRIVATE
     ui/effects/premium_3d_support.h
     ui/effects/premium_bubble.cpp
     ui/effects/premium_bubble.h
+    ui/effects/premium_coin.cpp
+    ui/effects/premium_coin.h
     ui/effects/premium_coin_renderer.cpp
     ui/effects/premium_coin_renderer.h
     ui/effects/premium_diamond.cpp
