@@ -128,6 +128,10 @@ TopBar::TopBar(
 			: MiniStarsType::BiStars) {
 	if (descriptor.use3dStar && Star::Supported()) {
 		_star3d = CreateChild<Star>(this);
+		_star3dGolden = descriptor.star3dGolden;
+		if (_star3dGolden) {
+			_star3d->setGolden(true);
+		}
 		_particles3d = std::make_unique<StarParticles>([=](
 				const QRect &area) {
 			update(area);
@@ -213,7 +217,12 @@ TopBar::TopBar(
 			_ministars.setColorOverride(descriptor.gradientStops);
 		}
 		if (_star3d) {
-			if (!_light && !TopBarAbstract::isDark()) {
+			if (_star3dGolden) {
+				_star3d->setColors(
+					QColor(0xFE, 0xC8, 0x46),
+					QColor(0xEC, 0x92, 0x0A));
+				_particles3d->setColor(QColor(0xFF, 0xC8, 0x37));
+			} else if (!_light && !TopBarAbstract::isDark()) {
 				_star3d->setColors(
 					QColor(255, 255, 255),
 					QColor(0xE3, 0xEC, 0xFA));

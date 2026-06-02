@@ -698,8 +698,11 @@ base::weak_qptr<Ui::RpWidget> Credits::createPinnedToTop(
 					: tr::lng_credits_summary_about)(
 						TextWithEntities::Simple),
 				.light = true,
+				.use3dStar = !isCurrency,
+				.star3dGolden = !isCurrency,
 				.use3dDiamond = isCurrency,
 				.gradientStops = Ui::Premium::CreditsIconGradientStops(),
+				.showFinished = _showFinished.events(),
 			});
 	}();
 	_setPaused = [=](bool paused) {
