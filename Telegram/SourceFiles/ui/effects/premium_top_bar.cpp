@@ -224,6 +224,7 @@ TopBar::TopBar(
 				_particles3d->setColors(
 					QColor(0xFA, 0x54, 0x16),
 					QColor(0xFF, 0xC8, 0x37));
+				_particles3d->setGlyph(StarParticles::Glyph::Star);
 			} else if (!_light && !TopBarAbstract::isDark()) {
 				_star3d->setColors(
 					QColor(255, 255, 255),

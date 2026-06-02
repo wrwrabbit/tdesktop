@@ -14,11 +14,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core.h"
 
 #include <QtMath>
+#include <QtSvg/QSvgRenderer>
 
 namespace Ui::Premium {
 namespace {
 
 constexpr auto kParticleCount = 100;
+constexpr auto kGlyphParticleCount = 75;
 constexpr auto kIdleLimit = 5;
 constexpr auto kMinDelta = crl::time(4);
 constexpr auto kMaxDelta = crl::time(50);
@@ -102,6 +104,14 @@ void StarParticles::setColors(QColor color1, QColor color2) {
 	}
 	_color1 = color1;
 	_color2 = color2;
+	_spritesDirty = true;
+}
+
+void StarParticles::setGlyph(Glyph glyph) {
+	if (_glyph == glyph) {
+		return;
+	}
+	_glyph = glyph;
 	_spritesDirty = true;
 }
 
@@ -189,7 +199,9 @@ void StarParticles::ensureParticles() {
 	}
 	const auto now = crl::now();
 	const auto perMs = driftStep(crl::time(1));
-	_particles.resize(kParticleCount);
+	_particles.resize((_glyph == Glyph::Star)
+		? kGlyphParticleCount
+		: kParticleCount);
 	for (auto &particle : _particles) {
 		createParticle(now, particle);
 		const auto life = particle.deathTime - particle.birthTime;
@@ -246,7 +258,7 @@ void StarParticles::rebuildSprites(int ratio) {
 	_spritesRatio = ratio;
 	const auto round = style::ConvertScale(kRoundDp) * ratio;
 	const auto pad = int(base::SafeRound(round)) + ratio;
-	const auto bake = [&](int side, QColor fill) {
+	const auto bakePath = [&](int side, QColor fill) {
 		const auto full = side + 2 * pad;
 		auto image = QImage(full, full, QImage::Format_ARGB32_Premultiplied);
 		image.fill(Qt::transparent);
@@ -281,18 +293,43 @@ void StarParticles::rebuildSprites(int ratio) {
 			.size = Size(full / float64(ratio)),
 		};
 	};
+	auto glyph = (_glyph == Glyph::Star)
+		? std::make_unique<QSvgRenderer>(u":/gui/icons/settings/star.svg"_q)
+		: nullptr;
+	const auto bakeGlyph = [&](int side, QColor fill) {
+		const auto full = side + 2 * pad;
+		auto image = QImage(full, full, QImage::Format_ARGB32_Premultiplied);
+		image.fill(Qt::transparent);
+		{
+			auto p = QPainter(&image);
+			glyph->render(&p, QRectF(pad, pad, side, side));
+			p.setCompositionMode(QPainter::CompositionMode_SourceIn);
+			p.fillRect(QRectF(0, 0, full, full), fill);
+		}
+		image.setDevicePixelRatio(ratio);
+		return Sprite{
+			.image = std::move(image),
+			.size = Size(full / float64(ratio)),
+		};
+	};
+	const auto sizes = (_glyph == Glyph::Star)
+		? std::array<float64, 3>{ { 11., 12., 13. } }
+		: kSizesDp;
 	_maxSpriteExtent = 0.;
 	for (auto i = 0; i != int(_sprites.size()); ++i) {
 		const auto side = std::max(
 			1,
-			int(base::SafeRound(style::ConvertScale(kSizesDp[i]) * ratio)));
+			int(base::SafeRound(style::ConvertScale(sizes[i]) * ratio)));
+		const auto useGlyph = (glyph != nullptr) && (i == 0);
 		for (auto j = 0; j != kColorSteps; ++j) {
 			const auto t = (kColorSteps > 1)
 				? (j / float64(kColorSteps - 1))
 				: 0.;
 			auto fill = anim::color(_color1, _color2, t);
 			fill.setAlpha(kSpriteAlpha);
-			_sprites[i][j] = bake(side, fill);
+			_sprites[i][j] = useGlyph
+				? bakeGlyph(side, fill)
+				: bakePath(side, fill);
 		}
 		_maxSpriteExtent = std::max(
 			_maxSpriteExtent,

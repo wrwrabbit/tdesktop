@@ -14,10 +14,16 @@ namespace Ui::Premium {
 
 class StarParticles final {
 public:
+	enum class Glyph {
+		None,
+		Star,
+	};
+
 	explicit StarParticles(Fn<void(const QRect &)> update);
 
 	void setColor(QColor color);
 	void setColors(QColor color1, QColor color2);
+	void setGlyph(Glyph glyph);
 	void paint(QPainter &p, const QRectF &field);
 	void setPaused(bool paused);
 	void fling(float64 strength);
@@ -56,6 +62,7 @@ private:
 
 	QColor _color1;
 	QColor _color2;
+	Glyph _glyph = Glyph::None;
 	float64 _maxSpriteExtent = 0.;
 	bool _spritesDirty = true;
 	int _spritesRatio = 0;
