@@ -256,7 +256,19 @@ TopBar::TopBar(
 		}
 		if (_coin3d) {
 			_coin3d->setNight(TopBarAbstract::isDark());
-			_particles3d->setColor(QColor(255, 255, 255));
+			if (TopBarAbstract::isDark()) {
+				const auto stops = descriptor.gradientStops
+					? (*descriptor.gradientStops)
+					: Ui::Premium::ButtonGradientStops();
+				_particles3d->setColors(
+					stops.front().second,
+					stops.back().second);
+			} else {
+				_particles3d->setColors(
+					QColor(255, 255, 255),
+					QColor(0xC8, 0xC8, 0xD0));
+			}
+			_particles3d->setGlyph(StarParticles::Glyph::Dollar);
 		}
 		auto event = QResizeEvent(size(), size());
 		resizeEvent(&event);

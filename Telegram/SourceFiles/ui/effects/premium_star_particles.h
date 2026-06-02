@@ -17,6 +17,7 @@ public:
 	enum class Glyph {
 		None,
 		Star,
+		Dollar,
 	};
 
 	explicit StarParticles(Fn<void(const QRect &)> update);
@@ -36,6 +37,7 @@ private:
 		float64 radiusFactor = 0.;
 		float64 distance = 0.;
 		float64 alpha = 0.;
+		float64 flipProgress = 0.;
 		int sizeIndex = 0;
 		int colorIndex = 0;
 	};
