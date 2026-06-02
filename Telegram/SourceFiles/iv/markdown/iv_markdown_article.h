@@ -326,7 +326,9 @@ public:
 	[[nodiscard]] int editableIndexForSegment(int segmentIndex) const;
 	[[nodiscard]] int segmentIndexForEditableIndex(int editableIndex) const;
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect logicalSegmentRect(int segmentIndex) const;
 	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
+	[[nodiscard]] bool revealSegment(int segmentIndex);
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
 		int segmentIndex) const;
 	[[nodiscard]] MarkdownArticleTextLeafStyle editableStyleForSegment(

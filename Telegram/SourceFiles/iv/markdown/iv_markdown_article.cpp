@@ -726,6 +726,43 @@ void RebuildVisibleSegmentLookup(
 	};
 }
 
+[[nodiscard]] int ComputeScrollTo(
+		int toFrom,
+		int toTill,
+		int toMin,
+		int toMax,
+		int current,
+		int size) {
+	if (toFrom < toMin) {
+		toFrom = toMin;
+	} else if (toFrom > toMax) {
+		toFrom = toMax;
+	}
+	const auto exact = (toTill < 0);
+
+	const auto curBottom = current + size;
+	auto scToFrom = toFrom;
+	if (!exact && toFrom >= current) {
+		if (toTill < toFrom) {
+			toTill = toFrom;
+		}
+		if (toTill <= curBottom) {
+			return current;
+		}
+
+		scToFrom = toTill - size;
+		if (scToFrom > toFrom) {
+			scToFrom = toFrom;
+		}
+		if (scToFrom == current) {
+			return current;
+		}
+	} else {
+		scToFrom = toFrom;
+	}
+	return scToFrom;
+}
+
 [[nodiscard]] QRect LogicalTextRectForSegment(const SelectableSegment &segment) {
 	if (segment.cell) {
 		return segment.cell->textRect;
@@ -1757,8 +1794,10 @@ public:
 	[[nodiscard]] int segmentIndexForEditableIndex(int editableIndex) const;
 
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect logicalSegmentRect(int segmentIndex) const;
 
 	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
+	[[nodiscard]] bool revealSegment(int segmentIndex);
 
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
 		int segmentIndex) const;
@@ -1892,6 +1931,15 @@ private:
 		const std::vector<LaidOutBlock> &blocks,
 		const std::vector<PreparedBlock> *prepared,
 		QPoint point,
+		std::vector<int> *preparedPath) const;
+	[[nodiscard]] std::optional<MarkdownArticleHorizontalScrollLookup>
+	findHorizontalScrollOwner(int segmentIndex) const;
+	[[nodiscard]] std::optional<MarkdownArticleHorizontalScrollLookup>
+	findHorizontalScrollOwner(
+		const std::vector<LaidOutBlock> &blocks,
+		const std::vector<PreparedBlock> *prepared,
+		const SelectableSegment &segment,
+		std::optional<MarkdownArticleHorizontalScrollLookup> owner,
 		std::vector<int> *preparedPath) const;
 	[[nodiscard]] LaidOutBlock *findScrollOwnerByIdentity(
 		const MarkdownArticleScrollOwnerIdentity &identity);
@@ -2282,6 +2330,18 @@ int MarkdownArticle::Impl::segmentIndexForEditableIndex(
 QRect MarkdownArticle::Impl::textSegmentRect(int segmentIndex) const {
 	const auto segment = FindSegment(&_segments, segmentIndex);
 	return (segment && segment->isTextLeaf()) ? segment->textRect : QRect();
+}
+
+QRect MarkdownArticle::Impl::logicalSegmentRect(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment) {
+		return QRect();
+	} else if (segment->isTextLeaf()) {
+		return LogicalTextRectForSegment(*segment);
+	} else if (IsDisplayMathSegment(*segment)) {
+		return segment->block ? segment->block->formulaRect : QRect();
+	}
+	return QRect();
 }
 
 QRect MarkdownArticle::Impl::segmentRect(int segmentIndex) const {
@@ -3004,6 +3064,70 @@ MarkdownArticle::Impl::findHorizontalScrollOwner(
 	return {};
 }
 
+std::optional<MarkdownArticleHorizontalScrollLookup>
+MarkdownArticle::Impl::findHorizontalScrollOwner(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment || !IsEditableSegment(*segment)) {
+		return std::nullopt;
+	}
+	auto preparedPath = std::vector<int>();
+	return findHorizontalScrollOwner(
+		_blocks,
+		&_content.blocks.blocks,
+		*segment,
+		std::nullopt,
+		&preparedPath);
+}
+
+std::optional<MarkdownArticleHorizontalScrollLookup>
+MarkdownArticle::Impl::findHorizontalScrollOwner(
+		const std::vector<LaidOutBlock> &blocks,
+		const std::vector<PreparedBlock> *prepared,
+		const SelectableSegment &segment,
+		std::optional<MarkdownArticleHorizontalScrollLookup> owner,
+		std::vector<int> *preparedPath) const {
+	for (auto i = 0, count = int(blocks.size()); i != count; ++i) {
+		const auto &block = blocks[i];
+		preparedPath->push_back(i);
+		const auto preparedBlock = (prepared && (i < prepared->size()))
+			? &(*prepared)[i]
+			: nullptr;
+		auto nextOwner = owner;
+		if (!block.scrollViewportRect.isEmpty()) {
+			nextOwner = MarkdownArticleHorizontalScrollLookup{
+				.identity = scrollOwnerIdentity(block, *preparedPath),
+				.block = &block,
+			};
+		}
+		const auto matchesCell = [&] {
+			if (!segment.cell) {
+				return false;
+			}
+			for (const auto &row : block.tableRows) {
+				for (const auto &cell : row.cells) {
+					if (segment.cell == &cell) {
+						return true;
+					}
+				}
+			}
+			return false;
+		}();
+		if (segment.block == &block || matchesCell) {
+			return nextOwner;
+		}
+		if (const auto result = findHorizontalScrollOwner(
+				block.children,
+				preparedBlock ? &preparedBlock->children : nullptr,
+				segment,
+				nextOwner,
+				preparedPath)) {
+			return result;
+		}
+		preparedPath->pop_back();
+	}
+	return std::nullopt;
+}
+
 LaidOutBlock *MarkdownArticle::Impl::findScrollOwnerByIdentity(
 		const MarkdownArticleScrollOwnerIdentity &identity) {
 	auto preparedPath = std::vector<int>();
@@ -3219,6 +3343,43 @@ bool MarkdownArticle::Impl::setScrollLeft(
 		_textRepaint();
 	}
 	return true;
+}
+
+bool MarkdownArticle::Impl::revealSegment(int segmentIndex) {
+	const auto logicalRect = logicalSegmentRect(segmentIndex);
+	if (logicalRect.isEmpty()) {
+		return false;
+	}
+	const auto lookup = findHorizontalScrollOwner(segmentIndex);
+	if (!lookup || !lookup->block) {
+		return false;
+	}
+	const auto &owner = *lookup->block;
+	if (owner.scrollViewportRect.isEmpty()
+		|| owner.scrollLogicalContentRect.isEmpty()) {
+		return false;
+	}
+	const auto viewportWidth = owner.scrollViewportRect.width();
+	if (viewportWidth <= 0) {
+		return false;
+	}
+	const auto toLeft = logicalRect.x()
+		+ owner.horizontalScrollLeft
+		- owner.scrollLogicalContentRect.x();
+	const auto left = ComputeScrollTo(
+		toLeft,
+		toLeft + logicalRect.width(),
+		0,
+		owner.horizontalScrollMax,
+		owner.horizontalScrollLeft,
+		viewportWidth);
+	if (left == owner.horizontalScrollLeft) {
+		return false;
+	}
+	if (const auto block = findScrollOwnerByIdentity(lookup->identity)) {
+		return setScrollLeft(*block, lookup->identity, left);
+	}
+	return false;
 }
 
 MarkdownArticleHorizontalScrollHit MarkdownArticle::Impl::horizontalScrollHit(
@@ -3587,8 +3748,16 @@ QRect MarkdownArticle::textSegmentRect(int segmentIndex) const {
 	return _impl->textSegmentRect(segmentIndex);
 }
 
+QRect MarkdownArticle::logicalSegmentRect(int segmentIndex) const {
+	return _impl->logicalSegmentRect(segmentIndex);
+}
+
 QRect MarkdownArticle::segmentRect(int segmentIndex) const {
 	return _impl->segmentRect(segmentIndex);
+}
+
+bool MarkdownArticle::revealSegment(int segmentIndex) {
+	return _impl->revealSegment(segmentIndex);
 }
 
 MarkdownArticleTextLeafStyle MarkdownArticle::textLeafStyleForSegment(

@@ -155,6 +155,14 @@ public:
 	};
 
 	struct BoundaryTarget {
+		enum class Action : uchar {
+			None,
+			Text,
+			StructuralSelection,
+			RemoveActiveOwner,
+		};
+
+		Action action = Action::None;
 		int textOrdinal = -1;
 		Markdown::PreparedEditSelection structuralSelection;
 	};
@@ -187,7 +195,6 @@ public:
 	[[nodiscard]] bool isActiveTopLevelParagraph() const;
 	[[nodiscard]] bool activeLeafUsesQuoteCaptionColor() const;
 	[[nodiscard]] bool activeLeafUsesQuotePlaceholderColor() const;
-	[[nodiscard]] bool activeOwnerIsEmpty() const;
 	[[nodiscard]] std::optional<int> moveActiveQuoteDown();
 	[[nodiscard]] std::optional<int> handleActiveHeadingEnter();
 	[[nodiscard]] std::optional<int> handleActiveListEnter();
@@ -208,17 +215,6 @@ public:
 	void insertPreparedBlocksAfterActive(std::vector<RichPage::Block> blocks);
 
 private:
-	struct BoundaryElement {
-		enum class Kind : uchar {
-			Text,
-			Block,
-		};
-
-		Kind kind = Kind::Text;
-		int textOrdinal = -1;
-		BlockPath block;
-	};
-
 	struct StructuralBlockRange {
 		BlockContainerPath container;
 		int from = -1;
@@ -384,18 +380,28 @@ private:
 		int count);
 	[[nodiscard]] std::optional<int> adjacentEditableOrdinal(
 		bool forward) const;
-	void collectBoundaryElements(
+	void collectBoundarySteps(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container,
-		std::vector<BoundaryElement> *elements) const;
-	void appendBoundaryTextElement(
+		bool forward,
+		std::vector<BoundaryTarget> *steps) const;
+	void appendBoundaryTextStep(
 		LeafPath leaf,
-		std::vector<BoundaryElement> *elements) const;
-	void appendBoundaryBlockElement(
+		std::vector<BoundaryTarget> *steps) const;
+	void appendBoundaryBlockStep(
 		const BlockPath &path,
-		std::vector<BoundaryElement> *elements) const;
+		std::vector<BoundaryTarget> *steps) const;
+	void appendBoundaryListItemStep(
+		const BlockPath &path,
+		int itemIndex,
+		std::vector<BoundaryTarget> *steps) const;
 	[[nodiscard]] Markdown::PreparedEditSelection preparedSelectionForBlock(
 		const BlockPath &path) const;
+	[[nodiscard]] Markdown::PreparedEditSelection preparedSelectionForListItem(
+		const BlockPath &path,
+		int itemIndex) const;
+	[[nodiscard]] bool shouldRemoveActiveOwnerDirectly(
+		const TextNodeDescriptor &descriptor) const;
 	[[nodiscard]] bool descriptorBelongsToBlock(
 		const TextNodeDescriptor &descriptor,
 		const BlockPath &path) const;

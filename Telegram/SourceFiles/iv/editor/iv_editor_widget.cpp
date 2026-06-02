@@ -24,7 +24,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/text/text_entity.h"
 #include "ui/ui_utility.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/scroll_area.h"
 #include "window/window_session_controller.h"
 
 #include "styles/palette.h"
@@ -864,6 +866,7 @@ int Widget::resizeGetHeight(int newWidth) {
 	const auto width = std::max(newWidth, 1);
 	const auto padding = EditorBodyPadding();
 	_articleHeight = _article->resizeGetHeight(articleWidth(width));
+	syncArticleVisibleTopBottom();
 	ensurePendingActivation();
 	syncInlineFieldGeometry(width);
 	const auto fieldBottom = (!_field->isHidden())
@@ -874,6 +877,14 @@ int Widget::resizeGetHeight(int newWidth) {
 			_articleHeight + padding.top() + padding.bottom(),
 			fieldBottom),
 		st::ivEditorMinHeight);
+}
+
+void Widget::visibleTopBottomUpdated(int visibleTop, int visibleBottom) {
+	_visibleRange = Ui::VisibleRange{
+		.top = visibleTop,
+		.bottom = visibleBottom,
+	};
+	syncArticleVisibleTopBottom();
 }
 
 bool Widget::eventFilter(QObject *object, QEvent *event) {
@@ -1804,8 +1815,43 @@ void Widget::activateTextOrdinal(
 	_field->show();
 	syncInlineFieldGeometry();
 	updateInlineFieldHeightOverride();
+	syncArticleVisibleTopBottom();
+	revealActiveInlineField();
 	_field->raise();
 	_field->setFocusFast();
+}
+
+void Widget::revealActiveInlineField() {
+	if (_field->isHidden() || _activeSegmentIndex < 0) {
+		return;
+	}
+	if (_article->revealSegment(_activeSegmentIndex)) {
+		syncInlineFieldGeometry();
+		if (_field->isHidden()) {
+			return;
+		}
+	}
+	const auto scrollIn = [&](auto &&scroll) {
+		if (const auto inner = scroll->widget()) {
+			const auto fieldRect = _field->geometry();
+			const auto localRect = QRect(
+				inner->mapFromGlobal(mapToGlobal(fieldRect.topLeft())),
+				fieldRect.size());
+			scroll->scrollToY(
+				localRect.y(),
+				localRect.y() + localRect.height());
+		}
+	};
+	for (auto parent = parentWidget(); parent; parent = parent->parentWidget()) {
+		if (const auto scroll = dynamic_cast<Ui::ScrollArea*>(parent)) {
+			scrollIn(scroll);
+			return;
+		}
+		if (const auto scroll = dynamic_cast<Ui::ElasticScroll*>(parent)) {
+			scrollIn(scroll);
+			return;
+		}
+	}
 }
 
 void Widget::activateTrailingParagraph() {
@@ -2000,7 +2046,10 @@ bool Widget::moveTabBoundary(bool forward) {
 
 bool Widget::removeBoundaryOwner(bool forward) {
 	commitInlineField();
-	if (_state->activeOwnerIsEmpty()) {
+	const auto target = _state->activeBoundaryTarget(forward);
+	using BoundaryAction = State::BoundaryTarget::Action;
+	switch (target.action) {
+	case BoundaryAction::RemoveActiveOwner: {
 		_boundarySelectionOrigin = std::nullopt;
 		const auto target = _state->removeActiveOwnerAndSelectAdjacent(
 			forward);
@@ -2018,8 +2067,7 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		}
 		return true;
 	}
-	const auto target = _state->activeBoundaryTarget(forward);
-	if (target.textOrdinal >= 0) {
+	case BoundaryAction::Text:
 		_boundarySelectionOrigin = std::nullopt;
 		refreshPreparedContent();
 		if (forward) {
@@ -2028,8 +2076,7 @@ bool Widget::removeBoundaryOwner(bool forward) {
 			activateTextOrdinalAtEnd(target.textOrdinal);
 		}
 		return true;
-	}
-	if (!target.structuralSelection.empty()) {
+	case BoundaryAction::StructuralSelection:
 		setStructuralSelection(
 			target.structuralSelection,
 			BoundarySelectionOrigin{
@@ -2046,6 +2093,8 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		refreshPreparedContent();
 		update();
 		return true;
+	case BoundaryAction::None:
+		break;
 	}
 	return moveBoundaryAfterCommit(forward, forward);
 }
@@ -2096,6 +2145,16 @@ void Widget::ensureArticleLayoutForInlineField(int width) {
 	_articleHeight = _article->resizeGetHeight(articleWidth(width));
 }
 
+void Widget::syncArticleVisibleTopBottom() {
+	if (!_article) {
+		return;
+	}
+	const auto articleTop = articleTopLeft().y();
+	_article->setVisibleTopBottom(
+		_visibleRange.top - articleTop,
+		_visibleRange.bottom - articleTop);
+}
+
 void Widget::syncInlineFieldGeometry(int width) {
 	if (_field->isHidden() || width <= 0) {
 		return;
@@ -2116,9 +2175,7 @@ void Widget::syncInlineFieldGeometry(int width) {
 	const auto left = segmentRect.x() - margins.left();
 	const auto top = segmentRect.y() - margins.top();
 	const auto fieldWidth = std::max(
-		std::min(
-			segmentRect.width() + margins.left() + margins.right(),
-			width - left),
+		segmentRect.width() + margins.left() + margins.right(),
 		1);
 	_syncingInlineFieldGeometry = true;
 	_field->resizeToWidth(fieldWidth);
@@ -2731,7 +2788,7 @@ int Widget::articleWidth(int outerWidth) const {
 }
 
 QRect Widget::outerEditableSegmentRect(int segmentIndex) const {
-	const auto rect = _article->segmentRect(segmentIndex);
+	const auto rect = _article->logicalSegmentRect(segmentIndex);
 	return rect.isEmpty() ? rect : rect.translated(articleTopLeft());
 }
 

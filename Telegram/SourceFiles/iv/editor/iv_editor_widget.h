@@ -78,6 +78,7 @@ protected:
 	void mouseReleaseEvent(QMouseEvent *e) override;
 	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
+	void visibleTopBottomUpdated(int visibleTop, int visibleBottom) override;
 	void wheelEvent(QWheelEvent *e) override;
 
 private:
@@ -195,7 +196,9 @@ private:
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
 	void ensureArticleLayoutForInlineField(int width);
+	void syncArticleVisibleTopBottom();
 	void syncInlineFieldGeometry(int width);
+	void revealActiveInlineField();
 	void clearSelection();
 	void clearTextSelection();
 	void clearStructuralSelection();
@@ -255,6 +258,7 @@ private:
 	Markdown::MarkdownArticleSelectionEndpoints _selectionEndpoints;
 	Markdown::PreparedEditSelection _structuralSelection;
 	std::optional<BoundarySelectionOrigin> _boundarySelectionOrigin;
+	Ui::VisibleRange _visibleRange;
 	ArticleSelectionDrag _articleSelectionDrag;
 	std::optional<Qt::Orientation> _horizontalScrollLock;
 	bool _settingField = false;
