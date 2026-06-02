@@ -485,6 +485,8 @@ PRIVATE
     ui/effects/outline_segments.h
     ui/effects/premium_3d_mesh.cpp
     ui/effects/premium_3d_mesh.h
+    ui/effects/premium_3d_support.cpp
+    ui/effects/premium_3d_support.h
     ui/effects/premium_bubble.cpp
     ui/effects/premium_bubble.h
     ui/effects/premium_graphics.cpp
