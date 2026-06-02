@@ -283,6 +283,9 @@ public:
 		Fn<void()> repaint,
 		Fn<void(QRect)> repaintRect);
 	void setContent(MarkdownArticleContent content);
+	void setEditableHeightOverride(int editableIndex, int height);
+	void setEditableHeightOverrideForSegment(int segmentIndex, int height);
+	void clearEditableHeightOverride();
 	void setTextLeafHeightOverride(int textLeafIndex, int height);
 	void clearTextLeafHeightOverride();
 	void invalidateLayout();
@@ -328,6 +331,8 @@ public:
 	[[nodiscard]] QRect textSegmentRect(int segmentIndex) const;
 	[[nodiscard]] QRect logicalSegmentRect(int segmentIndex) const;
 	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect displayMathEditRect(int segmentIndex) const;
+	[[nodiscard]] QRect displayMathBlockRect(int segmentIndex) const;
 	[[nodiscard]] bool revealSegment(int segmentIndex);
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
 		int segmentIndex) const;

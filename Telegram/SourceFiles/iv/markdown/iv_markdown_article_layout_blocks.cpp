@@ -34,6 +34,8 @@ constexpr auto kReadableTextColumns = 12;
 constexpr auto kReadableTextLineHeights = 4;
 constexpr auto kReadableCodeColumns = 16;
 
+thread_local const LayoutContext *CurrentLayoutContext = nullptr;
+
 void SetEditPlaceholderLeaf(
 	QString *placeholderText,
 	Ui::Text::String *placeholderLeaf,
@@ -76,6 +78,10 @@ void SetEditPlaceholderLeaf(
 		bool bordered,
 		const style::Markdown &st) {
 	return bordered ? st.table.border : 0;
+}
+
+[[nodiscard]] LayoutContext ActiveLayoutContext() {
+	return CurrentLayoutContext ? *CurrentLayoutContext : LayoutContext();
 }
 
 [[nodiscard]] TableCellLayoutData InitializeTableCellLayout(
@@ -440,7 +446,7 @@ void LayoutMediaCaptionText(
 		left,
 		top,
 		block->textWidth,
-		ResolveTextLeafHeight(
+		ResolveEditableHeight(
 			std::max(
 				block->leaf.countHeight(block->textWidth, true),
 				TextLineHeight(textStyle)),
@@ -483,6 +489,15 @@ void LayoutMediaCaptionText(
 }
 
 } // namespace
+
+LayoutContextScope::LayoutContextScope(const LayoutContext &context)
+: _previous(CurrentLayoutContext) {
+	CurrentLayoutContext = &context;
+}
+
+LayoutContextScope::~LayoutContextScope() {
+	CurrentLayoutContext = _previous;
+}
 
 void LayoutMediaCaption(
 		LaidOutBlock *block,
@@ -668,15 +683,15 @@ int TextLineBaseline(
 	return top + TextLineAscent(style);
 }
 
-int ResolveTextLeafHeight(
+int ResolveEditableHeight(
 		int naturalHeight,
 		LayoutContext context) {
-	const auto state = context.textLeafHeightOverride;
+	const auto state = context.editableHeightOverride;
 	if (!state) {
 		return naturalHeight;
 	}
-	const auto index = state->nextTextLeafIndex++;
-	return (index == state->textLeafIndex)
+	const auto index = state->nextEditableIndex++;
+	return (index == state->editableIndex)
 		? std::max(state->height, 1)
 		: naturalHeight;
 }
@@ -1029,7 +1044,7 @@ LaidOutBlock LayoutFlowBlock(
 		? block.placeholderLeaf
 		: block.leaf;
 
-	const auto height = ResolveTextLeafHeight(
+	const auto height = ResolveEditableHeight(
 		LeafHeight(
 			displayLeaf,
 			textStyle,
@@ -1126,7 +1141,7 @@ LaidOutBlock LayoutCodeBlock(
 	const auto &displayLeaf = usePlaceholder
 		? block.placeholderLeaf
 		: block.leaf;
-	const auto height = ResolveTextLeafHeight(
+	const auto height = ResolveEditableHeight(
 		LeafHeight(
 			displayLeaf,
 			st.code,
@@ -1333,6 +1348,9 @@ LaidOutBlock LayoutDisplayMathBlock(
 						st));
 		}
 	}
+	block.outer.setHeight(ResolveEditableHeight(
+		block.outer.height(),
+		ActiveLayoutContext()));
 
 	if (!(formula && formula->measured.success)) {
 		const auto &fallbackPadding = st.displayMath.fallbackPadding;
@@ -1473,7 +1491,7 @@ LaidOutBlock LayoutTableBlock(
 						cellData.cell.textWidth,
 						true),
 					TextLineHeight(textStyle));
-			cellData.textHeight = ResolveTextLeafHeight(
+			cellData.textHeight = ResolveEditableHeight(
 				naturalTextHeight,
 				context);
 			const auto outerHeight = cellData.textHeight

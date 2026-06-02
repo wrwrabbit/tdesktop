@@ -183,10 +183,10 @@ struct LaidOutBlock {
 	mutable QSize colorizedFormulaSize;
 };
 
-struct TextLeafHeightOverride {
-	int textLeafIndex = -1;
+struct EditableHeightOverride {
+	int editableIndex = -1;
 	int height = 0;
-	int nextTextLeafIndex = 0;
+	int nextEditableIndex = 0;
 };
 
 struct LayoutContext {
@@ -199,12 +199,24 @@ struct LayoutContext {
 	bool editMode = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
-	std::shared_ptr<TextLeafHeightOverride> textLeafHeightOverride;
+	std::shared_ptr<EditableHeightOverride> editableHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
 	std::function<std::shared_ptr<PlaceholderBlockRuntime>(
 		PreparedPlaceholderBlockId)> placeholderRuntimeFactory;
 	std::function<std::shared_ptr<TaskMarkerRippleRuntime>(
 		const PreparedEditListItemSource&)> taskMarkerRippleRuntimeFactory;
+};
+
+class LayoutContextScope {
+public:
+	explicit LayoutContextScope(const LayoutContext &context);
+	~LayoutContextScope();
+
+	LayoutContextScope(const LayoutContextScope &) = delete;
+	LayoutContextScope &operator=(const LayoutContextScope &) = delete;
+
+private:
+	const LayoutContext *_previous = nullptr;
 };
 
 struct TableCellLayoutData {
@@ -227,7 +239,7 @@ struct TableRowLayoutData {
 [[nodiscard]] int TextLineBaseline(
 	const style::TextStyle &style,
 	int top = 0);
-[[nodiscard]] int ResolveTextLeafHeight(
+[[nodiscard]] int ResolveEditableHeight(
 	int naturalHeight,
 	LayoutContext context);
 [[nodiscard]] QPoint BulletMarkerCenter(

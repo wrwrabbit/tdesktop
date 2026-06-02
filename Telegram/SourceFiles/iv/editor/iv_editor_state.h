@@ -216,7 +216,8 @@ public:
 	[[nodiscard]] bool isActiveTopLevelParagraph() const;
 	[[nodiscard]] bool activeLeafUsesQuoteCaptionColor() const;
 	[[nodiscard]] bool activeLeafUsesQuotePlaceholderColor() const;
-	[[nodiscard]] std::optional<int> moveActiveQuoteDown();
+	[[nodiscard]] std::optional<int> moveActiveSpecialBlockDown();
+	[[nodiscard]] BoundaryTarget removeTemporaryDownParagraphAndMove();
 	[[nodiscard]] std::optional<int> handleActiveHeadingEnter();
 	[[nodiscard]] std::optional<int> handleActiveListEnter();
 	[[nodiscard]] std::optional<int> removeActiveOwnerAndSelectAdjacent(
@@ -268,6 +269,7 @@ public:
 		const Markdown::PreparedEditTableCellRange &range,
 		bool striped);
 	[[nodiscard]] std::optional<int> ensureTrailingParagraphActive();
+	void resyncAfterExternalRichPageMutation();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
 	[[nodiscard]] bool insertBlockAfterActive(InsertAction action);
@@ -310,6 +312,18 @@ private:
 	struct ActiveListItemSurface {
 		BlockPath path;
 		int itemIndex = -1;
+	};
+
+	struct ParagraphTarget {
+		LeafPath leaf;
+		bool inserted = false;
+	};
+
+	struct RebuiltBoundaryTarget {
+		BoundaryTarget::Action action = BoundaryTarget::Action::None;
+		LeafPath leaf;
+		BlockPath block;
+		int listItemIndex = -1;
 	};
 
 	template <typename Result>
@@ -410,6 +424,8 @@ private:
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
 		const BlockContainerPath &container);
+	void clearTemporaryDownParagraph();
+	void clearTemporaryDownParagraphIfInvalid();
 	void commitCheckedMutation(State state);
 	template <typename Result, typename Callback>
 	[[nodiscard]] Result applyCheckedMutation(
@@ -425,7 +441,7 @@ private:
 	[[nodiscard]] bool shouldReplaceActiveTextOnlyBlock(
 		const TextNodeDescriptor &descriptor,
 		const std::vector<RichPage::Block> &blocks) const;
-	[[nodiscard]] std::optional<LeafPath> reuseOrInsertParagraph(
+	[[nodiscard]] std::optional<ParagraphTarget> reuseOrInsertParagraph(
 		const BlockContainerPath &container,
 		int index);
 	[[nodiscard]] auto activeNonPullquoteQuote() const
@@ -448,7 +464,21 @@ private:
 		const Markdown::PreparedEditTableCellRange &range,
 		bool after);
 	[[nodiscard]] std::optional<int> ensureTrailingParagraphActiveUnchecked();
-	[[nodiscard]] std::optional<int> moveActiveQuoteDownUnchecked();
+	[[nodiscard]] std::optional<int> moveActiveSpecialBlockDownUnchecked();
+	[[nodiscard]] BoundaryTarget boundaryTargetForLeaf(
+		const LeafPath &leaf,
+		const TextNodeDescriptor *descriptor,
+		bool forward,
+		bool allowRemoveDirectly) const;
+	[[nodiscard]] auto captureRebuiltBoundaryTarget(
+		const BoundaryTarget &target) const
+	-> std::optional<RebuiltBoundaryTarget>;
+	void shiftRebuiltBoundaryTargetAfterRemovedBlock(
+		RebuiltBoundaryTarget &target,
+		const BlockPath &removed) const;
+	[[nodiscard]] BoundaryTarget materializeBoundaryTarget(
+		const RebuiltBoundaryTarget &target) const;
+	[[nodiscard]] BoundaryTarget removeTemporaryDownParagraphAndMoveUnchecked();
 	[[nodiscard]] std::optional<int> handleActiveHeadingEnterUnchecked();
 	[[nodiscard]] std::optional<int> handleActiveListEnterUnchecked();
 	[[nodiscard]] bool insertBlocksAfterActiveUnchecked(
@@ -542,6 +572,7 @@ private:
 	std::vector<TextNodeDescriptor> _textNodes;
 	int _activeTextOrdinal = -1;
 	std::optional<RichMessageLimitError> _lastLimitError;
+	std::optional<LeafPath> _temporaryDownParagraph;
 
 };
 

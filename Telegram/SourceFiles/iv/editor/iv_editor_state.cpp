@@ -131,6 +131,39 @@ constexpr auto kMaxCommittedFieldLength = 256 * 1024;
 	return (index >= from) && (index < till);
 }
 
+[[nodiscard]] bool ShiftBlockContainerPathAfterRemovedBlock(
+		BlockContainerPath &path,
+		const BlockPath &removed) {
+	if (!ContainerHasPrefix(path, removed.container)) {
+		return true;
+	}
+	const auto size = removed.container.steps.size();
+	if (path.steps.size() == size) {
+		return true;
+	}
+	auto &step = path.steps[size];
+	if (step.blockIndex == removed.index) {
+		return false;
+	} else if (step.blockIndex > removed.index) {
+		--step.blockIndex;
+	}
+	return true;
+}
+
+[[nodiscard]] bool ShiftBlockPathAfterRemovedBlock(
+		BlockPath &path,
+		const BlockPath &removed) {
+	if (path.container == removed.container) {
+		if (path.index == removed.index) {
+			return false;
+		} else if (path.index > removed.index) {
+			--path.index;
+		}
+		return true;
+	}
+	return ShiftBlockContainerPathAfterRemovedBlock(path.container, removed);
+}
+
 [[nodiscard]] std::optional<int> BlockIndexInContainer(
 		const LeafPath &leaf,
 		const BlockContainerPath &container) {
@@ -727,6 +760,7 @@ Result State::applyCheckedMutation(Result failure, Callback &&callback) {
 		_limits);
 	candidate._activeTextOrdinal = _activeTextOrdinal;
 	candidate._lastLimitError = std::nullopt;
+	candidate._temporaryDownParagraph = _temporaryDownParagraph;
 	const auto outcome = callback(candidate);
 	if (!outcome.apply) {
 		return outcome.result;
@@ -745,10 +779,30 @@ void State::commitCheckedMutation(State state) {
 	_textNodes = std::move(state._textNodes);
 	_activeTextOrdinal = state._activeTextOrdinal;
 	_lastLimitError = std::nullopt;
+	_temporaryDownParagraph = std::move(state._temporaryDownParagraph);
 }
 
 const std::vector<TextNodeDescriptor> &State::textNodes() const {
 	return _textNodes;
+}
+
+void State::clearTemporaryDownParagraph() {
+	_temporaryDownParagraph = std::nullopt;
+}
+
+void State::clearTemporaryDownParagraphIfInvalid() {
+	if (!_temporaryDownParagraph
+		|| _temporaryDownParagraph->kind != LeafKind::BlockText
+		|| (textNodeOrdinal(*_temporaryDownParagraph) < 0)) {
+		clearTemporaryDownParagraph();
+		return;
+	}
+	const auto owner = block(_temporaryDownParagraph->block);
+	if (!owner
+		|| owner->kind != BlockKind::Paragraph
+		|| !BlockIsEmpty(*owner)) {
+		clearTemporaryDownParagraph();
+	}
 }
 
 int State::textOrdinalForLeaf(
@@ -768,6 +822,10 @@ int State::activeTextOrdinal() const {
 bool State::setActiveTextByOrdinal(int ordinal) {
 	if (ordinal < 0 || ordinal >= textNodeCount()) {
 		return false;
+	}
+	if (_temporaryDownParagraph
+		&& !(_textNodes[ordinal].leaf == *_temporaryDownParagraph)) {
+		clearTemporaryDownParagraph();
 	}
 	_activeTextOrdinal = ordinal;
 	return true;
@@ -799,6 +857,11 @@ bool State::applyActiveTextUnchecked(TextWithEntities text) {
 	}
 	if (auto current = richText(descriptor->leaf)) {
 		current->text = std::move(text);
+		if (_temporaryDownParagraph
+			&& (descriptor->leaf == *_temporaryDownParagraph)
+			&& !RichTextIsEmpty(*current)) {
+			clearTemporaryDownParagraph();
+		}
 		rebuild();
 		return true;
 	}
@@ -927,6 +990,7 @@ bool State::applySplitParagraphText(
 	if (chunks.empty()) {
 		return applyActiveTextUnchecked(TextWithEntities());
 	}
+	clearTemporaryDownParagraph();
 	const auto makeParagraph = [&](TextWithEntities text) {
 		auto paragraph = MakeParagraphBlock();
 		paragraph.text.text = std::move(text);
@@ -1713,6 +1777,22 @@ State::BoundaryTarget State::activeBoundaryTarget(bool forward) const {
 	if (!descriptor) {
 		return {};
 	}
+	return boundaryTargetForLeaf(
+		descriptor->leaf,
+		descriptor,
+		forward,
+		true);
+}
+
+State::BoundaryTarget State::boundaryTargetForLeaf(
+		const LeafPath &leaf,
+		const TextNodeDescriptor *descriptor,
+		bool forward,
+		bool allowRemoveDirectly) const {
+	const auto ordinal = textNodeOrdinal(leaf);
+	if (ordinal < 0) {
+		return {};
+	}
 	const auto prioritizeStructuralStep = [&](const BoundaryTarget &target) {
 		if (target.action != BoundaryAction::StructuralSelection) {
 			return false;
@@ -1721,13 +1801,13 @@ State::BoundaryTarget State::activeBoundaryTarget(bool forward) const {
 		case PreparedEditSelectionKind::Blocks:
 			if (const auto range = validateBlockRange(
 					target.structuralSelection.blocks)) {
-				return leafWillBeRemoved(descriptor->leaf, *range);
+				return leafWillBeRemoved(leaf, *range);
 			}
 			break;
 		case PreparedEditSelectionKind::ListItems:
 			if (const auto range = validateListItemRange(
 					target.structuralSelection.listItems)) {
-				return leafWillBeRemoved(descriptor->leaf, *range);
+				return leafWillBeRemoved(leaf, *range);
 			}
 			break;
 		default:
@@ -1735,7 +1815,9 @@ State::BoundaryTarget State::activeBoundaryTarget(bool forward) const {
 		}
 		return false;
 	};
-	const auto removeDirectly = removalTargetIsEmpty(descriptor->removalTarget)
+	const auto removeDirectly = allowRemoveDirectly
+		&& descriptor
+		&& removalTargetIsEmpty(descriptor->removalTarget)
 		&& shouldRemoveActiveOwnerDirectly(*descriptor);
 	auto steps = std::vector<BoundaryTarget>();
 	collectBoundarySteps(
@@ -1746,7 +1828,7 @@ State::BoundaryTarget State::activeBoundaryTarget(bool forward) const {
 	for (auto i = 0, count = int(steps.size()); i != count; ++i) {
 		const auto &step = steps[i];
 		if (step.action == BoundaryAction::Text
-			&& step.textOrdinal == _activeTextOrdinal) {
+			&& step.textOrdinal == ordinal) {
 			const auto next = (i + 1 < count)
 				? steps[i + 1]
 				: BoundaryTarget();
@@ -1908,6 +1990,7 @@ std::optional<int> State::removeActiveOwnerAndSelectAdjacent(bool forward) {
 std::optional<int> State::removeStructuralSelection(
 		const Markdown::PreparedEditSelection &selection,
 		bool forward) {
+	clearTemporaryDownParagraph();
 	const auto activate = [&](const LeafPath &leaf) -> std::optional<int> {
 		const auto ordinal = textNodeOrdinal(leaf);
 		if (setActiveTextByOrdinal(ordinal)) {
@@ -2827,6 +2910,7 @@ std::optional<int> State::normalizeTextOnlyListItemForInsertion(
 	item->anchorId.clear();
 	item->text = RichText();
 	if (!BlockIsEmpty(paragraph)) {
+		clearTemporaryDownParagraph();
 		item->blocks.insert(item->blocks.begin(), std::move(paragraph));
 		return 0;
 	}
@@ -2858,6 +2942,7 @@ std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
 	paragraph.text = std::move(owner->text);
 	owner->text = RichText();
 	if (!BlockIsEmpty(paragraph)) {
+		clearTemporaryDownParagraph();
 		owner->blocks.push_back(std::move(paragraph));
 		return 0;
 	}
@@ -2894,7 +2979,7 @@ std::optional<int> State::activateRebuiltLeaf(const LeafPath &path) {
 		: std::nullopt;
 }
 
-std::optional<State::LeafPath> State::reuseOrInsertParagraph(
+std::optional<State::ParagraphTarget> State::reuseOrInsertParagraph(
 		const BlockContainerPath &containerPath,
 		int index) {
 	const auto blocks = blockContainer(containerPath);
@@ -2904,21 +2989,27 @@ std::optional<State::LeafPath> State::reuseOrInsertParagraph(
 	const auto insertAt = std::clamp(index, 0, int(blocks->size()));
 	if (insertAt < int(blocks->size())
 		&& (*blocks)[insertAt].kind == BlockKind::Paragraph) {
-		return LeafPath{
+		return ParagraphTarget{
+			.leaf = {
+				.kind = LeafKind::BlockText,
+				.block = {
+					.container = containerPath,
+					.index = insertAt,
+				},
+			},
+		};
+	}
+	clearTemporaryDownParagraph();
+	blocks->insert(blocks->begin() + insertAt, MakeParagraphBlock());
+	return ParagraphTarget{
+		.leaf = {
 			.kind = LeafKind::BlockText,
 			.block = {
 				.container = containerPath,
 				.index = insertAt,
 			},
-		};
-	}
-	blocks->insert(blocks->begin() + insertAt, MakeParagraphBlock());
-	return LeafPath{
-		.kind = LeafKind::BlockText,
-		.block = {
-			.container = containerPath,
-			.index = insertAt,
 		},
+		.inserted = true,
 	};
 }
 
@@ -3039,6 +3130,7 @@ auto State::normalizeActiveListItemSurface()
 	paragraph.text = std::move(item->text);
 	item->anchorId.clear();
 	item->text = RichText();
+	clearTemporaryDownParagraph();
 	item->blocks.insert(item->blocks.begin(), std::move(paragraph));
 	return surface;
 }
@@ -3056,6 +3148,7 @@ std::optional<int> State::ensureTrailingParagraphActive() {
 std::optional<int> State::ensureTrailingParagraphActiveUnchecked() {
 	if (_richPage->blocks.empty()
 		|| _richPage->blocks.back().kind != BlockKind::Paragraph) {
+		clearTemporaryDownParagraph();
 		_richPage->blocks.push_back(MakeParagraphBlock());
 	}
 	const auto path = BlockPath{
@@ -3075,9 +3168,26 @@ std::optional<int> State::ensureTrailingParagraphActiveUnchecked() {
 		: std::nullopt;
 }
 
-std::optional<int> State::moveActiveQuoteDown() {
+void State::resyncAfterExternalRichPageMutation() {
+	clearTemporaryDownParagraph();
+	const auto activeLeaf = [&]() -> std::optional<LeafPath> {
+		if (const auto descriptor = textNode(_activeTextOrdinal)) {
+			return descriptor->leaf;
+		}
+		return std::nullopt;
+	}();
+	rebuild();
+	if (activeLeaf && (textNodeOrdinal(*activeLeaf) >= 0)) {
+		const auto activated = activateRebuiltLeaf(*activeLeaf);
+		Assert(activated);
+	} else {
+		ensureActiveTextOrdinal();
+	}
+}
+
+std::optional<int> State::moveActiveSpecialBlockDown() {
 	return applyCheckedMutation(std::optional<int>(), [](State &candidate) {
-		const auto result = candidate.moveActiveQuoteDownUnchecked();
+		const auto result = candidate.moveActiveSpecialBlockDownUnchecked();
 		return CheckedMutationResult<std::optional<int>>{
 			.apply = result.has_value(),
 			.result = result,
@@ -3085,43 +3195,228 @@ std::optional<int> State::moveActiveQuoteDown() {
 	});
 }
 
-std::optional<int> State::moveActiveQuoteDownUnchecked() {
+State::BoundaryTarget State::removeTemporaryDownParagraphAndMove() {
+	return applyCheckedMutation(BoundaryTarget(), [](State &candidate) {
+		const auto result
+			= candidate.removeTemporaryDownParagraphAndMoveUnchecked();
+		return CheckedMutationResult<BoundaryTarget>{
+			.apply = (result.action != BoundaryAction::None),
+			.result = result,
+		};
+	});
+}
+
+std::optional<int> State::moveActiveSpecialBlockDownUnchecked() {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
 		return std::nullopt;
 	}
-	const auto quote = activeNonPullquoteQuote();
-	if (!quote) {
-		return std::nullopt;
-	}
 	auto target = std::optional<LeafPath>();
-	if (descriptor->leaf.kind == LeafKind::BlockCaption
-		&& descriptor->leaf.block == quote->path) {
-		target = reuseOrInsertParagraph(
-			quote->path.container,
-			quote->path.index + 1);
-	} else if (descriptor->leaf.kind == LeafKind::BlockText
-		&& descriptor->leaf.block == quote->path) {
-		const auto owner = block(quote->path);
-		if (owner
-			&& owner->kind == BlockKind::Quote
-			&& owner->blocks.empty()) {
+	auto trackTemporary = false;
+	if (const auto quote = activeNonPullquoteQuote()) {
+		if (descriptor->leaf.kind == LeafKind::BlockCaption
+			&& descriptor->leaf.block == quote->path) {
+			if (const auto paragraph = reuseOrInsertParagraph(
+					quote->path.container,
+					quote->path.index + 1)) {
+				target = paragraph->leaf;
+				trackTemporary = paragraph->inserted;
+			}
+		} else if (descriptor->leaf.kind == LeafKind::BlockText
+			&& descriptor->leaf.block == quote->path) {
+			const auto owner = block(quote->path);
+			if (owner
+				&& owner->kind == BlockKind::Quote
+				&& owner->blocks.empty()) {
+				target = LeafPath{
+					.kind = LeafKind::BlockCaption,
+					.block = quote->path,
+				};
+			}
+		} else if (quote->activeLeafIsLastEditableBodyLeaf) {
 			target = LeafPath{
 				.kind = LeafKind::BlockCaption,
 				.block = quote->path,
 			};
 		}
-	} else if (quote->activeLeafIsLastEditableBodyLeaf) {
-		target = LeafPath{
-			.kind = LeafKind::BlockCaption,
-			.block = quote->path,
-		};
+	} else if (descriptor->leaf.kind == LeafKind::BlockText) {
+		const auto owner = block(descriptor->leaf.block);
+		if (owner && owner->kind == BlockKind::Code) {
+			if (const auto paragraph = reuseOrInsertParagraph(
+					descriptor->leaf.block.container,
+					descriptor->leaf.block.index + 1)) {
+				target = paragraph->leaf;
+				trackTemporary = paragraph->inserted;
+			}
+		}
 	}
 	if (!target) {
 		return std::nullopt;
 	}
+	_temporaryDownParagraph = trackTemporary
+		? std::make_optional(*target)
+		: std::nullopt;
 	rebuild();
 	return activateRebuiltLeaf(*target);
+}
+
+auto State::captureRebuiltBoundaryTarget(
+		const BoundaryTarget &target) const
+-> std::optional<RebuiltBoundaryTarget> {
+	switch (target.action) {
+	case BoundaryAction::Text:
+		if (const auto descriptor = textNode(target.textOrdinal)) {
+			return RebuiltBoundaryTarget{
+				.action = BoundaryAction::Text,
+				.leaf = descriptor->leaf,
+			};
+		}
+		break;
+	case BoundaryAction::StructuralSelection:
+		switch (target.structuralSelection.kind) {
+		case PreparedEditSelectionKind::Blocks:
+			if (const auto range = validateBlockRange(
+					target.structuralSelection.blocks);
+				range
+				&& (range->till == range->from + 1)) {
+				return RebuiltBoundaryTarget{
+					.action = BoundaryAction::StructuralSelection,
+					.block = {
+						.container = range->container,
+						.index = range->from,
+					},
+				};
+			}
+			break;
+		case PreparedEditSelectionKind::ListItems:
+			if (const auto range = validateListItemRange(
+					target.structuralSelection.listItems);
+				range
+				&& (range->till == range->from + 1)) {
+				return RebuiltBoundaryTarget{
+					.action = BoundaryAction::StructuralSelection,
+					.block = range->block,
+					.listItemIndex = range->from,
+				};
+			}
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+	return std::nullopt;
+}
+
+void State::shiftRebuiltBoundaryTargetAfterRemovedBlock(
+		RebuiltBoundaryTarget &target,
+		const BlockPath &removed) const {
+	switch (target.action) {
+	case BoundaryAction::Text:
+		if (!ShiftBlockPathAfterRemovedBlock(target.leaf.block, removed)) {
+			target = RebuiltBoundaryTarget();
+		}
+		break;
+	case BoundaryAction::StructuralSelection:
+		if (!ShiftBlockPathAfterRemovedBlock(target.block, removed)) {
+			target = RebuiltBoundaryTarget();
+		}
+		break;
+	default:
+		target = RebuiltBoundaryTarget();
+		break;
+	}
+}
+
+State::BoundaryTarget State::materializeBoundaryTarget(
+		const RebuiltBoundaryTarget &target) const {
+	switch (target.action) {
+	case BoundaryAction::Text:
+		if (const auto ordinal = textNodeOrdinal(target.leaf); ordinal >= 0) {
+			return {
+				.action = BoundaryAction::Text,
+				.textOrdinal = ordinal,
+			};
+		}
+		break;
+	case BoundaryAction::StructuralSelection:
+		if (target.listItemIndex >= 0) {
+			const auto owner = block(target.block);
+			if (owner
+				&& owner->kind == BlockKind::List
+				&& target.listItemIndex < int(owner->listItems.size())
+				&& CanEditBlocks(owner->listItems[target.listItemIndex].blocks)) {
+				return {
+					.action = BoundaryAction::StructuralSelection,
+					.structuralSelection = preparedSelectionForListItem(
+						target.block,
+						target.listItemIndex),
+				};
+			}
+		} else if (const auto owner = block(target.block);
+			owner && CanEditBlock(*owner)) {
+			return {
+				.action = BoundaryAction::StructuralSelection,
+				.structuralSelection = preparedSelectionForBlock(target.block),
+			};
+		}
+		break;
+	default:
+		break;
+	}
+	return {};
+}
+
+State::BoundaryTarget State::removeTemporaryDownParagraphAndMoveUnchecked() {
+	const auto tracked = _temporaryDownParagraph;
+	const auto descriptor = textNode(_activeTextOrdinal);
+	if (!tracked
+		|| !descriptor
+		|| !(descriptor->leaf == *tracked)) {
+		return {};
+	}
+	const auto owner = block(tracked->block);
+	if (!owner || owner->kind != BlockKind::Paragraph) {
+		clearTemporaryDownParagraph();
+		return {};
+	}
+	if (!BlockIsEmpty(*owner)) {
+		clearTemporaryDownParagraph();
+		return {};
+	}
+	const auto next = boundaryTargetForLeaf(
+		*tracked,
+		descriptor,
+		true,
+		false);
+	if (next.action == BoundaryAction::None) {
+		return {};
+	}
+	auto rebuiltTarget = captureRebuiltBoundaryTarget(next);
+	if (!rebuiltTarget) {
+		return {};
+	}
+	const auto removed = tracked->block;
+	if (!removeTarget({
+			.kind = RemovalKind::Block,
+			.block = removed,
+		})) {
+		return {};
+	}
+	shiftRebuiltBoundaryTargetAfterRemovedBlock(*rebuiltTarget, removed);
+	if (rebuiltTarget->action == BoundaryAction::None) {
+		return {};
+	}
+	rebuild();
+	const auto materialized = materializeBoundaryTarget(*rebuiltTarget);
+	if (materialized.action == BoundaryAction::Text) {
+		if (!setActiveTextByOrdinal(materialized.textOrdinal)) {
+			ensureActiveTextOrdinal();
+		}
+	}
+	return materialized;
 }
 
 std::optional<int> State::handleActiveHeadingEnter() {
@@ -3151,6 +3446,7 @@ std::optional<int> State::handleActiveHeadingEnterUnchecked() {
 	if (insertAt < 0 || insertAt > int(blocks->size())) {
 		return std::nullopt;
 	}
+	clearTemporaryDownParagraph();
 	blocks->insert(blocks->begin() + insertAt, MakeParagraphBlock());
 	const auto target = LeafPath{
 		.kind = LeafKind::BlockText,
@@ -3190,24 +3486,31 @@ std::optional<int> State::handleActiveListEnterUnchecked() {
 		&& (item->blocks.front().kind == BlockKind::Paragraph)
 		&& ListItemIsEmpty(*item);
 	if (trailingEmpty) {
+		clearTemporaryDownParagraph();
 		owner->listItems.erase(owner->listItems.begin() + surface->itemIndex);
 		if (owner->listItems.empty()) {
 			const auto blocks = blockContainer(surface->path.container);
 			if (!blocks
 				|| surface->path.index < 0
-				|| surface->path.index >= int(blocks->size())) {
+					|| surface->path.index >= int(blocks->size())) {
 				return std::nullopt;
 			}
+			clearTemporaryDownParagraph();
 			blocks->erase(blocks->begin() + surface->path.index);
-			target = reuseOrInsertParagraph(
-				surface->path.container,
-				surface->path.index);
+			if (const auto paragraph = reuseOrInsertParagraph(
+					surface->path.container,
+					surface->path.index)) {
+				target = paragraph->leaf;
+			}
 		} else {
-			target = reuseOrInsertParagraph(
-				surface->path.container,
-				surface->path.index + 1);
+			if (const auto paragraph = reuseOrInsertParagraph(
+					surface->path.container,
+					surface->path.index + 1)) {
+				target = paragraph->leaf;
+			}
 		}
 	} else {
+		clearTemporaryDownParagraph();
 		owner->listItems.insert(
 			owner->listItems.begin() + surface->itemIndex + 1,
 			MakeParagraphListItem(item->taskState));
@@ -3276,6 +3579,7 @@ bool State::insertBlocksAfterActiveUnchecked(std::vector<Block> blocks) {
 	if (blocks.empty()) {
 		return false;
 	}
+	clearTemporaryDownParagraph();
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (descriptor && shouldReplaceActiveTextOnlyBlock(*descriptor, blocks)) {
 		const auto path = descriptor->removalTarget.block;
@@ -3539,6 +3843,7 @@ void State::rebuild() {
 	rebuildTextNodes();
 	ensureEditableNodes();
 	ensureActiveTextOrdinal();
+	clearTemporaryDownParagraphIfInvalid();
 	_prepared = Markdown::TryPrepareNativeInstantView({
 		.richPage = _richPage,
 		.mediaRuntime = _mediaRuntime,
@@ -4068,6 +4373,7 @@ bool State::removalTargetIsEmpty(const RemovalTarget &target) const {
 }
 
 bool State::removeTarget(const RemovalTarget &target) {
+	clearTemporaryDownParagraph();
 	switch (target.kind) {
 	case RemovalKind::Block: {
 		const auto blocks = blockContainer(target.block.container);

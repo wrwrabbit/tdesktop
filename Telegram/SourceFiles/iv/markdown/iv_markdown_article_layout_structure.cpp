@@ -1136,7 +1136,7 @@ void FinalizeOwnerSelection(
 		? block.placeholderLeaf
 		: block.leaf;
 
-	const auto summaryHeight = ResolveTextLeafHeight(
+	const auto summaryHeight = ResolveEditableHeight(
 		std::max(
 			displayLeaf.countHeight(block.textWidth, true),
 			TextLineHeight(details.summaryStyle)),
@@ -1343,7 +1343,7 @@ void FinalizeOwnerSelection(
 			style.authorStyle,
 			TextWithEntities::Simple(prepared.embedPost.author),
 			parseOptions);
-		authorHeight = ResolveTextLeafHeight(
+		authorHeight = ResolveEditableHeight(
 			std::max(
 				block.labelLeaf.countHeight(textWidth, true),
 				TextLineHeight(style.authorStyle)),
@@ -1358,7 +1358,7 @@ void FinalizeOwnerSelection(
 			style.dateStyle,
 			TextWithEntities::Simple(prepared.embedPost.dateText),
 			parseOptions);
-		dateHeight = ResolveTextLeafHeight(
+		dateHeight = ResolveEditableHeight(
 			std::max(
 				block.subtitleLeaf.countHeight(textWidth, true),
 				TextLineHeight(style.dateStyle)),

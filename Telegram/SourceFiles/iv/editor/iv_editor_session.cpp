@@ -76,6 +76,7 @@ struct PreparedDocumentInfo {
 	QString performer;
 	QString fileName;
 	int duration = 0;
+	bool audio = false;
 	bool animation = false;
 	bool video = false;
 };
@@ -231,6 +232,27 @@ template <typename Container>
 	}
 }
 
+[[nodiscard]] PreparedDocumentInfo DocumentInfoFromPrepared(
+		const MTPDocument &document);
+
+[[nodiscard]] RichPage::BlockKind BlockKindForPreparedResult(
+		const FilePrepareResult &prepared) {
+	if (prepared.type == SendMediaType::Photo) {
+		return RichPage::BlockKind::Photo;
+	}
+	if (prepared.type != SendMediaType::File) {
+		return RichPage::BlockKind::Unsupported;
+	}
+	const auto info = DocumentInfoFromPrepared(prepared.document);
+	if (info.video) {
+		return RichPage::BlockKind::Video;
+	}
+	if (info.audio) {
+		return RichPage::BlockKind::Audio;
+	}
+	return RichPage::BlockKind::Unsupported;
+}
+
 [[nodiscard]] QSize PhotoSizeFromPrepared(const MTPPhoto &photo) {
 	auto result = QSize();
 	photo.match([](const MTPDphotoEmpty &) {
@@ -274,6 +296,7 @@ template <typename Container>
 		};
 		for (const auto &attribute : data.vattributes().v) {
 			attribute.match([&](const MTPDdocumentAttributeAudio &row) {
+				result.audio = true;
 				result.duration = row.vduration().v;
 				result.title = qs(row.vtitle().value_or_empty());
 				result.performer = qs(row.vperformer().value_or_empty());
@@ -727,26 +750,34 @@ private:
 		return nullptr;
 	}
 
+	[[nodiscard]] bool patchReadyAttachmentBlock(
+			RichPage::Block &block,
+			const AttachmentRecord &attachment) const {
+		if (attachment.state != AttachmentState::Ready) {
+			return false;
+		}
+		if (attachment.blockKind == RichPage::BlockKind::Photo) {
+			if (!attachment.serverPhoto || !attachment.serverMediaId) {
+				return false;
+			}
+			block.photoId = attachment.serverMediaId;
+			block.photo = attachment.serverPhoto;
+		} else {
+			if (!attachment.serverDocument || !attachment.serverMediaId) {
+				return false;
+			}
+			block.documentId = attachment.serverMediaId;
+			block.document = attachment.serverDocument;
+		}
+		return true;
+	}
+
 	[[nodiscard]] bool patchSubmittedBlocks(
 			std::vector<RichPage::Block> &blocks) const {
 		for (auto &block : blocks) {
 			if (const auto attachment = attachmentForBlock(block)) {
-				if (attachment->state != AttachmentState::Ready) {
+				if (!patchReadyAttachmentBlock(block, *attachment)) {
 					return false;
-				}
-				if (block.kind == RichPage::BlockKind::Photo) {
-					if (!attachment->serverPhoto || !attachment->serverMediaId) {
-						return false;
-					}
-					block.photoId = attachment->serverMediaId;
-					block.photo = attachment->serverPhoto;
-				} else {
-					if (!attachment->serverDocument
-						|| !attachment->serverMediaId) {
-						return false;
-					}
-					block.documentId = attachment->serverMediaId;
-					block.document = attachment->serverDocument;
 				}
 			}
 			if (!patchSubmittedBlocks(block.blocks)) {
@@ -873,7 +904,7 @@ private:
 		FileDialog::GetOpenPath(
 			QPointer<QWidget>(_controller->content().get()),
 			tr::lng_choose_file(tr::now),
-			FileDialog::AllFilesFilter(),
+			FileDialog::PhotoVideoAudioFilesFilter(),
 			[weak, editorPointer](FileDialog::OpenResult &&result) mutable {
 				if (const auto session = weak.get()) {
 					session->handleMediaDialogResult(
@@ -1031,31 +1062,34 @@ private:
 		PreparedFile file,
 		uint64 batchId) {
 		if (!AcceptedPreparedFileType(file.type)) {
-			showRejectedToast(batchId);
+			showUnsupportedMediaToast(batchId);
 			return;
 		}
 		if (exceedsMediaLimitWith(1)) {
 			showRichMessageLimitToast(RichMessageLimitError::Media);
 			return;
 		}
-		prepareAttachment(editor, std::move(file));
+		prepareAttachment(editor, std::move(file), batchId);
 	}
 
 	void prepareAttachment(
 		QPointer<Widget> editor,
-		PreparedFile file) {
+		PreparedFile file,
+		uint64 batchId) {
 		const auto meta = BuildAttachmentMeta(file);
 		const auto weak = base::make_weak(this);
 		++_pendingAttachmentPrepareCount;
 		_attachmentPrepareQueue.addTask(
 			std::make_unique<PrepareAttachmentTask>(
 				BuildPrepareTaskArgs(_session, _peer->id, std::move(file)),
-				[weak, editor, meta](std::shared_ptr<FilePrepareResult> prepared) mutable {
+				[weak, editor, meta, batchId](
+						std::shared_ptr<FilePrepareResult> prepared) mutable {
 					if (const auto session = weak.get()) {
 						session->attachmentPrepared(
 							editor,
 							std::move(meta),
-							std::move(prepared));
+							std::move(prepared),
+							batchId);
 					}
 				}));
 	}
@@ -1063,7 +1097,8 @@ private:
 	void attachmentPrepared(
 		QPointer<Widget> editor,
 		AttachmentMeta meta,
-		std::shared_ptr<FilePrepareResult> prepared) {
+		std::shared_ptr<FilePrepareResult> prepared,
+		uint64 batchId) {
 		_pendingAttachmentPrepareCount = std::max(
 			_pendingAttachmentPrepareCount - 1,
 			0);
@@ -1076,9 +1111,8 @@ private:
 			maybeContinueDeferredSubmit();
 			return;
 		}
-		if ((meta.blockKind == RichPage::BlockKind::Photo)
-			!= (prepared->type == SendMediaType::Photo)) {
-			showAttachmentFailedToast();
+		if (meta.blockKind != BlockKindForPreparedResult(*prepared)) {
+			showUnsupportedMediaToast(batchId);
 			maybeContinueDeferredSubmit();
 			return;
 		}
@@ -1383,7 +1417,17 @@ private:
 			markAttachmentFailed(uploadId);
 			return;
 		}
-		requestEditorUpdate();
+		attachment->progress = 1.;
+		if (!patchVisibleAttachmentBlocks(*attachment)) {
+			requestEditorUpdate();
+		} else {
+			_state->resyncAfterExternalRichPageMutation();
+			if (_editor) {
+				_editor->refreshPreparedContent();
+			} else {
+				requestEditorUpdate();
+			}
+		}
 		maybeContinueSubmittedRequest();
 	}
 
@@ -1417,7 +1461,17 @@ private:
 			markAttachmentFailed(uploadId);
 			return;
 		}
-		requestEditorUpdate();
+		attachment->progress = 1.;
+		if (!patchVisibleAttachmentBlocks(*attachment)) {
+			requestEditorUpdate();
+		} else {
+			_state->resyncAfterExternalRichPageMutation();
+			if (_editor) {
+				_editor->refreshPreparedContent();
+			} else {
+				requestEditorUpdate();
+			}
+		}
 		maybeContinueSubmittedRequest();
 	}
 
@@ -1432,12 +1486,17 @@ private:
 	}
 
 	void updateAttachmentProgress(AttachmentRecord &attachment) {
-		if (attachment.blockKind == RichPage::BlockKind::Photo) {
-			attachment.progress = _session->data().photo(
-				attachment.localMediaId)->progress();
-		} else {
-			attachment.progress = _session->data().document(
-				attachment.localMediaId)->progress();
+		if (attachment.state == AttachmentState::Ready) {
+			attachment.progress = 1.;
+		} else if ((attachment.state == AttachmentState::Uploading)
+			|| (attachment.state == AttachmentState::Finalizing)) {
+			if (attachment.blockKind == RichPage::BlockKind::Photo) {
+				attachment.progress = _session->data().photo(
+					attachment.localMediaId)->progress();
+			} else {
+				attachment.progress = _session->data().document(
+					attachment.localMediaId)->progress();
+			}
 		}
 		requestEditorUpdate();
 	}
@@ -1460,16 +1519,22 @@ private:
 	[[nodiscard]] bool blockMatchesAttachment(
 		const RichPage::Block &block,
 		const AttachmentRecord &attachment) const {
+		const auto mediaIdMatches = [&](uint64 id) {
+			return id
+				&& ((id == attachment.localMediaId)
+					|| (attachment.serverMediaId
+						&& (id == attachment.serverMediaId)));
+		};
 		switch (attachment.blockKind) {
 		case RichPage::BlockKind::Photo:
 			return (block.kind == RichPage::BlockKind::Photo)
-				&& (block.photoId == attachment.localMediaId);
+				&& mediaIdMatches(block.photoId);
 		case RichPage::BlockKind::Video:
 			return (block.kind == RichPage::BlockKind::Video)
-				&& (block.documentId == attachment.localMediaId);
+				&& mediaIdMatches(block.documentId);
 		case RichPage::BlockKind::Audio:
 			return (block.kind == RichPage::BlockKind::Audio)
-				&& (block.documentId == attachment.localMediaId);
+				&& mediaIdMatches(block.documentId);
 		default:
 			return false;
 		}
@@ -1533,6 +1598,67 @@ private:
 		attachment.blockLocators = std::move(locators);
 	}
 
+	[[nodiscard]] RichPage *visibleRichPage() const {
+		return &const_cast<RichPage&>(_state->richPage());
+	}
+
+	[[nodiscard]] std::vector<RichPage::Block> *visibleBlockContainer(
+			const State::BlockContainerPath &path) const {
+		const auto page = visibleRichPage();
+		if (!page) {
+			return nullptr;
+		}
+		auto result = &page->blocks;
+		for (const auto &step : path.steps) {
+			switch (step.kind) {
+			case State::BlockContainerKind::Root:
+				break;
+			case State::BlockContainerKind::BlockChildren:
+				if (step.blockIndex < 0 || step.blockIndex >= int(result->size())) {
+					return nullptr;
+				}
+				result = &(*result)[step.blockIndex].blocks;
+				break;
+			case State::BlockContainerKind::ListItemChildren: {
+				if (step.blockIndex < 0 || step.blockIndex >= int(result->size())) {
+					return nullptr;
+				}
+				auto &block = (*result)[step.blockIndex];
+				if (step.listItemIndex < 0
+					|| step.listItemIndex >= int(block.listItems.size())) {
+					return nullptr;
+				}
+				result = &block.listItems[step.listItemIndex].blocks;
+			} break;
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]] RichPage::Block *visibleBlock(
+			const State::BlockPath &path) const {
+		const auto blocks = visibleBlockContainer(path.container);
+		if (!blocks || path.index < 0 || path.index >= int(blocks->size())) {
+			return nullptr;
+		}
+		return &(*blocks)[path.index];
+	}
+
+	[[nodiscard]] bool patchVisibleAttachmentBlocks(AttachmentRecord &attachment) {
+		refreshAttachmentLocators(attachment);
+		for (const auto &locator : attachment.blockLocators) {
+			const auto block = visibleBlock(locator);
+			if (!block || !blockMatchesAttachment(*block, attachment)) {
+				continue;
+			}
+			if (!patchReadyAttachmentBlock(*block, attachment)) {
+				return false;
+			}
+		}
+		refreshAttachmentLocators(attachment);
+		return true;
+	}
+
 	[[nodiscard]] int pendingAttachmentPlaceholders() const {
 		auto result = _pendingAttachmentPrepareCount;
 		if (AcceptedPreparedFileType(_preparingFileType)) {
@@ -1575,12 +1701,12 @@ private:
 		_showLimitToast(error);
 	}
 
-	void showRejectedToast(uint64 batchId) {
+	void showUnsupportedMediaToast(uint64 batchId) {
 		if (_rejectedToastBatchId == batchId) {
 			return;
 		}
 		_rejectedToastBatchId = batchId;
-		_controller->showToast(tr::lng_edit_media_invalid_file(tr::now));
+		_controller->showToast(tr::lng_iv_editor_media_invalid_file(tr::now));
 	}
 
 	[[nodiscard]] bool hasPendingPreparation() const {

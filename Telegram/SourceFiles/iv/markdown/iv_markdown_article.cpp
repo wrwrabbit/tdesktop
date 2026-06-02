@@ -1732,6 +1732,12 @@ public:
 
 	void setContent(MarkdownArticleContent content);
 
+	void setEditableHeightOverride(int editableIndex, int height);
+
+	void setEditableHeightOverrideForSegment(int segmentIndex, int height);
+
+	void clearEditableHeightOverride();
+
 	void setTextLeafHeightOverride(int textLeafIndex, int height);
 
 	void clearTextLeafHeightOverride();
@@ -1797,6 +1803,8 @@ public:
 	[[nodiscard]] QRect logicalSegmentRect(int segmentIndex) const;
 
 	[[nodiscard]] QRect segmentRect(int segmentIndex) const;
+	[[nodiscard]] QRect displayMathEditRect(int segmentIndex) const;
+	[[nodiscard]] QRect displayMathBlockRect(int segmentIndex) const;
 	[[nodiscard]] bool revealSegment(int segmentIndex);
 
 	[[nodiscard]] MarkdownArticleTextLeafStyle textLeafStyleForSegment(
@@ -2013,8 +2021,8 @@ private:
 		int,
 		MarkdownArticleScrollOwnerIdentityHasher> _capturedScrollLefts;
 	std::optional<ActiveHorizontalScrollDrag> _activeHorizontalScrollDrag;
-	int _textLeafHeightOverrideIndex = -1;
-	int _textLeafHeightOverride = 0;
+	int _editableHeightOverrideIndex = -1;
+	int _editableHeightOverride = 0;
 	bool _blocksPainted = false;
 
 };
@@ -2078,22 +2086,40 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	invalidateLayout();
 }
 
-void MarkdownArticle::Impl::setTextLeafHeightOverride(
-		int textLeafIndex,
+void MarkdownArticle::Impl::setEditableHeightOverride(
+		int editableIndex,
 		int height) {
-	textLeafIndex = std::max(textLeafIndex, -1);
+	editableIndex = std::max(editableIndex, -1);
 	height = std::max(height, 0);
-	if (_textLeafHeightOverrideIndex == textLeafIndex
-		&& _textLeafHeightOverride == height) {
+	if (_editableHeightOverrideIndex == editableIndex
+		&& _editableHeightOverride == height) {
 		return;
 	}
-	_textLeafHeightOverrideIndex = textLeafIndex;
-	_textLeafHeightOverride = height;
+	_editableHeightOverrideIndex = editableIndex;
+	_editableHeightOverride = height;
 	invalidateLayout();
 }
 
+void MarkdownArticle::Impl::setEditableHeightOverrideForSegment(
+		int segmentIndex,
+		int height) {
+	setEditableHeightOverride(editableIndexForSegment(segmentIndex), height);
+}
+
+void MarkdownArticle::Impl::clearEditableHeightOverride() {
+	setEditableHeightOverride(-1, 0);
+}
+
+void MarkdownArticle::Impl::setTextLeafHeightOverride(
+		int textLeafIndex,
+		int height) {
+	setEditableHeightOverrideForSegment(
+		segmentIndexForTextLeafIndex(textLeafIndex),
+		height);
+}
+
 void MarkdownArticle::Impl::clearTextLeafHeightOverride() {
-	setTextLeafHeightOverride(-1, 0);
+	clearEditableHeightOverride();
 }
 
 int MarkdownArticle::Impl::maxWidth() {
@@ -2359,6 +2385,32 @@ QRect MarkdownArticle::Impl::segmentRect(int segmentIndex) const {
 	return QRect();
 }
 
+QRect MarkdownArticle::Impl::displayMathEditRect(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment || !IsDisplayMathSegment(*segment) || !segment->block) {
+		return QRect();
+	}
+	const auto &block = *segment->block;
+	if (!block.contentRect.isEmpty()) {
+		return block.contentRect;
+	} else if (!block.outer.isEmpty()) {
+		return block.outer;
+	}
+	return block.formulaRect;
+}
+
+QRect MarkdownArticle::Impl::displayMathBlockRect(int segmentIndex) const {
+	const auto segment = FindSegment(&_segments, segmentIndex);
+	if (!segment || !IsDisplayMathSegment(*segment) || !segment->block) {
+		return QRect();
+	}
+	const auto &block = *segment->block;
+	if (!block.outer.isEmpty()) {
+		return block.outer;
+	}
+	return displayMathEditRect(segmentIndex);
+}
+
 MarkdownArticleTextLeafStyle MarkdownArticle::Impl::textLeafStyleForSegment(
 		int segmentIndex) const {
 	const auto segment = FindSegment(&_segments, segmentIndex);
@@ -2393,7 +2445,7 @@ MarkdownArticleTextLeafStyle MarkdownArticle::Impl::editableStyleForSegment(
 		.textColor = st.displayMath.fg,
 		.markBg = MarkBgColorForStyle(st),
 		.lineHeight = TextLineHeight(st.displayMath.fallbackStyle),
-		.align = segment->align,
+		.align = ::style::al_center,
 	};
 }
 
@@ -3521,12 +3573,12 @@ void MarkdownArticle::Impl::relayout(int width) {
 		.editMode = _content.editMode,
 		.syntaxHighlightTracker = this,
 	};
-	if (_textLeafHeightOverrideIndex >= 0 && _textLeafHeightOverride > 0) {
-		context.textLeafHeightOverride
-			= std::make_shared<TextLeafHeightOverride>(
-				TextLeafHeightOverride{
-					.textLeafIndex = _textLeafHeightOverrideIndex,
-					.height = _textLeafHeightOverride,
+	if (_editableHeightOverrideIndex >= 0 && _editableHeightOverride > 0) {
+		context.editableHeightOverride
+			= std::make_shared<EditableHeightOverride>(
+				EditableHeightOverride{
+					.editableIndex = _editableHeightOverrideIndex,
+					.height = _editableHeightOverride,
 				});
 	}
 	context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
@@ -3539,6 +3591,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 		= [=](const PreparedEditListItemSource &source) {
 			return getOrCreateTaskMarkerRippleRuntime(source);
 		};
+	const auto contextScope = LayoutContextScope(context);
+	(void)contextScope;
 	const auto y = LayoutBlocks(
 		_content.blocks.blocks,
 		&_content.formulas,
@@ -3600,6 +3654,22 @@ void MarkdownArticle::setTextRepaintCallbacks(
 
 void MarkdownArticle::setContent(MarkdownArticleContent content) {
 	_impl->setContent(std::move(content));
+}
+
+void MarkdownArticle::setEditableHeightOverride(
+		int editableIndex,
+		int height) {
+	_impl->setEditableHeightOverride(editableIndex, height);
+}
+
+void MarkdownArticle::setEditableHeightOverrideForSegment(
+		int segmentIndex,
+		int height) {
+	_impl->setEditableHeightOverrideForSegment(segmentIndex, height);
+}
+
+void MarkdownArticle::clearEditableHeightOverride() {
+	_impl->clearEditableHeightOverride();
 }
 
 void MarkdownArticle::setTextLeafHeightOverride(
@@ -3754,6 +3824,14 @@ QRect MarkdownArticle::logicalSegmentRect(int segmentIndex) const {
 
 QRect MarkdownArticle::segmentRect(int segmentIndex) const {
 	return _impl->segmentRect(segmentIndex);
+}
+
+QRect MarkdownArticle::displayMathEditRect(int segmentIndex) const {
+	return _impl->displayMathEditRect(segmentIndex);
+}
+
+QRect MarkdownArticle::displayMathBlockRect(int segmentIndex) const {
+	return _impl->displayMathBlockRect(segmentIndex);
 }
 
 bool MarkdownArticle::revealSegment(int segmentIndex) {

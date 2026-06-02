@@ -866,7 +866,7 @@ void Widget::hideInlineFieldAndRefresh() {
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 	hideInlineField();
-	_article->clearTextLeafHeightOverride();
+	clearInlineFieldEditSession();
 	refreshPreparedContent();
 }
 
@@ -1673,7 +1673,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		_pendingOrdinal = -1;
 		_pendingCursorOffset = 0;
 		hideInlineField();
-		_article->clearTextLeafHeightOverride();
+		clearInlineFieldEditSession();
 		const auto toggled = toggle();
 		if (toggled || hadVisibleField) {
 			refreshPreparedContent();
@@ -1750,7 +1750,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		_pendingOrdinal = -1;
 		_pendingCursorOffset = 0;
 		hideInlineField();
-		_article->clearTextLeafHeightOverride();
+		clearInlineFieldEditSession();
 		refreshPreparedContent();
 		return true;
 	};
@@ -2181,7 +2181,7 @@ void Widget::setInlineFieldFromActiveState(int selectionFrom, int selectionTo) {
 		_field->setTextWithTags(
 			{ _state->activeRawText(), {} },
 			Ui::InputField::HistoryAction::Clear);
-		_article->clearTextLeafHeightOverride();
+		_article->clearEditableHeightOverride();
 	} else {
 		const auto activeText = ConvertRichTextToEditorTags(
 			_state->activeText());
@@ -2223,6 +2223,7 @@ void Widget::activateTextOrdinal(
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 
+	const auto previousSegmentIndex = _activeSegmentIndex;
 	const auto segmentIndex = segmentIndexForEditableOrdinal(ordinal);
 	if (segmentIndex < 0) {
 		_activeSegmentIndex = -1;
@@ -2232,7 +2233,23 @@ void Widget::activateTextOrdinal(
 		return;
 	}
 
+	if (_article && previousSegmentIndex != segmentIndex) {
+		_article->clearEditableHeightOverride();
+	}
+	if (previousSegmentIndex != segmentIndex) {
+		clearDisplayMathEditSession();
+	}
 	_activeSegmentIndex = segmentIndex;
+	if (_article->segmentIsDisplayMath(_activeSegmentIndex)) {
+		if (!_activeSegmentIsDisplayMath) {
+			const auto blockRect = _article->displayMathBlockRect(
+				_activeSegmentIndex);
+			_activeSegmentIsDisplayMath = true;
+			_activeDisplayMathBaselineHeight = std::max(blockRect.height(), 1);
+		}
+	} else {
+		clearDisplayMathEditSession();
+	}
 	setInlineFieldFromActiveState(selectionFrom, selectionTo);
 	_field->show();
 	syncInlineFieldGeometry();
@@ -2369,7 +2386,32 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 	} else if (atEnd && key == Qt::Key_Down) {
 		if (!commitInlineField()) {
 			handled = true;
-		} else if (const auto target = _state->moveActiveQuoteDown()) {
+		} else if (const auto target
+			= _state->removeTemporaryDownParagraphAndMove();
+			target.action != State::BoundaryTarget::Action::None) {
+			refreshPreparedContent();
+			switch (target.action) {
+			case State::BoundaryTarget::Action::Text:
+				activateTextOrdinal(target.textOrdinal, 0);
+				break;
+			case State::BoundaryTarget::Action::StructuralSelection:
+				_boundarySelectionOrigin = std::nullopt;
+				_selection = {};
+				_selectionEndpoints = {};
+				_articleSelectionDrag = {};
+				setStructuralSelection(target.structuralSelection);
+				_pendingOrdinal = -1;
+				_pendingCursorOffset = 0;
+				hideInlineField();
+				clearInlineFieldEditSession();
+				update();
+				break;
+			case State::BoundaryTarget::Action::None:
+			case State::BoundaryTarget::Action::RemoveActiveOwner:
+				break;
+			}
+			handled = true;
+		} else if (const auto target = _state->moveActiveSpecialBlockDown()) {
 			refreshPreparedContent();
 			activateTextOrdinal(*target, 0);
 			handled = true;
@@ -2526,7 +2568,7 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		const auto target = _state->removeActiveOwnerAndSelectAdjacent(
 			forward);
 		hideInlineField();
-		_article->clearTextLeafHeightOverride();
+		clearInlineFieldEditSession();
 		refreshPreparedContent();
 		if (target) {
 			if (forward) {
@@ -2561,7 +2603,7 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		_pendingOrdinal = -1;
 		_pendingCursorOffset = 0;
 		hideInlineField();
-		_article->clearTextLeafHeightOverride();
+		clearInlineFieldEditSession();
 		refreshPreparedContent();
 		update();
 		return true;
@@ -2595,19 +2637,39 @@ void Widget::updateInlineFieldHeightOverride() {
 		_pendingHeightOverrideUpdate = true;
 		return;
 	}
-	const auto textLeafIndex = _article->textLeafIndexForSegment(
-		_activeSegmentIndex);
-	if (textLeafIndex < 0) {
-		_article->clearTextLeafHeightOverride();
+	if (_article->editableIndexForSegment(_activeSegmentIndex) < 0) {
+		_article->clearEditableHeightOverride();
 		return;
 	}
-	const auto segmentRect = outerEditableSegmentRect(_activeSegmentIndex);
-	const auto height = segmentRect.isEmpty()
+	const auto segmentRect = fieldOuterRectForSegment(_activeSegmentIndex);
+	auto height = segmentRect.isEmpty()
 		? _field->height()
 		: std::max(_field->geometry().bottom() + 1 - segmentRect.y(), 1);
-	_article->setTextLeafHeightOverride(textLeafIndex, height);
+	if (_activeSegmentIsDisplayMath) {
+		const auto blockRect = _article->displayMathBlockRect(
+			_activeSegmentIndex).translated(articleTopLeft());
+		if (!blockRect.isEmpty()) {
+			height = std::max(
+				_field->geometry().bottom() + 1 - blockRect.y(),
+				1);
+		}
+		height = std::max(height, _activeDisplayMathBaselineHeight);
+	}
+	_article->setEditableHeightOverrideForSegment(_activeSegmentIndex, height);
 	resizeToWidth(std::max(widthNoMargins(), 1));
 	update();
+}
+
+void Widget::clearDisplayMathEditSession() {
+	_activeSegmentIsDisplayMath = false;
+	_activeDisplayMathBaselineHeight = 0;
+}
+
+void Widget::clearInlineFieldEditSession() {
+	clearDisplayMathEditSession();
+	if (_article) {
+		_article->clearEditableHeightOverride();
+	}
 }
 
 void Widget::ensureArticleLayoutForInlineField(int width) {
@@ -2635,12 +2697,12 @@ void Widget::syncInlineFieldGeometry(int width) {
 	if (_activeSegmentIndex >= 0) {
 		ensureInlineFieldForSegment(_activeSegmentIndex);
 	}
-	const auto segmentRect = outerEditableSegmentRect(_activeSegmentIndex);
+	const auto segmentRect = fieldOuterRectForSegment(_activeSegmentIndex);
 	if (segmentRect.isEmpty()) {
 		_pendingOrdinal = _activeOrdinal;
 		_pendingCursorOffset = _field->textCursor().position();
 		hideInlineField();
-		_article->clearTextLeafHeightOverride();
+		_article->clearEditableHeightOverride();
 		return;
 	}
 	const auto margins = _field->fullTextMargins();
@@ -3012,7 +3074,7 @@ std::optional<int> Widget::removeCurrentStructuralSelection(bool forward) {
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 	hideInlineField();
-	_article->clearTextLeafHeightOverride();
+	clearInlineFieldEditSession();
 	const auto target = _state->removeStructuralSelection(
 		selection,
 		forward);
@@ -3128,7 +3190,7 @@ bool Widget::handleFieldMouseEvent(QEvent *event) {
 			_pendingOrdinal = -1;
 			_pendingCursorOffset = 0;
 			hideInlineField();
-			_article->clearTextLeafHeightOverride();
+			clearInlineFieldEditSession();
 			refreshPreparedContent();
 			finishArticleSelection();
 			_trackingPointerPress = false;
@@ -3268,6 +3330,17 @@ int Widget::articleWidth(int outerWidth) const {
 
 QRect Widget::outerEditableSegmentRect(int segmentIndex) const {
 	const auto rect = _article->logicalSegmentRect(segmentIndex);
+	return rect.isEmpty() ? rect : rect.translated(articleTopLeft());
+}
+
+QRect Widget::fieldOuterRectForSegment(int segmentIndex) const {
+	if (!_article || segmentIndex < 0) {
+		return QRect();
+	}
+	if (!_activeSegmentIsDisplayMath) {
+		return outerEditableSegmentRect(segmentIndex);
+	}
+	const auto rect = _article->displayMathEditRect(segmentIndex);
 	return rect.isEmpty() ? rect : rect.translated(articleTopLeft());
 }
 

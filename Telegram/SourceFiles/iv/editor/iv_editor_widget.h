@@ -206,6 +206,8 @@ private:
 	[[nodiscard]] bool removeBoundaryOwner(bool forward);
 	void ensurePendingActivation();
 	void updateInlineFieldHeightOverride();
+	void clearDisplayMathEditSession();
+	void clearInlineFieldEditSession();
 	void ensureArticleLayoutForInlineField(int width);
 	void syncArticleVisibleTopBottom();
 	void syncInlineFieldGeometry(int width);
@@ -258,6 +260,7 @@ private:
 	[[nodiscard]] QPoint articleTopLeft() const;
 	[[nodiscard]] int articleWidth(int outerWidth) const;
 	void touchEvent(QTouchEvent *e);
+	[[nodiscard]] QRect fieldOuterRectForSegment(int segmentIndex) const;
 	[[nodiscard]] QRect outerEditableSegmentRect(int segmentIndex) const;
 	[[nodiscard]] Markdown::MarkdownArticlePaintContext textPaintContext(
 		QRect clip);
@@ -283,6 +286,8 @@ private:
 	int _articleHeight = 0;
 	int _activeOrdinal = -1;
 	int _activeSegmentIndex = -1;
+	bool _activeSegmentIsDisplayMath = false;
+	int _activeDisplayMathBaselineHeight = 0;
 	int _pendingOrdinal = -1;
 	int _pendingCursorOffset = 0;
 	Markdown::MarkdownArticleSelection _selection;
