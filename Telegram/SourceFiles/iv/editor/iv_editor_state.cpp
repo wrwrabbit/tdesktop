@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_state.h"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace Iv::Editor {
@@ -37,6 +38,7 @@ using RemovalKind = State::RemovalKind;
 using RemovalTarget = State::RemovalTarget;
 using RichText = RichPage::RichText;
 using TableCell = RichPage::TableCell;
+using TableRow = RichPage::TableRow;
 using TaskState = RichPage::TaskState;
 using TextNodeDescriptor = State::TextNodeDescriptor;
 
@@ -186,6 +188,429 @@ constexpr auto kMaxCommittedFieldLength = 256 * 1024;
 			&& leaf.tableRowIndex == rowIndex)
 		? std::make_optional(leaf.tableCellIndex)
 		: std::nullopt;
+}
+
+using TableGridOccupancyRow = std::vector<char>;
+using TableGridOccupancy = std::vector<TableGridOccupancyRow>;
+
+struct TableGridCellReference {
+	int rowIndex = -1;
+	int cellIndex = -1;
+	int rowFrom = -1;
+	int rowTill = -1;
+	int columnFrom = -1;
+	int columnTill = -1;
+};
+
+struct TableGrid {
+	std::vector<TableGridCellReference> cells;
+	TableGridOccupancy occupancy;
+	int rowCount = 0;
+	int columnCount = 0;
+};
+
+[[nodiscard]] int NormalizeTableSpan(int span) {
+	return std::max(span, 1);
+}
+
+[[nodiscard]] int ClampTableRowspan(
+		int rawRowspan,
+		int row,
+		int rowCount) {
+	if ((row < 0) || (row >= rowCount) || (rowCount <= 0)) {
+		return 0;
+	}
+	const auto remainingRows = int64(rowCount) - row;
+	return int(std::min<int64>(NormalizeTableSpan(rawRowspan), remainingRows));
+}
+
+[[nodiscard]] int ClampTableColspan(
+		int rawColspan,
+		int column,
+		int maxColumns) {
+	if ((column < 0) || (column >= maxColumns) || (maxColumns <= 0)) {
+		return 0;
+	}
+	const auto remainingColumns = int64(maxColumns) - column;
+	return int(std::min<int64>(
+		NormalizeTableSpan(rawColspan),
+		remainingColumns));
+}
+
+[[nodiscard]] bool CanOccupyTableSlots(
+		const TableGridOccupancy &occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy.size()))) {
+		return false;
+	}
+	const auto rowLimit = int(std::min<int64>(
+		int64(row) + rowspan,
+		occupancy.size()));
+	const auto columnLimit64 = int64(column) + colspan;
+	if (columnLimit64 <= column) {
+		return false;
+	}
+	const auto columnLimit = int(std::min<int64>(
+		columnLimit64,
+		std::numeric_limits<int>::max()));
+	for (auto currentRow = row; currentRow < rowLimit; ++currentRow) {
+		const auto &occupied = occupancy[currentRow];
+		const auto occupiedLimit = std::min(columnLimit, int(occupied.size()));
+		for (auto currentColumn = column;
+			currentColumn < occupiedLimit;
+			++currentColumn) {
+			if (occupied[currentColumn]) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] int FirstAvailableTableColumn(
+		const TableGridOccupancy &occupancy,
+		int row,
+		int rowspan,
+		int colspan,
+		int maxColumns) {
+	if ((row < 0)
+		|| (row >= int(occupancy.size()))
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (maxColumns <= 0)) {
+		return -1;
+	}
+	for (auto column = 0; column < maxColumns; ++column) {
+		const auto effectiveColspan = ClampTableColspan(
+			colspan,
+			column,
+			maxColumns);
+		if (effectiveColspan <= 0) {
+			continue;
+		}
+		if (CanOccupyTableSlots(
+				occupancy,
+				row,
+				column,
+				rowspan,
+				effectiveColspan)) {
+			return column;
+		}
+	}
+	return -1;
+}
+
+void MarkTableSlots(
+		TableGridOccupancy *occupancy,
+		int row,
+		int column,
+		int rowspan,
+		int colspan) {
+	if ((row < 0)
+		|| (column < 0)
+		|| (rowspan <= 0)
+		|| (colspan <= 0)
+		|| (row >= int(occupancy->size()))) {
+		return;
+	}
+	const auto rowLimit = int(std::min<int64>(
+		int64(row) + rowspan,
+		occupancy->size()));
+	const auto columnLimit64 = int64(column) + colspan;
+	if (columnLimit64 <= column) {
+		return;
+	}
+	const auto columnLimit = int(std::min<int64>(
+		columnLimit64,
+		std::numeric_limits<int>::max()));
+	for (auto currentRow = row; currentRow < rowLimit; ++currentRow) {
+		auto &occupied = (*occupancy)[currentRow];
+		if (columnLimit > int(occupied.size())) {
+			occupied.resize(columnLimit, false);
+		}
+		for (auto currentColumn = column;
+			currentColumn < columnLimit;
+			++currentColumn) {
+			occupied[currentColumn] = true;
+		}
+	}
+}
+
+[[nodiscard]] int TableGridColumnCount(
+		const TableGridOccupancy &occupancy) {
+	auto result = 0;
+	for (const auto &row : occupancy) {
+		result = std::max(result, int(row.size()));
+	}
+	return result;
+}
+
+[[nodiscard]] TableGrid BuildTableGrid(const Block &table) {
+	const auto &limits = Markdown::PrepareTableRenderLimitsForIv();
+	auto result = TableGrid();
+	result.rowCount = std::min(int(table.tableRows.size()), limits.maxRows);
+	if (result.rowCount < 0) {
+		result.rowCount = 0;
+	}
+	result.occupancy = TableGridOccupancy(result.rowCount);
+	auto occupiedSlotCountSoFar = int64(0);
+
+	for (auto rowIndex = 0; rowIndex != result.rowCount; ++rowIndex) {
+		const auto &row = table.tableRows[rowIndex];
+		for (auto cellIndex = 0, cellCount = int(row.cells.size());
+				cellIndex != cellCount;
+				++cellIndex) {
+			const auto &cell = row.cells[cellIndex];
+			const auto normalizedColspan = NormalizeTableSpan(cell.colspan);
+			const auto rowspan = ClampTableRowspan(
+				cell.rowspan,
+				rowIndex,
+				result.rowCount);
+			if (rowspan <= 0) {
+				continue;
+			}
+			const auto column = FirstAvailableTableColumn(
+				result.occupancy,
+				rowIndex,
+				rowspan,
+				normalizedColspan,
+				limits.maxColumns);
+			if (column < 0) {
+				continue;
+			}
+			const auto colspan = ClampTableColspan(
+				normalizedColspan,
+				column,
+				limits.maxColumns);
+			if (colspan <= 0) {
+				continue;
+			}
+			const auto occupiedSlotGrowth = int64(rowspan) * colspan;
+			if (occupiedSlotGrowth > limits.maxCells
+				|| (occupiedSlotCountSoFar + occupiedSlotGrowth)
+					> limits.maxCells) {
+				continue;
+			}
+			result.cells.push_back({
+				.rowIndex = rowIndex,
+				.cellIndex = cellIndex,
+				.rowFrom = rowIndex,
+				.rowTill = rowIndex + rowspan,
+				.columnFrom = column,
+				.columnTill = column + colspan,
+			});
+			MarkTableSlots(
+				&result.occupancy,
+				rowIndex,
+				column,
+				rowspan,
+				colspan);
+			occupiedSlotCountSoFar += occupiedSlotGrowth;
+		}
+	}
+	result.columnCount = TableGridColumnCount(result.occupancy);
+	return result;
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridCellIntersectsRange(
+		const TableGridCellReference &cell,
+		const Range &range) {
+	return (cell.rowFrom < range.rowTill)
+		&& (cell.rowTill > range.rowFrom)
+		&& (cell.columnFrom < range.columnTill)
+		&& (cell.columnTill > range.columnFrom);
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridCellContainedInRange(
+		const TableGridCellReference &cell,
+		const Range &range) {
+	return (cell.rowFrom >= range.rowFrom)
+		&& (cell.rowTill <= range.rowTill)
+		&& (cell.columnFrom >= range.columnFrom)
+		&& (cell.columnTill <= range.columnTill);
+}
+
+template <typename Range>
+[[nodiscard]] std::vector<TableGridCellReference> SelectedTableGridCells(
+		const TableGrid &grid,
+		const Range &range) {
+	auto result = std::vector<TableGridCellReference>();
+	result.reserve(grid.cells.size());
+	for (const auto &cell : grid.cells) {
+		if (TableGridCellIntersectsRange(cell, range)) {
+			result.push_back(cell);
+		}
+	}
+	return result;
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridRangeCovered(
+		const TableGrid &grid,
+		const Range &range) {
+	if ((range.rowFrom < 0)
+		|| (range.rowTill <= range.rowFrom)
+		|| (range.columnFrom < 0)
+		|| (range.columnTill <= range.columnFrom)
+		|| (range.rowTill > grid.rowCount)
+		|| (range.columnTill > grid.columnCount)) {
+		return false;
+	}
+	for (auto row = range.rowFrom; row != range.rowTill; ++row) {
+		if (row >= int(grid.occupancy.size())) {
+			return false;
+		}
+		const auto &occupied = grid.occupancy[row];
+		for (auto column = range.columnFrom;
+				column != range.columnTill;
+				++column) {
+			if (column >= int(occupied.size()) || !occupied[column]) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+template <typename Range>
+[[maybe_unused]] [[nodiscard]] bool CleanTableGridUniteRange(
+		const TableGrid &grid,
+		const Range &range) {
+	const auto selected = SelectedTableGridCells(grid, range);
+	if (selected.empty()) {
+		return false;
+	}
+	for (const auto &cell : selected) {
+		if (!TableGridCellContainedInRange(cell, range)) {
+			return false;
+		}
+	}
+	return TableGridRangeCovered(grid, range);
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridRangeSpansAllRows(
+		const TableGrid &grid,
+		const Range &range) {
+	return (range.rowFrom == 0)
+		&& (range.rowTill == grid.rowCount)
+		&& (range.columnFrom >= 0)
+		&& (range.columnTill > range.columnFrom)
+		&& (range.columnTill <= grid.columnCount);
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridRangeSpansAllColumns(
+		const TableGrid &grid,
+		const Range &range) {
+	return (range.rowFrom >= 0)
+		&& (range.rowTill > range.rowFrom)
+		&& (range.rowTill <= grid.rowCount)
+		&& (range.columnFrom == 0)
+		&& (range.columnTill == grid.columnCount);
+}
+
+template <typename Range>
+[[nodiscard]] bool TableGridRangeCoversFullTable(
+		const TableGrid &grid,
+		const Range &range) {
+	return TableGridRangeSpansAllRows(grid, range)
+		&& TableGridRangeSpansAllColumns(grid, range);
+}
+
+template <typename Range>
+[[nodiscard]] int TableGridCellColumnIntersection(
+		const TableGridCellReference &cell,
+		const Range &range) {
+	const auto from = std::max(cell.columnFrom, range.columnFrom);
+	const auto till = std::min(cell.columnTill, range.columnTill);
+	return std::max(till - from, 0);
+}
+
+[[nodiscard]] bool TableGridCellMatchesLeaf(
+		const TableGridCellReference &cell,
+		const LeafPath &leaf,
+		const BlockPath &block) {
+	const auto index = TableCellIndexForLeaf(leaf, block, cell.rowIndex);
+	return index && *index == cell.cellIndex;
+}
+
+[[nodiscard]] TableCell MakeDefaultTableCell() {
+	return TableCell();
+}
+
+[[nodiscard]] TableCell MakeDefaultTableCell(bool header) {
+	auto result = MakeDefaultTableCell();
+	result.header = header;
+	return result;
+}
+
+[[nodiscard]] const TableCell *TableGridCellAt(
+		const Block &table,
+		const TableGrid &grid,
+		int row,
+		int column) {
+	if (row < 0 || row >= grid.rowCount || column < 0) {
+		return nullptr;
+	}
+	for (const auto &reference : grid.cells) {
+		if (reference.rowFrom <= row
+			&& reference.rowTill > row
+			&& reference.columnFrom <= column
+			&& reference.columnTill > column) {
+			return &table.tableRows[reference.rowIndex].cells[
+				reference.cellIndex];
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] int IncrementTableSpan(int span) {
+	const auto normalized = NormalizeTableSpan(span);
+	return (normalized == std::numeric_limits<int>::max())
+		? normalized
+		: normalized + 1;
+}
+
+void InsertTableCellBeforeVisualColumn(
+		TableRow *row,
+		const TableGrid &grid,
+		int rowIndex,
+		int column,
+		TableCell insertedCell) {
+	auto insertAt = int(row->cells.size());
+	for (const auto &reference : grid.cells) {
+		if (reference.rowIndex == rowIndex
+			&& reference.columnFrom >= column) {
+			insertAt = std::min(reference.cellIndex, int(row->cells.size()));
+			break;
+		}
+	}
+	row->cells.insert(
+		row->cells.begin() + insertAt,
+		std::move(insertedCell));
+}
+
+void InsertTableCellBeforeVisualColumn(
+		TableRow *row,
+		const TableGrid &grid,
+		int rowIndex,
+		int column) {
+	InsertTableCellBeforeVisualColumn(
+		row,
+		grid,
+		rowIndex,
+		column,
+		MakeDefaultTableCell());
 }
 
 [[nodiscard]] bool BlockCanOwnChildContainer(const Block &block) {
@@ -654,6 +1079,620 @@ bool State::toggleDetailsOpen(
 	}
 	owner->open = !owner->open;
 	rebuild();
+	return true;
+}
+
+State::TableSelectionInfo State::tableSelectionInfo(
+		const Markdown::PreparedEditTableCellRange &range) const {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return {};
+	}
+	const auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return {};
+	}
+	const auto grid = BuildTableGrid(*owner);
+	const auto selected = SelectedTableGridCells(grid, *validated);
+	if (selected.empty()) {
+		return {};
+	}
+	auto result = TableSelectionInfo{
+		.valid = true,
+		.allHeader = true,
+		.allAlignCenter = true,
+		.allAlignRight = true,
+		.allAlignMiddle = true,
+		.allAlignBottom = true,
+		.singleCell = (selected.size() == 1),
+		.canDeleteRows = TableGridRangeSpansAllColumns(grid, *validated),
+		.canDeleteColumns = TableGridRangeSpansAllRows(grid, *validated),
+		.canDeleteTable = TableGridRangeCoversFullTable(grid, *validated),
+		.selectedRows = validated->rowTill - validated->rowFrom,
+		.selectedColumns = validated->columnTill - validated->columnFrom,
+		.bordered = owner->bordered,
+		.striped = owner->striped,
+	};
+	for (const auto &reference : selected) {
+		const auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		if (!cell.header) {
+			result.allHeader = false;
+		}
+		if (cell.alignment != RichPage::TableAlignment::Center) {
+			result.allAlignCenter = false;
+		}
+		if (cell.alignment != RichPage::TableAlignment::Right) {
+			result.allAlignRight = false;
+		}
+		if (cell.verticalAlignment
+			!= RichPage::TableVerticalAlignment::Middle) {
+			result.allAlignMiddle = false;
+		}
+		if (cell.verticalAlignment
+			!= RichPage::TableVerticalAlignment::Bottom) {
+			result.allAlignBottom = false;
+		}
+		if (result.singleCell) {
+			result.canSplitCell = (NormalizeTableSpan(cell.colspan) > 1)
+				|| (NormalizeTableSpan(cell.rowspan) > 1);
+		}
+	}
+	result.canUniteCells = !result.singleCell
+		&& CleanTableGridUniteRange(grid, *validated);
+	return result;
+}
+
+std::optional<Markdown::PreparedEditTableCellRange>
+State::tableContextRangeForSelection(
+		const Markdown::PreparedEditSelection &selection,
+		const Markdown::PreparedEditTableCellSource &source) const {
+	if (source.tableRowIndex < 0
+		|| source.column < 0
+		|| source.rowspan <= 0
+		|| source.colspan <= 0) {
+		return std::nullopt;
+	}
+	const auto sourceBlock = convertBlockPath(source.block);
+	if (!sourceBlock) {
+		return std::nullopt;
+	}
+	const auto owner = block(*sourceBlock);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return std::nullopt;
+	}
+	const auto grid = BuildTableGrid(*owner);
+	if (grid.rowCount <= 0 || grid.columnCount <= 0) {
+		return std::nullopt;
+	}
+	const auto fullTableRange = [&] {
+		return Markdown::PreparedEditTableCellRange{
+			.block = source.block,
+			.rowFrom = 0,
+			.rowTill = grid.rowCount,
+			.columnFrom = 0,
+			.columnTill = grid.columnCount,
+		};
+	};
+	const auto sourceIntersects = [&](const auto &range) {
+		return (source.tableRowIndex < range.rowTill)
+			&& (source.tableRowIndex + source.rowspan > range.rowFrom)
+			&& (source.column < range.columnTill)
+			&& (source.column + source.colspan > range.columnFrom);
+	};
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::TableCells: {
+		const auto range = validateTableCellRange(selection.tableCells);
+		if (!range || range->block != *sourceBlock) {
+			return std::nullopt;
+		}
+		return sourceIntersects(*range)
+			? std::make_optional(selection.tableCells)
+			: std::nullopt;
+	}
+	case PreparedEditSelectionKind::TableRows: {
+		const auto range = validateTableRowRange(selection.tableRows);
+		if (!range || range->block != *sourceBlock) {
+			return std::nullopt;
+		}
+		if (source.tableRowIndex >= range->till
+			|| source.tableRowIndex + source.rowspan <= range->from) {
+			return std::nullopt;
+		}
+		return Markdown::PreparedEditTableCellRange{
+			.block = source.block,
+			.rowFrom = range->from,
+			.rowTill = range->till,
+			.columnFrom = 0,
+			.columnTill = grid.columnCount,
+		};
+	}
+	case PreparedEditSelectionKind::Blocks: {
+		const auto range = validateBlockRange(selection.blocks);
+		if (!range
+			|| sourceBlock->container != range->container
+			|| sourceBlock->index < range->from
+			|| sourceBlock->index >= range->till) {
+			return std::nullopt;
+		}
+		return fullTableRange();
+	}
+	case PreparedEditSelectionKind::ListItems:
+	case PreparedEditSelectionKind::None:
+		return std::nullopt;
+	}
+	return std::nullopt;
+}
+
+bool State::canRemoveStructuralSelection(
+		const Markdown::PreparedEditSelection &selection) const {
+	switch (selection.kind) {
+	case PreparedEditSelectionKind::Blocks:
+		return validateBlockRange(selection.blocks).has_value();
+	case PreparedEditSelectionKind::ListItems:
+		return validateListItemRange(selection.listItems).has_value();
+	case PreparedEditSelectionKind::TableRows:
+		return validateTableRowRange(selection.tableRows).has_value();
+	case PreparedEditSelectionKind::TableCells: {
+		const auto range = validateTableCellRange(selection.tableCells);
+		if (!range) {
+			return false;
+		}
+		const auto owner = block(range->block);
+		if (!owner || owner->kind != BlockKind::Table) {
+			return false;
+		}
+		return TableGridRangeSpansAllRows(BuildTableGrid(*owner), *range);
+	}
+	case PreparedEditSelectionKind::None:
+		return false;
+	}
+	return false;
+}
+
+bool State::addTableRow(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after) {
+	return applyCheckedMutation(false, [range, after](State &candidate) {
+		const auto applied = candidate.addTableRowUnchecked(range, after);
+		return CheckedMutationResult<bool>{
+			.apply = applied,
+			.result = applied,
+		};
+	});
+}
+
+bool State::addTableRowUnchecked(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto insertAt = after ? validated->rowTill : validated->rowFrom;
+	const auto grid = BuildTableGrid(*owner);
+	if (insertAt < 0 || insertAt > int(owner->tableRows.size())) {
+		return false;
+	}
+	const auto sourceRow = after
+		? validated->rowTill - 1
+		: validated->rowFrom;
+
+	auto coveredColumns = std::vector<char>(grid.columnCount, false);
+	for (const auto &reference : grid.cells) {
+		if (reference.rowFrom >= insertAt || reference.rowTill <= insertAt) {
+			continue;
+		}
+		auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		cell.rowspan = IncrementTableSpan(cell.rowspan);
+		for (auto column = reference.columnFrom;
+				column != reference.columnTill;
+				++column) {
+			coveredColumns[column] = true;
+		}
+	}
+
+	auto row = TableRow();
+	if (grid.columnCount <= 0) {
+		row.cells.push_back(MakeDefaultTableCell());
+	} else {
+		row.cells.reserve(grid.columnCount);
+		for (auto column = 0; column != grid.columnCount; ++column) {
+			if (!coveredColumns[column]) {
+				const auto source = TableGridCellAt(
+					*owner,
+					grid,
+					sourceRow,
+					column);
+				row.cells.push_back(MakeDefaultTableCell(
+					source ? source->header : false));
+			}
+		}
+	}
+	owner->tableRows.insert(
+		owner->tableRows.begin() + insertAt,
+		std::move(row));
+	rebuild();
+	return true;
+}
+
+bool State::addTableColumn(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after) {
+	return applyCheckedMutation(false, [range, after](State &candidate) {
+		const auto applied = candidate.addTableColumnUnchecked(range, after);
+		return CheckedMutationResult<bool>{
+			.apply = applied,
+			.result = applied,
+		};
+	});
+}
+
+bool State::addTableColumnUnchecked(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto insertAt = after
+		? validated->columnTill
+		: validated->columnFrom;
+	const auto grid = BuildTableGrid(*owner);
+	const auto sourceColumn = after
+		? validated->columnTill - 1
+		: validated->columnFrom;
+
+	auto coveredRows = std::vector<char>(owner->tableRows.size(), false);
+	for (const auto &reference : grid.cells) {
+		if (reference.columnFrom >= insertAt
+			|| reference.columnTill <= insertAt) {
+			continue;
+		}
+		auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		cell.colspan = IncrementTableSpan(cell.colspan);
+		for (auto row = reference.rowFrom; row != reference.rowTill; ++row) {
+			coveredRows[row] = true;
+		}
+	}
+
+	for (auto rowIndex = 0;
+			rowIndex != int(owner->tableRows.size());
+			++rowIndex) {
+		if (coveredRows[rowIndex]) {
+			continue;
+		}
+		const auto source = TableGridCellAt(
+			*owner,
+			grid,
+			rowIndex,
+			sourceColumn);
+		InsertTableCellBeforeVisualColumn(
+			&owner->tableRows[rowIndex],
+			grid,
+			rowIndex,
+			insertAt,
+			MakeDefaultTableCell(source ? source->header : false));
+	}
+	rebuild();
+	return true;
+}
+
+bool State::setTableHeader(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool header) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto selected = SelectedTableGridCells(
+		BuildTableGrid(*owner),
+		*validated);
+	if (selected.empty()) {
+		return false;
+	}
+	auto changed = false;
+	for (const auto &reference : selected) {
+		auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		if (cell.header != header) {
+			cell.header = header;
+			changed = true;
+		}
+	}
+	if (changed) {
+		rebuild();
+	}
+	return true;
+}
+
+bool State::setTableAlignment(
+		const Markdown::PreparedEditTableCellRange &range,
+		RichPage::TableAlignment alignment) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto selected = SelectedTableGridCells(
+		BuildTableGrid(*owner),
+		*validated);
+	if (selected.empty()) {
+		return false;
+	}
+	auto changed = false;
+	for (const auto &reference : selected) {
+		auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		if (cell.alignment != alignment) {
+			cell.alignment = alignment;
+			changed = true;
+		}
+	}
+	if (changed) {
+		rebuild();
+	}
+	return true;
+}
+
+bool State::setTableVerticalAlignment(
+		const Markdown::PreparedEditTableCellRange &range,
+		RichPage::TableVerticalAlignment alignment) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto selected = SelectedTableGridCells(
+		BuildTableGrid(*owner),
+		*validated);
+	if (selected.empty()) {
+		return false;
+	}
+	auto changed = false;
+	for (const auto &reference : selected) {
+		auto &cell = owner->tableRows[reference.rowIndex].cells[
+			reference.cellIndex];
+		if (cell.verticalAlignment != alignment) {
+			cell.verticalAlignment = alignment;
+			changed = true;
+		}
+	}
+	if (changed) {
+		rebuild();
+	}
+	return true;
+}
+
+bool State::splitTableCell(
+		const Markdown::PreparedEditTableCellRange &range) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto grid = BuildTableGrid(*owner);
+	const auto selected = SelectedTableGridCells(grid, *validated);
+	if (selected.size() != 1) {
+		return false;
+	}
+	const auto reference = selected.front();
+	auto &cell = owner->tableRows[reference.rowIndex].cells[
+		reference.cellIndex];
+	if (cell.rowspan <= 1 && cell.colspan <= 1) {
+		return false;
+	}
+	const auto header = cell.header;
+
+	cell.rowspan = 1;
+	cell.colspan = 1;
+	for (auto rowIndex = reference.rowFrom;
+			rowIndex != reference.rowTill;
+			++rowIndex) {
+		auto &row = owner->tableRows[rowIndex];
+		for (auto column = reference.columnTill;
+				column != reference.columnFrom;
+				--column) {
+			const auto currentColumn = column - 1;
+			if (rowIndex == reference.rowFrom
+				&& currentColumn == reference.columnFrom) {
+				continue;
+			}
+			InsertTableCellBeforeVisualColumn(
+				&row,
+				grid,
+				rowIndex,
+				currentColumn,
+				MakeDefaultTableCell(header));
+		}
+	}
+	rebuild();
+	return true;
+}
+
+bool State::uniteTableCells(
+		const Markdown::PreparedEditTableCellRange &range) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	const auto grid = BuildTableGrid(*owner);
+	const auto selected = SelectedTableGridCells(grid, *validated);
+	if (selected.size() <= 1
+		|| !CleanTableGridUniteRange(grid, *validated)) {
+		return false;
+	}
+	const auto keeper = *std::min_element(
+		selected.begin(),
+		selected.end(),
+		[](const auto &a, const auto &b) {
+			if (a.rowFrom != b.rowFrom) {
+				return a.rowFrom < b.rowFrom;
+			} else if (a.columnFrom != b.columnFrom) {
+				return a.columnFrom < b.columnFrom;
+			} else if (a.rowIndex != b.rowIndex) {
+				return a.rowIndex < b.rowIndex;
+			}
+			return a.cellIndex < b.cellIndex;
+		});
+
+	auto &keeperCell = owner->tableRows[keeper.rowIndex].cells[
+		keeper.cellIndex];
+	keeperCell.rowspan = validated->rowTill - validated->rowFrom;
+	keeperCell.colspan = validated->columnTill - validated->columnFrom;
+
+	auto toErase = selected;
+	toErase.erase(
+		std::remove_if(
+			toErase.begin(),
+			toErase.end(),
+			[&](const TableGridCellReference &cell) {
+				return cell.rowIndex == keeper.rowIndex
+					&& cell.cellIndex == keeper.cellIndex;
+			}),
+		toErase.end());
+	std::sort(
+		toErase.begin(),
+		toErase.end(),
+		[](const auto &a, const auto &b) {
+			if (a.rowIndex != b.rowIndex) {
+				return a.rowIndex > b.rowIndex;
+			}
+			return a.cellIndex > b.cellIndex;
+		});
+	for (const auto &reference : toErase) {
+		auto &row = owner->tableRows[reference.rowIndex];
+		row.cells.erase(row.cells.begin() + reference.cellIndex);
+	}
+	rebuild();
+	return true;
+}
+
+bool State::removeTableRows(
+		const Markdown::PreparedEditTableCellRange &range) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	const auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	if (!TableGridRangeSpansAllColumns(BuildTableGrid(*owner), *validated)) {
+		return false;
+	}
+	return removeStructuralSelection({
+		.kind = PreparedEditSelectionKind::TableRows,
+		.tableRows = {
+			.block = range.block,
+			.from = validated->rowFrom,
+			.till = validated->rowTill,
+		},
+	}, true).has_value();
+}
+
+bool State::removeTableColumns(
+		const Markdown::PreparedEditTableCellRange &range) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	const auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	if (!TableGridRangeSpansAllRows(BuildTableGrid(*owner), *validated)) {
+		return false;
+	}
+	return removeStructuralSelection({
+		.kind = PreparedEditSelectionKind::TableCells,
+		.tableCells = range,
+	}, true).has_value();
+}
+
+bool State::removeTable(
+		const Markdown::PreparedEditTableCellRange &range) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	const auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	if (!TableGridRangeCoversFullTable(BuildTableGrid(*owner), *validated)) {
+		return false;
+	}
+	return removeStructuralSelection({
+		.kind = PreparedEditSelectionKind::Blocks,
+		.blocks = {
+			.container = range.block.container,
+			.from = range.block.index,
+			.till = range.block.index + 1,
+		},
+	}, true).has_value();
+}
+
+bool State::setTableBordered(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool bordered) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	if (owner->bordered != bordered) {
+		owner->bordered = bordered;
+		rebuild();
+	}
+	return true;
+}
+
+bool State::setTableStriped(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool striped) {
+	const auto validated = validateTableCellRange(range);
+	if (!validated) {
+		return false;
+	}
+	auto owner = block(validated->block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return false;
+	}
+	if (owner->striped != striped) {
+		owner->striped = striped;
+		rebuild();
+	}
 	return true;
 }
 
@@ -1139,19 +2178,72 @@ std::optional<int> State::removeStructuralSelection(
 		if (!range) {
 			return std::nullopt;
 		}
-		const auto plannedFocus = plannedFocusForRange(*range, forward);
 		const auto owner = block(range->block);
-		if (!owner
-			|| owner->kind != BlockKind::Table
-			|| range->tableRowIndex >= int(owner->tableRows.size())) {
+		if (!owner || owner->kind != BlockKind::Table) {
 			return std::nullopt;
 		}
-		auto &row = owner->tableRows[range->tableRowIndex];
-		if (range->till > int(row.cells.size())) {
+		const auto grid = BuildTableGrid(*owner);
+		if (!TableGridRangeSpansAllRows(grid, *range)) {
 			return std::nullopt;
 		}
-		for (auto i = range->from; i != range->till; ++i) {
-			row.cells[i].text = RichText();
+		const auto plannedFocus = plannedFocusForRange(*range, forward);
+		const auto selected = SelectedTableGridCells(grid, *range);
+		if (selected.empty()) {
+			return std::nullopt;
+		}
+		auto toErase = std::vector<TableGridCellReference>();
+		for (const auto &reference : selected) {
+			if (TableGridCellContainedInRange(reference, *range)) {
+				toErase.push_back(reference);
+				continue;
+			}
+			const auto intersection = TableGridCellColumnIntersection(
+				reference,
+				*range);
+			if (intersection <= 0) {
+				continue;
+			}
+			auto &cell = owner->tableRows[reference.rowIndex].cells[
+				reference.cellIndex];
+			cell.colspan = std::max(
+				(reference.columnTill - reference.columnFrom) - intersection,
+				1);
+		}
+		std::sort(
+			toErase.begin(),
+			toErase.end(),
+			[](const auto &a, const auto &b) {
+				if (a.rowIndex != b.rowIndex) {
+					return a.rowIndex > b.rowIndex;
+				}
+				return a.cellIndex > b.cellIndex;
+			});
+		for (const auto &reference : toErase) {
+			auto &row = owner->tableRows[reference.rowIndex];
+			row.cells.erase(row.cells.begin() + reference.cellIndex);
+		}
+		if (std::all_of(
+				owner->tableRows.begin(),
+				owner->tableRows.end(),
+				[](const TableRow &row) {
+					return row.cells.empty();
+				})) {
+			if (RichTextIsEmpty(owner->text)) {
+				const auto removed = range->block;
+				if (!removeTarget({
+						.kind = RemovalKind::Block,
+						.block = removed,
+					})) {
+					return std::nullopt;
+				}
+				return finish([&] {
+					return focusForRemovedBlock(removed, forward);
+				}, plannedFocus);
+			}
+			auto row = TableRow();
+			row.cells.push_back(MakeDefaultTableCell());
+			owner->tableRows.clear();
+			owner->tableRows.push_back(std::move(row));
 		}
 		return finish([&] {
 			return leafNearTableCells(*range, forward);
@@ -1386,22 +2478,27 @@ std::optional<State::StructuralTableCellRange> State::validateTableCellRange(
 		return std::nullopt;
 	}
 	const auto owner = block(*path);
-	if (!owner
-		|| owner->kind != BlockKind::Table
-		|| range.tableRowIndex < 0
-		|| range.tableRowIndex >= int(owner->tableRows.size())) {
+	if (!owner || owner->kind != BlockKind::Table) {
 		return std::nullopt;
 	}
-	const auto &row = owner->tableRows[range.tableRowIndex];
-	if (range.from < 0 || range.till > int(row.cells.size())) {
+	const auto grid = BuildTableGrid(*owner);
+	if (range.rowFrom < 0
+		|| range.rowTill > grid.rowCount
+		|| range.columnFrom < 0
+		|| range.columnTill > grid.columnCount) {
 		return std::nullopt;
 	}
-	return StructuralTableCellRange{
+	auto result = StructuralTableCellRange{
 		.block = *path,
-		.tableRowIndex = range.tableRowIndex,
-		.from = range.from,
-		.till = range.till,
+		.rowFrom = range.rowFrom,
+		.rowTill = range.rowTill,
+		.columnFrom = range.columnFrom,
+		.columnTill = range.columnTill,
 	};
+	if (SelectedTableGridCells(grid, result).empty()) {
+		return std::nullopt;
+	}
+	return result;
 }
 
 bool State::leafWillBeRemoved(
@@ -1452,13 +2549,21 @@ bool State::leafBelongsToBlock(
 
 std::optional<State::LeafPath> State::firstSelectedLeaf(
 		const StructuralTableCellRange &range) const {
+	const auto owner = block(range.block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return std::nullopt;
+	}
+	const auto selected = SelectedTableGridCells(BuildTableGrid(*owner), range);
 	for (const auto &descriptor : _textNodes) {
 		const auto &leaf = descriptor.leaf;
-		if (leaf.block == range.block
-			&& leaf.kind == LeafKind::TableCellText
-			&& leaf.tableRowIndex == range.tableRowIndex
-			&& IndexInRange(leaf.tableCellIndex, range.from, range.till)) {
-			return leaf;
+		if (leaf.block != range.block
+			|| leaf.kind != LeafKind::TableCellText) {
+			continue;
+		}
+		for (const auto &reference : selected) {
+			if (TableGridCellMatchesLeaf(reference, leaf, range.block)) {
+				return leaf;
+			}
 		}
 	}
 	return std::nullopt;
@@ -1539,29 +2644,54 @@ std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
 std::optional<State::LeafPath> State::adjacentLeafOutsideRange(
 		const StructuralTableCellRange &range,
 		bool forward) const {
+	const auto owner = block(range.block);
+	if (!owner || owner->kind != BlockKind::Table) {
+		return std::nullopt;
+	}
+	const auto grid = BuildTableGrid(*owner);
+	const auto leafIntersectsRange = [&](const LeafPath &leaf) {
+		if (leaf.block != range.block
+			|| leaf.kind != LeafKind::TableCellText) {
+			return false;
+		}
+		for (const auto &reference : grid.cells) {
+			if (TableGridCellMatchesLeaf(reference, leaf, range.block)) {
+				return TableGridCellIntersectsRange(reference, range);
+			}
+		}
+		return false;
+	};
+	auto fallback = std::optional<LeafPath>();
+	auto foundIntersecting = false;
 	if (forward) {
 		for (const auto &descriptor : _textNodes) {
-			const auto index = TableCellIndexForLeaf(
-				descriptor.leaf,
-				range.block,
-				range.tableRowIndex);
-			if (index && *index >= range.till) {
-				return descriptor.leaf;
+			if (descriptor.leaf.block == range.block
+				&& descriptor.leaf.kind == LeafKind::TableCellText) {
+				if (leafIntersectsRange(descriptor.leaf)) {
+					foundIntersecting = true;
+				} else if (foundIntersecting) {
+					return descriptor.leaf;
+				} else if (!fallback) {
+					fallback = descriptor.leaf;
+				}
 			}
 		}
 	} else {
 		for (auto i = textNodeCount(); i != 0; --i) {
 			const auto &leaf = _textNodes[i - 1].leaf;
-			const auto index = TableCellIndexForLeaf(
-				leaf,
-				range.block,
-				range.tableRowIndex);
-			if (index && *index < range.from) {
-				return leaf;
+			if (leaf.block == range.block
+				&& leaf.kind == LeafKind::TableCellText) {
+				if (leafIntersectsRange(leaf)) {
+					foundIntersecting = true;
+				} else if (foundIntersecting) {
+					return leaf;
+				} else if (!fallback) {
+					fallback = leaf;
+				}
 			}
 		}
 	}
-	return std::nullopt;
+	return foundIntersecting ? std::nullopt : fallback;
 }
 
 std::optional<State::LeafPath> State::fallbackFocusLeaf() const {
@@ -3145,6 +4275,7 @@ Block State::MakeDetailsBlock() {
 Block State::MakeTableBlock() {
 	auto block = Block();
 	block.kind = BlockKind::Table;
+	block.bordered = true;
 	block.tableRows.reserve(3);
 	for (auto rowIndex = 0; rowIndex != 3; ++rowIndex) {
 		auto row = RichPage::TableRow();

@@ -167,6 +167,25 @@ public:
 		Markdown::PreparedEditSelection structuralSelection;
 	};
 
+	struct TableSelectionInfo {
+		bool valid = false;
+		bool allHeader = false;
+		bool allAlignCenter = false;
+		bool allAlignRight = false;
+		bool allAlignMiddle = false;
+		bool allAlignBottom = false;
+		bool singleCell = false;
+		bool canSplitCell = false;
+		bool canUniteCells = false;
+		bool canDeleteRows = false;
+		bool canDeleteColumns = false;
+		bool canDeleteTable = false;
+		int selectedRows = 0;
+		int selectedColumns = 0;
+		bool bordered = false;
+		bool striped = false;
+	};
+
 	State();
 	State(
 		std::shared_ptr<RichPage> richPage,
@@ -209,6 +228,45 @@ public:
 		const Markdown::PreparedEditListItemSource &source);
 	[[nodiscard]] bool toggleDetailsOpen(
 		const Markdown::PreparedEditBlockSource &source);
+	[[nodiscard]] TableSelectionInfo tableSelectionInfo(
+		const Markdown::PreparedEditTableCellRange &range) const;
+	[[nodiscard]] std::optional<Markdown::PreparedEditTableCellRange>
+	tableContextRangeForSelection(
+		const Markdown::PreparedEditSelection &selection,
+		const Markdown::PreparedEditTableCellSource &source) const;
+	[[nodiscard]] bool canRemoveStructuralSelection(
+		const Markdown::PreparedEditSelection &selection) const;
+	[[nodiscard]] bool addTableRow(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after);
+	[[nodiscard]] bool addTableColumn(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after);
+	[[nodiscard]] bool setTableHeader(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool header);
+	[[nodiscard]] bool setTableAlignment(
+		const Markdown::PreparedEditTableCellRange &range,
+		RichPage::TableAlignment alignment);
+	[[nodiscard]] bool setTableVerticalAlignment(
+		const Markdown::PreparedEditTableCellRange &range,
+		RichPage::TableVerticalAlignment alignment);
+	[[nodiscard]] bool splitTableCell(
+		const Markdown::PreparedEditTableCellRange &range);
+	[[nodiscard]] bool uniteTableCells(
+		const Markdown::PreparedEditTableCellRange &range);
+	[[nodiscard]] bool removeTableRows(
+		const Markdown::PreparedEditTableCellRange &range);
+	[[nodiscard]] bool removeTableColumns(
+		const Markdown::PreparedEditTableCellRange &range);
+	[[nodiscard]] bool removeTable(
+		const Markdown::PreparedEditTableCellRange &range);
+	[[nodiscard]] bool setTableBordered(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool bordered);
+	[[nodiscard]] bool setTableStriped(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool striped);
 	[[nodiscard]] std::optional<int> ensureTrailingParagraphActive();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
@@ -238,9 +296,10 @@ private:
 
 	struct StructuralTableCellRange {
 		BlockPath block;
-		int tableRowIndex = -1;
-		int from = -1;
-		int till = -1;
+		int rowFrom = -1;
+		int rowTill = -1;
+		int columnFrom = -1;
+		int columnTill = -1;
 	};
 
 	struct ActiveNonPullquoteQuote {
@@ -382,6 +441,12 @@ private:
 	[[nodiscard]] bool applySplitParagraphText(
 		const TextNodeDescriptor &descriptor,
 		std::vector<TextWithEntities> chunks);
+	[[nodiscard]] bool addTableRowUnchecked(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after);
+	[[nodiscard]] bool addTableColumnUnchecked(
+		const Markdown::PreparedEditTableCellRange &range,
+		bool after);
 	[[nodiscard]] std::optional<int> ensureTrailingParagraphActiveUnchecked();
 	[[nodiscard]] std::optional<int> moveActiveQuoteDownUnchecked();
 	[[nodiscard]] std::optional<int> handleActiveHeadingEnterUnchecked();

@@ -11,16 +11,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/editor/iv_editor_state.h"
 #include "iv/markdown/iv_markdown_article.h"
 #include "ui/style/style_core_types.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/rp_widget.h"
 #include "rpl/lifetime.h"
+
+#include <rpl/event_stream.h>
 
 #include <memory>
 #include <optional>
 #include <vector>
 
 class QEvent;
+class QContextMenuEvent;
 class QInputMethodEvent;
 class QKeyEvent;
+class QMenu;
 class QObject;
 class QTouchEvent;
 class QWheelEvent;
@@ -29,6 +34,7 @@ namespace Ui {
 class ChatStyle;
 class ChatTheme;
 class InputField;
+class PopupMenu;
 } // namespace Ui
 
 namespace style {
@@ -69,6 +75,7 @@ public:
 protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 	bool eventHook(QEvent *e) override;
+	void contextMenuEvent(QContextMenuEvent *e) override;
 	void focusInEvent(QFocusEvent *e) override;
 	bool focusNextPrevChild(bool next) override;
 	void keyPressEvent(QKeyEvent *e) override;
@@ -222,10 +229,27 @@ private:
 		const Markdown::PreparedEditHit &editHit);
 	void finishArticleSelection();
 	[[nodiscard]] bool handleStructuralSelectionKey(QKeyEvent *e);
+	[[nodiscard]] bool handleFieldContextMenuEvent(
+		QObject *object,
+		QContextMenuEvent *e);
 	[[nodiscard]] bool handleFieldMouseEvent(QEvent *event);
 	[[nodiscard]] bool handleHorizontalScrollWheel(
 		QWheelEvent *e,
 		QPoint articlePoint);
+	[[nodiscard]] std::optional<Markdown::PreparedEditTableCellSource>
+	activeTableCellSourceAt(
+		QObject *object,
+		const QContextMenuEvent &e) const;
+	[[nodiscard]] Markdown::PreparedEditTableCellRange
+	effectiveTableRangeForCell(
+		const Markdown::PreparedEditTableCellSource &source);
+	void showTableContextMenu(
+		const Markdown::PreparedEditTableCellRange &range,
+		QPoint globalPos);
+	void fillTableChangeMenu(
+		not_null<Ui::PopupMenu*> menu,
+		const Markdown::PreparedEditTableCellRange &range);
+	void applyTableChange(Fn<bool()> change);
 	[[nodiscard]] Markdown::PreparedEditSelection structuralSelectionFromHits(
 		const Markdown::PreparedEditHit &anchor,
 		const Markdown::PreparedEditHit &focus) const;
@@ -245,6 +269,8 @@ private:
 	std::shared_ptr<style::Markdown> _articleStyle;
 	std::shared_ptr<Markdown::MarkdownArticle> _article;
 	base::unique_qptr<Ui::InputField> _field;
+	rpl::event_stream<Ui::InputField::ExtendedContextMenu>
+		_fieldContextMenuRequests;
 	std::unique_ptr<Ui::ChatTheme> _theme;
 	std::unique_ptr<Ui::ChatStyle> _style;
 	std::vector<Ui::Text::SpecialColor> _highlightColors;

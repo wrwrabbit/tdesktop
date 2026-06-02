@@ -252,13 +252,19 @@ struct PreparedEditTableCellSource {
 	PreparedEditBlockPath block;
 	int tableRowIndex = -1;
 	int tableCellIndex = -1;
+	int column = -1;
+	int colspan = 1;
+	int rowspan = 1;
 
 	friend inline bool operator==(
 			const PreparedEditTableCellSource &a,
 			const PreparedEditTableCellSource &b) {
 		return (a.block == b.block)
 			&& (a.tableRowIndex == b.tableRowIndex)
-			&& (a.tableCellIndex == b.tableCellIndex);
+			&& (a.tableCellIndex == b.tableCellIndex)
+			&& (a.column == b.column)
+			&& (a.colspan == b.colspan)
+			&& (a.rowspan == b.rowspan);
 	}
 
 	friend inline bool operator!=(
@@ -342,21 +348,26 @@ struct PreparedEditTableRowRange {
 
 struct PreparedEditTableCellRange {
 	PreparedEditBlockPath block;
-	int tableRowIndex = -1;
-	int from = -1;
-	int till = -1;
+	int rowFrom = -1;
+	int rowTill = -1;
+	int columnFrom = -1;
+	int columnTill = -1;
 
 	[[nodiscard]] bool empty() const {
-		return (tableRowIndex < 0) || (from < 0) || (till <= from);
+		return (rowFrom < 0)
+			|| (rowTill <= rowFrom)
+			|| (columnFrom < 0)
+			|| (columnTill <= columnFrom);
 	}
 
 	friend inline bool operator==(
 			const PreparedEditTableCellRange &a,
 			const PreparedEditTableCellRange &b) {
 		return (a.block == b.block)
-			&& (a.tableRowIndex == b.tableRowIndex)
-			&& (a.from == b.from)
-			&& (a.till == b.till);
+			&& (a.rowFrom == b.rowFrom)
+			&& (a.rowTill == b.rowTill)
+			&& (a.columnFrom == b.columnFrom)
+			&& (a.columnTill == b.columnTill);
 	}
 
 	friend inline bool operator!=(

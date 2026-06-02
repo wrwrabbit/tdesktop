@@ -408,6 +408,14 @@ void RefreshBlockSegmentRect(
 	return (index >= from) && (index < till);
 }
 
+[[nodiscard]] bool RangesIntersect(
+		int firstFrom,
+		int firstTill,
+		int secondFrom,
+		int secondTill) {
+	return (firstFrom < secondTill) && (secondFrom < firstTill);
+}
+
 [[nodiscard]] const PreparedEditSelection *StructuralSelection(
 		const PaintSelectionState &selectionState,
 		PreparedEditSelectionKind kind) {
@@ -866,9 +874,24 @@ bool StructuralTableCellSelected(
 		return false;
 	}
 	const auto &range = selection->tableCells;
+	if (range.empty()
+		|| source.tableRowIndex < 0
+		|| source.column < 0
+		|| source.colspan <= 0
+		|| source.rowspan <= 0) {
+		return false;
+	}
 	return (source.block == range.block)
-		&& (source.tableRowIndex == range.tableRowIndex)
-		&& IndexInRange(source.tableCellIndex, range.from, range.till);
+		&& RangesIntersect(
+			source.tableRowIndex,
+			source.tableRowIndex + source.rowspan,
+			range.rowFrom,
+			range.rowTill)
+		&& RangesIntersect(
+			source.column,
+			source.column + source.colspan,
+			range.columnFrom,
+			range.columnTill);
 }
 
 std::optional<TextSelection> TextSelectionForSegment(

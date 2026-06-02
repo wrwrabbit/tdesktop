@@ -177,6 +177,7 @@ void AccumulateBlockMetrics(
 		AccumulateBlockMetrics(metrics, child, depth + 1);
 	}
 	for (const auto &item : block.listItems) {
+		++metrics->blockCount;
 		AccumulateTextLength(metrics, item.text);
 		AccumulateBlockMetrics(metrics, item.blocks, depth + 1);
 	}
@@ -186,6 +187,7 @@ void AccumulateBlockMetrics(
 		}
 	}
 	for (const auto &row : block.tableRows) {
+		++metrics->blockCount;
 		metrics->maxTableColumns = std::max(
 			metrics->maxTableColumns,
 			EffectiveTableColumns(row));

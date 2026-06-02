@@ -449,11 +449,17 @@ void MarkNativeIvTableSlots(
 [[maybe_unused]] [[nodiscard]] PreparedEditTableCellSource TableCellSource(
 		PreparedEditBlockPath block,
 		int tableRowIndex,
-		int tableCellIndex) {
+		int tableCellIndex,
+		int column,
+		int colspan,
+		int rowspan) {
 	return {
 		.block = std::move(block),
 		.tableRowIndex = tableRowIndex,
 		.tableCellIndex = tableCellIndex,
+		.column = column,
+		.colspan = colspan,
+		.rowspan = rowspan,
 	};
 }
 
@@ -960,7 +966,13 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			preparedCell.verticalAlignment = NativeIvTableVerticalAlignment(cell);
 			preparedCell.colspan = colspan;
 			preparedCell.rowspan = rowspan;
-			preparedCell.editCell = TableCellSource(path, rowIndex, cellIndex);
+			preparedCell.editCell = TableCellSource(
+				path,
+				rowIndex,
+				cellIndex,
+				column,
+				colspan,
+				rowspan);
 			preparedCell.editLeaf = TableCellTextLeafSource(
 				path,
 				rowIndex,

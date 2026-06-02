@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_paint.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
+#include "lang/lang_keys.h"
+#include "menu/menu_checked_action.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/chat_theme.h"
@@ -26,17 +28,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "window/window_session_controller.h"
 
 #include "styles/palette.h"
 #include "styles/style_chat.h"
 #include "styles/style_iv.h"
+#include "styles/style_menu_icons.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDate>
 #include <QtCore/QEvent>
 #include <QtCore/QPointer>
+#include <QtGui/QContextMenuEvent>
 #include <QtGui/QFocusEvent>
 #include <QtGui/QInputMethodEvent>
 #include <QtGui/QKeyEvent>
@@ -47,7 +52,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QWheelEvent>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
+#include <QtWidgets/QAction>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QMenu>
 #include <QtWidgets/QTextEdit>
 
 #include <algorithm>
@@ -203,6 +210,7 @@ using PreparedEditLeafSource = Markdown::PreparedEditLeafSource;
 using PreparedEditListItemSource = Markdown::PreparedEditListItemSource;
 using PreparedEditSelection = Markdown::PreparedEditSelection;
 using PreparedEditSelectionKind = Markdown::PreparedEditSelectionKind;
+using PreparedEditTableCellRange = Markdown::PreparedEditTableCellRange;
 using PreparedEditTableCellSource = Markdown::PreparedEditTableCellSource;
 using PreparedEditTableRowSource = Markdown::PreparedEditTableRowSource;
 
@@ -372,7 +380,10 @@ struct StructuralOwner {
 		const PreparedEditTableCellSource &source) {
 	if (!ValidPreparedEditBlockPath(source.block)
 		|| source.tableRowIndex < 0
-		|| source.tableCellIndex < 0) {
+		|| source.tableCellIndex < 0
+		|| source.column < 0
+		|| source.colspan <= 0
+		|| source.rowspan <= 0) {
 		return {};
 	}
 	return {
@@ -395,11 +406,7 @@ struct StructuralOwner {
 			.listItemIndex = source.listItemIndex,
 		});
 	case PreparedEditLeafKind::TableCellText:
-		return StructuralOwnerFromTableCell({
-			.block = source.block,
-			.tableRowIndex = source.tableRowIndex,
-			.tableCellIndex = source.tableCellIndex,
-		});
+		return {};
 	case PreparedEditLeafKind::BlockText:
 	case PreparedEditLeafKind::BlockCaption:
 	case PreparedEditLeafKind::MathFormula:
@@ -449,6 +456,57 @@ struct StructuralOwner {
 [[nodiscard]] std::optional<PreparedEditTableCellSource> TableCellFromOwner(
 		const StructuralOwner &owner) {
 	return owner.tableCell;
+}
+
+[[nodiscard]] PreparedEditTableCellRange TableRangeFromCell(
+		const PreparedEditTableCellSource &source) {
+	if (source.tableRowIndex < 0
+		|| source.column < 0
+		|| source.rowspan <= 0
+		|| source.colspan <= 0) {
+		return {};
+	}
+	return {
+		.block = source.block,
+		.rowFrom = source.tableRowIndex,
+		.rowTill = source.tableRowIndex + source.rowspan,
+		.columnFrom = source.column,
+		.columnTill = source.column + source.colspan,
+	};
+}
+
+[[nodiscard]] bool SameTableRangeBlock(
+		const PreparedEditTableCellRange &a,
+		const PreparedEditTableCellRange &b) {
+	return !a.empty()
+		&& !b.empty()
+		&& SamePreparedEditBlockPath(a.block, b.block);
+}
+
+[[nodiscard]] bool TableRangeContainsCell(
+		const PreparedEditTableCellRange &range,
+		const PreparedEditTableCellSource &source) {
+	const auto cell = TableRangeFromCell(source);
+	return SameTableRangeBlock(range, cell)
+		&& (range.rowFrom <= cell.rowFrom)
+		&& (range.rowTill >= cell.rowTill)
+		&& (range.columnFrom <= cell.columnFrom)
+		&& (range.columnTill >= cell.columnTill);
+}
+
+[[nodiscard]] PreparedEditTableCellRange TableRangesUnion(
+		const PreparedEditTableCellRange &a,
+		const PreparedEditTableCellRange &b) {
+	if (!SameTableRangeBlock(a, b)) {
+		return {};
+	}
+	return {
+		.block = a.block,
+		.rowFrom = std::min(a.rowFrom, b.rowFrom),
+		.rowTill = std::max(a.rowTill, b.rowTill),
+		.columnFrom = std::min(a.columnFrom, b.columnFrom),
+		.columnTill = std::max(a.columnTill, b.columnTill),
+	};
 }
 
 [[nodiscard]] std::optional<PreparedEditTableRowSource> TableRowFromOwner(
@@ -939,6 +997,11 @@ bool Widget::eventFilter(QObject *object, QEvent *event) {
 					|| handleFieldKey(keyEvent)) {
 					return true;
 				}
+			} else if (type == QEvent::ContextMenu) {
+				const auto context = static_cast<QContextMenuEvent*>(event);
+				if (handleFieldContextMenuEvent(object, context)) {
+					return true;
+				}
 			} else if ((type == QEvent::MouseButtonPress
 				|| type == QEvent::MouseMove
 				|| type == QEvent::MouseButtonRelease)
@@ -967,6 +1030,28 @@ bool Widget::eventHook(QEvent *e) {
 		}
 	}
 	return Ui::RpWidget::eventHook(e);
+}
+
+void Widget::contextMenuEvent(QContextMenuEvent *e) {
+	if (!_article) {
+		Ui::RpWidget::contextMenuEvent(e);
+		return;
+	}
+	const auto articlePoint = e->pos() - articleTopLeft();
+	const auto editHit = _article->editHitTest(articlePoint);
+	const auto owner = StructuralOwnerFromHit(editHit);
+	const auto cell = TableCellFromOwner(owner);
+	if (!cell) {
+		Ui::RpWidget::contextMenuEvent(e);
+		return;
+	}
+	const auto range = effectiveTableRangeForCell(*cell);
+	if (range.empty()) {
+		Ui::RpWidget::contextMenuEvent(e);
+		return;
+	}
+	showTableContextMenu(range, e->globalPos());
+	e->accept();
 }
 
 void Widget::focusInEvent(QFocusEvent *e) {
@@ -1034,6 +1119,310 @@ bool Widget::handleHorizontalScrollWheel(
 		return true;
 	}
 	return false;
+}
+
+std::optional<PreparedEditTableCellSource> Widget::activeTableCellSourceAt(
+		QObject *object,
+		const QContextMenuEvent &e) const {
+	if (!_article || _activeSegmentIndex < 0) {
+		return std::nullopt;
+	}
+	const auto cellAt = [&](QPoint articlePoint) {
+		const auto owner = StructuralOwnerFromHit(
+			_article->editHitTest(articlePoint));
+		return TableCellFromOwner(owner);
+	};
+	if (const auto widget = qobject_cast<QWidget*>(object)) {
+		if (const auto cell = cellAt(
+				widget->mapTo(this, e.pos()) - articleTopLeft())) {
+			return cell;
+		}
+	}
+	const auto segmentRect = _article->segmentRect(_activeSegmentIndex);
+	return !segmentRect.isEmpty()
+		? cellAt(segmentRect.center())
+		: std::optional<PreparedEditTableCellSource>();
+}
+
+bool Widget::handleFieldContextMenuEvent(
+		QObject *object,
+		QContextMenuEvent *e) {
+	const auto cell = activeTableCellSourceAt(object, *e);
+	if (!cell) {
+		return false;
+	}
+	const auto range = effectiveTableRangeForCell(*cell);
+	if (range.empty() || !_state->tableSelectionInfo(range).valid) {
+		return false;
+	}
+	const auto raw = _field->rawTextEdit();
+	const auto menu = raw->createStandardContextMenu();
+	if (!menu) {
+		return false;
+	}
+	const auto before = menu->actions().empty()
+		? nullptr
+		: menu->actions().front();
+	const auto changeTable = new QAction(
+		tr::lng_article_table_change(tr::now),
+		menu);
+	menu->insertAction(before, changeTable);
+	menu->insertSeparator(before);
+	const auto setupPopupMenu = [=](not_null<Ui::PopupMenu*> popup) {
+		changeTable->setMenu(new QMenu(menu));
+		const auto submenu = popup->ensureSubmenu(
+			changeTable,
+			st::popupMenuWithIcons);
+		fillTableChangeMenu(submenu, range);
+	};
+	auto copied = std::make_shared<QContextMenuEvent>(
+		e->reason(),
+		e->pos(),
+		e->globalPos());
+	_fieldContextMenuRequests.fire({
+		.menu = menu,
+		.event = std::move(copied),
+		.setupPopupMenu = setupPopupMenu,
+	});
+	e->accept();
+	return true;
+}
+
+PreparedEditTableCellRange Widget::effectiveTableRangeForCell(
+		const PreparedEditTableCellSource &source) {
+	const auto single = TableRangeFromCell(source);
+	if (single.empty()) {
+		return {};
+	}
+	if (const auto selected = _state->tableContextRangeForSelection(
+			_structuralSelection,
+			source)) {
+		return *selected;
+	}
+	clearSelection();
+	return single;
+}
+
+void Widget::showTableContextMenu(
+		const PreparedEditTableCellRange &range,
+		QPoint globalPos) {
+	const auto menu = Ui::CreateChild<Ui::PopupMenu>(
+		this,
+		st::popupMenuWithIcons);
+	fillTableChangeMenu(menu, range);
+	if (menu->empty()) {
+		menu->deleteLater();
+		return;
+	}
+	menu->popup(globalPos);
+}
+
+void Widget::fillTableChangeMenu(
+		not_null<Ui::PopupMenu*> menu,
+		const PreparedEditTableCellRange &range) {
+	const auto info = _state->tableSelectionInfo(range);
+	if (!info.valid) {
+		return;
+	}
+	menu->addAction(
+		tr::lng_article_table_add_row(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->addTableRow(range, false);
+			});
+		},
+		&st::menuIconTableSubmenuRowAbove);
+	menu->addAction(
+		tr::lng_article_table_add_row(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->addTableRow(range, true);
+			});
+		},
+		&st::menuIconTableSubmenuRowBelow);
+	menu->addAction(
+		tr::lng_article_table_add_column(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->addTableColumn(range, false);
+			});
+		},
+		&st::menuIconTableSubmenuColumnLeft);
+	menu->addAction(
+		tr::lng_article_table_add_column(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->addTableColumn(range, true);
+			});
+		},
+		&st::menuIconTableSubmenuColumnRight);
+	menu->addSeparator();
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_header(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableHeader(range, !info.allHeader);
+			});
+		},
+		nullptr,
+		info.allHeader);
+	menu->addSeparator();
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_align_center(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableAlignment(
+					range,
+					info.allAlignCenter
+						? RichPage::TableAlignment::Left
+						: RichPage::TableAlignment::Center);
+			});
+		},
+		nullptr,
+		info.allAlignCenter);
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_align_right(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableAlignment(
+					range,
+					info.allAlignRight
+						? RichPage::TableAlignment::Left
+						: RichPage::TableAlignment::Right);
+			});
+		},
+		nullptr,
+		info.allAlignRight);
+	menu->addSeparator();
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_align_middle(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableVerticalAlignment(
+					range,
+					info.allAlignMiddle
+						? RichPage::TableVerticalAlignment::Top
+						: RichPage::TableVerticalAlignment::Middle);
+			});
+		},
+		nullptr,
+		info.allAlignMiddle);
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_align_bottom(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableVerticalAlignment(
+					range,
+					info.allAlignBottom
+						? RichPage::TableVerticalAlignment::Top
+						: RichPage::TableVerticalAlignment::Bottom);
+			});
+		},
+		nullptr,
+		info.allAlignBottom);
+	if (info.canSplitCell) {
+		menu->addSeparator();
+		menu->addAction(
+			tr::lng_article_table_split_cell(tr::now),
+			[=] {
+				applyTableChange([=] {
+					return _state->splitTableCell(range);
+				});
+			});
+	} else if (info.canUniteCells) {
+		menu->addSeparator();
+		menu->addAction(
+			tr::lng_article_table_unite_cells(tr::now),
+			[=] {
+				applyTableChange([=] {
+					return _state->uniteTableCells(range);
+				});
+			});
+	}
+	const auto hasDeleteAction = info.canDeleteTable
+		|| info.canDeleteRows
+		|| info.canDeleteColumns;
+	if (hasDeleteAction) {
+		menu->addSeparator();
+		if (info.canDeleteTable) {
+			menu->addAction(
+				tr::lng_article_table_delete_table(tr::now),
+				[=] {
+					applyTableChange([=] {
+						return _state->removeTable(range);
+					});
+				},
+				&st::menuIconTableSubmenuDelete);
+		} else {
+			if (info.canDeleteRows) {
+				menu->addAction(
+					(info.selectedRows == 1)
+						? tr::lng_article_table_delete_row(tr::now)
+						: tr::lng_article_table_delete_rows(tr::now),
+					[=] {
+						applyTableChange([=] {
+							return _state->removeTableRows(range);
+						});
+					},
+					&st::menuIconTableSubmenuDelete);
+			}
+			if (info.canDeleteColumns) {
+				menu->addAction(
+					(info.selectedColumns == 1)
+						? tr::lng_article_table_delete_column(tr::now)
+						: tr::lng_article_table_delete_columns(tr::now),
+					[=] {
+						applyTableChange([=] {
+							return _state->removeTableColumns(range);
+						});
+					},
+					&st::menuIconTableSubmenuDelete);
+			}
+		}
+	}
+	menu->addSeparator();
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_bordered(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableBordered(range, !info.bordered);
+			});
+		},
+		nullptr,
+		info.bordered);
+	Menu::AddCheckedAction(
+		menu,
+		tr::lng_article_table_striped(tr::now),
+		[=] {
+			applyTableChange([=] {
+				return _state->setTableStriped(range, !info.striped);
+			});
+		},
+		nullptr,
+		info.striped);
+}
+
+void Widget::applyTableChange(Fn<bool()> change) {
+	commitInlineField();
+	_pendingOrdinal = -1;
+	_pendingCursorOffset = 0;
+	hideInlineField();
+	if (_article) {
+		_article->clearTextLeafHeightOverride();
+	}
+	clearSelection();
+	setFocus();
+	if (!change()) {
+		showLastLimitToast();
+		return;
+	}
+	refreshPreparedContent();
 }
 
 void Widget::touchEvent(QTouchEvent *e) {
@@ -1703,6 +2092,7 @@ void Widget::setupInlineField() {
 	const auto raw = _field->rawTextEdit();
 	raw->installEventFilter(this);
 	raw->viewport()->installEventFilter(this);
+	_field->setExtendedContextMenu(_fieldContextMenuRequests.events());
 
 	_field->heightChanges(
 	) | rpl::on_next([=] {
@@ -2572,6 +2962,10 @@ bool Widget::handleStructuralSelectionKey(QKeyEvent *e) {
 	if (!forward && key != Qt::Key_Backspace) {
 		return false;
 	}
+	if (!_state->canRemoveStructuralSelection(_structuralSelection)) {
+		e->accept();
+		return true;
+	}
 	const auto origin = [&]() -> std::optional<BoundarySelectionOrigin> {
 		if (_boundarySelectionOrigin
 			&& _boundarySelectionOrigin->forward == forward) {
@@ -2760,22 +3154,16 @@ PreparedEditSelection Widget::structuralSelectionFromHits(
 	}
 	const auto anchorCell = TableCellFromOwner(anchorOwner);
 	const auto focusCell = TableCellFromOwner(focusOwner);
-	if (anchorCell
-		&& focusCell
-		&& SamePreparedEditBlockPath(anchorCell->block, focusCell->block)
-		&& anchorCell->tableRowIndex == focusCell->tableRowIndex) {
-		const auto range = NormalizeIntegerRange(
-			anchorCell->tableCellIndex,
-			focusCell->tableCellIndex);
-		if (!range.empty()) {
+	if (anchorCell && focusCell) {
+		const auto range = TableRangesUnion(
+			TableRangeFromCell(*anchorCell),
+			TableRangeFromCell(*focusCell));
+		if (!range.empty()
+			&& TableRangeContainsCell(range, *anchorCell)
+			&& TableRangeContainsCell(range, *focusCell)) {
 			return {
 				.kind = PreparedEditSelectionKind::TableCells,
-				.tableCells = {
-					.block = anchorCell->block,
-					.tableRowIndex = anchorCell->tableRowIndex,
-					.from = range.from,
-					.till = range.till,
-				},
+				.tableCells = range,
 			};
 		}
 	}
