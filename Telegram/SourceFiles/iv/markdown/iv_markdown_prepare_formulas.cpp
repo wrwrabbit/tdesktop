@@ -158,11 +158,24 @@ void MeasurePreparedFormulas(PrepareState *state) {
 }
 
 void MeasureNativeIvPreparedFormulas(NativeIvPrepareState *state) {
+	MeasureNativeIvPreparedFormulas(
+		state,
+		0,
+		int(state->result.formulas.size()));
+}
+
+void MeasureNativeIvPreparedFormulas(
+		NativeIvPrepareState *state,
+		int from,
+		int till) {
 	const auto &dimensions = state->dimensions;
 	auto renderer = MathRenderer();
 	auto timer = QElapsedTimer();
 	timer.start();
-	for (auto i = 0, count = int(state->result.formulas.size()); i != count; ++i) {
+	const auto count = int(state->result.formulas.size());
+	from = std::clamp(from, 0, count);
+	till = std::clamp(till, from, count);
+	for (auto i = from; i != till; ++i) {
 		auto &slot = state->result.formulas[i];
 		if (!slot.present) {
 			continue;

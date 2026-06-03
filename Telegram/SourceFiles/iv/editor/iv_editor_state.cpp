@@ -17,6 +17,7 @@ namespace {
 using Block = RichPage::Block;
 using BlockContainerKind = State::BlockContainerKind;
 using BlockContainerPath = State::BlockContainerPath;
+using ApplyResult = State::ApplyResult;
 using BlockKind = RichPage::BlockKind;
 using BoundaryAction = State::BoundaryTarget::Action;
 using BlockPath = State::BlockPath;
@@ -27,13 +28,17 @@ using LeafKind = State::LeafKind;
 using LeafPath = State::LeafPath;
 using ListItem = RichPage::ListItem;
 using ListKind = RichPage::ListKind;
+using NativeInstantViewLeafUpdateResult
+	= Markdown::NativeInstantViewLeafUpdateResult;
 using PreparedBlockContainerKind = Markdown::PreparedEditBlockContainerKind;
 using PreparedEditLeafKind = Markdown::PreparedEditLeafKind;
+using PreparedEditLeafSource = Markdown::PreparedEditLeafSource;
 using PreparedEditSelectionKind = Markdown::PreparedEditSelectionKind;
 using PreparedBlockContainerPath = Markdown::PreparedEditBlockContainerPath;
 using PreparedBlockPath = Markdown::PreparedEditBlockPath;
 using PreparedBlockContainerStep = Markdown::PreparedEditBlockContainerStep;
 using PreparedEditSelection = Markdown::PreparedEditSelection;
+using PreparedMutationKind = State::PreparedMutationKind;
 using RemovalKind = State::RemovalKind;
 using RemovalTarget = State::RemovalTarget;
 using RichText = RichPage::RichText;
@@ -778,6 +783,10 @@ void State::commitCheckedMutation(State state) {
 	_prepared = std::move(state._prepared);
 	_textNodes = std::move(state._textNodes);
 	_activeTextOrdinal = state._activeTextOrdinal;
+	_lastPreparedMutationKind = (
+		state._lastPreparedMutationKind == PreparedMutationKind::FullRebuild)
+		? state._lastPreparedMutationKind
+		: PreparedMutationKind::FullRebuild;
 	_lastLimitError = std::nullopt;
 	_temporaryDownParagraph = std::move(state._temporaryDownParagraph);
 }
@@ -809,6 +818,15 @@ int State::textOrdinalForLeaf(
 		const Markdown::PreparedEditLeafSource &source) const {
 	const auto leaf = convertLeafPath(source);
 	return leaf ? textNodeOrdinal(*leaf) : -1;
+}
+
+PreparedMutationKind State::lastPreparedMutationKind() const {
+	return _lastPreparedMutationKind;
+}
+
+std::optional<PreparedEditLeafSource> State::activePreparedLeafSource() const {
+	const auto descriptor = textNode(_activeTextOrdinal);
+	return descriptor ? convertPreparedLeafSource(*descriptor) : std::nullopt;
 }
 
 int State::textNodeCount() const {
@@ -845,38 +863,61 @@ TextWithEntities State::activeText() const {
 	return TextWithEntities();
 }
 
-bool State::applyActiveText(TextWithEntities text) {
+ApplyResult State::applyActiveText(TextWithEntities text) {
 	_lastLimitError = std::nullopt;
+	_lastPreparedMutationKind = PreparedMutationKind::None;
 	return applyActiveTextWithLocalLimit(std::move(text));
 }
 
-bool State::applyActiveTextUnchecked(TextWithEntities text) {
+ApplyResult State::applyActiveTextUnchecked(TextWithEntities text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
-		return false;
+		return ApplyResult::Failed;
 	}
 	if (auto current = richText(descriptor->leaf)) {
-		current->text = std::move(text);
-		if (_temporaryDownParagraph
-			&& (descriptor->leaf == *_temporaryDownParagraph)
-			&& !RichTextIsEmpty(*current)) {
-			clearTemporaryDownParagraph();
+		if (current->text == text) {
+			return ApplyResult::Unchanged;
 		}
-		rebuild();
-		return true;
+		current->text = std::move(text);
+		if (leafMutationKeepsTextNodes(*descriptor)) {
+			if (_temporaryDownParagraph
+				&& (descriptor->leaf == *_temporaryDownParagraph)
+				&& !RichTextIsEmpty(*current)) {
+				clearTemporaryDownParagraph();
+			}
+			if (updatePreparedActiveLeaf(*descriptor)) {
+				_lastPreparedMutationKind = PreparedMutationKind::LeafOnly;
+			} else {
+				rebuildPrepared();
+			}
+		} else {
+			rebuild();
+		}
+		return ApplyResult::Changed;
 	}
 	if (auto current = rawText(descriptor->leaf)) {
+		if (*current == text.text) {
+			return ApplyResult::Unchanged;
+		}
 		*current = std::move(text.text);
-		rebuild();
-		return true;
+		if (leafMutationKeepsTextNodes(*descriptor)) {
+			if (updatePreparedActiveLeaf(*descriptor)) {
+				_lastPreparedMutationKind = PreparedMutationKind::LeafOnly;
+			} else {
+				rebuildPrepared();
+			}
+		} else {
+			rebuild();
+		}
+		return ApplyResult::Changed;
 	}
-	return false;
+	return ApplyResult::Failed;
 }
 
-bool State::applyActiveTextWithLocalLimit(TextWithEntities text) {
+ApplyResult State::applyActiveTextWithLocalLimit(TextWithEntities text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
-		return false;
+		return ApplyResult::Failed;
 	}
 	auto chunks = SplitFieldText(std::move(text));
 	if (chunks.size() <= 1) {
@@ -885,8 +926,10 @@ bool State::applyActiveTextWithLocalLimit(TextWithEntities text) {
 			: std::move(chunks.front()));
 	}
 	auto first = chunks.front();
-	if (applySplitParagraphText(*descriptor, std::move(chunks))) {
-		return true;
+	if (const auto result = applySplitParagraphText(
+			*descriptor,
+			std::move(chunks)); result != ApplyResult::Failed) {
+		return result;
 	}
 	return applyActiveTextUnchecked(std::move(first));
 }
@@ -954,43 +997,71 @@ QString State::activePlaceholderText() const {
 	return QString();
 }
 
-bool State::applyActiveRawText(QString text) {
+ApplyResult State::applyActiveRawText(QString text) {
 	_lastLimitError = std::nullopt;
+	_lastPreparedMutationKind = PreparedMutationKind::None;
 	return applyActiveRawTextWithLocalLimit(std::move(text));
 }
 
-bool State::applyActiveRawTextUnchecked(QString text) {
+ApplyResult State::applyActiveRawTextUnchecked(QString text) {
 	const auto descriptor = textNode(_activeTextOrdinal);
 	if (!descriptor) {
-		return false;
+		return ApplyResult::Failed;
 	}
 	if (auto current = rawText(descriptor->leaf)) {
+		if (*current == text) {
+			return ApplyResult::Unchanged;
+		}
 		*current = std::move(text);
-		rebuild();
-		return true;
+		if (leafMutationKeepsTextNodes(*descriptor)) {
+			if (updatePreparedActiveLeaf(*descriptor)) {
+				_lastPreparedMutationKind = PreparedMutationKind::LeafOnly;
+			} else {
+				rebuildPrepared();
+			}
+		} else {
+			rebuild();
+		}
+		return ApplyResult::Changed;
 	}
 	if (auto current = richText(descriptor->leaf)) {
-		current->text = MakeText(std::move(text));
-		rebuild();
-		return true;
+		auto updated = MakeText(std::move(text));
+		if (current->text == updated) {
+			return ApplyResult::Unchanged;
+		}
+		current->text = std::move(updated);
+		if (leafMutationKeepsTextNodes(*descriptor)) {
+			if (_temporaryDownParagraph
+				&& (descriptor->leaf == *_temporaryDownParagraph)
+				&& !RichTextIsEmpty(*current)) {
+				clearTemporaryDownParagraph();
+			}
+			if (updatePreparedActiveLeaf(*descriptor)) {
+				_lastPreparedMutationKind = PreparedMutationKind::LeafOnly;
+			} else {
+				rebuildPrepared();
+			}
+		} else {
+			rebuild();
+		}
+		return ApplyResult::Changed;
 	}
-	return false;
+	return ApplyResult::Failed;
 }
 
-bool State::applyActiveRawTextWithLocalLimit(QString text) {
+ApplyResult State::applyActiveRawTextWithLocalLimit(QString text) {
 	auto chunks = SplitFieldText(MakeText(std::move(text)));
 	return applyActiveRawTextUnchecked(chunks.empty()
 		? QString()
 		: std::move(chunks.front().text));
 }
 
-bool State::applySplitParagraphText(
+ApplyResult State::applySplitParagraphText(
 		const TextNodeDescriptor &descriptor,
 		std::vector<TextWithEntities> chunks) {
 	if (chunks.empty()) {
 		return applyActiveTextUnchecked(TextWithEntities());
 	}
-	clearTemporaryDownParagraph();
 	const auto makeParagraph = [&](TextWithEntities text) {
 		auto paragraph = MakeParagraphBlock();
 		paragraph.text.text = std::move(text);
@@ -1010,8 +1081,9 @@ bool State::applySplitParagraphText(
 				if (!container
 					|| path.index < 0
 					|| path.index >= int(container->size())) {
-					return false;
+					return ApplyResult::Failed;
 				}
+				clearTemporaryDownParagraph();
 				owner->text.text = std::move(chunks.front());
 				auto blocks = std::vector<Block>();
 				blocks.reserve(chunks.size() - 1);
@@ -1023,8 +1095,9 @@ bool State::applySplitParagraphText(
 					std::make_move_iterator(blocks.begin()),
 					std::make_move_iterator(blocks.end()));
 				focus(descriptor.leaf);
-				return true;
+				return ApplyResult::Changed;
 			} else if (owner->kind == BlockKind::Quote && !owner->pullquote) {
+				clearTemporaryDownParagraph();
 				auto firstText = std::move(owner->text);
 				firstText.text = std::move(chunks.front());
 				auto blocks = std::vector<Block>();
@@ -1047,12 +1120,13 @@ bool State::applySplitParagraphText(
 						.index = 0,
 					},
 				});
-				return true;
+				return ApplyResult::Changed;
 			}
 		}
 	} else if (descriptor.leaf.kind == LeafKind::ListItemText) {
 		const auto path = descriptor.leaf.block;
 		if (auto item = listItem(path, descriptor.leaf.listItemIndex)) {
+			clearTemporaryDownParagraph();
 			auto firstText = std::move(item->text);
 			firstText.text = std::move(chunks.front());
 			auto blocks = std::vector<Block>();
@@ -1079,10 +1153,10 @@ bool State::applySplitParagraphText(
 					.index = 0,
 				},
 			});
-			return true;
+			return ApplyResult::Changed;
 		}
 	}
-	return false;
+	return ApplyResult::Failed;
 }
 
 std::optional<RichMessageLimitError> State::lastLimitError() const {
@@ -2473,6 +2547,65 @@ std::optional<State::LeafPath> State::convertLeafPath(
 	return result;
 }
 
+std::optional<PreparedEditLeafSource> State::convertPreparedLeafSource(
+		const LeafPath &path) const {
+	const auto owner = block(path.block);
+	if (!owner) {
+		return std::nullopt;
+	}
+	auto result = PreparedEditLeafSource();
+	result.block = {
+		.container = ToPreparedBlockContainerPath(path.block.container),
+		.index = path.block.index,
+	};
+	switch (path.kind) {
+	case LeafKind::BlockText:
+		if (!BlockSupportsBlockText(*owner)) {
+			return std::nullopt;
+		}
+		result.kind = PreparedEditLeafKind::BlockText;
+		break;
+	case LeafKind::BlockCaption:
+		if (!BlockSupportsBlockCaption(*owner)) {
+			return std::nullopt;
+		}
+		result.kind = PreparedEditLeafKind::BlockCaption;
+		break;
+	case LeafKind::ListItemText:
+		if (owner->kind != BlockKind::List
+			|| !listItem(path.block, path.listItemIndex)) {
+			return std::nullopt;
+		}
+		result.kind = PreparedEditLeafKind::ListItemText;
+		result.listItemIndex = path.listItemIndex;
+		break;
+	case LeafKind::TableCellText:
+		if (owner->kind != BlockKind::Table
+			|| !tableCell(
+				path.block,
+				path.tableRowIndex,
+				path.tableCellIndex)) {
+			return std::nullopt;
+		}
+		result.kind = PreparedEditLeafKind::TableCellText;
+		result.tableRowIndex = path.tableRowIndex;
+		result.tableCellIndex = path.tableCellIndex;
+		break;
+	case LeafKind::MathFormula:
+		if (owner->kind != BlockKind::Math) {
+			return std::nullopt;
+		}
+		result.kind = PreparedEditLeafKind::MathFormula;
+		break;
+	}
+	return result;
+}
+
+std::optional<PreparedEditLeafSource> State::convertPreparedLeafSource(
+		const TextNodeDescriptor &descriptor) const {
+	return convertPreparedLeafSource(descriptor.leaf);
+}
+
 std::optional<State::StructuralBlockRange> State::validateBlockRange(
 		const Markdown::PreparedEditBlockRange &range) const {
 	if (range.empty()) {
@@ -3839,11 +3972,65 @@ int State::textNodeOrdinal(const LeafPath &path) const {
 	return -1;
 }
 
+bool State::leafMutationKeepsTextNodes(
+		const TextNodeDescriptor &descriptor) const {
+	switch (descriptor.leaf.kind) {
+	case LeafKind::BlockText:
+		if (const auto owner = block(descriptor.leaf.block)) {
+			switch (owner->kind) {
+			case BlockKind::Heading:
+			case BlockKind::Paragraph:
+			case BlockKind::Footer:
+			case BlockKind::Code:
+			case BlockKind::Details:
+				return true;
+			case BlockKind::Quote:
+				return owner->blocks.empty();
+			case BlockKind::Table:
+				return !owner->text.text.text.isEmpty();
+			default:
+				return false;
+			}
+		}
+		return false;
+	case LeafKind::BlockCaption:
+	case LeafKind::TableCellText:
+	case LeafKind::MathFormula:
+		return true;
+	case LeafKind::ListItemText:
+		if (const auto item = listItem(
+				descriptor.leaf.block,
+				descriptor.leaf.listItemIndex)) {
+			return !RichTextIsEmpty(item->text) || item->blocks.empty();
+		}
+		return false;
+	}
+	return false;
+}
+
+bool State::updatePreparedActiveLeaf(
+		const TextNodeDescriptor &descriptor) {
+	const auto source = convertPreparedLeafSource(descriptor);
+	if (!source) {
+		return false;
+	}
+	return (Markdown::UpdatePreparedNativeInstantViewLeaf(
+		&_prepared,
+		*_richPage,
+		*source) == NativeInstantViewLeafUpdateResult::Updated);
+}
+
 void State::rebuild() {
+	_lastPreparedMutationKind = PreparedMutationKind::FullRebuild;
 	rebuildTextNodes();
 	ensureEditableNodes();
 	ensureActiveTextOrdinal();
 	clearTemporaryDownParagraphIfInvalid();
+	rebuildPrepared();
+}
+
+void State::rebuildPrepared() {
+	_lastPreparedMutationKind = PreparedMutationKind::FullRebuild;
 	_prepared = Markdown::TryPrepareNativeInstantView({
 		.richPage = _richPage,
 		.mediaRuntime = _mediaRuntime,

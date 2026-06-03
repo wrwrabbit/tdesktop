@@ -742,6 +742,12 @@ enum class NativeInstantViewPrepareResultKind {
 	Failure,
 };
 
+enum class NativeInstantViewLeafUpdateResult {
+	Updated,
+	Unsupported,
+	Failed,
+};
+
 struct NativeInstantViewPrepareResult {
 	NativeInstantViewPrepareResultKind kind
 		= NativeInstantViewPrepareResultKind::Unsupported;
@@ -772,5 +778,9 @@ struct NativeInstantViewPrepareResult {
 [[nodiscard]] MarkdownArticleContent PrepareSynchronously(PrepareRequest request);
 [[nodiscard]] NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 	NativeInstantViewPrepareRequest request);
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeInstantViewLeaf(
+	MarkdownArticleContent *content,
+	const RichPage &page,
+	const PreparedEditLeafSource &source);
 
 } // namespace Iv::Markdown

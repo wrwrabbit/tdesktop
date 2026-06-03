@@ -555,6 +555,413 @@ void ApplyNativeIvEditPlaceholderText(PreparedTableCell *cell) {
 		cell->editLeaf->kind);
 }
 
+[[nodiscard]] const std::vector<RichPageBlock> *ResolveCanonicalNativeIvContainer(
+		const RichPage &page,
+		const PreparedEditBlockContainerPath &container) {
+	auto blocks = &page.blocks;
+	for (const auto &step : container.steps) {
+		if (step.kind == PreparedEditBlockContainerKind::Root) {
+			blocks = &page.blocks;
+			continue;
+		}
+		if (step.blockIndex < 0 || step.blockIndex >= int(blocks->size())) {
+			return nullptr;
+		}
+		const auto &block = (*blocks)[step.blockIndex];
+		switch (step.kind) {
+		case PreparedEditBlockContainerKind::BlockChildren:
+			blocks = &block.blocks;
+			break;
+		case PreparedEditBlockContainerKind::ListItemChildren:
+			if (step.listItemIndex < 0
+				|| step.listItemIndex >= int(block.listItems.size())) {
+				return nullptr;
+			}
+			blocks = &block.listItems[step.listItemIndex].blocks;
+			break;
+		case PreparedEditBlockContainerKind::Root:
+			blocks = &page.blocks;
+			break;
+		}
+	}
+	return blocks;
+}
+
+[[nodiscard]] const RichPageBlock *ResolveCanonicalNativeIvBlock(
+		const RichPage &page,
+		const PreparedEditBlockPath &path) {
+	const auto container = ResolveCanonicalNativeIvContainer(page, path.container);
+	if (!container || path.index < 0 || path.index >= int(container->size())) {
+		return nullptr;
+	}
+	return &(*container)[path.index];
+}
+
+[[nodiscard]] PreparedBlock *FindPreparedNativeIvBlockByPath(
+		std::vector<PreparedBlock> *blocks,
+		const PreparedEditBlockPath &path) {
+	for (auto &block : *blocks) {
+		if (block.editBlock && block.editBlock->path == path) {
+			return &block;
+		}
+		if (const auto nested = FindPreparedNativeIvBlockByPath(
+				&block.children,
+				path)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] PreparedBlock *FindPreparedNativeIvLeafBlock(
+		PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	if (block->editLeaf && (*block->editLeaf == source)) {
+		return block;
+	}
+	for (auto &child : block->children) {
+		if (const auto nested = FindPreparedNativeIvLeafBlock(&child, source)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] PreparedTableCell *FindPreparedNativeIvLeafCell(
+		PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	for (auto &row : block->tableRows) {
+		for (auto &cell : row.cells) {
+			if (cell.editLeaf && (*cell.editLeaf == source)) {
+				return &cell;
+			}
+		}
+	}
+	return nullptr;
+}
+
+void StripPreparedDetailsSummaryLinks(PreparedIvRichText *summary) {
+	if (summary->links.empty()) {
+		return;
+	}
+	const auto from = std::remove_if(
+		summary->text.entities.begin(),
+		summary->text.entities.end(),
+		[](const EntityInText &entity) {
+			return entity.type() == EntityType::CustomUrl;
+		});
+	summary->text.entities.erase(from, summary->text.entities.end());
+	summary->links.clear();
+}
+
+void RefreshPreparedNativeIvBlockPlaceholder(
+		PreparedBlock *block,
+		NativeIvPrepareState *state) {
+	block->editPlaceholderText = QString();
+	if (state->editMode && block->editLeaf) {
+		ApplyNativeIvEditPlaceholderText(block);
+	}
+}
+
+void RefreshPreparedNativeIvCellPlaceholder(
+		PreparedTableCell *cell,
+		NativeIvPrepareState *state) {
+	cell->editPlaceholderText = QString();
+	if (state->editMode && cell->editLeaf) {
+		ApplyNativeIvEditPlaceholderText(cell);
+	}
+}
+
+void RefreshPreparedNativeIvMediaCaptionPlaceholder(
+		PreparedBlock *block,
+		NativeIvPrepareState *state) {
+	block->editPlaceholderText = QString();
+	if (state->editMode && block->editLeaf) {
+		ApplyNativeIvEditPlaceholderText(block);
+	}
+}
+
+void RefreshPreparedNativeIvPlaceholderCopyText(PreparedBlock *block) {
+	if (block->kind != PreparedBlockKind::Placeholder) {
+		return;
+	}
+	block->placeholder.copyText = block->text.text.isEmpty()
+		? block->placeholder.label
+		: (block->placeholder.label + u"\n"_q + block->text.text);
+}
+
+[[nodiscard]] bool PreparePreparedNativeIvRichText(
+		const RichPage::RichText &text,
+		PreparedIvRichText *prepared,
+		NativeIvPrepareState *state,
+		NativeIvRichTextContext context = {}) {
+	return PrepareNativeIvRichText(text, prepared, nullptr, state, context);
+}
+
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvBlockText(
+		PreparedBlock *preparedBlock,
+		const RichPageBlock &canonicalBlock,
+		const PreparedEditLeafSource &source,
+		NativeIvPrepareState *state,
+		NativeIvPreparedLeafFormulaRange *formulaRange) {
+	formulaRange->from = state->nextFormulaIndex;
+	formulaRange->till = state->nextFormulaIndex;
+	switch (canonicalBlock.kind) {
+	case RichPageBlockKind::Heading:
+	case RichPageBlockKind::Paragraph:
+	case RichPageBlockKind::Footer: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		const auto kind = (canonicalBlock.kind == RichPageBlockKind::Heading)
+			? PreparedBlockKind::Heading
+			: PreparedBlockKind::Paragraph;
+		const auto context = NativeIvRichTextContextForTextSize(
+			NativeIvFlowTextSize(
+				kind,
+				canonicalBlock.headingLevel,
+				state->dimensions),
+			state->dimensions);
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.text,
+				&prepared,
+				state,
+				context)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		SortPreparedIvRichText(&prepared);
+		preparedBlock->text = std::move(prepared.text);
+		preparedBlock->links = std::move(prepared.links);
+		RefreshPreparedNativeIvBlockPlaceholder(preparedBlock, state);
+	} break;
+	case RichPageBlockKind::Code: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.text,
+				&prepared,
+				state,
+				{ .dropClickHandlers = true })) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		SortPreparedIvRichText(&prepared);
+		preparedBlock->text = StripOneTrailingNewline(std::move(prepared.text));
+		preparedBlock->links = std::move(prepared.links);
+		RefreshPreparedNativeIvBlockPlaceholder(preparedBlock, state);
+	} break;
+	case RichPageBlockKind::Quote: {
+		const auto target = FindPreparedNativeIvLeafBlock(preparedBlock, source);
+		if (!target) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.text,
+				&prepared,
+				state)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		if (canonicalBlock.pullquote) {
+			WrapPreparedIvRichTextItalic(&prepared);
+		}
+		SortPreparedIvRichText(&prepared);
+		target->text = std::move(prepared.text);
+		target->links = std::move(prepared.links);
+		RefreshPreparedNativeIvBlockPlaceholder(target, state);
+	} break;
+	case RichPageBlockKind::Table: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.text,
+				&prepared,
+				state)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		SortPreparedIvRichText(&prepared);
+		preparedBlock->text = std::move(prepared.text);
+		preparedBlock->links = std::move(prepared.links);
+	} break;
+	case RichPageBlockKind::Details: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.text,
+				&prepared,
+				state)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		StripPreparedDetailsSummaryLinks(&prepared);
+		SortPreparedIvRichText(&prepared);
+		preparedBlock->text = std::move(prepared.text);
+		preparedBlock->links = std::move(prepared.links);
+		RefreshPreparedNativeIvBlockPlaceholder(preparedBlock, state);
+	} break;
+	case RichPageBlockKind::Math: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		if (canonicalBlock.formula.trimmed().isEmpty() && !state->editMode) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto formulaIndex = preparedBlock->formulaIndex;
+		if (formulaIndex >= 0 && formulaIndex < int(state->result.formulas.size())) {
+			auto slot = PreparedFormulaSlot();
+			slot.trimmedTex = canonicalBlock.formula.trimmed();
+			slot.kind = MathKind::Display;
+			slot.textSize = state->dimensions.displayMathTextSize;
+			slot.renderWidthCap = state->dimensions.displayMathMaxRenderWidth;
+			slot.renderHeightCap = state->dimensions.displayMathMaxRenderHeight;
+			slot.present = true;
+			state->result.formulas[formulaIndex] = std::move(slot);
+		} else {
+			auto prepared = PreparedBlock();
+			prepared.kind = PreparedBlockKind::DisplayMath;
+			prepared.formulaTex = canonicalBlock.formula;
+			prepared.mathKind = MathKind::Display;
+			formulaIndex = state->rememberFormula(prepared);
+		}
+		preparedBlock->formulaTex = canonicalBlock.formula;
+		preparedBlock->formulaIndex = formulaIndex;
+		RefreshPreparedNativeIvBlockPlaceholder(preparedBlock, state);
+		formulaRange->from = formulaIndex;
+		formulaRange->till = formulaIndex + 1;
+	} break;
+	default:
+		return NativeInstantViewLeafUpdateResult::Unsupported;
+	}
+	if (canonicalBlock.kind != RichPageBlockKind::Math) {
+		formulaRange->till = state->nextFormulaIndex;
+	}
+	return NativeInstantViewLeafUpdateResult::Updated;
+}
+
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvBlockCaption(
+		PreparedBlock *preparedBlock,
+		const RichPageBlock &canonicalBlock,
+		const PreparedEditLeafSource &source,
+		NativeIvPrepareState *state,
+		NativeIvPreparedLeafFormulaRange *formulaRange) {
+	formulaRange->from = state->nextFormulaIndex;
+	formulaRange->till = state->nextFormulaIndex;
+	switch (canonicalBlock.kind) {
+	case RichPageBlockKind::Quote: {
+		const auto target = FindPreparedNativeIvLeafBlock(preparedBlock, source);
+		if (!target) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.caption,
+				&prepared,
+				state)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		if (canonicalBlock.pullquote) {
+			WrapPreparedIvRichTextItalic(&prepared);
+		}
+		SortPreparedIvRichText(&prepared);
+		target->text = std::move(prepared.text);
+		target->links = std::move(prepared.links);
+		RefreshPreparedNativeIvBlockPlaceholder(target, state);
+	} break;
+	case RichPageBlockKind::Photo:
+	case RichPageBlockKind::Video:
+	case RichPageBlockKind::Audio:
+	case RichPageBlockKind::Map: {
+		if (!preparedBlock->editLeaf || (*preparedBlock->editLeaf != source)) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		auto prepared = PreparedIvRichText();
+		if (!PreparePreparedNativeIvRichText(
+				canonicalBlock.caption,
+				&prepared,
+				state)) {
+			return NativeInstantViewLeafUpdateResult::Failed;
+		}
+		SortPreparedIvRichText(&prepared);
+		preparedBlock->text = std::move(prepared.text);
+		preparedBlock->links = std::move(prepared.links);
+		RefreshPreparedNativeIvMediaCaptionPlaceholder(preparedBlock, state);
+		RefreshPreparedNativeIvPlaceholderCopyText(preparedBlock);
+	} break;
+	default:
+		return NativeInstantViewLeafUpdateResult::Unsupported;
+	}
+	formulaRange->till = state->nextFormulaIndex;
+	return NativeInstantViewLeafUpdateResult::Updated;
+}
+
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvListItemText(
+		PreparedBlock *preparedBlock,
+		const RichPageListItem &canonicalItem,
+		const PreparedEditLeafSource &source,
+		NativeIvPrepareState *state,
+		NativeIvPreparedLeafFormulaRange *formulaRange) {
+	const auto target = FindPreparedNativeIvLeafBlock(preparedBlock, source);
+	if (!target) {
+		return NativeInstantViewLeafUpdateResult::Unsupported;
+	}
+	formulaRange->from = state->nextFormulaIndex;
+	formulaRange->till = state->nextFormulaIndex;
+	auto prepared = PreparedIvRichText();
+	if (!PreparePreparedNativeIvRichText(canonicalItem.text, &prepared, state)) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	SortPreparedIvRichText(&prepared);
+	target->text = std::move(prepared.text);
+	target->links = std::move(prepared.links);
+	RefreshPreparedNativeIvBlockPlaceholder(target, state);
+	formulaRange->till = state->nextFormulaIndex;
+	return NativeInstantViewLeafUpdateResult::Updated;
+}
+
+[[nodiscard]] NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvTableCellText(
+		PreparedBlock *preparedBlock,
+		const RichPageTableCell &canonicalCell,
+		const PreparedEditLeafSource &source,
+		NativeIvPrepareState *state,
+		NativeIvPreparedLeafFormulaRange *formulaRange) {
+	const auto target = FindPreparedNativeIvLeafCell(preparedBlock, source);
+	if (!target) {
+		return NativeInstantViewLeafUpdateResult::Unsupported;
+	}
+	formulaRange->from = state->nextFormulaIndex;
+	formulaRange->till = state->nextFormulaIndex;
+	auto prepared = PreparedIvRichText();
+	const auto context = NativeIvRichTextContextForTextSize(
+		canonicalCell.header
+			? state->dimensions.tableHeaderTextSize
+			: state->dimensions.tableBodyTextSize,
+		state->dimensions);
+	if (!PreparePreparedNativeIvRichText(
+			canonicalCell.text,
+			&prepared,
+			state,
+			context)) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	SortPreparedIvRichText(&prepared);
+	target->text = std::move(prepared.text);
+	target->links = std::move(prepared.links);
+	RefreshPreparedNativeIvCellPlaceholder(target, state);
+	formulaRange->till = state->nextFormulaIndex;
+	return NativeInstantViewLeafUpdateResult::Updated;
+}
+
 using PrepareCanonicalMediaBlock = bool (*)(
 	const RichPageBlock &data,
 	std::vector<PreparedBlock> *result,
@@ -1474,6 +1881,78 @@ bool PrepareNativeIvBlocks(
 		state,
 		PreparedEditBlockContainerPath(),
 		NativeIvDepthContext());
+}
+
+NativeInstantViewLeafUpdateResult UpdatePreparedNativeIvLeaf(
+		std::vector<PreparedBlock> *blocks,
+		const Iv::RichPage &page,
+		const PreparedEditLeafSource &source,
+		NativeIvPrepareState *state,
+		NativeIvPreparedLeafFormulaRange *formulaRange) {
+	if (!blocks || !state || !formulaRange) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	const auto canonicalBlock = ResolveCanonicalNativeIvBlock(page, source.block);
+	const auto preparedBlock = FindPreparedNativeIvBlockByPath(blocks, source.block);
+	if (!canonicalBlock || !preparedBlock) {
+		return NativeInstantViewLeafUpdateResult::Unsupported;
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::MathFormula:
+	case PreparedEditLeafKind::BlockCaption:
+		break;
+	case PreparedEditLeafKind::ListItemText:
+		if (source.listItemIndex < 0
+			|| source.listItemIndex >= int(canonicalBlock->listItems.size())) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		break;
+	case PreparedEditLeafKind::TableCellText:
+		if (source.tableRowIndex < 0
+			|| source.tableRowIndex >= int(canonicalBlock->tableRows.size())) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		if (source.tableCellIndex < 0
+			|| source.tableCellIndex
+				>= int(canonicalBlock->tableRows[source.tableRowIndex].cells.size())) {
+			return NativeInstantViewLeafUpdateResult::Unsupported;
+		}
+		break;
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::MathFormula:
+		return UpdatePreparedNativeIvBlockText(
+			preparedBlock,
+			*canonicalBlock,
+			source,
+			state,
+			formulaRange);
+	case PreparedEditLeafKind::BlockCaption:
+		return UpdatePreparedNativeIvBlockCaption(
+			preparedBlock,
+			*canonicalBlock,
+			source,
+			state,
+			formulaRange);
+	case PreparedEditLeafKind::ListItemText:
+		return UpdatePreparedNativeIvListItemText(
+			preparedBlock,
+			canonicalBlock->listItems[source.listItemIndex],
+			source,
+			state,
+			formulaRange);
+	case PreparedEditLeafKind::TableCellText:
+		return UpdatePreparedNativeIvTableCellText(
+			preparedBlock,
+			canonicalBlock->tableRows[source.tableRowIndex]
+				.cells[source.tableCellIndex],
+			source,
+			state,
+			formulaRange);
+	}
+	return NativeInstantViewLeafUpdateResult::Unsupported;
 }
 
 } // namespace Iv::Markdown

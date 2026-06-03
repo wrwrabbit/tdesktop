@@ -369,7 +369,8 @@ void SetupBox(
 	const auto submit = box->addButton(
 		rpl::single(SubmitText(descriptor)),
 		[=, confirmed = std::move(descriptor.confirmed)] {
-			if (!editor->commitInlineField()) {
+			if (editor->commitInlineField()
+				== State::ApplyResult::Failed) {
 				return;
 			}
 			if ((!confirmed || confirmed()) && weak) {

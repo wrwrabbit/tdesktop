@@ -61,8 +61,9 @@ public:
 
 	void activateInitialNode();
 	void activateSegment(int segmentIndex, int cursorOffset);
-	[[nodiscard]] bool commitInlineField();
+	[[nodiscard]] State::ApplyResult commitInlineField();
 	void refreshPreparedContent();
+	void refreshPreparedLeafAtActiveSource();
 	void syncInlineFieldGeometry();
 	void insertBlock(State::InsertAction action);
 	void insertPreparedBlock(RichPage::Block block);
@@ -183,7 +184,7 @@ private:
 	void activateTrailingParagraph();
 	void setInlineFieldFromActiveState(int selectionFrom, int selectionTo);
 	void revertInlineFieldToState();
-	[[nodiscard]] bool applyFieldTextToState();
+	[[nodiscard]] State::ApplyResult applyFieldTextToState();
 	bool showLastLimitToast();
 	void hideInlineField();
 	void acceptInlineField();
@@ -200,6 +201,7 @@ private:
 	[[nodiscard]] bool handleFieldKey(QKeyEvent *e);
 	[[nodiscard]] bool moveBoundary(bool forward, bool allowTrailing);
 	[[nodiscard]] bool moveBoundaryAfterCommit(
+		State::ApplyResult committed,
 		bool forward,
 		bool allowTrailing);
 	[[nodiscard]] bool moveTabBoundary(bool forward);
@@ -208,6 +210,8 @@ private:
 	void updateInlineFieldHeightOverride();
 	void clearDisplayMathEditSession();
 	void clearInlineFieldEditSession();
+	void relayoutCurrentContent();
+	void refreshAfterInlineFieldCommit(State::ApplyResult committed);
 	void ensureArticleLayoutForInlineField(int width);
 	void syncArticleVisibleTopBottom();
 	void syncInlineFieldGeometry(int width);

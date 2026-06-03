@@ -283,6 +283,9 @@ public:
 		Fn<void()> repaint,
 		Fn<void(QRect)> repaintRect);
 	void setContent(MarkdownArticleContent content);
+	void updatePreparedLeaf(
+		const PreparedEditLeafSource &source,
+		const MarkdownArticleContent &prepared);
 	void setEditableHeightOverride(int editableIndex, int height);
 	void setEditableHeightOverrideForSegment(int segmentIndex, int height);
 	void clearEditableHeightOverride();

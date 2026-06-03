@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <functional>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace Ui {
@@ -191,6 +192,103 @@ struct EditableHeightOverride {
 	int nextEditableIndex = 0;
 };
 
+enum class CachedTextLeafSlot {
+	Leaf,
+	Placeholder,
+	Label,
+	Subtitle,
+	Action,
+	Marker,
+	Fallback,
+	TableCellText,
+	TableCellPlaceholder,
+};
+
+enum class CachedTextLeafIdentityKind {
+	PreparedPath,
+	EditBlock,
+	EditListItem,
+	EditTableCell,
+	EditLeaf,
+};
+
+struct CachedTextLeafKey {
+	CachedTextLeafSlot slot = CachedTextLeafSlot::Leaf;
+	CachedTextLeafIdentityKind identityKind
+		= CachedTextLeafIdentityKind::PreparedPath;
+	PreparedEditBlockSource editBlock;
+	PreparedEditListItemSource editListItem;
+	PreparedEditTableCellSource editTableCell;
+	PreparedEditLeafSource editLeaf;
+	std::vector<int> preparedPath;
+	int tableRowIndex = -1;
+	int tableCellIndex = -1;
+
+	friend inline bool operator==(
+			const CachedTextLeafKey &a,
+			const CachedTextLeafKey &b) {
+		if (a.slot != b.slot || a.identityKind != b.identityKind) {
+			return false;
+		}
+		switch (a.identityKind) {
+		case CachedTextLeafIdentityKind::PreparedPath:
+			return (a.preparedPath == b.preparedPath)
+				&& (a.tableRowIndex == b.tableRowIndex)
+				&& (a.tableCellIndex == b.tableCellIndex);
+		case CachedTextLeafIdentityKind::EditBlock:
+			return (a.editBlock == b.editBlock);
+		case CachedTextLeafIdentityKind::EditListItem:
+			return (a.editListItem == b.editListItem);
+		case CachedTextLeafIdentityKind::EditTableCell:
+			return (a.editTableCell == b.editTableCell);
+		case CachedTextLeafIdentityKind::EditLeaf:
+			return (a.editLeaf == b.editLeaf);
+		}
+		return false;
+	}
+
+	friend inline bool operator!=(
+			const CachedTextLeafKey &a,
+			const CachedTextLeafKey &b) {
+		return !(a == b);
+	}
+};
+
+struct CachedTextLeafKeyHasher {
+	[[nodiscard]] size_t operator()(
+		const CachedTextLeafKey &value) const noexcept;
+};
+
+struct CachedTextLeafSourceSignature {
+	TextWithEntities text;
+	QString codeLanguage;
+	int minResizeWidth = 1;
+	size_t styleKey = 0;
+	bool dependsOnMediaRuntime = false;
+
+	friend inline bool operator==(
+		const CachedTextLeafSourceSignature &a,
+		const CachedTextLeafSourceSignature &b) = default;
+	friend inline bool operator!=(
+		const CachedTextLeafSourceSignature &a,
+		const CachedTextLeafSourceSignature &b) {
+		return !(a == b);
+	}
+};
+
+struct CachedTextLeafEntry {
+	Ui::Text::String leaf;
+	CachedTextLeafSourceSignature source;
+	Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0;
+};
+
+struct CachedTextLeafPool {
+	std::unordered_map<
+		CachedTextLeafKey,
+		CachedTextLeafEntry,
+		CachedTextLeafKeyHasher> entries;
+};
+
 struct LayoutContext {
 	int listDepth = 0;
 	int quoteDepth = 0;
@@ -201,6 +299,8 @@ struct LayoutContext {
 	bool editMode = false;
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
+	CachedTextLeafPool *cachedTextLeafs = nullptr;
+	std::vector<int> preparedPath;
 	std::shared_ptr<EditableHeightOverride> editableHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
 	std::function<std::shared_ptr<PlaceholderBlockRuntime>(
@@ -219,18 +319,6 @@ public:
 
 private:
 	const LayoutContext *_previous = nullptr;
-};
-
-struct TableCellLayoutData {
-	LaidOutTableCell cell;
-	int preferredWidth = 0;
-	int preferredHeight = 0;
-	int textHeight = 0;
-};
-
-struct TableRowLayoutData {
-	std::vector<TableCellLayoutData> cells;
-	bool header = false;
 };
 
 [[nodiscard]] bool IsAnchorOnlyBlock(const PreparedBlock &block);
@@ -253,17 +341,23 @@ struct TableRowLayoutData {
 [[nodiscard]] Ui::Text::GeometryDescriptor TextGeometry(int width);
 [[nodiscard]] int TextMinResizeWidth(int width);
 [[nodiscard]] int ReadableTextMinWidth(const style::TextStyle &style);
+[[nodiscard]] int FlowTextMinResizeWidth(const style::TextStyle &style);
 [[nodiscard]] int FlowBlockMinimumWidth(
 	const PreparedBlock &prepared,
 	const style::Markdown &st);
 [[nodiscard]] int FlowBlockPreferredWidth(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> &formulas,
-	const style::Markdown &st);
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
 [[nodiscard]] int CodeBlockMinimumWidth(const style::Markdown &st);
+[[nodiscard]] int CodeTextMinResizeWidth(const style::Markdown &st);
 [[nodiscard]] int CodeBlockPreferredWidth(
 	const PreparedBlock &prepared,
-	const style::Markdown &st);
+	const style::Markdown &st,
+	LayoutContext context = {});
 [[nodiscard]] int DisplayMathMinimumWidth(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> &formulas,
@@ -271,6 +365,10 @@ struct TableRowLayoutData {
 [[nodiscard]] int DisplayMathPreferredWidth(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> &formulas,
+	const style::Markdown &st,
+	LayoutContext context = {});
+[[nodiscard]] int PlainTextMinResizeWidth(const style::TextStyle &style);
+[[nodiscard]] int DisplayMathFallbackTextMinResizeWidth(
 	const style::Markdown &st);
 [[nodiscard]] int ContainerMinimumWidth(
 	int contentMinimumWidth,
@@ -299,6 +397,40 @@ struct TableRowLayoutData {
 	const PreparedBlock &block,
 	const style::Markdown &st);
 [[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
+void CopyCachedTextLeafs(
+	const std::vector<PreparedBlock> &preparedBlocks,
+	std::vector<LaidOutBlock> *blocks,
+	const style::Markdown &st,
+	CachedTextLeafPool *pool);
+void BuildOrReuseMarkedTextLeaf(
+	Ui::Text::String *leaf,
+	CachedTextLeafSlot slot,
+	const PreparedBlock &prepared,
+	const style::TextStyle &textStyle,
+	const style::Markdown &st,
+	const TextWithEntities &text,
+	const std::vector<PreparedLink> &links,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	int minResizeWidth,
+	LayoutContext context = {});
+void BuildOrReusePlainTextLeaf(
+	Ui::Text::String *leaf,
+	CachedTextLeafSlot slot,
+	const PreparedBlock &prepared,
+	const style::TextStyle &textStyle,
+	const QString &text,
+	int minResizeWidth,
+	LayoutContext context = {});
+void BuildOrReuseEditPlaceholderLeaf(
+	QString *placeholderText,
+	Ui::Text::String *placeholderLeaf,
+	const PreparedBlock &prepared,
+	const QString &text,
+	const style::TextStyle &textStyle,
+	int minResizeWidth,
+	LayoutContext context = {});
 void ApplyPreparedEditSources(
 	LaidOutBlock *block,
 	const PreparedBlock &prepared);
@@ -315,6 +447,24 @@ void LayoutMediaCaption(
 	int skip,
 	int *bottom,
 	LayoutContext context = {});
+void FillMediaCaptionContent(
+	LaidOutBlock *block,
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
+[[nodiscard]] bool LayoutMediaCaptionGeometry(
+	LaidOutBlock *block,
+	const PreparedBlock &prepared,
+	const style::Markdown &st,
+	int left,
+	int top,
+	int width,
+	int skip,
+	int *bottom,
+	LayoutContext context = {});
 void RepopulateCodeBlockLeaf(
 	LaidOutBlock &block,
 	const std::vector<PreparedFormulaSlot> *formulas,
@@ -323,6 +473,24 @@ void RepopulateCodeBlockLeaf(
 	const style::Markdown &st,
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
+void UpdateLaidOutLeafContent(
+	LaidOutBlock *block,
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
+void UpdateLaidOutLeafContent(
+	LaidOutTableCell *cell,
+	const PreparedTableCell &prepared,
+	const std::vector<PreparedFormulaSlot> *formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	int tableRowIndex,
+	int tableCellIndex,
+	LayoutContext context = {});
 
 [[nodiscard]] LaidOutBlock LayoutFlowBlock(
 	const PreparedBlock &prepared,
@@ -364,7 +532,8 @@ void RepopulateCodeBlockLeaf(
 	int top,
 	int width,
 	int logicalWidth,
-	bool scrollOwner);
+	bool scrollOwner,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutTableBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -393,7 +562,8 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width,
-	const std::shared_ptr<MediaRuntime> &mediaRuntime);
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	LayoutContext context = {});
 [[nodiscard]] LaidOutBlock LayoutPhotoBlock(
 	const PreparedBlock &prepared,
 	std::vector<PreparedFormulaSlot> *formulas,
@@ -453,6 +623,17 @@ void RepopulateCodeBlockLeaf(
 	int left,
 	int top,
 	int width,
+	LayoutContext context = {});
+[[nodiscard]] std::optional<int> RecountSimpleLaidOutBlock(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	LaidOutBlock *block,
+	const style::Markdown &st,
+	int left,
+	int top,
+	int width,
+	int logicalWidth,
+	bool scrollOwner,
 	LayoutContext context = {});
 
 } // namespace Iv::Markdown

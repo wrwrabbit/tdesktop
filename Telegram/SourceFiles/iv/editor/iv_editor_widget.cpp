@@ -251,6 +251,8 @@ using PreparedEditSelectionKind = Markdown::PreparedEditSelectionKind;
 using PreparedEditTableCellRange = Markdown::PreparedEditTableCellRange;
 using PreparedEditTableCellSource = Markdown::PreparedEditTableCellSource;
 using PreparedEditTableRowSource = Markdown::PreparedEditTableRowSource;
+using ApplyResult = State::ApplyResult;
+using PreparedMutationKind = State::PreparedMutationKind;
 
 struct NormalizedIntegerRange {
 	int from = -1;
@@ -887,25 +889,26 @@ bool Widget::replayImeIntoField(QInputMethodEvent *e) {
 	return true;
 }
 
-bool Widget::commitInlineField() {
-	if (applyFieldTextToState()) {
-		return true;
+ApplyResult Widget::commitInlineField() {
+	const auto result = applyFieldTextToState();
+	if (result != ApplyResult::Failed) {
+		return result;
 	}
 	revertInlineFieldToState();
 	showLastLimitToast();
-	return false;
+	return result;
 }
 
 void Widget::hideInlineFieldAndRefresh() {
 	if (_field->isHidden()) {
 		return;
 	}
-	(void)commitInlineField();
+	const auto committed = commitInlineField();
 	_pendingOrdinal = -1;
 	_pendingCursorOffset = 0;
 	hideInlineField();
 	clearInlineFieldEditSession();
-	refreshPreparedContent();
+	refreshAfterInlineFieldCommit(committed);
 }
 
 void Widget::acceptInlineField() {
@@ -914,6 +917,19 @@ void Widget::acceptInlineField() {
 
 void Widget::refreshPreparedContent() {
 	setDocument(_state->prepared());
+	relayoutCurrentContent();
+}
+
+void Widget::refreshPreparedLeafAtActiveSource() {
+	if (const auto source = _state->activePreparedLeafSource()) {
+		_article->updatePreparedLeaf(*source, _state->prepared());
+		relayoutCurrentContent();
+	} else {
+		refreshPreparedContent();
+	}
+}
+
+void Widget::relayoutCurrentContent() {
 	const auto width = std::max(
 		widthNoMargins(),
 		parentWidget() ? parentWidget()->width() : 0);
@@ -929,7 +945,7 @@ void Widget::syncInlineFieldGeometry() {
 }
 
 void Widget::insertBlock(State::InsertAction action) {
-	if (!commitInlineField()) {
+	if (commitInlineField() == ApplyResult::Failed) {
 		return;
 	}
 	if (!_state->insertBlockAfterActive(action)) {
@@ -950,7 +966,7 @@ void Widget::insertPreparedBlocks(std::vector<RichPage::Block> blocks) {
 	if (blocks.empty()) {
 		return;
 	}
-	if (!commitInlineField()) {
+	if (commitInlineField() == ApplyResult::Failed) {
 		return;
 	}
 	if (!_state->insertPreparedBlocksAfterActive(std::move(blocks))) {
@@ -1447,7 +1463,8 @@ void Widget::fillTableChangeMenu(
 }
 
 void Widget::applyTableChange(Fn<bool()> change) {
-	if (!commitInlineField()) {
+	const auto committed = commitInlineField();
+	if (committed == ApplyResult::Failed) {
 		return;
 	}
 	_pendingOrdinal = -1;
@@ -1459,6 +1476,7 @@ void Widget::applyTableChange(Fn<bool()> change) {
 	clearSelection();
 	setFocus();
 	if (!change()) {
+		refreshAfterInlineFieldCommit(committed);
 		showLastLimitToast();
 		return;
 	}
@@ -1705,7 +1723,8 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 	const auto controlHit = _article->editControlHitTest(articlePoint);
 	const auto applyControlToggle = [&](auto &&toggle, auto &&afterRefresh) {
 		const auto hadVisibleField = !_field->isHidden();
-		if (!commitInlineField()) {
+		const auto committed = commitInlineField();
+		if (committed == ApplyResult::Failed) {
 			return false;
 		}
 		_pendingOrdinal = -1;
@@ -1713,8 +1732,10 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		hideInlineField();
 		clearInlineFieldEditSession();
 		const auto toggled = toggle();
-		if (toggled || hadVisibleField) {
+		if (toggled) {
 			refreshPreparedContent();
+		} else if (hadVisibleField) {
+			refreshAfterInlineFieldCommit(committed);
 		}
 		clearTextSelection();
 		clearStructuralSelection();
@@ -1782,14 +1803,15 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		if (_field->isHidden()) {
 			return false;
 		}
-		if (!commitInlineField()) {
+		const auto committed = commitInlineField();
+		if (committed == ApplyResult::Failed) {
 			return false;
 		}
 		_pendingOrdinal = -1;
 		_pendingCursorOffset = 0;
 		hideInlineField();
 		clearInlineFieldEditSession();
-		refreshPreparedContent();
+		refreshAfterInlineFieldCommit(committed);
 		return true;
 	};
 	const auto focusOrActivateInitial = [&] {
@@ -2141,8 +2163,10 @@ void Widget::setupInlineField() {
 	_field->focusedChanges(
 	) | rpl::on_next([=](bool focused) {
 		if (!focused && !_settingField && !_trackingPointerPress) {
-			(void)commitInlineField();
-			refreshPreparedContent();
+			const auto committed = commitInlineField();
+			if (committed == ApplyResult::Changed) {
+				refreshAfterInlineFieldCommit(committed);
+			}
 		}
 	}, _field->lifetime());
 
@@ -2368,7 +2392,7 @@ void Widget::revealActiveInlineField() {
 }
 
 void Widget::activateTrailingParagraph() {
-	if (!commitInlineField()) {
+	if (commitInlineField() == ApplyResult::Failed) {
 		return;
 	}
 	const auto ordinal = _state->ensureTrailingParagraphActive();
@@ -2390,9 +2414,9 @@ void Widget::revertInlineFieldToState() {
 	updateInlineFieldHeightOverride();
 }
 
-bool Widget::applyFieldTextToState() {
+ApplyResult Widget::applyFieldTextToState() {
 	if (_settingField || _field->isHidden()) {
-		return true;
+		return ApplyResult::Unchanged;
 	}
 	if (_state->activeFieldMode() == State::FieldMode::Raw) {
 		return _state->applyActiveRawText(_field->getLastText());
@@ -2458,7 +2482,8 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 			|| key == Qt::Key_PageUp)) {
 		handled = moveBoundary(false, false);
 	} else if (atEnd && key == Qt::Key_Down) {
-		if (!commitInlineField()) {
+		const auto committed = commitInlineField();
+		if (committed == ApplyResult::Failed) {
 			handled = true;
 		} else if (const auto target
 			= _state->removeTemporaryDownParagraphAndMove();
@@ -2490,19 +2515,19 @@ bool Widget::handleFieldKey(QKeyEvent *e) {
 			activateTextOrdinal(*target, 0);
 			handled = true;
 		} else if (_state->lastLimitError()) {
-			handled = moveBoundaryAfterCommit(true, false);
+			handled = moveBoundaryAfterCommit(committed, true, false);
 			if (!handled) {
 				handled = true;
 			}
 		} else {
-			handled = moveBoundaryAfterCommit(true, true);
+			handled = moveBoundaryAfterCommit(committed, true, true);
 		}
 	} else if (atEnd
 		&& (key == Qt::Key_Right
 			|| key == Qt::Key_PageDown)) {
 		handled = moveBoundary(true, true);
 	} else if (key == Qt::Key_Return || key == Qt::Key_Enter) {
-		if (!commitInlineField()) {
+		if (commitInlineField() == ApplyResult::Failed) {
 			handled = true;
 		} else if (const auto target = _state->handleActiveListEnter()) {
 			refreshPreparedContent();
@@ -2557,11 +2582,14 @@ bool Widget::moveBoundary(bool forward, bool allowTrailing) {
 	if (!target && !addTrailing) {
 		return false;
 	}
-	if (!commitInlineField()) {
+	const auto committed = commitInlineField();
+	if (committed == ApplyResult::Failed) {
 		return true;
 	}
 	if (target) {
-		refreshPreparedContent();
+		if (committed == ApplyResult::Changed) {
+			refreshAfterInlineFieldCommit(committed);
+		}
 		if (forward) {
 			activateTextOrdinal(*target, 0);
 		} else {
@@ -2578,12 +2606,17 @@ bool Widget::moveBoundary(bool forward, bool allowTrailing) {
 	return true;
 }
 
-bool Widget::moveBoundaryAfterCommit(bool forward, bool allowTrailing) {
+bool Widget::moveBoundaryAfterCommit(
+		ApplyResult committed,
+		bool forward,
+		bool allowTrailing) {
 	const auto target = forward
 		? _state->nextEditableOrdinal()
 		: _state->previousEditableOrdinal();
 	if (target) {
-		refreshPreparedContent();
+		if (committed == ApplyResult::Changed) {
+			refreshAfterInlineFieldCommit(committed);
+		}
 		if (forward) {
 			activateTextOrdinal(*target, 0);
 		} else {
@@ -2604,8 +2637,10 @@ bool Widget::moveBoundaryAfterCommit(bool forward, bool allowTrailing) {
 }
 
 bool Widget::moveTabBoundary(bool forward) {
+	auto committed = ApplyResult::Unchanged;
 	if (!_field->isHidden()) {
-		if (!commitInlineField()) {
+		committed = commitInlineField();
+		if (committed == ApplyResult::Failed) {
 			return true;
 		}
 	}
@@ -2614,7 +2649,9 @@ bool Widget::moveTabBoundary(bool forward) {
 		: _state->previousEditableOrdinal();
 	if (target) {
 		clearSelection();
-		refreshPreparedContent();
+		if (committed == ApplyResult::Changed) {
+			refreshAfterInlineFieldCommit(committed);
+		}
 		activateTextOrdinalAtEnd(*target);
 		return true;
 	} else if (!forward || _state->isActiveTopLevelParagraph()) {
@@ -2631,7 +2668,8 @@ bool Widget::moveTabBoundary(bool forward) {
 }
 
 bool Widget::removeBoundaryOwner(bool forward) {
-	if (!commitInlineField()) {
+	const auto committed = commitInlineField();
+	if (committed == ApplyResult::Failed) {
 		return true;
 	}
 	const auto target = _state->activeBoundaryTarget(forward);
@@ -2657,7 +2695,9 @@ bool Widget::removeBoundaryOwner(bool forward) {
 	}
 	case BoundaryAction::Text:
 		_boundarySelectionOrigin = std::nullopt;
-		refreshPreparedContent();
+		if (committed == ApplyResult::Changed) {
+			refreshAfterInlineFieldCommit(committed);
+		}
 		if (forward) {
 			activateTextOrdinal(target.textOrdinal, 0);
 		} else {
@@ -2678,13 +2718,13 @@ bool Widget::removeBoundaryOwner(bool forward) {
 		_pendingCursorOffset = 0;
 		hideInlineField();
 		clearInlineFieldEditSession();
-		refreshPreparedContent();
+		refreshAfterInlineFieldCommit(committed);
 		update();
 		return true;
 	case BoundaryAction::None:
 		break;
 	}
-	return moveBoundaryAfterCommit(forward, forward);
+	return moveBoundaryAfterCommit(committed, forward, forward);
 }
 
 void Widget::ensurePendingActivation() {
@@ -2743,6 +2783,22 @@ void Widget::clearInlineFieldEditSession() {
 	clearDisplayMathEditSession();
 	if (_article) {
 		_article->clearEditableHeightOverride();
+	}
+}
+
+void Widget::refreshAfterInlineFieldCommit(ApplyResult committed) {
+	switch ((committed == ApplyResult::Changed)
+		? _state->lastPreparedMutationKind()
+		: PreparedMutationKind::None) {
+	case PreparedMutationKind::LeafOnly:
+		refreshPreparedLeafAtActiveSource();
+		break;
+	case PreparedMutationKind::FullRebuild:
+		refreshPreparedContent();
+		break;
+	case PreparedMutationKind::None:
+		relayoutCurrentContent();
+		break;
 	}
 }
 
@@ -3142,7 +3198,7 @@ std::optional<int> Widget::removeCurrentStructuralSelection(bool forward) {
 		return std::nullopt;
 	}
 	const auto selection = _structuralSelection;
-	if (!commitInlineField()) {
+	if (commitInlineField() == ApplyResult::Failed) {
 		return std::nullopt;
 	}
 	_pendingOrdinal = -1;
@@ -3257,7 +3313,8 @@ bool Widget::handleFieldMouseEvent(QEvent *event) {
 	updateArticleSelection(articlePoint, hit, editHit);
 	if (type == QEvent::MouseButtonRelease) {
 		if (hasStructuralSelection()) {
-			if (!commitInlineField()) {
+			const auto committed = commitInlineField();
+			if (committed == ApplyResult::Failed) {
 				mouse->accept();
 				return true;
 			}
@@ -3265,7 +3322,7 @@ bool Widget::handleFieldMouseEvent(QEvent *event) {
 			_pendingCursorOffset = 0;
 			hideInlineField();
 			clearInlineFieldEditSession();
-			refreshPreparedContent();
+			refreshAfterInlineFieldCommit(committed);
 			finishArticleSelection();
 			_trackingPointerPress = false;
 			mouse->accept();

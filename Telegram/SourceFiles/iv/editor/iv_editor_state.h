@@ -23,6 +23,18 @@ public:
 		Raw,
 	};
 
+	enum class ApplyResult {
+		Failed,
+		Unchanged,
+		Changed,
+	};
+
+	enum class PreparedMutationKind {
+		None,
+		LeafOnly,
+		FullRebuild,
+	};
+
 	enum class InsertBlockType : uchar {
 		Heading,
 		Blockquote,
@@ -197,15 +209,18 @@ public:
 	[[nodiscard]] const std::vector<TextNodeDescriptor> &textNodes() const;
 	[[nodiscard]] int textOrdinalForLeaf(
 		const Markdown::PreparedEditLeafSource &source) const;
+	[[nodiscard]] PreparedMutationKind lastPreparedMutationKind() const;
+	[[nodiscard]] auto activePreparedLeafSource() const
+	-> std::optional<Markdown::PreparedEditLeafSource>;
 	[[nodiscard]] int textNodeCount() const;
 	[[nodiscard]] int activeTextOrdinal() const;
 	[[nodiscard]] bool setActiveTextByOrdinal(int ordinal);
 	[[nodiscard]] TextWithEntities activeText() const;
-	[[nodiscard]] bool applyActiveText(TextWithEntities text);
+	[[nodiscard]] ApplyResult applyActiveText(TextWithEntities text);
 	[[nodiscard]] FieldMode activeFieldMode() const;
 	[[nodiscard]] QString activeRawText() const;
 	[[nodiscard]] QString activePlaceholderText() const;
-	[[nodiscard]] bool applyActiveRawText(QString text);
+	[[nodiscard]] ApplyResult applyActiveRawText(QString text);
 	[[nodiscard]] std::optional<RichMessageLimitError> lastLimitError() const;
 	[[nodiscard]] std::optional<QString> codeBlockLanguage(int ordinal) const;
 	[[nodiscard]] bool setCodeBlockLanguage(int ordinal, QString language);
@@ -418,8 +433,14 @@ private:
 	[[nodiscard]] const QString *rawText(const LeafPath &path) const;
 	[[nodiscard]] const TextNodeDescriptor *textNode(int ordinal) const;
 	[[nodiscard]] int textNodeOrdinal(const LeafPath &path) const;
+	[[nodiscard]] auto convertPreparedLeafSource(const LeafPath &path) const
+	-> std::optional<Markdown::PreparedEditLeafSource>;
+	[[nodiscard]] auto convertPreparedLeafSource(
+		const TextNodeDescriptor &descriptor) const
+	-> std::optional<Markdown::PreparedEditLeafSource>;
 
 	void rebuild();
+	void rebuildPrepared();
 	void rebuildTextNodes();
 	void rebuildTextNodes(
 		const std::vector<RichPage::Block> &blocks,
@@ -450,13 +471,18 @@ private:
 	-> std::optional<ActiveListItemSurface>;
 	[[nodiscard]] auto normalizeActiveListItemSurface()
 	-> std::optional<ActiveListItemSurface>;
-	[[nodiscard]] bool applyActiveTextUnchecked(TextWithEntities text);
-	[[nodiscard]] bool applyActiveRawTextUnchecked(QString text);
-	[[nodiscard]] bool applyActiveTextWithLocalLimit(TextWithEntities text);
-	[[nodiscard]] bool applyActiveRawTextWithLocalLimit(QString text);
-	[[nodiscard]] bool applySplitParagraphText(
+	[[nodiscard]] ApplyResult applyActiveTextUnchecked(TextWithEntities text);
+	[[nodiscard]] ApplyResult applyActiveRawTextUnchecked(QString text);
+	[[nodiscard]] ApplyResult applyActiveTextWithLocalLimit(
+		TextWithEntities text);
+	[[nodiscard]] ApplyResult applyActiveRawTextWithLocalLimit(QString text);
+	[[nodiscard]] ApplyResult applySplitParagraphText(
 		const TextNodeDescriptor &descriptor,
 		std::vector<TextWithEntities> chunks);
+	[[nodiscard]] bool leafMutationKeepsTextNodes(
+		const TextNodeDescriptor &descriptor) const;
+	[[nodiscard]] bool updatePreparedActiveLeaf(
+		const TextNodeDescriptor &descriptor);
 	[[nodiscard]] bool addTableRowUnchecked(
 		const Markdown::PreparedEditTableCellRange &range,
 		bool after);
@@ -571,6 +597,8 @@ private:
 	Markdown::MarkdownArticleContent _prepared;
 	std::vector<TextNodeDescriptor> _textNodes;
 	int _activeTextOrdinal = -1;
+	PreparedMutationKind _lastPreparedMutationKind
+		= PreparedMutationKind::None;
 	std::optional<RichMessageLimitError> _lastLimitError;
 	std::optional<LeafPath> _temporaryDownParagraph;
 

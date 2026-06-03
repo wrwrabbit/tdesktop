@@ -184,4 +184,44 @@ NativeInstantViewPrepareResult TryPrepareNativeInstantView(
 		QString());
 }
 
+NativeInstantViewLeafUpdateResult UpdatePreparedNativeInstantViewLeaf(
+		MarkdownArticleContent *content,
+		const RichPage &page,
+		const PreparedEditLeafSource &source) {
+	if (!content) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	auto state = NativeIvPrepareState();
+	state.result.mediaRuntime = content->mediaRuntime;
+	state.result.editMode = content->editMode;
+	state.result.formulas = content->formulas;
+	state.dimensions = CaptureMarkdownPrepareDimensions();
+	state.editMode = content->editMode;
+	state.nextFormulaIndex = int(content->formulas.size());
+	auto blocks = content->blocks.blocks;
+	auto formulaRange = NativeIvPreparedLeafFormulaRange{
+		.from = state.nextFormulaIndex,
+		.till = state.nextFormulaIndex,
+	};
+	const auto updated = UpdatePreparedNativeIvLeaf(
+		&blocks,
+		page,
+		source,
+		&state,
+		&formulaRange);
+	if (updated != NativeInstantViewLeafUpdateResult::Updated) {
+		return updated;
+	}
+	MeasureNativeIvPreparedFormulas(
+		&state,
+		formulaRange.from,
+		formulaRange.till);
+	if (state.result.failure.failed()) {
+		return NativeInstantViewLeafUpdateResult::Failed;
+	}
+	content->blocks.blocks = std::move(blocks);
+	content->formulas = std::move(state.result.formulas);
+	return NativeInstantViewLeafUpdateResult::Updated;
+}
+
 } // namespace Iv::Markdown

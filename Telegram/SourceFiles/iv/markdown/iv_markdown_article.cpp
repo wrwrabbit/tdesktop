@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_article_text.h"
 #include "iv/markdown/iv_markdown_media_reuse.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "iv/markdown/iv_markdown_prepare_serialize.h"
+#include "lang/lang_keys.h"
 #include "ui/style/style_core_color.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/widgets/checkbox.h"
@@ -118,6 +120,485 @@ struct MarkdownArticleHorizontalScrollLookup {
 	MarkdownArticleScrollOwnerIdentity identity;
 	const LaidOutBlock *block = nullptr;
 };
+
+[[nodiscard]] bool TextDependsOnMediaRuntime(
+		const TextWithEntities &text) {
+	for (const auto &entity : text.entities) {
+		if (entity.type() != EntityType::CustomEmoji) {
+			continue;
+		}
+		const auto parsed = ParseInlineTextObjectEntity(entity.data());
+		if (parsed && (parsed->kind == InlineTextObjectKind::IvImage)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+[[nodiscard]] TextWithEntities DisplayMathFallbackText() {
+	auto result = TextWithEntities::Simple(u"Invalid formula"_q);
+	result.entities.push_back(EntityInText(
+		EntityType::Italic,
+		0,
+		result.text.size()));
+	return result;
+}
+
+[[nodiscard]] QString DetailsStateText(bool open) {
+	return open
+		? tr::lng_iv_details_state_expanded(tr::now)
+		: tr::lng_iv_details_state_collapsed(tr::now);
+}
+
+[[nodiscard]] size_t TextStyleKey(const style::TextStyle &style) {
+	return reinterpret_cast<size_t>(&style);
+}
+
+[[nodiscard]] CachedTextLeafSourceSignature MarkedTextLeafSourceSignature(
+		TextWithEntities text,
+		const style::TextStyle &textStyle,
+		int minResizeWidth) {
+	auto result = CachedTextLeafSourceSignature();
+	result.dependsOnMediaRuntime = TextDependsOnMediaRuntime(text);
+	result.text = std::move(text);
+	result.minResizeWidth = minResizeWidth;
+	result.styleKey = TextStyleKey(textStyle);
+	return result;
+}
+
+[[nodiscard]] CachedTextLeafSourceSignature PlainTextLeafSourceSignature(
+		const QString &text,
+		const style::TextStyle &textStyle,
+		int minResizeWidth) {
+	return MarkedTextLeafSourceSignature(
+		TextWithEntities::Simple(text),
+		textStyle,
+		minResizeWidth);
+}
+
+[[nodiscard]] CachedTextLeafSourceSignature CodeTextLeafSourceSignature(
+		const PreparedBlock &prepared,
+		const style::Markdown &st) {
+	auto result = MarkedTextLeafSourceSignature(
+		CodeBlockDisplayText(prepared.text),
+		st.code,
+		CodeTextMinResizeWidth(st));
+	result.codeLanguage = prepared.codeLanguage;
+	return result;
+}
+
+[[nodiscard]] CachedTextLeafKey BlockCachedTextLeafKey(
+		CachedTextLeafSlot slot,
+		const PreparedBlock &prepared,
+		const std::vector<int> &preparedPath) {
+	auto result = CachedTextLeafKey();
+	result.slot = slot;
+	if ((slot == CachedTextLeafSlot::Leaf
+			|| slot == CachedTextLeafSlot::Placeholder
+			|| slot == CachedTextLeafSlot::Fallback)
+		&& prepared.editLeaf) {
+		result.identityKind = CachedTextLeafIdentityKind::EditLeaf;
+		result.editLeaf = *prepared.editLeaf;
+		return result;
+	}
+	if ((slot == CachedTextLeafSlot::Marker) && prepared.editListItem) {
+		result.identityKind = CachedTextLeafIdentityKind::EditListItem;
+		result.editListItem = *prepared.editListItem;
+		return result;
+	}
+	if (prepared.editBlock) {
+		result.identityKind = CachedTextLeafIdentityKind::EditBlock;
+		result.editBlock = *prepared.editBlock;
+		return result;
+	}
+	if (prepared.editListItem) {
+		result.identityKind = CachedTextLeafIdentityKind::EditListItem;
+		result.editListItem = *prepared.editListItem;
+		return result;
+	}
+	if (prepared.editLeaf) {
+		result.identityKind = CachedTextLeafIdentityKind::EditLeaf;
+		result.editLeaf = *prepared.editLeaf;
+		return result;
+	}
+	result.preparedPath = preparedPath;
+	return result;
+}
+
+[[nodiscard]] CachedTextLeafKey TableCellCachedTextLeafKey(
+		CachedTextLeafSlot slot,
+		const PreparedTableCell &prepared,
+		const std::vector<int> &preparedPath,
+		int tableRowIndex,
+		int tableCellIndex) {
+	auto result = CachedTextLeafKey();
+	result.slot = slot;
+	result.tableRowIndex = tableRowIndex;
+	result.tableCellIndex = tableCellIndex;
+	if (prepared.editLeaf) {
+		result.identityKind = CachedTextLeafIdentityKind::EditLeaf;
+		result.editLeaf = *prepared.editLeaf;
+		return result;
+	}
+	if (prepared.editCell) {
+		result.identityKind = CachedTextLeafIdentityKind::EditTableCell;
+		result.editTableCell = *prepared.editCell;
+		return result;
+	}
+	result.preparedPath = preparedPath;
+	return result;
+}
+
+void StoreCachedTextLeaf(
+		CachedTextLeafPool *pool,
+		CachedTextLeafKey key,
+		CachedTextLeafSourceSignature source,
+		Ui::Text::String *leaf,
+		Spellchecker::HighlightProcessId syntaxHighlightProcessId = 0) {
+	if (!pool || !leaf || leaf->isEmpty()) {
+		return;
+	}
+	pool->entries.insert_or_assign(
+		std::move(key),
+		CachedTextLeafEntry{
+			.leaf = std::move(*leaf),
+			.source = std::move(source),
+			.syntaxHighlightProcessId = syntaxHighlightProcessId,
+		});
+	*leaf = Ui::Text::String();
+}
+
+void PruneMediaRuntimeBoundCachedTextLeafs(CachedTextLeafPool *pool) {
+	if (!pool) {
+		return;
+	}
+	for (auto i = pool->entries.begin(); i != pool->entries.end();) {
+		if (i->second.source.dependsOnMediaRuntime) {
+			i = pool->entries.erase(i);
+		} else {
+			++i;
+		}
+	}
+}
+
+void HarvestCachedTextLeafs(
+	const std::vector<PreparedBlock> &preparedBlocks,
+	std::vector<LaidOutBlock> *blocks,
+	const style::Markdown &st,
+	CachedTextLeafPool *pool,
+	std::vector<int> *preparedPath);
+
+void RebuildCachedTextLeafs(
+		const std::vector<PreparedBlock> &preparedBlocks,
+		std::vector<LaidOutBlock> *blocks,
+		const style::Markdown &st,
+		CachedTextLeafPool *pool) {
+	if (!pool) {
+		return;
+	}
+	pool->entries.clear();
+	auto preparedPath = std::vector<int>();
+	HarvestCachedTextLeafs(
+		preparedBlocks,
+		blocks,
+		st,
+		pool,
+		&preparedPath);
+}
+
+void HarvestCachedTextLeafs(
+		const PreparedBlock &prepared,
+		LaidOutBlock *block,
+		const style::Markdown &st,
+		CachedTextLeafPool *pool,
+		const std::vector<int> &preparedPath) {
+	const auto storeBlockLeaf = [&](CachedTextLeafSlot slot,
+			CachedTextLeafSourceSignature source,
+			Ui::Text::String *leaf) {
+		StoreCachedTextLeaf(
+			pool,
+			BlockCachedTextLeafKey(slot, prepared, preparedPath),
+			std::move(source),
+			leaf);
+	};
+	const auto storeTableCellLeaf = [&](
+			CachedTextLeafSlot slot,
+			const PreparedTableCell &preparedCell,
+			int tableRowIndex,
+			int tableCellIndex,
+			CachedTextLeafSourceSignature source,
+			Ui::Text::String *leaf) {
+		StoreCachedTextLeaf(
+			pool,
+			TableCellCachedTextLeafKey(
+				slot,
+				preparedCell,
+				preparedPath,
+				tableRowIndex,
+				tableCellIndex),
+			std::move(source),
+			leaf);
+	};
+
+	if (!block->marker.isEmpty()) {
+		storeBlockLeaf(
+			CachedTextLeafSlot::Marker,
+			PlainTextLeafSourceSignature(
+				ListMarkerText(prepared),
+				st.body,
+				PlainTextMinResizeWidth(st.body)),
+			&block->marker);
+	}
+
+	switch (prepared.kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading:
+	{
+		const auto &textStyle = TextStyleFor(prepared, st);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Leaf,
+			MarkedTextLeafSourceSignature(
+				prepared.text,
+				textStyle,
+				FlowBlockMinimumWidth(prepared, st)),
+			&block->leaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				textStyle,
+				PlainTextMinResizeWidth(textStyle)),
+			&block->placeholderLeaf);
+	} break;
+	case PreparedBlockKind::CodeBlock:
+		StoreCachedTextLeaf(
+			pool,
+			BlockCachedTextLeafKey(
+				CachedTextLeafSlot::Leaf,
+				prepared,
+				preparedPath),
+			CodeTextLeafSourceSignature(prepared, st),
+			&block->leaf,
+			block->syntaxHighlightProcessId);
+		block->syntaxHighlightProcessId = 0;
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.code,
+				PlainTextMinResizeWidth(st.code)),
+			&block->placeholderLeaf);
+		break;
+	case PreparedBlockKind::DisplayMath:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.displayMath.fallbackStyle,
+				DisplayMathFallbackTextMinResizeWidth(st)),
+			&block->placeholderLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Fallback,
+			MarkedTextLeafSourceSignature(
+				DisplayMathFallbackText(),
+				st.displayMath.fallbackStyle,
+				DisplayMathFallbackTextMinResizeWidth(st)),
+			&block->fallbackLeaf);
+		break;
+	case PreparedBlockKind::Table: {
+		storeBlockLeaf(
+			CachedTextLeafSlot::Leaf,
+			MarkedTextLeafSourceSignature(
+				prepared.text,
+				st.body,
+				FlowTextMinResizeWidth(st.body)),
+			&block->leaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.body,
+				PlainTextMinResizeWidth(st.body)),
+			&block->placeholderLeaf);
+		const auto rowCount = std::min(
+			int(prepared.tableRows.size()),
+			int(block->tableRows.size()));
+		for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+			const auto cellCount = std::min(
+				int(prepared.tableRows[rowIndex].cells.size()),
+				int(block->tableRows[rowIndex].cells.size()));
+			for (auto cellIndex = 0; cellIndex != cellCount; ++cellIndex) {
+				const auto &preparedCell
+					= prepared.tableRows[rowIndex].cells[cellIndex];
+				auto &cell = block->tableRows[rowIndex].cells[cellIndex];
+				const auto &textStyle = preparedCell.header
+					? st.table.headerStyle
+					: st.table.bodyStyle;
+				const auto minResizeWidth = TableCellTextMinResizeWidth(
+					textStyle,
+					st);
+				storeTableCellLeaf(
+					CachedTextLeafSlot::TableCellText,
+					preparedCell,
+					rowIndex,
+					cellIndex,
+					MarkedTextLeafSourceSignature(
+						preparedCell.text,
+						textStyle,
+						minResizeWidth),
+					&cell.leaf);
+				storeTableCellLeaf(
+					CachedTextLeafSlot::TableCellPlaceholder,
+					preparedCell,
+					rowIndex,
+					cellIndex,
+					PlainTextLeafSourceSignature(
+						preparedCell.editPlaceholderText,
+						textStyle,
+						minResizeWidth),
+					&cell.placeholderLeaf);
+			}
+		}
+	} break;
+	case PreparedBlockKind::Details:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Leaf,
+			MarkedTextLeafSourceSignature(
+				prepared.text,
+				st.details.summaryStyle,
+				FlowTextMinResizeWidth(st.details.summaryStyle)),
+			&block->leaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.details.summaryStyle,
+				PlainTextMinResizeWidth(st.details.summaryStyle)),
+			&block->placeholderLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Action,
+			PlainTextLeafSourceSignature(
+				DetailsStateText(prepared.detailsOpen),
+				st.details.summaryStyle,
+				PlainTextMinResizeWidth(st.details.summaryStyle)),
+			&block->actionLeaf);
+		break;
+	case PreparedBlockKind::Placeholder:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Label,
+			PlainTextLeafSourceSignature(
+				prepared.placeholder.label,
+				st.placeholder.labelStyle,
+				PlainTextMinResizeWidth(st.placeholder.labelStyle)),
+			&block->labelLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Leaf,
+			MarkedTextLeafSourceSignature(
+				prepared.text,
+				st.body,
+				FlowTextMinResizeWidth(st.body)),
+			&block->leaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.body,
+				PlainTextMinResizeWidth(st.body)),
+			&block->placeholderLeaf);
+		break;
+	case PreparedBlockKind::RelatedArticle:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Label,
+			PlainTextLeafSourceSignature(
+				prepared.relatedArticle.title,
+				st.relatedArticle.titleStyle,
+				PlainTextMinResizeWidth(st.relatedArticle.titleStyle)),
+			&block->labelLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Subtitle,
+			PlainTextLeafSourceSignature(
+				prepared.relatedArticle.description,
+				st.relatedArticle.subtitleStyle,
+				PlainTextMinResizeWidth(st.relatedArticle.subtitleStyle)),
+			&block->subtitleLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Action,
+			PlainTextLeafSourceSignature(
+				prepared.relatedArticle.footer,
+				st.relatedArticle.footerStyle,
+				PlainTextMinResizeWidth(st.relatedArticle.footerStyle)),
+			&block->actionLeaf);
+		break;
+	case PreparedBlockKind::EmbedPost:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Label,
+			PlainTextLeafSourceSignature(
+				prepared.embedPost.author,
+				st.embedPost.authorStyle,
+				PlainTextMinResizeWidth(st.embedPost.authorStyle)),
+			&block->labelLeaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Subtitle,
+			PlainTextLeafSourceSignature(
+				prepared.embedPost.dateText,
+				st.embedPost.dateStyle,
+				PlainTextMinResizeWidth(st.embedPost.dateStyle)),
+			&block->subtitleLeaf);
+		break;
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+		storeBlockLeaf(
+			CachedTextLeafSlot::Leaf,
+			MarkedTextLeafSourceSignature(
+				prepared.text,
+				st.body,
+				FlowTextMinResizeWidth(st.body)),
+			&block->leaf);
+		storeBlockLeaf(
+			CachedTextLeafSlot::Placeholder,
+			PlainTextLeafSourceSignature(
+				prepared.editPlaceholderText,
+				st.body,
+				PlainTextMinResizeWidth(st.body)),
+			&block->placeholderLeaf);
+		break;
+	case PreparedBlockKind::Rule:
+	case PreparedBlockKind::Quote:
+	case PreparedBlockKind::List:
+	case PreparedBlockKind::ListItem:
+		break;
+	}
+
+	auto childPath = preparedPath;
+	HarvestCachedTextLeafs(prepared.children, &block->children, st, pool, &childPath);
+}
+
+void HarvestCachedTextLeafs(
+		const std::vector<PreparedBlock> &preparedBlocks,
+		std::vector<LaidOutBlock> *blocks,
+		const style::Markdown &st,
+		CachedTextLeafPool *pool,
+		std::vector<int> *preparedPath) {
+	if (!blocks || !pool || !preparedPath) {
+		return;
+	}
+	const auto count = std::min(int(preparedBlocks.size()), int(blocks->size()));
+	for (auto i = 0; i != count; ++i) {
+		preparedPath->push_back(i);
+		HarvestCachedTextLeafs(
+			preparedBlocks[i],
+			&(*blocks)[i],
+			st,
+			pool,
+			*preparedPath);
+		preparedPath->pop_back();
+	}
+}
 
 void StoreRelatedArticleImageState(
 		const LaidOutBlock &block,
@@ -1685,6 +2166,258 @@ void ClearColorizedFormulaImages(std::vector<LaidOutBlock> *blocks) {
 	}
 }
 
+struct PreparedArticleLeafLookup {
+	PreparedBlock *block = nullptr;
+	PreparedTableCell *cell = nullptr;
+
+	[[nodiscard]] bool valid() const {
+		return block || cell;
+	}
+};
+
+struct ConstPreparedArticleLeafLookup {
+	const PreparedBlock *block = nullptr;
+	const PreparedTableCell *cell = nullptr;
+
+	[[nodiscard]] bool valid() const {
+		return block || cell;
+	}
+};
+
+struct LaidOutArticleLeafLookup {
+	LaidOutBlock *block = nullptr;
+	LaidOutTableCell *cell = nullptr;
+
+	[[nodiscard]] bool valid() const {
+		return block || cell;
+	}
+};
+
+[[nodiscard]] PreparedBlock *FindPreparedArticleBlockByPath(
+		std::vector<PreparedBlock> *blocks,
+		const PreparedEditBlockPath &path) {
+	for (auto &block : *blocks) {
+		if (block.editBlock && (block.editBlock->path == path)) {
+			return &block;
+		}
+		if (const auto nested = FindPreparedArticleBlockByPath(
+				&block.children,
+				path)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const PreparedBlock *FindPreparedArticleBlockByPath(
+		const std::vector<PreparedBlock> &blocks,
+		const PreparedEditBlockPath &path) {
+	for (const auto &block : blocks) {
+		if (block.editBlock && (block.editBlock->path == path)) {
+			return &block;
+		}
+		if (const auto nested = FindPreparedArticleBlockByPath(
+				block.children,
+				path)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] PreparedBlock *FindPreparedArticleLeafBlock(
+		PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	if (block->editLeaf && (*block->editLeaf == source)) {
+		return block;
+	}
+	for (auto &child : block->children) {
+		if (const auto nested = FindPreparedArticleLeafBlock(&child, source)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const PreparedBlock *FindPreparedArticleLeafBlock(
+		const PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	if (block->editLeaf && (*block->editLeaf == source)) {
+		return block;
+	}
+	for (const auto &child : block->children) {
+		if (const auto nested = FindPreparedArticleLeafBlock(&child, source)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] PreparedTableCell *FindPreparedArticleLeafCell(
+		PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	for (auto &row : block->tableRows) {
+		for (auto &cell : row.cells) {
+			if (cell.editLeaf && (*cell.editLeaf == source)) {
+				return &cell;
+			}
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] const PreparedTableCell *FindPreparedArticleLeafCell(
+		const PreparedBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	for (const auto &row : block->tableRows) {
+		for (const auto &cell : row.cells) {
+			if (cell.editLeaf && (*cell.editLeaf == source)) {
+				return &cell;
+			}
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] PreparedArticleLeafLookup FindPreparedArticleLeaf(
+		std::vector<PreparedBlock> *blocks,
+		const PreparedEditLeafSource &source) {
+	const auto owner = FindPreparedArticleBlockByPath(blocks, source.block);
+	if (!owner) {
+		return {};
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::TableCellText:
+		return { .cell = FindPreparedArticleLeafCell(owner, source) };
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::BlockCaption:
+	case PreparedEditLeafKind::ListItemText:
+	case PreparedEditLeafKind::MathFormula:
+		return { .block = FindPreparedArticleLeafBlock(owner, source) };
+	}
+	return {};
+}
+
+[[nodiscard]] ConstPreparedArticleLeafLookup FindPreparedArticleLeaf(
+		const std::vector<PreparedBlock> &blocks,
+		const PreparedEditLeafSource &source) {
+	const auto owner = FindPreparedArticleBlockByPath(blocks, source.block);
+	if (!owner) {
+		return {};
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::TableCellText:
+		return { .cell = FindPreparedArticleLeafCell(owner, source) };
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::BlockCaption:
+	case PreparedEditLeafKind::ListItemText:
+	case PreparedEditLeafKind::MathFormula:
+		return { .block = FindPreparedArticleLeafBlock(owner, source) };
+	}
+	return {};
+}
+
+[[nodiscard]] LaidOutBlock *FindLaidOutArticleBlockByPath(
+		std::vector<LaidOutBlock> *blocks,
+		const PreparedEditBlockPath &path) {
+	for (auto &block : *blocks) {
+		if (block.editBlock && (block.editBlock->path == path)) {
+			return &block;
+		}
+		if (const auto nested = FindLaidOutArticleBlockByPath(
+				&block.children,
+				path)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] LaidOutBlock *FindLaidOutArticleLeafBlock(
+		LaidOutBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	if (block->editLeaf && (*block->editLeaf == source)) {
+		return block;
+	}
+	for (auto &child : block->children) {
+		if (const auto nested = FindLaidOutArticleLeafBlock(&child, source)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] LaidOutTableCell *FindLaidOutArticleLeafCell(
+		LaidOutBlock *block,
+		const PreparedEditLeafSource &source) {
+	if (!block) {
+		return nullptr;
+	}
+	for (auto &row : block->tableRows) {
+		for (auto &cell : row.cells) {
+			if (cell.editLeaf && (*cell.editLeaf == source)) {
+				return &cell;
+			}
+		}
+	}
+	return nullptr;
+}
+
+[[nodiscard]] LaidOutArticleLeafLookup FindLaidOutArticleLeaf(
+		std::vector<LaidOutBlock> *blocks,
+		const PreparedEditLeafSource &source) {
+	const auto owner = FindLaidOutArticleBlockByPath(blocks, source.block);
+	if (!owner) {
+		return {};
+	}
+	switch (source.kind) {
+	case PreparedEditLeafKind::TableCellText:
+		return { .cell = FindLaidOutArticleLeafCell(owner, source) };
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::BlockCaption:
+	case PreparedEditLeafKind::ListItemText:
+	case PreparedEditLeafKind::MathFormula:
+		return { .block = FindLaidOutArticleLeafBlock(owner, source) };
+	}
+	return {};
+}
+
+void PatchPreparedArticleLeaf(
+		PreparedBlock *block,
+		const PreparedBlock &prepared,
+		const PreparedEditLeafSource &source) {
+	block->text = prepared.text;
+	block->links = prepared.links;
+	block->editPlaceholderText = prepared.editPlaceholderText;
+	if (source.kind == PreparedEditLeafKind::MathFormula) {
+		block->formulaTex = prepared.formulaTex;
+		block->formulaIndex = prepared.formulaIndex;
+	}
+}
+
+void PatchPreparedArticleLeaf(
+		PreparedTableCell *cell,
+		const PreparedTableCell &prepared) {
+	cell->text = prepared.text;
+	cell->links = prepared.links;
+	cell->editPlaceholderText = prepared.editPlaceholderText;
+}
+
 void CollectCodeBlockHighlightKeys(
 		const std::vector<PreparedBlock> &blocks,
 		std::unordered_set<
@@ -1735,6 +2468,9 @@ public:
 		Fn<void(QRect)> repaintRect);
 
 	void setContent(MarkdownArticleContent content);
+	void updatePreparedLeaf(
+		const PreparedEditLeafSource &source,
+		const MarkdownArticleContent &prepared);
 
 	void setEditableHeightOverride(int editableIndex, int height);
 
@@ -1932,6 +2668,9 @@ private:
 		PreparedPlaceholderBlockId id,
 		bool loading);
 
+	void invalidateLayout(bool harvestCurrentBlocks);
+	void invalidateGeometry();
+
 	[[nodiscard]] const style::Markdown &layoutStyle() const;
 	[[nodiscard]] MarkdownArticleScrollOwnerIdentity scrollOwnerIdentity(
 		const LaidOutBlock &block,
@@ -1984,7 +2723,9 @@ private:
 		const MarkdownArticleScrollOwnerIdentity &identity,
 		int left);
 
+	void finalizeRelayout(int width, int heightBottom);
 	void relayout(int width);
+	void relayoutRetained(int width);
 	void retainBlocks();
 
 	mutable MarkdownArticleContent _content;
@@ -1998,6 +2739,7 @@ private:
 	int _width = -1;
 	int _laidOutWidth = 0;
 	int _height = 0;
+	CachedTextLeafPool _cachedTextLeafs;
 	std::vector<LaidOutBlock> _blocks;
 	std::vector<LaidOutBlock> _retainedBlocks;
 	MediaBlockStorage _mediaBlocks;
@@ -2068,6 +2810,14 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	}
 	auto reusedMediaBlocks = MediaBlockStorage();
 	const auto reuseMediaBlocks = (_content.mediaRuntime == content.mediaRuntime);
+	RebuildCachedTextLeafs(
+		_content.blocks.blocks,
+		&_blocks,
+		layoutStyle(),
+		&_cachedTextLeafs);
+	if (!reuseMediaBlocks) {
+		PruneMediaRuntimeBoundCachedTextLeafs(&_cachedTextLeafs);
+	}
 	if (reuseMediaBlocks) {
 		auto oldMediaBlocks = MediaBlockStorage();
 		oldMediaBlocks.swap(_mediaBlocks);
@@ -2087,7 +2837,121 @@ void MarkdownArticle::Impl::setContent(MarkdownArticleContent content) {
 	prunePendingHighlightProcessesForContent();
 	ClearInlineFormulaObjectCache(_inlineFormulaObjects);
 	resetFormulaRasterCache();
-	invalidateLayout();
+	invalidateLayout(false);
+}
+
+void MarkdownArticle::Impl::updatePreparedLeaf(
+		const PreparedEditLeafSource &source,
+		const MarkdownArticleContent &prepared) {
+	if (!ValidBlockPath(source.block)
+		|| (_content.mediaRuntime != prepared.mediaRuntime)
+		|| (_content.editMode != prepared.editMode)) {
+		setContent(prepared);
+		return;
+	}
+	const auto current = FindPreparedArticleLeaf(&_content.blocks.blocks, source);
+	const auto incoming = FindPreparedArticleLeaf(prepared.blocks.blocks, source);
+	const auto live = FindLaidOutArticleLeaf(&_blocks, source);
+	if (!current.valid() || !incoming.valid() || !live.valid()) {
+		setContent(prepared);
+		return;
+	}
+
+	auto codeTextChanged = false;
+	auto displayMathOldIndex = -1;
+	auto displayMathNewIndex = -1;
+
+	switch (source.kind) {
+	case PreparedEditLeafKind::TableCellText:
+		if (!current.cell
+			|| !incoming.cell
+			|| !live.cell
+			|| (current.cell->header != incoming.cell->header)
+			|| (current.cell->alignment != incoming.cell->alignment)
+			|| (current.cell->verticalAlignment
+				!= incoming.cell->verticalAlignment)
+			|| (current.cell->column != incoming.cell->column)
+			|| (current.cell->colspan != incoming.cell->colspan)
+			|| (current.cell->rowspan != incoming.cell->rowspan)) {
+			setContent(prepared);
+			return;
+		}
+		PatchPreparedArticleLeaf(current.cell, *incoming.cell);
+		break;
+	case PreparedEditLeafKind::BlockText:
+	case PreparedEditLeafKind::BlockCaption:
+	case PreparedEditLeafKind::ListItemText:
+	case PreparedEditLeafKind::MathFormula:
+		if (!current.block
+			|| !incoming.block
+			|| !live.block
+			|| (current.block->kind != incoming.block->kind)
+			|| (current.block->codeLanguage != incoming.block->codeLanguage)
+			|| ((source.kind == PreparedEditLeafKind::MathFormula)
+				&& (current.block->kind != PreparedBlockKind::DisplayMath))) {
+			setContent(prepared);
+			return;
+		}
+		codeTextChanged = (current.block->kind == PreparedBlockKind::CodeBlock)
+			&& (CodeBlockDisplayText(current.block->text.text)
+				!= CodeBlockDisplayText(incoming.block->text.text));
+		displayMathOldIndex = current.block->formulaIndex;
+		displayMathNewIndex = incoming.block->formulaIndex;
+		PatchPreparedArticleLeaf(current.block, *incoming.block, source);
+		break;
+	}
+
+	_content.formulas = prepared.formulas;
+	_formulaRenders.resize(_content.formulas.size());
+	if (source.kind == PreparedEditLeafKind::MathFormula) {
+		if (displayMathOldIndex >= 0
+			&& displayMathOldIndex < int(_formulaRenders.size())) {
+			_formulaRenders[displayMathOldIndex] = RenderedFormula();
+		}
+		if (displayMathNewIndex >= 0
+			&& displayMathNewIndex < int(_formulaRenders.size())) {
+			_formulaRenders[displayMathNewIndex] = RenderedFormula();
+		}
+		if (live.block) {
+			live.block->colorizedFormulaImage = QImage();
+			live.block->colorizedFormulaColor = QColor();
+			live.block->colorizedFormulaSize = QSize();
+		}
+	}
+
+	auto context = LayoutContext();
+	context.syntaxHighlightTracker = this;
+	if (live.block && incoming.block) {
+		UpdateLaidOutLeafContent(
+			live.block,
+			*incoming.block,
+			&_content.formulas,
+			_inlineFormulaObjects.get(),
+			_content.mediaRuntime,
+			layoutStyle(),
+			context);
+	} else if (live.cell && incoming.cell) {
+		UpdateLaidOutLeafContent(
+			live.cell,
+			*incoming.cell,
+			&_content.formulas,
+			_inlineFormulaObjects.get(),
+			_content.mediaRuntime,
+			layoutStyle(),
+			source.tableRowIndex,
+			source.tableCellIndex,
+			context);
+	} else {
+		setContent(prepared);
+		return;
+	}
+
+	if (codeTextChanged) {
+		prunePendingHighlightProcessesForContent();
+	}
+	if (_width > 0) {
+		invalidateGeometry();
+	}
 }
 
 void MarkdownArticle::Impl::setEditableHeightOverride(
@@ -2101,7 +2965,7 @@ void MarkdownArticle::Impl::setEditableHeightOverride(
 	}
 	_editableHeightOverrideIndex = editableIndex;
 	_editableHeightOverride = height;
-	invalidateLayout();
+	invalidateGeometry();
 }
 
 void MarkdownArticle::Impl::setEditableHeightOverrideForSegment(
@@ -2140,13 +3004,27 @@ int MarkdownArticle::Impl::lastLayoutWidth() const {
 }
 
 int MarkdownArticle::Impl::resizeGetHeight(int width) {
-	relayout(width);
+	width = std::max(width, 1);
+	if (_width != width) {
+		if (_blocks.empty()) {
+			relayout(width);
+		} else {
+			relayoutRetained(width);
+		}
+	}
 	return std::max(_height, 1);
 }
 
 auto MarkdownArticle::Impl::countRevealLinesGeometry(int width)
 -> std::vector<MarkdownArticleRevealLine> {
-	relayout(width);
+	width = std::max(width, 1);
+	if (_width != width) {
+		if (_blocks.empty()) {
+			relayout(width);
+		} else {
+			relayoutRetained(width);
+		}
+	}
 	return CollectRevealLines(_blocks, layoutStyle());
 }
 
@@ -2704,17 +3582,32 @@ void MarkdownArticle::Impl::stopPlaceholderRipple(
 }
 
 void MarkdownArticle::Impl::invalidateLayout() {
+	invalidateLayout(true);
+}
+
+void MarkdownArticle::Impl::invalidateGeometry() {
 	_width = -1;
 	_laidOutWidth = 0;
 	_height = 0;
 	captureScrollState();
 	clearPendingHighlightBlockPointers();
-	retainBlocks();
 	_anchors.clear();
 	_segments.clear();
 	_visibleSegmentSpan = {};
 	_segmentTops.clear();
 	_segmentBottoms.clear();
+}
+
+void MarkdownArticle::Impl::invalidateLayout(bool harvestCurrentBlocks) {
+	invalidateGeometry();
+	if (harvestCurrentBlocks) {
+		RebuildCachedTextLeafs(
+			_content.blocks.blocks,
+			&_blocks,
+			layoutStyle(),
+			&_cachedTextLeafs);
+	}
+	retainBlocks();
 }
 
 void MarkdownArticle::Impl::retainBlocks() {
@@ -3547,22 +4440,51 @@ void MarkdownArticle::Impl::endHorizontalScroll() {
 	_activeHorizontalScrollDrag.reset();
 }
 
-void MarkdownArticle::Impl::relayout(int width) {
-	width = std::max(width, 1);
-	if (_width == width) {
-		return;
-	}
+void MarkdownArticle::Impl::finalizeRelayout(int width, int heightBottom) {
+	const auto &page = layoutStyle().pagePadding;
 	_width = width;
+	restoreScrollState();
+	refreshScrolledGeometry(_blocks);
+	_laidOutWidth = std::min(
+		width,
+		std::max(
+			BlockMaxRight(_blocks) + page.right(),
+			page.left() + page.right() + 1));
+	pruneTaskMarkerRuntimes();
+	prunePlaceholderRuntimes();
+	_relatedArticleImages.clear();
 	StoreRelatedArticleImageStates(
 		_blocks,
 		&_relatedArticleImages);
+	_height = heightBottom + page.bottom();
 	clearPendingHighlightBlockPointers();
-	retainBlocks();
 	_anchors.clear();
 	_segments.clear();
 	_visibleSegmentSpan = {};
 	_segmentTops.clear();
 	_segmentBottoms.clear();
+	registerPendingHighlightBlocks(_blocks);
+	CollectAnchors(_blocks, &_anchors);
+	CollectSelectableSegments(&_blocks, &_segments);
+	RefreshScrollableSegmentRects(_blocks, &_segments);
+	rebuildVisibleSegmentLookup();
+}
+
+void MarkdownArticle::Impl::relayout(int width) {
+	width = std::max(width, 1);
+	if (_width == width) {
+		return;
+	}
+	StoreRelatedArticleImageStates(
+		_blocks,
+		&_relatedArticleImages);
+	invalidateGeometry();
+	RebuildCachedTextLeafs(
+		_content.blocks.blocks,
+		&_blocks,
+		layoutStyle(),
+		&_cachedTextLeafs);
+	retainBlocks();
 
 	const auto &st = layoutStyle();
 	const auto &page = st.pagePadding;
@@ -3576,6 +4498,7 @@ void MarkdownArticle::Impl::relayout(int width) {
 		.useArticleBands = true,
 		.editMode = _content.editMode,
 		.syntaxHighlightTracker = this,
+		.cachedTextLeafs = &_cachedTextLeafs,
 	};
 	if (_editableHeightOverrideIndex >= 0 && _editableHeightOverride > 0) {
 		context.editableHeightOverride
@@ -3610,24 +4533,70 @@ void MarkdownArticle::Impl::relayout(int width) {
 		page.top(),
 		innerWidth,
 		context);
-	restoreScrollState();
-	refreshScrolledGeometry(_blocks);
-	_laidOutWidth = std::min(
-		width,
-		std::max(
-			BlockMaxRight(_blocks) + page.right(),
-			page.left() + page.right() + 1));
-	pruneTaskMarkerRuntimes();
-	prunePlaceholderRuntimes();
 	RestoreRelatedArticleImageStates(
 		&_blocks,
 		_relatedArticleImages);
-	_height = y + page.bottom();
-	registerPendingHighlightBlocks(_blocks);
-	CollectAnchors(_blocks, &_anchors);
-	CollectSelectableSegments(&_blocks, &_segments);
-	RefreshScrollableSegmentRects(_blocks, &_segments);
-	rebuildVisibleSegmentLookup();
+	finalizeRelayout(width, y);
+}
+
+void MarkdownArticle::Impl::relayoutRetained(int width) {
+	width = std::max(width, 1);
+	if (_width == width) {
+		return;
+	} else if (_blocks.empty()) {
+		relayout(width);
+		return;
+	}
+	captureScrollState();
+
+	const auto &st = layoutStyle();
+	const auto &page = st.pagePadding;
+	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
+	auto repaintScope = InlineIvImageRepaintScope(
+		_textRepaint,
+		_textRepaintRect);
+	auto context = LayoutContext{
+		.articleLeft = page.left(),
+		.articleWidth = innerWidth,
+		.useArticleBands = true,
+		.editMode = _content.editMode,
+		.syntaxHighlightTracker = this,
+		.cachedTextLeafs = &_cachedTextLeafs,
+	};
+	if (_editableHeightOverrideIndex >= 0 && _editableHeightOverride > 0) {
+		context.editableHeightOverride
+			= std::make_shared<EditableHeightOverride>(
+				EditableHeightOverride{
+					.editableIndex = _editableHeightOverrideIndex,
+					.height = _editableHeightOverride,
+				});
+	}
+	context.mediaBlockFactory = [=](const PreparedBlock &prepared) {
+		return getOrCreateMediaBlock(prepared);
+	};
+	context.placeholderRuntimeFactory = [=](PreparedPlaceholderBlockId id) {
+		return getOrCreatePlaceholderRuntime(id);
+	};
+	context.taskMarkerRippleRuntimeFactory
+		= [=](const PreparedEditListItemSource &source) {
+			return getOrCreateTaskMarkerRippleRuntime(source);
+		};
+	const auto contextScope = LayoutContextScope(context);
+	(void)contextScope;
+	const auto y = RecountLaidOutBlocks(
+		_content.blocks.blocks,
+		_content.formulas,
+		&_blocks,
+		st,
+		page.left(),
+		page.top(),
+		innerWidth,
+		context);
+	if (!y) {
+		relayout(width);
+		return;
+	}
+	finalizeRelayout(width, *y);
 }
 
 MarkdownArticle::MarkdownArticle(
@@ -3658,6 +4627,12 @@ void MarkdownArticle::setTextRepaintCallbacks(
 
 void MarkdownArticle::setContent(MarkdownArticleContent content) {
 	_impl->setContent(std::move(content));
+}
+
+void MarkdownArticle::updatePreparedLeaf(
+		const PreparedEditLeafSource &source,
+		const MarkdownArticleContent &prepared) {
+	_impl->updatePreparedLeaf(source, prepared);
 }
 
 void MarkdownArticle::setEditableHeightOverride(

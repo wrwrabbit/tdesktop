@@ -24,5 +24,14 @@ namespace Iv::Markdown {
 	int top,
 	int width,
 	LayoutContext context);
+[[nodiscard]] std::optional<int> RecountLaidOutBlocks(
+	const std::vector<PreparedBlock> &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	std::vector<LaidOutBlock> *blocks,
+	const style::Markdown &st,
+	int left,
+	int top,
+	int width,
+	LayoutContext context);
 
 } // namespace Iv::Markdown
