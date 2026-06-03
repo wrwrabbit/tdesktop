@@ -95,8 +95,8 @@ struct ViewButton::Inner {
 		uint8 colorIndex,
 		Fn<void()> updateCallback);
 
-	void updateMask(int height);
-	void toggleRipple(bool pressed);
+	void createRipple(int height);
+	void toggleRipple(bool pressed, int height);
 
 	const Kind kind;
 	const style::margins &margins;
@@ -145,7 +145,7 @@ ViewButton::Inner::Inner(
 , text(st::historyViewButtonTextStyle, MakeRichMessageButtonText()) {
 }
 
-void ViewButton::Inner::updateMask(int height) {
+void ViewButton::Inner::createRipple(int height) {
 	const auto radius = (kind == Kind::RichMessage)
 		? st::historyPagePreview.radius
 		: st::roundRadiusLarge;
@@ -157,13 +157,14 @@ void ViewButton::Inner::updateMask(int height) {
 		updateCallback);
 }
 
-void ViewButton::Inner::toggleRipple(bool pressed) {
-	if (ripple) {
-		if (pressed) {
-			ripple->add(lastPoint);
-		} else {
-			ripple->lastStop();
+void ViewButton::Inner::toggleRipple(bool pressed, int height) {
+	if (pressed) {
+		if (!ripple) {
+			createRipple(height);
 		}
+		ripple->add(lastPoint);
+	} else if (ripple) {
+		ripple->lastStop();
 	}
 }
 
@@ -199,7 +200,9 @@ bool ViewButton::matches(FullMsgId itemId) const {
 }
 
 void ViewButton::resized() const {
-	_inner->updateMask(height());
+	if (_inner->ripple) {
+		_inner->createRipple(height());
+	}
 }
 
 int ViewButton::height() const {
@@ -227,7 +230,7 @@ void ViewButton::draw(
 	if (_inner->kind == Kind::RichMessage) {
 		Ui::Text::ValidateQuotePaintCache(*cache, st::historyPagePreview);
 		Ui::Text::FillQuotePaint(p, r, *cache, st::historyPagePreview);
-		if (_inner->ripple && !_inner->ripple->empty()) {
+		if (_inner->ripple) {
 			_inner->ripple->paint(p, r.left(), r.top(), r.width(), &cache->bg);
 			if (_inner->ripple->empty()) {
 				_inner->ripple = nullptr;
@@ -254,8 +257,11 @@ void ViewButton::draw(
 		}
 	} else {
 		const auto radius = st::historyPagePreview.radius;
-		if (_inner->ripple && !_inner->ripple->empty()) {
+		if (_inner->ripple) {
 			_inner->ripple->paint(p, r.left(), r.top(), r.width(), &cache->bg);
+			if (_inner->ripple->empty()) {
+				_inner->ripple = nullptr;
+			}
 		}
 		PainterHighQualityEnabler hq(p);
 		p.setPen(Qt::NoPen);
@@ -296,7 +302,7 @@ bool ViewButton::checkLink(const ClickHandlerPtr &other, bool pressed) {
 	if (_inner->link != other) {
 		return false;
 	}
-	_inner->toggleRipple(pressed);
+	_inner->toggleRipple(pressed, height());
 	return true;
 }
 
@@ -308,6 +314,9 @@ bool ViewButton::getState(
 		return false;
 	}
 	outResult->link = _inner->link;
+	if (!_inner->ripple) {
+		_inner->lastWidth = g.width();
+	}
 	_inner->lastPoint = point - g.topLeft();
 	return true;
 }
