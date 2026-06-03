@@ -1197,7 +1197,6 @@ public:
 	[[nodiscard]] bool skipRequest() const;
 	void requestNext(int limit = 0);
 
-	[[nodiscard]] rpl::producer<bool> allLoadedValue() const;
 	[[nodiscard]] rpl::producer<bool> showMoreShownValue() const;
 
 private:
@@ -1375,10 +1374,6 @@ void CreditsController::rowClicked(not_null<PeerListRow*> row) {
 		const auto r = static_cast<const CreditsRow*>(row.get());
 		_entryClickedCallback(r->entry(), r->subscription());
 	}
-}
-
-rpl::producer<bool> CreditsController::allLoadedValue() const {
-	return _allLoaded.value();
 }
 
 rpl::producer<bool> CreditsController::showMoreShownValue() const {
