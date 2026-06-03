@@ -211,6 +211,10 @@ private:
 	void ensureArticleLayoutForInlineField(int width);
 	void syncArticleVisibleTopBottom();
 	void syncInlineFieldGeometry(int width);
+	[[nodiscard]] QRect activeInlineFieldRevealRect() const;
+	[[nodiscard]] QRect mapFieldLocalRectToScrollContent(
+		QWidget *inner,
+		QRect rect) const;
 	void revealActiveInlineField();
 	void clearSelection();
 	void clearTextSelection();

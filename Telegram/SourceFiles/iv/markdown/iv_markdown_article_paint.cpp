@@ -1349,6 +1349,21 @@ void PaintTableCaption(
 	return paintSt.table.overflowFg->c;
 }
 
+[[nodiscard]] bool HorizontalRightEdgeHidden(const LaidOutBlock &block) {
+	return block.horizontalScrollMax > 0
+		&& (block.horizontalScrollLeft < block.horizontalScrollMax);
+}
+
+[[nodiscard]] QRect HorizontalScrollLogicalPaintRect(
+		const LaidOutBlock &block) {
+	if (block.insideHorizontalScroll) {
+		return block.logicalGeometry.outer.translated(
+			block.horizontalScrollAncestorShift,
+			0);
+	}
+	return block.outer;
+}
+
 void PaintHorizontalOverflowIndicators(
 		Painter &p,
 		const LaidOutBlock &block,
@@ -1366,7 +1381,7 @@ void PaintHorizontalOverflowIndicators(
 		return;
 	}
 	const auto left = (block.horizontalScrollLeft > 0);
-	const auto right = (block.horizontalScrollLeft < block.horizontalScrollMax);
+	const auto right = HorizontalRightEdgeHidden(block);
 	if (!left && !right) {
 		return;
 	}
@@ -1810,7 +1825,7 @@ void PaintQuoteBlock(
 			p.setClipRect(quoteClip);
 			Ui::Text::FillQuotePaint(
 				p,
-				block.outer,
+				HorizontalScrollLogicalPaintRect(block),
 				*context.caches.blockquote,
 				quoteStyle);
 			p.restore();

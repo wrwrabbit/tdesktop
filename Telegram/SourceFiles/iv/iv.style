@@ -370,6 +370,7 @@ Markdown {
 	blockSkips: MarkdownBlockSkips;
 	list: MarkdownList;
 	quoteIndent: pixels;
+	quoteReadableMinWidth: pixels;
 	quotePaintColors: MarkdownQuotePaintColors;
 	pullquote: MarkdownPullquote;
 	rule: MarkdownRule;
@@ -730,6 +731,7 @@ defaultMarkdown: Markdown {
 	blockSkips: defaultMarkdownBlockSkips;
 	list: defaultMarkdownList;
 	quoteIndent: 18px;
+	quoteReadableMinWidth: 160px;
 	quotePaintColors: defaultMarkdownQuotePaintColors;
 	pullquote: defaultMarkdownPullquote;
 	rule: defaultMarkdownRule;
@@ -983,6 +985,7 @@ messageMarkdown: Markdown(defaultMarkdown) {
 		}
 	}
 	quoteIndent: 16px;
+	quoteReadableMinWidth: 160px;
 	quotePaintColors: messageMarkdownQuotePaintColors;
 	pullquote: messageMarkdownPullquote;
 	rule: messageMarkdownRule;

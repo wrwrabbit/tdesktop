@@ -1007,6 +1007,8 @@ void RestoreLogicalBlockGeometry(LaidOutBlock *block) {
 	block->tableScrollbarThumbRect = QRect();
 	block->scrollScrollbarThumbRect = QRect();
 	block->visibleMediaRect = block->mediaRect;
+	block->insideHorizontalScroll = false;
+	block->horizontalScrollAncestorShift = 0;
 	for (auto &row : block->tableRows) {
 		row.outer = row.logicalOuter;
 		for (auto &cell : row.cells) {
@@ -1075,6 +1077,8 @@ void RestoreLogicalBlockGeometry(LaidOutBlock *block) {
 void ApplyTranslatedDescendantGeometry(
 		LaidOutBlock *block,
 		const ActiveHorizontalScrollOwnerState &state) {
+	block->insideHorizontalScroll = true;
+	block->horizontalScrollAncestorShift = state.shift;
 	block->outer = ClipRectToViewport(
 		TranslateRect(block->outer, state.shift),
 		state.viewport);

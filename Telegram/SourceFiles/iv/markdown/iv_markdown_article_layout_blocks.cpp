@@ -757,6 +757,42 @@ int FlowBlockMinimumWidth(
 	return ReadableTextMinWidth(TextStyleFor(prepared, st));
 }
 
+int FlowBlockPreferredWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		const style::Markdown &st) {
+	if (IsAnchorOnlyBlock(prepared)) {
+		return 1;
+	}
+	const auto &textStyle = TextStyleFor(prepared, st);
+	const auto mediaRuntime = std::shared_ptr<MediaRuntime>();
+	const auto inlineFormulaObjects = CreateInlineFormulaObjectCache(nullptr);
+	auto leaf = Ui::Text::String();
+	SetTextLeaf(
+		&leaf,
+		textStyle,
+		st,
+		prepared.text,
+		&formulas,
+		inlineFormulaObjects.get(),
+		mediaRuntime,
+		1);
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (!usePlaceholder) {
+		return leaf.maxWidth();
+	}
+	auto placeholderText = QString();
+	auto placeholderLeaf = Ui::Text::String();
+	SetEditPlaceholderLeaf(
+		&placeholderText,
+		&placeholderLeaf,
+		prepared.editPlaceholderText,
+		textStyle,
+		1);
+	return placeholderLeaf.maxWidth();
+}
+
 int CodeBlockMinimumWidth(const style::Markdown &st) {
 	const auto padding = BlockquotePadding(st.code.pre);
 	const auto content = std::max({
@@ -765,6 +801,37 @@ int CodeBlockMinimumWidth(const style::Markdown &st) {
 		1,
 	});
 	return HorizontalMarginsWidth(padding) + content;
+}
+
+int CodeBlockPreferredWidth(
+		const PreparedBlock &prepared,
+		const style::Markdown &st) {
+	const auto padding = BlockquotePadding(st.code.pre);
+	const auto usePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		auto placeholderText = QString();
+		auto placeholderLeaf = Ui::Text::String();
+		SetEditPlaceholderLeaf(
+			&placeholderText,
+			&placeholderLeaf,
+			prepared.editPlaceholderText,
+			st.code,
+			1);
+		return HorizontalMarginsWidth(padding) + placeholderLeaf.maxWidth();
+	}
+	const auto mediaRuntime = std::shared_ptr<MediaRuntime>();
+	auto leaf = Ui::Text::String();
+	SetTextLeaf(
+		&leaf,
+		st.code,
+		st,
+		CodeBlockDisplayText(prepared.text),
+		nullptr,
+		nullptr,
+		mediaRuntime,
+		1);
+	return HorizontalMarginsWidth(padding) + leaf.maxWidth();
 }
 
 int DisplayMathMinimumWidth(
@@ -795,6 +862,47 @@ int DisplayMathMinimumWidth(
 			ReadableTextMinWidth(st.displayMath.fallbackStyle),
 			1,
 		});
+}
+
+int DisplayMathPreferredWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		const style::Markdown &st) {
+	const auto &padding = st.displayMath.padding;
+	if (const auto formula = PreparedFormulaFor(formulas, prepared.formulaIndex);
+		formula && formula->measured.success) {
+		return HorizontalMarginsWidth(padding)
+			+ std::max(formula->measured.logicalSize.width(), 1);
+	}
+	const auto &fallbackPadding = st.displayMath.fallbackPadding;
+	const auto usePlaceholder = prepared.formulaTex.trimmed().isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	if (usePlaceholder) {
+		auto placeholderText = QString();
+		auto placeholderLeaf = Ui::Text::String();
+		SetEditPlaceholderLeaf(
+			&placeholderText,
+			&placeholderLeaf,
+			prepared.editPlaceholderText,
+			st.displayMath.fallbackStyle,
+			1);
+		return HorizontalMarginsWidth(padding)
+			+ HorizontalMarginsWidth(fallbackPadding)
+			+ placeholderLeaf.maxWidth();
+	}
+	auto fallbackText = TextWithEntities::Simple(u"Invalid formula"_q);
+	fallbackText.entities.push_back(EntityInText(
+		EntityType::Italic,
+		0,
+		fallbackText.text.size()));
+	auto leaf = Ui::Text::String(TextMinResizeWidth(1));
+	leaf.setMarkedText(
+		st.displayMath.fallbackStyle,
+		std::move(fallbackText),
+		kIvMarkedTextOptions);
+	return HorizontalMarginsWidth(padding)
+		+ HorizontalMarginsWidth(fallbackPadding)
+		+ leaf.maxWidth();
 }
 
 int ContainerMinimumWidth(

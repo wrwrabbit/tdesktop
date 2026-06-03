@@ -156,8 +156,10 @@ struct LaidOutBlock {
 	bool tableStriped = false;
 	bool supplementary = false;
 	bool pullquote = false;
+	bool insideHorizontalScroll = false;
 	int horizontalScrollLeft = 0;
 	int horizontalScrollMax = 0;
+	int horizontalScrollAncestorShift = 0;
 	int segmentIndex = -1;
 	int secondarySegmentIndex = -1;
 	int tertiarySegmentIndex = -1;
@@ -254,8 +256,19 @@ struct TableRowLayoutData {
 [[nodiscard]] int FlowBlockMinimumWidth(
 	const PreparedBlock &prepared,
 	const style::Markdown &st);
+[[nodiscard]] int FlowBlockPreferredWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	const style::Markdown &st);
 [[nodiscard]] int CodeBlockMinimumWidth(const style::Markdown &st);
+[[nodiscard]] int CodeBlockPreferredWidth(
+	const PreparedBlock &prepared,
+	const style::Markdown &st);
 [[nodiscard]] int DisplayMathMinimumWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	const style::Markdown &st);
+[[nodiscard]] int DisplayMathPreferredWidth(
 	const PreparedBlock &prepared,
 	const std::vector<PreparedFormulaSlot> &formulas,
 	const style::Markdown &st);

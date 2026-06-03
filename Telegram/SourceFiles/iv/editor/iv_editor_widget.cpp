@@ -168,6 +168,44 @@ void EnableQTextEditLineMetrics(style::Markdown &style) {
 	return false;
 }
 
+struct InlineFieldTrimResult {
+	TextWithTags text;
+	int left = 0;
+};
+
+[[nodiscard]] InlineFieldTrimResult TrimInlineFieldText(
+		TextWithTags text,
+		bool trimLeft) {
+	auto from = 0;
+	auto till = text.text.size();
+	if (trimLeft) {
+		while (from < till && text.text[from].isSpace()) {
+			++from;
+		}
+	}
+	while (till > from && text.text[till - 1].isSpace()) {
+		--till;
+	}
+	if (from == 0 && till == text.text.size()) {
+		return { std::move(text), 0 };
+	}
+	text.text = text.text.mid(from, till - from);
+	for (auto i = text.tags.begin(); i != text.tags.end();) {
+		const auto tagFrom = i->offset;
+		const auto tagTill = i->offset + i->length;
+		const auto clippedFrom = std::max(tagFrom, from);
+		const auto clippedTill = std::min(tagTill, till);
+		if (clippedTill <= clippedFrom || i->length <= 0) {
+			i = text.tags.erase(i);
+		} else {
+			i->offset = clippedFrom - from;
+			i->length = clippedTill - clippedFrom;
+			++i;
+		}
+	}
+	return { std::move(text), from };
+}
+
 [[nodiscard]] QString ValidateInstantViewEditorLink(QString link) {
 	const auto normal = qthelp::validate_url(link);
 	if (!normal.isEmpty()) {
@@ -2177,16 +2215,24 @@ void Widget::setInlineFieldFromActiveState(int selectionFrom, int selectionTo) {
 	_settingField = true;
 	auto cursorSelectionFrom = selectionFrom;
 	auto cursorSelectionTo = selectionTo;
+	auto trimmedLeft = 0;
+	const auto trimLeft = !_state->codeBlockLanguage(
+		_state->activeTextOrdinal()).has_value();
 	if (_state->activeFieldMode() == State::FieldMode::Raw) {
-		_field->setTextWithTags(
+		const auto trimmed = TrimInlineFieldText(
 			{ _state->activeRawText(), {} },
+			trimLeft);
+		_field->setTextWithTags(
+			trimmed.text,
 			Ui::InputField::HistoryAction::Clear);
+		trimmedLeft = trimmed.left;
 		_article->clearEditableHeightOverride();
 	} else {
 		const auto activeText = ConvertRichTextToEditorTags(
 			_state->activeText());
+		const auto trimmed = TrimInlineFieldText(activeText.text, trimLeft);
 		_field->setTextWithTags(
-			activeText.text,
+			trimmed.text,
 			Ui::InputField::HistoryAction::Clear);
 		cursorSelectionFrom = MapRichTextOffsetToEditorOffset(
 			activeText.replacements,
@@ -2194,7 +2240,10 @@ void Widget::setInlineFieldFromActiveState(int selectionFrom, int selectionTo) {
 		cursorSelectionTo = MapRichTextOffsetToEditorOffset(
 			activeText.replacements,
 			selectionTo);
+		trimmedLeft = trimmed.left;
 	}
+	cursorSelectionFrom -= trimmedLeft;
+	cursorSelectionTo -= trimmedLeft;
 	auto cursor = _field->textCursor();
 	const auto size = int(_field->getLastText().size());
 	const auto from = std::clamp(cursorSelectionFrom, 0, size);
@@ -2260,6 +2309,32 @@ void Widget::activateTextOrdinal(
 	_field->setFocusFast();
 }
 
+QRect Widget::activeInlineFieldRevealRect() const {
+	const auto raw = _field->rawTextEdit();
+	const auto cursor = _field->textCursor();
+	auto positionCursor = cursor;
+	positionCursor.setPosition(cursor.position());
+	auto revealRect = raw->cursorRect(positionCursor);
+	if (cursor.hasSelection()) {
+		auto anchorCursor = cursor;
+		anchorCursor.setPosition(cursor.anchor());
+		revealRect = revealRect.united(raw->cursorRect(anchorCursor));
+	}
+	if (!revealRect.isValid() || revealRect.isEmpty()) {
+		return _field->rect();
+	}
+	revealRect.moveTopLeft(
+		raw->viewport()->mapTo(_field, revealRect.topLeft()));
+	return revealRect;
+}
+
+QRect Widget::mapFieldLocalRectToScrollContent(
+		QWidget *inner,
+		QRect rect) const {
+	rect.moveTopLeft(_field->mapTo(inner, rect.topLeft()));
+	return rect;
+}
+
 void Widget::revealActiveInlineField() {
 	if (_field->isHidden() || _activeSegmentIndex < 0) {
 		return;
@@ -2272,10 +2347,9 @@ void Widget::revealActiveInlineField() {
 	}
 	const auto scrollIn = [&](auto &&scroll) {
 		if (const auto inner = scroll->widget()) {
-			const auto fieldRect = _field->geometry();
-			const auto localRect = QRect(
-				inner->mapFromGlobal(mapToGlobal(fieldRect.topLeft())),
-				fieldRect.size());
+			const auto localRect = mapFieldLocalRectToScrollContent(
+				inner,
+				activeInlineFieldRevealRect());
 			scroll->scrollToY(
 				localRect.y(),
 				localRect.y() + localRect.height());
