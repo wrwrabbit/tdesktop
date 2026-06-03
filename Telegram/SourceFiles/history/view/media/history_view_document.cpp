@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_lottie_custom_emoji.h"
 #include "ui/text/text_utilities.h"
 #include "ui/chat/chat_style.h"
+#include "ui/effects/voice_once_particles.h"
 #include "ui/painter.h"
 #include "ui/power_saving.h"
 #include "ui/rect.h"
@@ -194,7 +195,8 @@ void PaintWaveform(
 		int availableWidth,
 		float64 progress,
 		bool ttl,
-		float64 hoverProgress = -1) {
+		float64 hoverProgress = -1,
+		Ui::WaveformParticles *ttlParticles = nullptr) {
 	const auto wf = [&]() -> const VoiceWaveform* {
 		if (!voiceData) {
 			return nullptr;
@@ -230,6 +232,9 @@ void PaintWaveform(
 	const auto maxDelta = st::msgWaveformMax - st::msgWaveformMin;
 	p.setPen(Qt::NoPen);
 	auto hq = PainterHighQualityEnabler(p);
+	auto edgeTop = 0.;
+	auto edgeHeight = 0.;
+	auto edgeFound = false;
 	for (auto i = 0, barLeft = 0, sum = 0, maxValue = 0; i < wfSize; ++i) {
 		const auto value = wf ? wf->at(i) : 0;
 		if (sum + barCount < wfSize) {
@@ -247,6 +252,11 @@ void PaintWaveform(
 		const auto barHeight = st::msgWaveformMin + barValue;
 		const auto barTop = st::lineWidth + (st::msgWaveformMax - barValue) / 2.;
 
+		if (barLeft < activeWidth) {
+			edgeTop = barTop;
+			edgeHeight = barHeight;
+			edgeFound = true;
+		}
 		if ((barLeft < activeWidth) && (barLeft + barWidth > activeWidth)) {
 			const auto leftWidth = activeWidth - barLeft;
 			const auto rightWidth = barWidth - leftWidth;
@@ -278,6 +288,16 @@ void PaintWaveform(
 		barLeft += barWidth + st::msgWaveformSkip;
 
 		maxValue = (sum < (barCount + 1) / 2) ? 0 : value;
+	}
+	if (ttl && ttlParticles) {
+		const auto emitArea = (edgeFound && activeWidth < availableWidth)
+			? QRectF(
+				activeWidth - barWidth,
+				edgeTop,
+				barWidth * 2.,
+				edgeHeight)
+			: QRectF();
+		ttlParticles->paint(p, emitArea, active->c, 1.);
 	}
 }
 
@@ -874,6 +894,35 @@ void Document::draw(
 				_iconCache);
 		}
 
+		if (_drawTtl) {
+			const auto voice = Get<HistoryDocumentVoice>();
+			const auto progress = (voice && voice->playback)
+				? voice->playback->progress.current()
+				: 0.;
+			if (voice && progress > 0.) {
+				if (!voice->once) {
+					voice->once
+						= std::make_unique<Ui::VoiceOnceParticles>();
+				}
+				const auto stepInside = style::ConvertScaleExact(1.5) * 2;
+				const auto arcRect = QRectF(inner - Margins(stepInside));
+				const auto center = arcRect.center();
+				const auto radius = arcRect.width() / 2.;
+				const auto degrees = 90. + 360. * (1. - progress);
+				const auto angle = degrees * M_PI / 180.;
+				const auto cosa = std::cos(angle);
+				const auto sina = std::sin(angle);
+				voice->once->radial.paint(
+					p,
+					QPointF(
+						center.x() + radius * cosa,
+						center.y() - radius * sina),
+					QPointF(-sina, -cosa),
+					stm->msgBg->c,
+					1.);
+			}
+		}
+
 		drawCornerDownload(p, context, mode);
 	}
 	auto namewidth = width - nameleft - nameright;
@@ -928,13 +977,17 @@ void Document::draw(
 		}
 		const auto inTTLViewer = _parent->delegate()->elementContext()
 			== Context::TTLViewer;
+		if (inTTLViewer && !voice->once) {
+			voice->once = std::make_unique<Ui::VoiceOnceParticles>();
+		}
 		PaintWaveform(p,
 			context,
 			_transcribedRound ? _data->round() : _data->voice(),
 			namewidth + st::msgWaveformSkip,
 			progress,
 			inTTLViewer,
-			_voiceHoverProgress);
+			_voiceHoverProgress,
+			inTTLViewer ? &voice->once->waveform : nullptr);
 		p.restore();
 	} else if (const auto named = Get<HistoryDocumentNamed>()) {
 		p.setPen(stm->historyFileNameFg);
