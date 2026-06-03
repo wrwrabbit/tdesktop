@@ -1848,6 +1848,8 @@ PRIVATE
     ui/effects/thanos_effect_session.h
     ui/effects/send_action_animations.cpp
     ui/effects/send_action_animations.h
+    ui/effects/voice_once_particles.cpp
+    ui/effects/voice_once_particles.h
     ui/image/image.cpp
     ui/image/image.h
     ui/image/image_location.cpp
