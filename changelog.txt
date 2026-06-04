@@ -1,3 +1,19 @@
+6.8.5 beta (04.06.26)
+
+- Animated 3D objects on settings covers (premium star, coin, diamond).
+- Particle effects for one-time voice message playback.
+- Birthday celebration effect on profile.
+- Poll votes graph in message statistics.
+- Separate send action animation for round video messages.
+- Open public channels from chat folder invite links.
+- Notify toggle and muted icon for silent scheduled messages.
+- Per-window Qt RHI renderer activation.
+- Fix empty chat list preview after deleting last message.
+- Fix shaking of pinned chats dragged past rows of other heights.
+- Fix scroll with keyboard in chat history.
+- Fix pause of animated reactions when opening their context menu.
+- Improve performance with RHI enabled.
+
 6.8.4 beta (27.05.26)
 
 - Drag-and-drop of photos into chats.
