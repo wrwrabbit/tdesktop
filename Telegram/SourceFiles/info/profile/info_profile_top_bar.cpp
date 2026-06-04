@@ -2656,6 +2656,10 @@ void TopBar::setupStoryOutline(const QRect &geometry) {
 					| Data::PeerUpdate::Flag::ColorProfile
 			) | rpl::filter([=](const Data::PeerUpdate &update) {
 				return update.peer == _peer;
+			}) | rpl::to_empty,
+			_peer->owner().stories().sourceChanged(
+			) | rpl::filter([=](PeerId peerId) {
+				return peerId == _peer->id;
 			}) | rpl::to_empty)
 	) | rpl::on_next([=](
 			std::optional<QColor> edgeColor,
@@ -2729,9 +2733,10 @@ void TopBar::updateStoryOutline(std::optional<QColor> edgeColor) {
 		return;
 	}
 
-	const auto &stories = _peer->owner().stories();
+	auto &stories = _peer->owner().stories();
 	const auto source = stories.source(_peer->id);
 	if (!source) {
+		stories.requestPeerStories(_peer);
 		return;
 	}
 
