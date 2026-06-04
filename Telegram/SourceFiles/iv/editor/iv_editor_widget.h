@@ -25,6 +25,7 @@ class QEvent;
 class QContextMenuEvent;
 class QInputMethodEvent;
 class QKeyEvent;
+class QMimeData;
 class QMenu;
 class QObject;
 class QTouchEvent;
@@ -184,6 +185,11 @@ private:
 	void activateTrailingParagraph();
 	void setInlineFieldFromActiveState(int selectionFrom, int selectionTo);
 	void revertInlineFieldToState();
+	[[nodiscard]] std::optional<State::ActiveTextInsertContext>
+	activeTextInsertContext() const;
+	[[nodiscard]] int richOffsetForFieldOffset(
+		const TextWithEntities &text,
+		int offset) const;
 	[[nodiscard]] State::ApplyResult applyFieldTextToState();
 	bool showLastLimitToast();
 	void hideInlineField();
@@ -198,7 +204,14 @@ private:
 	[[nodiscard]] bool replayKeyIntoField(QKeyEvent *e);
 	[[nodiscard]] bool replayImeIntoField(QInputMethodEvent *e);
 	[[nodiscard]] bool handleTabNavigation(QKeyEvent *e);
+	[[nodiscard]] bool handleClipboardKey(QKeyEvent *e);
 	[[nodiscard]] bool handleFieldKey(QKeyEvent *e);
+	void copyCurrentSelectionToClipboard();
+	[[nodiscard]] TextForMimeData currentSelectionTextForClipboard() const;
+	void pasteStructuredClipboardData(const ClipboardData &data);
+	[[nodiscard]] bool handleIvClipboardMime(
+		not_null<const QMimeData*> data,
+		Ui::InputField::MimeAction action);
 	[[nodiscard]] bool moveBoundary(bool forward, bool allowTrailing);
 	[[nodiscard]] bool moveBoundaryAfterCommit(
 		State::ApplyResult committed,

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "iv/editor/iv_editor_clipboard.h"
 #include "iv/iv_rich_page.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 
@@ -252,6 +253,9 @@ public:
 		const Markdown::PreparedEditTableCellSource &source) const;
 	[[nodiscard]] bool canRemoveStructuralSelection(
 		const Markdown::PreparedEditSelection &selection) const;
+	[[nodiscard]] auto structuredClipboardDataForSelection(
+		const Markdown::PreparedEditSelection &selection) const
+	-> std::optional<ClipboardData>;
 	[[nodiscard]] bool addTableRow(
 		const Markdown::PreparedEditTableCellRange &range,
 		bool after);
@@ -287,10 +291,33 @@ public:
 	void resyncAfterExternalRichPageMutation();
 	void insertHeading1AfterActive();
 	void insertBlockquoteAfterActive();
-	[[nodiscard]] bool insertBlockAfterActive(InsertAction action);
+	struct ActiveTextInsertContext {
+		TextWithEntities before;
+		TextWithEntities selected;
+		TextWithEntities after;
+	};
+	[[nodiscard]] bool insertBlockAfterActive(
+		InsertAction action,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
 	[[nodiscard]] bool insertPreparedBlockAfterActive(RichPage::Block block);
 	[[nodiscard]] bool insertPreparedBlocksAfterActive(
-		std::vector<RichPage::Block> blocks);
+		std::vector<RichPage::Block> blocks,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
+	[[nodiscard]] bool pasteClipboardListItemsAfterActive(
+		const ClipboardListItemsData &data,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
+	[[nodiscard]] bool replaceStructuralSelectionWithBlock(
+		const Markdown::PreparedEditSelection &selection,
+		InsertAction action,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
+	[[nodiscard]] bool replaceStructuralSelectionWithPreparedBlocks(
+		const Markdown::PreparedEditSelection &selection,
+		std::vector<RichPage::Block> blocks,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
+	[[nodiscard]] bool replaceStructuralSelectionWithClipboardListItems(
+		const Markdown::PreparedEditSelection &selection,
+		const ClipboardListItemsData &data,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
 
 private:
 	struct StructuralBlockRange {
@@ -332,6 +359,11 @@ private:
 	struct ParagraphTarget {
 		LeafPath leaf;
 		bool inserted = false;
+	};
+
+	struct ActiveTextInsertTarget {
+		LeafPath leaf;
+		InsertionAnchor anchor;
 	};
 
 	struct RebuiltBoundaryTarget {
@@ -465,6 +497,8 @@ private:
 	[[nodiscard]] std::optional<ParagraphTarget> reuseOrInsertParagraph(
 		const BlockContainerPath &container,
 		int index);
+	[[nodiscard]] auto resolveActiveTextInsertTarget()
+	-> std::optional<ActiveTextInsertTarget>;
 	[[nodiscard]] auto activeNonPullquoteQuote() const
 	-> std::optional<ActiveNonPullquoteQuote>;
 	[[nodiscard]] auto activeListItemSurface() const
@@ -508,7 +542,28 @@ private:
 	[[nodiscard]] std::optional<int> handleActiveHeadingEnterUnchecked();
 	[[nodiscard]] std::optional<int> handleActiveListEnterUnchecked();
 	[[nodiscard]] bool insertBlocksAfterActiveUnchecked(
-		std::vector<RichPage::Block> blocks);
+		std::vector<RichPage::Block> blocks,
+		std::optional<ActiveTextInsertContext> context = std::nullopt);
+	[[nodiscard]] bool insertBlocksAfterActiveWithContextUnchecked(
+		std::vector<RichPage::Block> &blocks,
+		const ActiveTextInsertContext &context);
+	[[nodiscard]] RichPage::RichText *seedInsertedBlocks(
+		std::vector<RichPage::Block> &blocks,
+		TextWithEntities text);
+	[[nodiscard]] RichPage::RichText *seedInsertedBlock(
+		RichPage::Block &block);
+	[[nodiscard]] bool appendInsertedTrailingText(
+		const BlockContainerPath &container,
+		int insertAt,
+		int count,
+		TextWithEntities text);
+	void normalizeInsertedBlockAnchors(std::vector<RichPage::Block> &blocks);
+	void normalizeInsertedBlockAnchors(
+		std::vector<RichPage::Block> &root,
+		RichPage::Block &block);
+	void normalizeInsertedRichTextAnchors(
+		std::vector<RichPage::Block> &root,
+		RichPage::RichText &text);
 	void appendBlockTextNode(
 		const BlockPath &path,
 		LeafKind kind,

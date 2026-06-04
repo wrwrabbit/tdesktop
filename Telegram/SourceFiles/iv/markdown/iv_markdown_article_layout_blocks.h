@@ -300,6 +300,8 @@ struct LayoutContext {
 	bool allowAsyncSyntaxHighlighting = true;
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr;
 	CachedTextLeafPool *cachedTextLeafs = nullptr;
+	Fn<void()> repaint;
+	Fn<void(QRect)> repaintRect;
 	std::vector<int> preparedPath;
 	std::shared_ptr<EditableHeightOverride> editableHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
@@ -472,7 +474,9 @@ void RepopulateCodeBlockLeaf(
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &st,
 	bool allowAsyncSyntaxHighlighting,
-	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr);
+	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr,
+	Fn<void()> repaint = nullptr,
+	Fn<void(QRect)> repaintRect = nullptr);
 void UpdateLaidOutLeafContent(
 	LaidOutBlock *block,
 	const PreparedBlock &prepared,

@@ -350,7 +350,9 @@ void BuildOrReuseCachedTextLeaf(
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
-				minResizeWidth);
+				minResizeWidth,
+				context.repaint,
+				context.repaintRect);
 			BindLinks(leaf, prepared.links);
 		});
 	BindLinks(&result.leaf, prepared.links);
@@ -612,7 +614,9 @@ void PopulateCodeBlockLeaf(
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st,
 		bool allowAsyncSyntaxHighlighting,
-		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
+		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect) {
 	auto display = CodeBlockDisplayText(codeText);
 	auto highlightRequest = TextWithEntities();
 	highlightRequest.text = display.text;
@@ -646,7 +650,9 @@ void PopulateCodeBlockLeaf(
 		formulas,
 		inlineFormulaObjects,
 		mediaRuntime,
-		CodeTextMinResizeWidth(st));
+		CodeTextMinResizeWidth(st),
+		std::move(repaint),
+		std::move(repaintRect));
 	BindLinks(leaf, codeLinks);
 	if (syntaxHighlightProcessId) {
 		*syntaxHighlightProcessId = processId;
@@ -1230,7 +1236,9 @@ void BuildOrReuseMarkedTextLeaf(
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
-				minResizeWidth);
+				minResizeWidth,
+				context.repaint,
+				context.repaintRect);
 			BindLinks(leaf, links);
 		});
 	BindLinks(leaf, links);
@@ -1675,7 +1683,9 @@ int FlowBlockPreferredWidth(
 					&formulas,
 					inlineFormulaObjects,
 					mediaRuntime,
-					minResizeWidth);
+					minResizeWidth,
+					context.repaint,
+					context.repaintRect);
 				BindLinks(leaf, prepared.links);
 			},
 			[](const Ui::Text::String &leaf,
@@ -1775,7 +1785,9 @@ int CodeBlockPreferredWidth(
 				nullptr,
 				st,
 				context.allowAsyncSyntaxHighlighting,
-				context.syntaxHighlightTracker);
+				context.syntaxHighlightTracker,
+				context.repaint,
+				context.repaintRect);
 		},
 		[](const Ui::Text::String &leaf,
 				Spellchecker::HighlightProcessId) {
@@ -2037,7 +2049,9 @@ void RepopulateCodeBlockLeaf(
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st,
 		bool allowAsyncSyntaxHighlighting,
-		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker) {
+		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect) {
 	PopulateCodeBlockLeaf(
 		&block.leaf,
 		&block.syntaxHighlightProcessId,
@@ -2049,7 +2063,9 @@ void RepopulateCodeBlockLeaf(
 		mediaRuntime,
 		st,
 		allowAsyncSyntaxHighlighting,
-		syntaxHighlightTracker);
+		syntaxHighlightTracker,
+		std::move(repaint),
+		std::move(repaintRect));
 }
 
 void UpdateLaidOutLeafContent(
@@ -2108,7 +2124,9 @@ void UpdateLaidOutLeafContent(
 			mediaRuntime,
 			st,
 			context.allowAsyncSyntaxHighlighting,
-			context.syntaxHighlightTracker);
+			context.syntaxHighlightTracker,
+			context.repaint,
+			context.repaintRect);
 		if (prepared.text.text.isEmpty()
 			&& !prepared.editPlaceholderText.isEmpty()) {
 			BuildOrReuseEditPlaceholderLeaf(
@@ -2269,7 +2287,9 @@ void UpdateLaidOutLeafContent(
 				formulas,
 				inlineFormulaObjects,
 				mediaRuntime,
-				minResizeWidth);
+				minResizeWidth,
+				context.repaint,
+				context.repaintRect);
 			BindLinks(leaf, prepared.links);
 		});
 	BindLinks(&cell->leaf, prepared.links);
@@ -2496,7 +2516,9 @@ LaidOutBlock LayoutCodeBlock(
 				mediaRuntime,
 				st,
 				allowAsyncSyntaxHighlighting,
-				syntaxHighlightTracker);
+				syntaxHighlightTracker,
+				context.repaint,
+				context.repaintRect);
 		});
 	BindLinks(&block.leaf, block.codeLinks);
 	if (!block.syntaxHighlightProcessId

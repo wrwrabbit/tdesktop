@@ -480,14 +480,6 @@ private:
 
 };
 
-struct InlineIvImageRepaintCallbacks {
-	Fn<void()> repaint;
-	Fn<void(QRect)> repaintRect;
-};
-
-thread_local auto CurrentInlineIvImageRepaintCallbacks
-	= std::vector<InlineIvImageRepaintCallbacks>();
-
 [[nodiscard]] QString InlineFormulaDisplayFallbackText(
 		const PreparedFormulaMeasurementSignature &signature,
 		const MeasuredFormula &measured) {
@@ -528,22 +520,6 @@ FindInlineFormulaMeasuredData(
 
 ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link) {
 	return std::make_shared<PreparedLinkClickHandler>(std::move(link));
-}
-
-InlineIvImageRepaintScope::InlineIvImageRepaintScope(
-		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect)
-: _active(true) {
-	CurrentInlineIvImageRepaintCallbacks.push_back({
-		.repaint = std::move(repaint),
-		.repaintRect = std::move(repaintRect),
-	});
-}
-
-InlineIvImageRepaintScope::~InlineIvImageRepaintScope() {
-	if (_active) {
-		CurrentInlineIvImageRepaintCallbacks.pop_back();
-	}
 }
 
 std::optional<PreparedLink> ExtractPreparedLink(const ClickHandlerPtr &link) {
@@ -1162,17 +1138,14 @@ void SetTextLeaf(
 		const std::vector<PreparedFormulaSlot> *formulas,
 		InlineFormulaObjectCache *inlineFormulaObjects,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
-		int minResizeWidth) {
+		int minResizeWidth,
+		Fn<void()> repaint,
+		Fn<void(QRect)> repaintRect) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = mediaRuntime
 		? mediaRuntime->textContext()
 		: Ui::Text::MarkedContext();
-	auto repaintRect = Fn<void(QRect)>();
-	if (!CurrentInlineIvImageRepaintCallbacks.empty()) {
-		const auto &callbacks = CurrentInlineIvImageRepaintCallbacks.back();
-		context.repaint = callbacks.repaint;
-		repaintRect = callbacks.repaintRect;
-	}
+	context.repaint = repaint;
 	const auto textStylePtr = &textStyle;
 	const auto stPtr = &st;
 	auto originalCustomEmojiFactory = std::move(context.customEmojiFactory);

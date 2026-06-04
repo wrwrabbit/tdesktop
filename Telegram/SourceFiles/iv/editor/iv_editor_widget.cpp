@@ -40,7 +40,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDate>
 #include <QtCore/QEvent>
+#include <QtCore/QMimeData>
 #include <QtCore/QPointer>
+#include <QtGui/QClipboard>
 #include <QtGui/QContextMenuEvent>
 #include <QtGui/QFocusEvent>
 #include <QtGui/QInputMethodEvent>
@@ -204,6 +206,37 @@ struct InlineFieldTrimResult {
 		}
 	}
 	return { std::move(text), from };
+}
+
+[[nodiscard]] int MapEditorOffsetToRichOffset(
+		const std::vector<RichTextEditorOffsetReplacement> &replacements,
+		int offset) {
+	auto delta = 0;
+	for (const auto &replacement : replacements) {
+		if (replacement.richLength <= 0) {
+			continue;
+		}
+		const auto richStart = replacement.richOffset;
+		const auto editorStart = richStart + delta;
+		const auto editorEnd = editorStart + replacement.editorLength;
+		if (offset < editorStart) {
+			break;
+		} else if (offset <= editorEnd) {
+			return richStart
+				+ ((offset == editorEnd) ? replacement.richLength : 0);
+		}
+		delta += replacement.editorLength - replacement.richLength;
+	}
+	return offset - delta;
+}
+
+[[nodiscard]] auto ClipboardPasteInsertContext(
+		std::optional<State::ActiveTextInsertContext> context)
+-> std::optional<State::ActiveTextInsertContext> {
+	if (context) {
+		context->selected = TextWithEntities();
+	}
+	return context;
 }
 
 [[nodiscard]] QString ValidateInstantViewEditorLink(QString link) {
@@ -945,12 +978,46 @@ void Widget::syncInlineFieldGeometry() {
 }
 
 void Widget::insertBlock(State::InsertAction action) {
-	if (commitInlineField() == ApplyResult::Failed) {
+	const auto context = activeTextInsertContext();
+	if (!context
+		&& !_field->isHidden()
+		&& (commitInlineField() == ApplyResult::Failed)) {
 		return;
 	}
-	if (!_state->insertBlockAfterActive(action)) {
+	const auto hadStructuralSelection = hasStructuralSelection();
+	const auto restoreField = context.has_value();
+	if (hadStructuralSelection || restoreField) {
+		_pendingOrdinal = -1;
+		_pendingCursorOffset = 0;
+		hideInlineField();
+		clearInlineFieldEditSession();
+	}
+	auto restore = restoreField;
+	const auto restoreInlineField = gsl::finally([&] {
+		if (!restore) {
+			return;
+		}
+		_field->show();
+		syncInlineFieldGeometry();
+		updateInlineFieldHeightOverride();
+		syncArticleVisibleTopBottom();
+		revealActiveInlineField();
+		_field->raise();
+		_field->setFocusFast();
+	});
+	const auto applied = hadStructuralSelection
+		? _state->replaceStructuralSelectionWithBlock(
+			_structuralSelection,
+			action,
+			context)
+		: _state->insertBlockAfterActive(action, context);
+	if (!applied) {
 		showLastLimitToast();
 		return;
+	}
+	restore = false;
+	if (hadStructuralSelection) {
+		clearSelection();
 	}
 	refreshPreparedContent();
 	activateTextOrdinal(_state->activeTextOrdinal(), 0);
@@ -966,15 +1033,168 @@ void Widget::insertPreparedBlocks(std::vector<RichPage::Block> blocks) {
 	if (blocks.empty()) {
 		return;
 	}
-	if (commitInlineField() == ApplyResult::Failed) {
+	const auto context = activeTextInsertContext();
+	if (!context
+		&& !_field->isHidden()
+		&& (commitInlineField() == ApplyResult::Failed)) {
 		return;
 	}
-	if (!_state->insertPreparedBlocksAfterActive(std::move(blocks))) {
+	const auto hadStructuralSelection = hasStructuralSelection();
+	const auto restoreField = context.has_value();
+	if (hadStructuralSelection || restoreField) {
+		_pendingOrdinal = -1;
+		_pendingCursorOffset = 0;
+		hideInlineField();
+		clearInlineFieldEditSession();
+	}
+	auto restore = restoreField;
+	const auto restoreInlineField = gsl::finally([&] {
+		if (!restore) {
+			return;
+		}
+		_field->show();
+		syncInlineFieldGeometry();
+		updateInlineFieldHeightOverride();
+		syncArticleVisibleTopBottom();
+		revealActiveInlineField();
+		_field->raise();
+		_field->setFocusFast();
+	});
+	const auto applied = hadStructuralSelection
+		? _state->replaceStructuralSelectionWithPreparedBlocks(
+			_structuralSelection,
+			std::move(blocks),
+			context)
+		: _state->insertPreparedBlocksAfterActive(std::move(blocks), context);
+	if (!applied) {
 		showLastLimitToast();
 		return;
 	}
+	restore = false;
+	if (hadStructuralSelection) {
+		clearSelection();
+	}
 	refreshPreparedContent();
 	activateTextOrdinal(_state->activeTextOrdinal(), 0);
+}
+
+TextForMimeData Widget::currentSelectionTextForClipboard() const {
+	return _article
+		? _article->textForSelection(
+			_selection,
+			&_selectionEndpoints,
+			hasStructuralSelection() ? &_structuralSelection : nullptr)
+		: TextForMimeData();
+}
+
+void Widget::copyCurrentSelectionToClipboard() {
+	auto structured = std::optional<ClipboardData>();
+	if (hasStructuralSelection()) {
+		structured = _state->structuredClipboardDataForSelection(
+			_structuralSelection);
+	}
+	const auto text = currentSelectionTextForClipboard();
+	auto mimeData = structured
+		? MimeDataFromClipboardData(*structured)
+		: TextUtilities::MimeDataFromText(text);
+	if (!mimeData) {
+		return;
+	}
+	if (structured) {
+		if (const auto textMimeData = TextUtilities::MimeDataFromText(text)) {
+			for (const auto &format : textMimeData->formats()) {
+				mimeData->setData(format, textMimeData->data(format));
+			}
+		}
+	}
+	QApplication::clipboard()->setMimeData(mimeData.release());
+}
+
+void Widget::pasteStructuredClipboardData(const ClipboardData &data) {
+	const auto blocks = std::get_if<ClipboardBlockData>(&data);
+	const auto items = std::get_if<ClipboardListItemsData>(&data);
+	if (blocks) {
+		if (blocks->blocks.empty()) {
+			return;
+		}
+	} else if (!items || items->items.empty()) {
+		return;
+	}
+	const auto context = ClipboardPasteInsertContext(
+		activeTextInsertContext());
+	if (!context
+		&& !_field->isHidden()
+		&& (commitInlineField() == ApplyResult::Failed)) {
+		return;
+	}
+	const auto hadStructuralSelection = hasStructuralSelection();
+	const auto restoreField = context.has_value();
+	if (hadStructuralSelection || restoreField) {
+		_pendingOrdinal = -1;
+		_pendingCursorOffset = 0;
+		hideInlineField();
+		clearInlineFieldEditSession();
+	}
+	auto restore = restoreField;
+	const auto restoreInlineField = gsl::finally([&] {
+		if (!restore) {
+			return;
+		}
+		_field->show();
+		syncInlineFieldGeometry();
+		updateInlineFieldHeightOverride();
+		syncArticleVisibleTopBottom();
+		revealActiveInlineField();
+		_field->raise();
+		_field->setFocusFast();
+	});
+	const auto applied = hadStructuralSelection
+		? (blocks
+			? _state->replaceStructuralSelectionWithPreparedBlocks(
+				_structuralSelection,
+				blocks->blocks,
+				context)
+			: _state->replaceStructuralSelectionWithClipboardListItems(
+				_structuralSelection,
+				*items,
+				context))
+		: (blocks
+			? _state->insertPreparedBlocksAfterActive(blocks->blocks, context)
+			: _state->pasteClipboardListItemsAfterActive(*items, context));
+	if (!applied) {
+		showLastLimitToast();
+		return;
+	}
+	restore = false;
+	if (hadStructuralSelection) {
+		clearSelection();
+	}
+	refreshPreparedContent();
+	activateTextOrdinal(_state->activeTextOrdinal(), 0);
+}
+
+bool Widget::handleClipboardKey(QKeyEvent *e) {
+	if (e == QKeySequence::Copy) {
+		if (_selection.empty() && !hasStructuralSelection()) {
+			return false;
+		}
+		copyCurrentSelectionToClipboard();
+		e->accept();
+		return true;
+	} else if ((e == QKeySequence::Paste) && _field->isHidden()) {
+		if (const auto data = ClipboardDataFromMimeData(
+				QApplication::clipboard()->mimeData())) {
+			pasteStructuredClipboardData(*data);
+			e->accept();
+			return true;
+		} else if (prepareFieldForInput()) {
+			_field->setFocusFast();
+			QCoreApplication::sendEvent(_field->rawTextEdit(), e);
+			e->accept();
+			return true;
+		}
+	}
+	return false;
 }
 
 void Widget::insertHeading1() {
@@ -1123,7 +1343,9 @@ bool Widget::focusNextPrevChild(bool next) {
 }
 
 void Widget::keyPressEvent(QKeyEvent *e) {
-	if (handleStructuralSelectionKey(e)) {
+	if (handleClipboardKey(e)) {
+		return;
+	} else if (handleStructuralSelectionKey(e)) {
 		return;
 	} else if (_field->isHidden() && handleTabNavigation(e)) {
 		return;
@@ -2133,9 +2355,18 @@ void Widget::setupInlineField() {
 			.fieldStyle = &_field->st(),
 			.linkValidator = ValidateInstantViewEditorLink,
 		});
-		_field->setMimeDataHook(WrappedMessageFieldMimeHook(
+		auto messageFieldMimeHook = WrappedMessageFieldMimeHook(
 			Ui::InputField::MimeDataHook(),
-			_field.get()));
+			_field.get());
+		_field->setMimeDataHook([=,
+				messageFieldMimeHook = std::move(messageFieldMimeHook)](
+				not_null<const QMimeData*> data,
+				Ui::InputField::MimeAction action) {
+			return handleIvClipboardMime(data, action)
+				|| (messageFieldMimeHook
+					? messageFieldMimeHook(data, action)
+					: false);
+		});
 	} else {
 		_field->setInstantViewEditorTagsEnabled(false);
 		_field->setInstantReplacesEnabled(
@@ -2412,6 +2643,75 @@ void Widget::revertInlineFieldToState() {
 	setInlineFieldFromActiveState(cursor.anchor(), cursor.position());
 	syncInlineFieldGeometry();
 	updateInlineFieldHeightOverride();
+}
+
+std::optional<State::ActiveTextInsertContext>
+Widget::activeTextInsertContext() const {
+	if (_settingField
+		|| _field->isHidden()
+		|| (_activeSegmentIndex < 0)
+		|| (_state->activeFieldMode() == State::FieldMode::Raw)) {
+		return std::nullopt;
+	}
+	auto full = ConvertEditorTagsToRichText(_field->getTextWithAppliedMarkdown());
+	const auto cursor = _field->textCursor();
+	auto from = richOffsetForFieldOffset(full, cursor.selectionStart());
+	auto till = richOffsetForFieldOffset(full, cursor.selectionEnd());
+	from = std::clamp(from, 0, full.text.size());
+	till = std::clamp(till, from, full.text.size());
+	auto before = TextWithEntities();
+	auto selected = TextWithEntities();
+	auto after = std::move(full);
+	if (from > 0) {
+		[[maybe_unused]] const auto cut = TextUtilities::CutPart(
+			before,
+			after,
+			from);
+	}
+	if (till > from) {
+		[[maybe_unused]] const auto cut = TextUtilities::CutPart(
+			selected,
+			after,
+			till - from);
+	}
+	return State::ActiveTextInsertContext{
+		.before = std::move(before),
+		.selected = std::move(selected),
+		.after = std::move(after),
+	};
+}
+
+bool Widget::handleIvClipboardMime(
+		not_null<const QMimeData*> data,
+		Ui::InputField::MimeAction action) {
+	const auto modifiers = QApplication::keyboardModifiers();
+	if ((modifiers & Qt::ControlModifier)
+		&& (modifiers & Qt::ShiftModifier)) {
+		return false;
+	}
+	if (!ClipboardPasteInsertContext(activeTextInsertContext())) {
+		return false;
+	}
+	const auto clipboardData = ClipboardDataFromMimeData(data.get());
+	if (!clipboardData) {
+		return false;
+	} else if (action == Ui::InputField::MimeAction::Check) {
+		return true;
+	}
+	crl::on_main(this, [=, clipboardData = *clipboardData] {
+		pasteStructuredClipboardData(clipboardData);
+	});
+	return true;
+}
+
+int Widget::richOffsetForFieldOffset(
+		const TextWithEntities &text,
+		int offset) const {
+	const auto replacements = ConvertRichTextToEditorTags(text).replacements;
+	return std::clamp(
+		MapEditorOffsetToRichOffset(replacements, offset),
+		0,
+		text.text.size());
 }
 
 ApplyResult Widget::applyFieldTextToState() {

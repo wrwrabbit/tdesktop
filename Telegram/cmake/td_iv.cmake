@@ -13,6 +13,8 @@ nice_target_sources(td_iv ${src_loc}
 PRIVATE
     iv/editor/iv_editor_box.cpp
     iv/editor/iv_editor_box.h
+    iv/editor/iv_editor_clipboard.cpp
+    iv/editor/iv_editor_clipboard.h
     iv/editor/iv_editor_state.cpp
     iv/editor/iv_editor_state.h
     iv/editor/iv_editor_text_entities.cpp

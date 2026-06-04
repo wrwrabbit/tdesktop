@@ -106,6 +106,7 @@ void CollectAnchors(
 [[nodiscard]] TextForMimeData TextForSelectedSegments(
 	const std::vector<SelectableSegment> &segments,
 	MarkdownArticleSelection selection,
-	const MarkdownArticleSelectionEndpoints *endpoints);
+	const MarkdownArticleSelectionEndpoints *endpoints,
+	const PreparedEditSelection *structuralSelection = nullptr);
 
 } // namespace Iv::Markdown

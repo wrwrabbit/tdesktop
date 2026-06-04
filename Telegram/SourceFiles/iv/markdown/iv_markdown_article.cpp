@@ -2572,7 +2572,8 @@ public:
 
 	[[nodiscard]] TextForMimeData textForSelection(
 		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) const;
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const PreparedEditSelection *structuralSelection) const;
 
 	[[nodiscard]] bool highlightProcessDone(
 		Spellchecker::HighlightProcessId processId);
@@ -2921,6 +2922,8 @@ void MarkdownArticle::Impl::updatePreparedLeaf(
 
 	auto context = LayoutContext();
 	context.syntaxHighlightTracker = this;
+	context.repaint = _textRepaint;
+	context.repaintRect = _textRepaintRect;
 	if (live.block && incoming.block) {
 		UpdateLaidOutLeafContent(
 			live.block,
@@ -3402,8 +3405,13 @@ TextForMimeData MarkdownArticle::Impl::textForContext(
 
 TextForMimeData MarkdownArticle::Impl::textForSelection(
 		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) const {
-	return TextForSelectedSegments(_segments, selection, endpoints);
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const PreparedEditSelection *structuralSelection) const {
+	return TextForSelectedSegments(
+		_segments,
+		selection,
+		endpoints,
+		structuralSelection);
 }
 
 bool MarkdownArticle::Impl::highlightProcessDone(
@@ -3425,7 +3433,9 @@ bool MarkdownArticle::Impl::highlightProcessDone(
 			_content.mediaRuntime,
 			layoutStyle(),
 			true,
-			this);
+			this,
+			_textRepaint,
+			_textRepaintRect);
 		registerPendingHighlightBlock(*block);
 		rebuilt = true;
 	}
@@ -4489,9 +4499,6 @@ void MarkdownArticle::Impl::relayout(int width) {
 	const auto &st = layoutStyle();
 	const auto &page = st.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
-	auto repaintScope = InlineIvImageRepaintScope(
-		_textRepaint,
-		_textRepaintRect);
 	auto context = LayoutContext{
 		.articleLeft = page.left(),
 		.articleWidth = innerWidth,
@@ -4499,6 +4506,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 		.editMode = _content.editMode,
 		.syntaxHighlightTracker = this,
 		.cachedTextLeafs = &_cachedTextLeafs,
+		.repaint = _textRepaint,
+		.repaintRect = _textRepaintRect,
 	};
 	if (_editableHeightOverrideIndex >= 0 && _editableHeightOverride > 0) {
 		context.editableHeightOverride
@@ -4552,9 +4561,6 @@ void MarkdownArticle::Impl::relayoutRetained(int width) {
 	const auto &st = layoutStyle();
 	const auto &page = st.pagePadding;
 	const auto innerWidth = std::max(width - page.left() - page.right(), 1);
-	auto repaintScope = InlineIvImageRepaintScope(
-		_textRepaint,
-		_textRepaintRect);
 	auto context = LayoutContext{
 		.articleLeft = page.left(),
 		.articleWidth = innerWidth,
@@ -4562,6 +4568,8 @@ void MarkdownArticle::Impl::relayoutRetained(int width) {
 		.editMode = _content.editMode,
 		.syntaxHighlightTracker = this,
 		.cachedTextLeafs = &_cachedTextLeafs,
+		.repaint = _textRepaint,
+		.repaintRect = _textRepaintRect,
 	};
 	if (_editableHeightOverrideIndex >= 0 && _editableHeightOverride > 0) {
 		context.editableHeightOverride
@@ -4854,8 +4862,12 @@ TextForMimeData MarkdownArticle::textForContext(
 
 TextForMimeData MarkdownArticle::textForSelection(
 		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) const {
-	return _impl->textForSelection(selection, endpoints);
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const PreparedEditSelection *structuralSelection) const {
+	return _impl->textForSelection(
+		selection,
+		endpoints,
+		structuralSelection);
 }
 
 bool MarkdownArticle::highlightProcessDone(

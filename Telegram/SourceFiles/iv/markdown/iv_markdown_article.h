@@ -356,7 +356,8 @@ public:
 		const MarkdownArticleHitTestResult &result) const;
 	[[nodiscard]] TextForMimeData textForSelection(
 		MarkdownArticleSelection selection,
-		const MarkdownArticleSelectionEndpoints *endpoints) const;
+		const MarkdownArticleSelectionEndpoints *endpoints,
+		const PreparedEditSelection *structuralSelection = nullptr) const;
 	[[nodiscard]] bool highlightProcessDone(
 		Spellchecker::HighlightProcessId processId);
 	void invalidatePaletteCache();
