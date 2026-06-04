@@ -2194,8 +2194,7 @@ void UpdateLaidOutLeafContent(
 			mediaRuntime,
 			FlowTextMinResizeWidth(st.body),
 			context);
-		if ((prepared.kind != PreparedBlockKind::Table)
-			&& prepared.text.text.isEmpty()
+		if (prepared.text.text.isEmpty()
 			&& !prepared.editPlaceholderText.isEmpty()) {
 			BuildOrReuseEditPlaceholderLeaf(
 				&block->placeholderText,
@@ -3476,8 +3475,14 @@ LaidOutBlock LayoutGroupedMediaBlock(
 			}
 		}
 	}
-	if (!prepared.text.text.isEmpty()
-		&& MissingRetainedLeaf(prepared.text.text, block->leaf)) {
+	const auto useTitlePlaceholder = prepared.text.text.isEmpty()
+		&& !prepared.editPlaceholderText.isEmpty();
+	const auto hasTitle = !prepared.text.text.isEmpty()
+		|| prepared.forceTextSegment;
+	if ((hasTitle && MissingRetainedLeaf(prepared.text.text, block->leaf))
+		|| MissingRetainedPlaceholderLeaf(
+			useTitlePlaceholder,
+			block->placeholderLeaf)) {
 		return std::nullopt;
 	}
 	ClearBlockGeometry(block);
@@ -3485,7 +3490,10 @@ LaidOutBlock LayoutGroupedMediaBlock(
 		ResetTableRowGeometry(&row);
 	}
 	auto tableTop = top;
-	if (!prepared.text.text.isEmpty()) {
+	if (hasTitle) {
+		const auto &displayLeaf = useTitlePlaceholder
+			? block->placeholderLeaf
+			: block->leaf;
 		block->textWidth = std::max(width, 1);
 		block->textRect = QRect(
 			left,
@@ -3493,11 +3501,11 @@ LaidOutBlock LayoutGroupedMediaBlock(
 			block->textWidth,
 			ResolveEditableHeight(
 				std::max(
-					block->leaf.countHeight(block->textWidth, true),
+					displayLeaf.countHeight(block->textWidth, true),
 					TextLineHeight(st.body)),
 				context));
 		block->firstLineBaseline = LeafFirstLineBaseline(
-			block->leaf,
+			displayLeaf,
 			block->textRect,
 			st.body);
 		tableTop = block->textRect.y()

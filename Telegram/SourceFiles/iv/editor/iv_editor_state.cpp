@@ -4665,9 +4665,7 @@ void State::rebuildTextNodes(
 			appendBlockTextNode(path, LeafKind::MathFormula, FieldMode::Raw);
 			break;
 		case BlockKind::Table:
-			if (!block.text.text.text.isEmpty()) {
-				appendBlockTextNode(path, LeafKind::BlockText);
-			}
+			appendBlockTextNode(path, LeafKind::BlockText);
 			for (auto j = 0, rowCount = int(block.tableRows.size());
 					j != rowCount;
 					++j) {

@@ -529,6 +529,9 @@ void ApplyBlockCaptionEditSource(
 	case PreparedEditLeafKind::ListItemText:
 		return u"Text"_q;
 	case PreparedEditLeafKind::BlockText:
+		if (kind == PreparedBlockKind::Table) {
+			return u"Title"_q;
+		}
 		return (kind == PreparedBlockKind::Heading)
 			|| (kind == PreparedBlockKind::Details)
 			? u"Header"_q
@@ -1318,8 +1321,12 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	block.text = std::move(title.text);
 	block.links = std::move(title.links);
 	block.anchorIds = std::move(title.anchorIds);
-	if (!block.text.text.isEmpty()) {
+	if (!block.text.text.isEmpty() || state->editMode) {
 		block.editLeaf = BlockTextLeafSource(path);
+	}
+	if (state->editMode) {
+		block.forceTextSegment = true;
+		ApplyNativeIvEditPlaceholderText(&block);
 	}
 
 	const auto &limits = PrepareTableRenderLimitsForIv();
