@@ -51,6 +51,7 @@
   <qresource prefix="/icons">
     <file alias="calls/hands.lottie">../../icons/calls/hands.lottie</file>
     <file alias="calls/voice.lottie">../../icons/calls/voice.lottie</file>
+    <file alias="notify_toggle.lottie">../../icons/notify_toggle.lottie</file>
     <file alias="settings/devices/device_desktop_mac.lottie">../../icons/settings/devices/device_desktop_mac.lottie</file>
     <file alias="settings/devices/device_desktop_win.lottie">../../icons/settings/devices/device_desktop_win.lottie</file>
     <file alias="settings/devices/device_linux.lottie">../../icons/settings/devices/device_linux.lottie</file>

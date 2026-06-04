@@ -4668,6 +4668,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_reminder_message" = "Set a reminder";
 "lng_schedule_title" = "Send this message on...";
 "lng_remind_title" = "Remind me on...";
+"lng_schedule_notify_on" = "Recipients will be notified.";
+"lng_schedule_notify_off" = "Recipients will receive a silent notification.";
 "lng_schedule_repeat_label" = "Repeat:";
 "lng_schedule_repeat_never" = "Never";
 "lng_schedule_repeat_daily" = "Daily";

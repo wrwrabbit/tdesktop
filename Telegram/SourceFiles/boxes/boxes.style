@@ -888,6 +888,8 @@ scheduleDateWidth: 136px;
 scheduleTimeWidth: 72px;
 scheduleAtSkip: 24px;
 scheduleAtTop: 42px;
+scheduleNotifyIconSize: 24px;
+scheduleNotifyTooltipShift: 5px;
 scheduleAtLabel: FlatLabel(defaultFlatLabel) {
 }
 scheduleTimeSeparator: FlatLabel(defaultFlatLabel) {
