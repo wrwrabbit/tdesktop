@@ -100,7 +100,9 @@ void DiamondRenderer::initialize(
 		return;
 	}
 
-	_drawStride = rhi->ubufAlignment();
+	const auto align = std::max<quint32>(rhi->ubufAlignment(), 1);
+	const auto slotBytes = quint32(4 * sizeof(float));
+	_drawStride = ((slotBytes + align - 1) / align) * align;
 	_drawUniform = rhi->newBuffer(
 		QRhiBuffer::Immutable,
 		QRhiBuffer::UniformBuffer,
