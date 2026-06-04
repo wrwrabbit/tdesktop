@@ -493,6 +493,11 @@ bool CanHideForwardAuthor(
 	if (HasOnlyForcedForwardedInfo(list)) {
 		return false;
 	}
+#ifndef _DEBUG
+	if (HasRichPage(list)) {
+		return false;
+	}
+#endif
 	return session->premium() || !HasRichPage(list);
 }
 
