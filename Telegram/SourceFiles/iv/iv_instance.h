@@ -69,7 +69,8 @@ public:
 
 	void showRichMessage(
 		not_null<Window::SessionController*> controller,
-		not_null<HistoryItem*> item);
+		not_null<HistoryItem*> item,
+		QString initialFragment = QString());
 	void resolveRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
@@ -136,7 +137,8 @@ private:
 	void showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
-		std::shared_ptr<const RichPage> page);
+		std::shared_ptr<const RichPage> page,
+		QString initialFragment = QString());
 	void finishRichMessageRequest(
 		not_null<Main::Session*> session,
 		FullMsgId itemId,

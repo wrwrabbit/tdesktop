@@ -816,6 +816,12 @@ void InnerWidget::elementOpenDocument(
 	_controller->openDocument(document, showInMediaView, { context });
 }
 
+bool InnerWidget::elementScrollToLocalY(
+		not_null<const Element*> view,
+		int localTop) {
+	return false;
+}
+
 void InnerWidget::elementCancelUpload(const FullMsgId &context) {
 	if (const auto item = session().data().message(context)) {
 		_controller->cancelUploadLayer(item);

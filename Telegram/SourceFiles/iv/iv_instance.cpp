@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_web_page.h"
 #include "history/history.h"
 #include "history/history_item.h"
+#include "iv/markdown/iv_markdown_article.h"
 #include "iv/markdown/iv_markdown_controller.h"
 #include "iv/iv_cached_media.h"
 #include "iv/iv_controller.h"
@@ -36,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
+
+#include "styles/style_iv.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QFileInfo>
@@ -160,6 +163,27 @@ struct LocalMarkdownTarget {
 
 [[nodiscard]] uint64 RichMessagePageId(FullMsgId itemId) {
 	return uint64(itemId.peer.value) ^ (uint64(itemId.msg.bare) << 1);
+}
+
+[[nodiscard]] bool PreparedContentHasAnchor(
+		const Markdown::MarkdownArticleContent &content,
+		const QString &anchorId) {
+	if (anchorId.isEmpty()) {
+		return false;
+	}
+	auto article = Markdown::MarkdownArticle(st::defaultMarkdown);
+	article.setContent(content);
+	const auto width = article.maxWidth();
+	static_cast<void>(article.resizeGetHeight(width));
+	auto top = article.anchorTop(anchorId);
+	if (top < 0) {
+		const auto expansion = article.expandDetailsToAnchor(anchorId);
+		if (expansion.changed) {
+			static_cast<void>(article.resizeGetHeight(width));
+		}
+		top = article.anchorTop(anchorId);
+	}
+	return (top >= 0);
 }
 
 void OpenRichMessageChannel(
@@ -1213,7 +1237,8 @@ void Instance::resolveRichMessage(
 
 void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
-		not_null<HistoryItem*> item) {
+		not_null<HistoryItem*> item,
+		QString initialFragment) {
 	const auto weak = base::make_weak(controller);
 	const auto itemId = item->fullId();
 	resolveRichMessage(controller, item, [=](std::shared_ptr<const RichPage> page) {
@@ -1227,14 +1252,19 @@ void Instance::showRichMessage(
 			}
 			return;
 		}
-		showRichMessage(not_null{ strong }, not_null{ current }, std::move(page));
+		showRichMessage(
+			not_null{ strong },
+			not_null{ current },
+			std::move(page),
+			initialFragment);
 	});
 }
 
 void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
-		std::shared_ptr<const RichPage> richPage) {
+		std::shared_ptr<const RichPage> richPage,
+		QString initialFragment) {
 	if (Platform::IsMac()) {
 		Core::App().hideMediaView();
 	}
@@ -1263,6 +1293,11 @@ void Instance::showRichMessage(
 		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
 		return;
 	}
+	if (!initialFragment.isEmpty()
+		&& !PreparedContentHasAnchor(prepared.content, initialFragment)) {
+		controller->showToast(tr::lng_iv_not_found_in_message(tr::now));
+		return;
+	}
 	auto options = Markdown::OpenOptions{
 		.sourceName = title,
 		.currentPageId = RichMessagePageId(itemId),
@@ -1275,6 +1310,7 @@ void Instance::showRichMessage(
 		},
 		.downloadTaskFinished = session->downloaderTaskFinished(),
 	};
+	options.initialFragment = std::move(initialFragment);
 	if (CanShareMarkdownItem(item)) {
 		options.share = [=](std::shared_ptr<Ui::Show> show) {
 			const auto current = session->data().message(itemId);

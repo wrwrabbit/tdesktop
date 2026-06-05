@@ -176,6 +176,13 @@ template <typename T>
 	return { Ui::FillAmountAndCurrency(amount, currency) };
 }
 
+[[nodiscard]] bool IsNavigableForInstantViewMedia(
+		DocumentData *document) {
+	Expects(document != nullptr);
+	return !document->isVideoMessage()
+		&& (document->isVideoFile() || document->isAnimation());
+}
+
 } // namespace
 
 void HistoryItem::HistoryItem::Destroyer::operator()(HistoryItem *value) {
@@ -1587,11 +1594,16 @@ void HistoryItem::setMediaForInstantView(
 	data->url = std::move(url);
 	data->documents.clear();
 	data->photos.clear();
+	data->items.clear();
 	if (document) {
 		data->documents.emplace(document);
+		if (IsNavigableForInstantViewMedia(document)) {
+			data->items.emplace_back(document);
+		}
 	}
 	if (photo) {
 		data->photos.emplace(photo);
+		data->items.emplace_back(photo);
 	}
 }
 
@@ -1599,13 +1611,18 @@ void HistoryItem::addDocumentForInstantView(
 		not_null<DocumentData*> document) {
 	AddComponents(HistoryMessageMediaForInstantView::Bit());
 	const auto data = Get<HistoryMessageMediaForInstantView>();
-	data->documents.emplace(document);
+	if (data->documents.emplace(document).second
+		&& IsNavigableForInstantViewMedia(document)) {
+		data->items.emplace_back(document.get());
+	}
 }
 
 void HistoryItem::addPhotoForInstantView(not_null<PhotoData*> photo) {
 	AddComponents(HistoryMessageMediaForInstantView::Bit());
 	const auto data = Get<HistoryMessageMediaForInstantView>();
-	data->photos.emplace(photo);
+	if (data->photos.emplace(photo).second) {
+		data->items.emplace_back(photo.get());
+	}
 }
 
 bool HistoryItem::needsUpdateForVideoQualities(const MTPMessage &data) {
@@ -4204,6 +4221,7 @@ void HistoryItem::setRichPage(std::shared_ptr<const Iv::RichPage> page) {
 		media->url = QString();
 		media->documents.clear();
 		media->photos.clear();
+		media->items.clear();
 	} else {
 		clearRichPage();
 	}

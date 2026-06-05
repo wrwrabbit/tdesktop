@@ -7994,6 +7994,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_iv_window_title" = "Instant View";
 "lng_iv_wrong_layout" = "Wrong layout?";
 "lng_iv_not_supported" = "This link appears to be invalid.";
+"lng_iv_not_found_in_message" = "This section isn't found in the message.";
 "lng_iv_details_state_expanded" = "Expanded";
 "lng_iv_details_state_collapsed" = "Collapsed";
 "lng_iv_zoom_tooltip_ctrl" = "Hold Ctrl to zoom by 5%.\nHold Alt to zoom by 1%.";

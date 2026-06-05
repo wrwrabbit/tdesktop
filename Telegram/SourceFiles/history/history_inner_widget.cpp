@@ -242,6 +242,13 @@ public:
 				showInMediaView);
 		}
 	}
+	bool elementScrollToLocalY(
+			not_null<const Element*> view,
+			int localTop) override {
+		return _widget
+			? _widget->scrollToElementLocalY(view, localTop)
+			: false;
+	}
 	void elementCancelUpload(const FullMsgId &context) override {
 		if (_widget) {
 			_widget->elementCancelUpload(context);
@@ -5469,6 +5476,21 @@ int HistoryInner::itemTop(const Element *view) const {
 			? migratedTop()
 			: -2);
 	return (top < 0) ? top : (top + view->y() + view->block()->y());
+}
+
+bool HistoryInner::scrollToElementLocalY(
+		not_null<const Element*> view,
+		int localTop) {
+	const auto top = itemTop(view);
+	if (top < 0) {
+		return false;
+	}
+	const auto wanted = _scroll->computeScrollToY(top + localTop, -1);
+	if (wanted == _scroll->scrollTop()) {
+		return true;
+	}
+	_scroll->scrollToY(top + localTop);
+	return true;
 }
 
 auto HistoryInner::findViewForPinnedTracking(int top) const

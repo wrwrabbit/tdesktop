@@ -138,9 +138,12 @@ struct HistoryMessageEdited
 
 struct HistoryMessageMediaForInstantView
 : RuntimeComponent<HistoryMessageMediaForInstantView, HistoryItem> {
+	using Item = std::variant<PhotoData*, DocumentData*>;
+
 	QString url;
 	base::flat_set<not_null<DocumentData*>> documents;
 	base::flat_set<not_null<PhotoData*>> photos;
+	std::vector<Item> items;
 };
 
 struct HistoryMessageRichPageSource

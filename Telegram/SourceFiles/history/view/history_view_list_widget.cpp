@@ -2034,6 +2034,21 @@ void ListWidget::elementOpenDocument(
 	_delegate->listOpenDocument(document, context, showInMediaView);
 }
 
+bool ListWidget::elementScrollToLocalY(
+		not_null<const Element*> view,
+		int localTop) {
+	const auto currentScrollTop = _visibleTop;
+	const auto currentScrollHeight = (_visibleBottom - _visibleTop);
+	const auto wanted = std::max(
+		std::min(itemTop(view) + localTop, height() - currentScrollHeight),
+		0);
+	if (wanted == currentScrollTop) {
+		return true;
+	}
+	computeScrollTo(wanted, view->data()->position(), anim::type::normal);
+	return true;
+}
+
 void ListWidget::elementCancelUpload(const FullMsgId &context) {
 	if (const auto item = session().data().message(context)) {
 		_delegate->listCancelUploadLayer(item);

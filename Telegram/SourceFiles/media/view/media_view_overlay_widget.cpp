@@ -385,6 +385,16 @@ struct OverlayWidget::UserPhotos {
 	rpl::lifetime lifetime;
 };
 
+struct OverlayWidget::InstantViewMedia {
+	InstantViewMedia(HistoryItem *item, InstantViewItem key)
+	: item(item)
+	, key(std::move(key)) {
+	}
+
+	HistoryItem *item = nullptr;
+	InstantViewItem key;
+};
+
 struct OverlayWidget::Collage {
 	Collage(CollageKey key) : key(key) {
 	}
@@ -1400,6 +1410,10 @@ void OverlayWidget::refreshNavVisibility() {
 	if (_stories) {
 		_leftNavVisible = _stories->subjumpAvailable(-1);
 		_rightNavVisible = _stories->subjumpAvailable(1);
+	} else if (_instantViewMediaData) {
+		_leftNavVisible = _index && (*_index > 0);
+		_rightNavVisible = _index
+			&& (*_index + 1 < _instantViewMediaData->size());
 	} else if (_sharedMediaData) {
 		_leftNavVisible = _index && (*_index > 0);
 		_rightNavVisible = _index && (*_index + 1 < _sharedMediaData->size());
@@ -2243,6 +2257,9 @@ void OverlayWidget::fillContextMenuActions(
 
 auto OverlayWidget::computeOverviewType() const
 -> std::optional<SharedMediaType> {
+	if (_instantViewMediaData) {
+		return std::nullopt;
+	}
 	if (const auto mediaType = sharedMediaType()) {
 		if (const auto overviewType = SharedMediaOverviewType(*mediaType)) {
 			return overviewType;
@@ -2726,6 +2743,8 @@ void OverlayWidget::clearSession() {
 	_caption.clear();
 	_sharedMedia = nullptr;
 	_userPhotos = nullptr;
+	_instantViewMedia = nullptr;
+	_instantViewMediaData = std::nullopt;
 	_collage = nullptr;
 	_session = nullptr;
 }
@@ -3739,6 +3758,53 @@ void OverlayWidget::handleUserPhotosUpdate(UserPhotosSlice &&update) {
 	preloadData(0);
 }
 
+auto OverlayWidget::instantViewMediaKey() const
+-> std::optional<InstantViewItem> {
+	if (_photo) {
+		return InstantViewItem(_photo);
+	} else if (_document) {
+		return InstantViewItem(_document);
+	}
+	return std::nullopt;
+}
+
+bool OverlayWidget::validInstantViewMedia() const {
+	if (const auto key = instantViewMediaKey()) {
+		if (!_instantViewMedia || (_instantViewMedia->item != _message)) {
+			return false;
+		}
+		if (*key == _instantViewMedia->key) {
+			return true;
+		} else if (_instantViewMediaData) {
+			const auto &items = *_instantViewMediaData;
+			if (ranges::find(items, *key) != end(items)
+				&& ranges::find(items, _instantViewMedia->key) != end(items)) {
+				return true;
+			}
+		}
+	}
+	return (_instantViewMedia == nullptr);
+}
+
+void OverlayWidget::validateInstantViewMedia() {
+	if (_message) {
+		if (const auto media = _message->Get<HistoryMessageMediaForInstantView>()) {
+			if (const auto key = instantViewMediaKey()) {
+				const auto i = ranges::find(media->items, *key);
+				if (i != end(media->items)) {
+					_instantViewMedia = std::make_unique<InstantViewMedia>(
+						_message,
+						*key);
+					_instantViewMediaData = media->items;
+					return;
+				}
+			}
+		}
+	}
+	_instantViewMedia = nullptr;
+	_instantViewMediaData = std::nullopt;
+}
+
 std::optional<OverlayWidget::CollageKey> OverlayWidget::collageKey() const {
 	if (_message) {
 		if (const auto media = _message->media()) {
@@ -3823,7 +3889,14 @@ void OverlayWidget::validateCollage() {
 }
 
 void OverlayWidget::refreshMediaViewer() {
-	if (!validSharedMedia()) {
+	if (!validInstantViewMedia()) {
+		validateInstantViewMedia();
+	}
+	if (_instantViewMediaData) {
+		_sharedMedia = nullptr;
+		_sharedMediaData = std::nullopt;
+		_sharedMediaDataKey = std::nullopt;
+	} else if (!validSharedMedia()) {
 		validateSharedMedia();
 	}
 	if (!validUserPhotos()) {
@@ -3991,7 +4064,15 @@ void OverlayWidget::refreshTimestampDividers(
 
 void OverlayWidget::refreshGroupThumbs() {
 	const auto existed = (_groupThumbs != nullptr);
-	if (_index && _sharedMediaData) {
+	if (_index && _instantViewMediaData) {
+		const auto messageId = _message ? _message->fullId() : FullMsgId();
+		View::GroupThumbs::Refresh(
+			_session,
+			_groupThumbs,
+			{ messageId, &*_instantViewMediaData },
+			*_index,
+			_groupThumbsAvailableWidth);
+	} else if (_index && _sharedMediaData) {
 		View::GroupThumbs::Refresh(
 			_session,
 			_groupThumbs,
@@ -4039,6 +4120,7 @@ void OverlayWidget::initGroupThumbs() {
 	_groupThumbs->activateRequests(
 	) | rpl::on_next([this](View::GroupThumbs::Key key) {
 		using CollageKey = View::GroupThumbs::CollageKey;
+		using InstantViewKey = View::GroupThumbs::InstantViewKey;
 		if (const auto photoId = std::get_if<PhotoId>(&key)) {
 			const auto photo = _session->data().photo(*photoId);
 			moveToEntity({ photo, nullptr });
@@ -4047,6 +4129,10 @@ void OverlayWidget::initGroupThumbs() {
 		} else if (const auto collageKey = std::get_if<CollageKey>(&key)) {
 			if (_collageData) {
 				moveToEntity(entityForCollage(collageKey->index));
+			}
+		} else if (const auto instantViewKey = std::get_if<InstantViewKey>(&key)) {
+			if (_instantViewMediaData) {
+				moveToEntity(entityForInstantViewMedia(instantViewKey->index));
 			}
 		}
 	}, _groupThumbs->lifetime());
@@ -4159,6 +4245,7 @@ void OverlayWidget::show(OpenRequest request) {
 	const auto contextItem = request.item();
 	const auto contextPeer = request.peer();
 	const auto contextTopicRootId = request.topicRootId();
+	const auto contextMonoforumPeerId = request.monoforumPeerId();
 	_drawButtonEnabled = request.showDrawButton();
 	if (!request.continueStreaming() && !request.startTime() && !_reShow) {
 		if (_message && (_message == contextItem)) {
@@ -4195,7 +4282,11 @@ void OverlayWidget::show(OpenRequest request) {
 		} else if (contextPeer) {
 			setContext(contextPeer);
 		} else if (contextItem) {
-			setContext(ItemContext{ contextItem, contextTopicRootId });
+			setContext(ItemContext{
+				contextItem,
+				contextTopicRootId,
+				contextMonoforumPeerId,
+			});
 		} else {
 			setContext(v::null);
 		}
@@ -4221,7 +4312,11 @@ void OverlayWidget::show(OpenRequest request) {
 				request.storiesContext(),
 			});
 		} else if (contextItem) {
-			setContext(ItemContext{ contextItem, contextTopicRootId });
+			setContext(ItemContext{
+				contextItem,
+				contextTopicRootId,
+				contextMonoforumPeerId,
+			});
 		} else {
 			setContext(v::null);
 		}
@@ -6966,6 +7061,22 @@ OverlayWidget::Entity OverlayWidget::entityForSharedMedia(int index) const {
 	return { v::null, nullptr };
 }
 
+OverlayWidget::Entity OverlayWidget::entityForInstantViewMedia(int index) const {
+	Expects(_instantViewMediaData.has_value());
+	Expects(_session != nullptr);
+
+	const auto &items = *_instantViewMediaData;
+	if (!_message || index < 0 || index >= items.size()) {
+		return { v::null, nullptr };
+	}
+	if (const auto document = std::get_if<DocumentData*>(&items[index])) {
+		return { *document, _message, _topicRootId, _monoforumPeerId };
+	} else if (const auto photo = std::get_if<PhotoData*>(&items[index])) {
+		return { *photo, _message, _topicRootId, _monoforumPeerId };
+	}
+	return { v::null, nullptr };
+}
+
 OverlayWidget::Entity OverlayWidget::entityForCollage(int index) const {
 	Expects(_collageData.has_value());
 	Expects(_session != nullptr);
@@ -6999,7 +7110,9 @@ OverlayWidget::Entity OverlayWidget::entityForItemId(const FullMsgId &itemId) co
 }
 
 OverlayWidget::Entity OverlayWidget::entityByIndex(int index) const {
-	if (_sharedMediaData) {
+	if (_instantViewMediaData) {
+		return entityForInstantViewMedia(index);
+	} else if (_sharedMediaData) {
 		return entityForSharedMedia(index);
 	} else if (_userPhotosData) {
 		return entityForUserPhotos(index);
@@ -7029,10 +7142,12 @@ void OverlayWidget::setContext(
 		_history = _peer->owner().history(_peer);
 		_message = nullptr;
 		_topicRootId = MsgId();
+		_monoforumPeerId = PeerId();
 		setStoriesPeer(nullptr);
 	} else if (const auto story = std::get_if<StoriesContext>(&context)) {
 		_message = nullptr;
 		_topicRootId = MsgId();
+		_monoforumPeerId = PeerId();
 		_history = nullptr;
 		_peer = nullptr;
 		setStoriesPeer(story->peer);
@@ -7046,6 +7161,7 @@ void OverlayWidget::setContext(
 	} else {
 		_message = nullptr;
 		_topicRootId = MsgId();
+		_monoforumPeerId = PeerId();
 		_history = nullptr;
 		_peer = nullptr;
 		setStoriesPeer(nullptr);
@@ -7146,7 +7262,11 @@ bool OverlayWidget::moveToEntity(const Entity &entity, int preloadDelta) {
 		return false;
 	}
 	if (const auto item = entity.item) {
-		setContext(ItemContext{ item, entity.topicRootId });
+		setContext(ItemContext{
+			item,
+			entity.topicRootId,
+			entity.monoforumPeerId,
+		});
 	} else if (_peer) {
 		setContext(_peer);
 	} else {
@@ -7983,6 +8103,8 @@ void OverlayWidget::clearBeforeHide() {
 	_sharedMediaDataKey = std::nullopt;
 	_userPhotos = nullptr;
 	_userPhotosData = std::nullopt;
+	_instantViewMedia = nullptr;
+	_instantViewMediaData = std::nullopt;
 	_collage = nullptr;
 	_collageData = std::nullopt;
 	clearStreaming();
@@ -8060,7 +8182,18 @@ void OverlayWidget::updateSaveMsg() {
 
 void OverlayWidget::findCurrent() {
 	using namespace rpl::mappers;
-	if (_sharedMediaData) {
+	if (_instantViewMediaData) {
+		const auto key = instantViewMediaKey();
+		const auto &items = *_instantViewMediaData;
+		const auto i = key
+			? ranges::find(items, *key)
+			: end(items);
+		_index = (i != end(items))
+			? std::make_optional(int(i - begin(items)))
+			: std::nullopt;
+		_fullIndex = _index;
+		_fullCount = items.size();
+	} else if (_sharedMediaData) {
 		_index = _message
 			? _sharedMediaData->indexOf(_message->fullId())
 			: _photo ? _sharedMediaData->indexOf(_photo) : std::nullopt;

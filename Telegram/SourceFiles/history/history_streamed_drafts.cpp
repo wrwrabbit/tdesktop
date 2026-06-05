@@ -97,6 +97,9 @@ HistoryStreamedDrafts::DraftContent HistoryStreamedDrafts::prepareContent(
 	};
 	content.text = Iv::FlattenRichPageSummary(content.richPage);
 	content.matchText = content.text.text;
+	if (content.text.empty()) {
+		content.text.append(loadingEmoji());
+	}
 	return content;
 }
 

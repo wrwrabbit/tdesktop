@@ -616,6 +616,43 @@ void Message::activateRichPagePreparedLink(
 		&& context.button != Qt::MiddleButton) {
 		return;
 	}
+	const auto resolveInlineAnchor = [owner = const_cast<Message*>(this)](
+			const QString &anchorId) {
+		if (anchorId.isEmpty()) {
+			return false;
+		}
+		const auto rich = owner->richpage();
+		if (!rich) {
+			return false;
+		}
+		auto top = rich->article.anchorTop(anchorId);
+		auto trect = QRect();
+		auto haveTrect = false;
+		if (top < 0) {
+			const auto expansion = rich->article.expandDetailsToAnchor(anchorId);
+			if (expansion.changed) {
+				haveTrect = owner->prepareRichPageTextRect(trect);
+				if (!haveTrect) {
+					return false;
+				}
+				const auto rect = owner->richPageRect(trect);
+				static_cast<void>(rich->article.resizeGetHeight(rect.width()));
+				top = rich->article.anchorTop(anchorId);
+				owner->requestRichPageRelayout(QRect());
+			} else {
+				top = rich->article.anchorTop(anchorId);
+			}
+			if (top < 0) {
+				return false;
+			}
+		}
+		if (!haveTrect && !owner->prepareRichPageTextRect(trect)) {
+			return false;
+		}
+		return owner->delegate()->elementScrollToLocalY(
+			owner,
+			owner->richPageRect(trect).top() + top);
+	};
 	switch (link.kind) {
 	case PreparedLinkKind::External:
 		if (const auto data = ExternalEntityLinkData(link)) {
@@ -641,11 +678,24 @@ void Message::activateRichPagePreparedLink(
 	} break;
 	case PreparedLinkKind::Anchor:
 	case PreparedLinkKind::Footnote:
-	case PreparedLinkKind::FootnoteBacklink:
-		if (const auto controller = ExtractController(context)) {
-			Core::App().iv().showRichMessage(controller, data());
+	case PreparedLinkKind::FootnoteBacklink: {
+		if (resolveInlineAnchor(link.target)) {
+			break;
+		}
+		const auto rich = richpage();
+		if (rich && rich->page && rich->page->part) {
+			if (const auto controller = ExtractController(context)) {
+				Core::App().iv().showRichMessage(
+					controller,
+					data(),
+					link.target);
+			}
+		} else if (const auto controller = ExtractController(context)) {
+			controller->showToast(
+				tr::lng_iv_not_found_in_message(tr::now));
 		}
 		break;
+	}
 	case PreparedLinkKind::LocalFile: {
 		const auto target = OpenableTargetForPreparedLink(link);
 		if (!target.isEmpty()) {

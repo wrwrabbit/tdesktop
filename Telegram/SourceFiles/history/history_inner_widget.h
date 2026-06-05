@@ -242,6 +242,9 @@ public:
 	[[nodiscard]] int itemTop(const HistoryItem *item) const;
 	[[nodiscard]] int itemTop(const Element *view) const;
 	[[nodiscard]] Element *viewByItem(const HistoryItem *item) const;
+	bool scrollToElementLocalY(
+		not_null<const Element*> view,
+		int localTop);
 
 	// Returns (view, offset-from-top).
 	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(

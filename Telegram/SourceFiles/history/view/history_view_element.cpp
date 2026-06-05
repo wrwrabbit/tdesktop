@@ -548,6 +548,12 @@ void DefaultElementDelegate::elementOpenDocument(
 	bool showInMediaView) {
 }
 
+bool DefaultElementDelegate::elementScrollToLocalY(
+		not_null<const Element*> view,
+		int localTop) {
+	return false;
+}
+
 void DefaultElementDelegate::elementCancelUpload(const FullMsgId &context) {
 }
 
