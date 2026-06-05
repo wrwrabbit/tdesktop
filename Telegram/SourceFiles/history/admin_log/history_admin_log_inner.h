@@ -426,6 +426,7 @@ private:
 	CursorState _mouseCursorState = CursorState();
 	uint16 _mouseTextSymbol = 0;
 	bool _pressWasInactive = false;
+	bool _overSenderUserpic = false;
 
 	Element *_selectedItem = nullptr;
 	TextSelection _selectedText;

@@ -2215,6 +2215,9 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}
 			}
 			suggestRestrictParticipant(participant, realId);
+			if (_overSenderUserpic) {
+				_menu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomLeft);
+			}
 		}
 	} else { // maybe cursor on some text history item?
 		const auto item = view ? view->data().get() : nullptr;
@@ -2784,6 +2787,7 @@ void InnerWidget::updateSelected() {
 
 	TextState dragState;
 	ClickHandlerHost *lnkhost = nullptr;
+	auto dragStateUserpic = false;
 	auto selectingText = _selectedItem
 		&& (view == _mouseActionItem)
 		&& (view == Element::Hovered());
@@ -2819,6 +2823,7 @@ void InnerWidget::updateSelected() {
 					// stop enumeration if we've found a userpic under the cursor
 					if (point.y() >= userpicTop && point.y() < userpicTop + st::msgPhotoSize) {
 						dragState.link = view->data()->from()->openLink();
+						dragStateUserpic = true;
 						lnkhost = view;
 						return false;
 					}
@@ -2827,6 +2832,7 @@ void InnerWidget::updateSelected() {
 			}
 		}
 	}
+	_overSenderUserpic = dragStateUserpic;
 	auto lnkChanged = ClickHandler::setActive(dragState.link, lnkhost);
 	if (lnkChanged || dragState.cursor != _mouseCursorState) {
 		Ui::Tooltip::Hide();
