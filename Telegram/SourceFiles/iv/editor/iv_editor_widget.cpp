@@ -54,10 +54,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QWheelEvent>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
-#include <QtWidgets/QAction>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QTextEdit>
+#include <QAction>
 
 #include <algorithm>
 #include <cmath>
@@ -182,7 +182,7 @@ struct InlineFieldTrimResult {
 		TextWithTags text,
 		bool trimLeft) {
 	auto from = 0;
-	auto till = text.text.size();
+	auto till = int(text.text.size());
 	if (trimLeft) {
 		while (from < till && text.text[from].isSpace()) {
 			++from;
@@ -3326,8 +3326,8 @@ Widget::activeTextInsertContext() const {
 	const auto cursor = _field->textCursor();
 	auto from = richOffsetForFieldOffset(full, cursor.selectionStart());
 	auto till = richOffsetForFieldOffset(full, cursor.selectionEnd());
-	from = std::clamp(from, 0, full.text.size());
-	till = std::clamp(till, from, full.text.size());
+	from = std::clamp(from, 0, int(full.text.size()));
+	till = std::clamp(till, from, int(full.text.size()));
 	auto before = TextWithEntities();
 	auto selected = TextWithEntities();
 	auto after = std::move(full);
@@ -3380,7 +3380,7 @@ int Widget::richOffsetForFieldOffset(
 	return std::clamp(
 		MapEditorOffsetToRichOffset(replacements, offset),
 		0,
-		text.text.size());
+		int(text.text.size()));
 }
 
 ApplyResult Widget::applyFieldTextToState() {
@@ -3917,7 +3917,7 @@ Widget::HistoryViewState Widget::captureHistoryViewState() const {
 			const auto trimmed = TrimInlineFieldText(
 				{ _state->activeRawText(), {} },
 				trimLeft);
-			const auto size = _state->activeRawText().size();
+			const auto size = int(_state->activeRawText().size());
 			anchorOffset = std::clamp(cursor.anchor() + trimmed.left, 0, size);
 			cursorOffset = std::clamp(
 				cursor.position() + trimmed.left,
@@ -3927,7 +3927,7 @@ Widget::HistoryViewState Widget::captureHistoryViewState() const {
 			const auto activeText = ConvertRichTextToEditorTags(
 				_state->activeText());
 			const auto trimmed = TrimInlineFieldText(activeText.text, trimLeft);
-			const auto size = _state->activeText().text.size();
+			const auto size = int(_state->activeText().text.size());
 			anchorOffset = std::clamp(
 				MapEditorOffsetToRichOffset(
 					activeText.replacements,

@@ -371,6 +371,8 @@ public:
 	void addPlaceholderRipple(PreparedPlaceholderBlockId id, QPoint point);
 	void stopPlaceholderRipple(PreparedPlaceholderBlockId id);
 
+    void clearBeforeDestroy();
+
 private:
 	class Impl;
 

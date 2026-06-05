@@ -586,14 +586,14 @@ RichTextEditorConversion ConvertRichTextToEditorTags(TextWithEntities text) {
 		if (newLength > 0) {
 			mathTags.push_back({
 				.offset = formula.offset,
-				.length = newLength,
+				.length = int(newLength),
 				.id = Ui::InputField::kTagIvMath,
 			});
 		}
 		replacements.push_back({
 			.richOffset = formula.offset,
 			.richLength = formula.length,
-			.editorLength = newLength,
+			.editorLength = int(newLength),
 		});
 	}
 

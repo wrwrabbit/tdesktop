@@ -4884,7 +4884,7 @@ void MarkdownArticle::invalidateRasterCache() {
 }
 
 bool MarkdownArticle::hasHeavyPart() const {
-	return _impl->hasHeavyPart();
+	return _impl && _impl->hasHeavyPart();
 }
 
 void MarkdownArticle::unloadHeavyPart() {
@@ -4915,6 +4915,10 @@ void MarkdownArticle::addPlaceholderRipple(
 
 void MarkdownArticle::stopPlaceholderRipple(PreparedPlaceholderBlockId id) {
 	_impl->stopPlaceholderRipple(id);
+}
+
+void MarkdownArticle::clearBeforeDestroy() {
+    base::take(_impl);
 }
 
 } // namespace Iv::Markdown

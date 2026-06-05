@@ -3180,7 +3180,7 @@ Element::~Element() {
 		checkHeavyPart();
 	}
 	if (const auto rich = richpage(); rich && rich->article.hasHeavyPart()) {
-		rich->article.unloadHeavyPart();
+		rich->article.clearBeforeDestroy();
 		checkHeavyPart();
 	}
 	if (_data->mainView() == this) {
