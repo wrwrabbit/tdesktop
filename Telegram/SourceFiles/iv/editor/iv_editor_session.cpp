@@ -1217,7 +1217,7 @@ private:
 		_attachments.push_back(std::move(record));
 		auto &stored = _attachments.back();
 		editor->insertPreparedBlock(makeAttachmentBlock(stored));
-		refreshAttachmentLocators(stored);
+		refreshAttachmentLocators(_state->richPage(), stored);
 		if (stored.blockLocators.empty()) {
 			_attachments.pop_back();
 			return;
@@ -1444,15 +1444,25 @@ private:
 			return;
 		}
 		attachment->progress = 1.;
-		if (!patchVisibleAttachmentBlocks(*attachment)) {
+		if (_editor) {
+			auto patched = true;
+			_editor->applyExternalRichPageMutation([&](RichPage &page) {
+				const auto result = patchVisibleAttachmentBlocks(
+					page,
+					*attachment);
+				patched = patched && result;
+				return result;
+			});
+			if (!patched) {
+				requestEditorUpdate();
+			}
+		} else if (!patchVisibleAttachmentBlocks(
+			*visibleRichPage(),
+			*attachment)) {
 			requestEditorUpdate();
 		} else {
 			_state->resyncAfterExternalRichPageMutation();
-			if (_editor) {
-				_editor->refreshPreparedContent();
-			} else {
-				requestEditorUpdate();
-			}
+			requestEditorUpdate();
 		}
 		maybeContinueSubmittedRequest();
 	}
@@ -1488,15 +1498,25 @@ private:
 			return;
 		}
 		attachment->progress = 1.;
-		if (!patchVisibleAttachmentBlocks(*attachment)) {
+		if (_editor) {
+			auto patched = true;
+			_editor->applyExternalRichPageMutation([&](RichPage &page) {
+				const auto result = patchVisibleAttachmentBlocks(
+					page,
+					*attachment);
+				patched = patched && result;
+				return result;
+			});
+			if (!patched) {
+				requestEditorUpdate();
+			}
+		} else if (!patchVisibleAttachmentBlocks(
+			*visibleRichPage(),
+			*attachment)) {
 			requestEditorUpdate();
 		} else {
 			_state->resyncAfterExternalRichPageMutation();
-			if (_editor) {
-				_editor->refreshPreparedContent();
-			} else {
-				requestEditorUpdate();
-			}
+			requestEditorUpdate();
 		}
 		maybeContinueSubmittedRequest();
 	}
@@ -1614,10 +1634,12 @@ private:
 		}
 	}
 
-	void refreshAttachmentLocators(AttachmentRecord &attachment) {
+	void refreshAttachmentLocators(
+		const RichPage &page,
+		AttachmentRecord &attachment) {
 		auto locators = std::vector<State::BlockPath>();
 		collectBlockLocators(
-			_state->richPage().blocks,
+			page.blocks,
 			State::BlockContainerPath(),
 			attachment,
 			locators);
@@ -1629,12 +1651,9 @@ private:
 	}
 
 	[[nodiscard]] std::vector<RichPage::Block> *visibleBlockContainer(
-			const State::BlockContainerPath &path) const {
-		const auto page = visibleRichPage();
-		if (!page) {
-			return nullptr;
-		}
-		auto result = &page->blocks;
+		RichPage &page,
+		const State::BlockContainerPath &path) const {
+		auto result = &page.blocks;
 		for (const auto &step : path.steps) {
 			switch (step.kind) {
 			case State::BlockContainerKind::Root:
@@ -1662,18 +1681,21 @@ private:
 	}
 
 	[[nodiscard]] RichPage::Block *visibleBlock(
-			const State::BlockPath &path) const {
-		const auto blocks = visibleBlockContainer(path.container);
+		RichPage &page,
+		const State::BlockPath &path) const {
+		const auto blocks = visibleBlockContainer(page, path.container);
 		if (!blocks || path.index < 0 || path.index >= int(blocks->size())) {
 			return nullptr;
 		}
 		return &(*blocks)[path.index];
 	}
 
-	[[nodiscard]] bool patchVisibleAttachmentBlocks(AttachmentRecord &attachment) {
-		refreshAttachmentLocators(attachment);
+	[[nodiscard]] bool patchVisibleAttachmentBlocks(
+		RichPage &page,
+		AttachmentRecord &attachment) {
+		refreshAttachmentLocators(page, attachment);
 		for (const auto &locator : attachment.blockLocators) {
-			const auto block = visibleBlock(locator);
+			const auto block = visibleBlock(page, locator);
 			if (!block || !blockMatchesAttachment(*block, attachment)) {
 				continue;
 			}
@@ -1681,7 +1703,7 @@ private:
 				return false;
 			}
 		}
-		refreshAttachmentLocators(attachment);
+		refreshAttachmentLocators(page, attachment);
 		return true;
 	}
 
@@ -1705,7 +1727,7 @@ private:
 	}
 
 	[[nodiscard]] bool hasVisibleAttachmentBlock(AttachmentRecord &attachment) {
-		refreshAttachmentLocators(attachment);
+		refreshAttachmentLocators(_state->richPage(), attachment);
 		return !attachment.blockLocators.empty();
 	}
 

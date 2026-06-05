@@ -804,6 +804,39 @@ const std::vector<TextNodeDescriptor> &State::textNodes() const {
 	return _textNodes;
 }
 
+State::Snapshot State::snapshot() const {
+	return {
+		.richPage = *_richPage,
+		.activeLeaf = activeLeafPath(),
+		.temporaryDownParagraph = _temporaryDownParagraph,
+	};
+}
+
+void State::restoreSnapshot(Snapshot snapshot) {
+	_richPage = std::make_shared<RichPage>(std::move(snapshot.richPage));
+	_activeTextOrdinal = -1;
+	_lastLimitError = std::nullopt;
+	_temporaryDownParagraph = std::move(snapshot.temporaryDownParagraph);
+	rebuild();
+	if (snapshot.activeLeaf && (textNodeOrdinal(*snapshot.activeLeaf) >= 0)) {
+		const auto activated = activateRebuiltLeaf(*snapshot.activeLeaf);
+		Assert(activated);
+	} else {
+		ensureActiveTextOrdinal();
+	}
+}
+
+std::optional<LeafPath> State::activeLeafPath() const {
+	if (const auto descriptor = textNode(_activeTextOrdinal)) {
+		return descriptor->leaf;
+	}
+	return std::nullopt;
+}
+
+int State::textOrdinalForLeafPath(const LeafPath &path) const {
+	return textNodeOrdinal(path);
+}
+
 void State::clearTemporaryDownParagraph() {
 	_temporaryDownParagraph = std::nullopt;
 }
@@ -826,7 +859,7 @@ void State::clearTemporaryDownParagraphIfInvalid() {
 int State::textOrdinalForLeaf(
 		const Markdown::PreparedEditLeafSource &source) const {
 	const auto leaf = convertLeafPath(source);
-	return leaf ? textNodeOrdinal(*leaf) : -1;
+	return leaf ? textOrdinalForLeafPath(*leaf) : -1;
 }
 
 PreparedMutationKind State::lastPreparedMutationKind() const {

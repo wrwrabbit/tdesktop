@@ -131,6 +131,12 @@ public:
 		}
 	};
 
+	struct Snapshot {
+		RichPage richPage;
+		std::optional<LeafPath> activeLeaf;
+		std::optional<LeafPath> temporaryDownParagraph;
+	};
+
 	struct InsertionAnchor {
 		BlockContainerPath container;
 		int blockIndex = -1;
@@ -208,6 +214,10 @@ public:
 	[[nodiscard]] const RichPage &richPage() const;
 	[[nodiscard]] const Markdown::MarkdownArticleContent &prepared() const;
 	[[nodiscard]] const std::vector<TextNodeDescriptor> &textNodes() const;
+	[[nodiscard]] Snapshot snapshot() const;
+	void restoreSnapshot(Snapshot snapshot);
+	[[nodiscard]] std::optional<LeafPath> activeLeafPath() const;
+	[[nodiscard]] int textOrdinalForLeafPath(const LeafPath &path) const;
 	[[nodiscard]] int textOrdinalForLeaf(
 		const Markdown::PreparedEditLeafSource &source) const;
 	[[nodiscard]] PreparedMutationKind lastPreparedMutationKind() const;
