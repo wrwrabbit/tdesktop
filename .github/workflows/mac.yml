@@ -74,8 +74,6 @@ jobs:
 
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-          sudo sed -i '' '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/ -g//' /opt/homebrew/share/cmake/Modules/Compiler/GNU.cmake
-
       - name: Libraries cache.
         id: cache-libs
         uses: actions/cache@v5
@@ -109,14 +107,64 @@ jobs:
 
           ./configure.sh \
           -D CMAKE_CONFIGURATION_TYPES=Debug \
+          -D CMAKE_OSX_ARCHITECTURES=x86_64 \
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON \
           -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+          -D CMAKE_XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
+          -D CMAKE_XCODE_ATTRIBUTE_GCC_GENERATE_DEBUGGING_SYMBOLS=YES \
+          -D CMAKE_XCODE_ATTRIBUTE_DEPLOYMENT_POSTPROCESSING=NO \
+          -D CMAKE_XCODE_ATTRIBUTE_STRIP_INSTALLED_PRODUCT=NO \
+          -D CMAKE_XCODE_ATTRIBUTE_ENABLE_ADDRESS_SANITIZER=YES \
           -D TDESKTOP_API_TEST=ON \
-          -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           $DEFINE
 
           cmake --build ../out --config Debug --parallel
+
+      - name: Bundle AddressSanitizer runtime into the app.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          cd $REPO_NAME/out/Debug
+          APP=Telegram.app
+          BIN="$APP/Contents/MacOS/Telegram"
+          FRAMEWORKS="$APP/Contents/Frameworks"
+
+          # Fail loudly if ASan did not actually get linked into the binary.
+          ASAN_IN_BIN=$(otool -L "$BIN" | awk '/libclang_rt.asan/ {print $1; exit}')
+          if [ -z "$ASAN_IN_BIN" ]; then
+            echo "Binary is not linked against the ASan runtime." >&2
+            exit 1
+          fi
+          echo "Binary references ASan runtime as: $ASAN_IN_BIN"
+
+          ASAN_DYLIB=$(find "$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang" \
+            -name 'libclang_rt.asan_osx_dynamic.dylib' | head -n1)
+          if [ -z "$ASAN_DYLIB" ]; then
+            echo "AddressSanitizer runtime dylib not found in the toolchain." >&2
+            exit 1
+          fi
+          echo "Using ASan runtime: $ASAN_DYLIB"
+
+          mkdir -p "$FRAMEWORKS"
+          cp "$ASAN_DYLIB" "$FRAMEWORKS/"
+
+          # Normalize the load command to @rpath form (older clang may embed an
+          # absolute toolchain path that does not exist on the user's machine).
+          if [ "$ASAN_IN_BIN" != "@rpath/libclang_rt.asan_osx_dynamic.dylib" ]; then
+            install_name_tool -change "$ASAN_IN_BIN" \
+              @rpath/libclang_rt.asan_osx_dynamic.dylib "$BIN"
+          fi
+
+          # Add an rpath that resolves inside the bundle on the user's machine.
+          install_name_tool -add_rpath @executable_path/../Frameworks "$BIN"
+
+          # Re-sign (ad-hoc) after the load-command edit.
+          codesign --force --sign - "$FRAMEWORKS/libclang_rt.asan_osx_dynamic.dylib"
+          codesign --force --sign - "$BIN"
+
+          echo "ASan load command:"
+          otool -L "$BIN" | grep asan || true
 
       - name: Move artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
@@ -124,6 +172,7 @@ jobs:
           cd $REPO_NAME/out/Debug
           mkdir artifact
           mv Telegram.app artifact/
+          mv Telegram.app.dSYM artifact/
           mv Updater artifact/
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
