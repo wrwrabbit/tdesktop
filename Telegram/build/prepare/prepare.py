@@ -455,7 +455,7 @@ if customRunCommand:
 stage('patches', """
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 99e4345c14fb57164139654d62ae483ceba49e2c
+    git checkout e55cfac896a7ca28813c36ec9b442c4927d83ce8
 mac:
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
     cd qt6_highsierra
@@ -1069,7 +1069,7 @@ win32:
 win64:
     SET "TOOLCHAIN=x86_64-win64-vs17"
 winarm:
-    SET "TOOLCHAIN=arm64-win64-vs17"
+    SET "TOOLCHAIN=arm64-win64-vs17-v145"
 win:
 depends:patches/build_libvpx_win.sh
     bash --login ../patches/build_libvpx_win.sh
