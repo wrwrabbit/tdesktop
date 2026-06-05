@@ -268,6 +268,41 @@ void ShowProxyQrBox(std::shared_ptr<Ui::Show> show, const QString &link) {
 	}));
 }
 
+void ShareProxy(
+		std::shared_ptr<Ui::Show> show,
+		not_null<Main::Account*> account,
+		const ProxyData &proxy,
+		bool qr) {
+	if (!ProxyDataIsShareable(proxy)) {
+		return;
+	}
+	const auto qrLink = ProxyDataToLocalLink(proxy);
+	if (qrLink.isEmpty()) {
+		return;
+	}
+	if (qr) {
+		if (account->sessionExists()) {
+			show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+				Ui::FillPeerQrBox(
+					box,
+					nullptr,
+					qrLink,
+					rpl::single(QString()));
+				box->setTitle(tr::lng_proxy_edit_share_qr_box_title());
+			}));
+		} else {
+			ShowProxyQrBox(show, qrLink);
+		}
+		return;
+	}
+	const auto shareLink = ProxyDataToPublicLink(account, proxy);
+	if (shareLink.isEmpty()) {
+		return;
+	}
+	TextUtilities::SetClipboardText(TextForMimeData::Simple(shareLink));
+	show->showToast(tr::lng_username_copied(tr::now));
+}
+
 [[nodiscard]] ProxyData ProxyDataFromFields(
 		ProxyData::Type type,
 		const QMap<QString, QString> &fields) {
@@ -1698,6 +1733,47 @@ void ProxiesBoxController::ShowApplyConfirmation(
 			box->closeBox();
 		});
 
+		if (ProxyDataIsShareable(proxy)) {
+			const auto account = controller
+				? &controller->session().account()
+				: &Core::App().activeAccount();
+			const auto top = box->addTopButton(st::boxTitleMenu);
+			const auto menu = top->lifetime().make_state<
+				base::unique_qptr<Ui::PopupMenu>>();
+			top->setClickedCallback([=] {
+				*menu = base::make_unique_q<Ui::PopupMenu>(
+					top,
+					st::popupMenuWithIcons);
+				const auto raw = menu->get();
+				const auto addAction = Ui::Menu::CreateAddActionCallback(raw);
+				addAction({
+					.text = tr::lng_proxy_edit_share(tr::now),
+					.handler = [=] {
+						ShareProxy(box->uiShow(), account, proxy, false);
+					},
+					.icon = &st::menuIconShare,
+				});
+				addAction({
+					.text = tr::lng_group_invite_context_qr(tr::now),
+					.handler = [=] {
+						ShareProxy(box->uiShow(), account, proxy, true);
+					},
+					.icon = &st::menuIconQrCode,
+				});
+				raw->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
+				top->setForceRippled(true);
+				raw->setDestroyedCallback([=] {
+					if (const auto strong = top.data()) {
+						strong->setForceRippled(false);
+					}
+				});
+				raw->popup(top->mapToGlobal(QPoint(
+					top->width(),
+					top->height() - st::lineWidth * 3)));
+				return true;
+			});
+		}
+
 		const auto table = box->addRow(
 			object_ptr<Ui::TableLayout>(
 				box,
@@ -2283,30 +2359,7 @@ void ProxiesBoxController::updateView(const Item &item) {
 }
 
 void ProxiesBoxController::share(const ProxyData &proxy, bool qr) {
-	if (!ProxyDataIsShareable(proxy)) {
-		return;
-	}
-	const auto qrLink = ProxyDataToLocalLink(proxy);
-	if (qrLink.isEmpty()) {
-		return;
-	}
-	if (qr) {
-		if (_account->sessionExists()) {
-			_show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
-				Ui::FillPeerQrBox(box, nullptr, qrLink, rpl::single(QString()));
-				box->setTitle(tr::lng_proxy_edit_share_qr_box_title());
-			}));
-		} else {
-			ShowProxyQrBox(_show, qrLink);
-		}
-		return;
-	}
-	const auto shareLink = ProxyDataToPublicLink(_account, proxy);
-	if (shareLink.isEmpty()) {
-		return;
-	}
-	QGuiApplication::clipboard()->setText(shareLink);
-	_show->showToast(tr::lng_username_copied(tr::now));
+	ShareProxy(_show, _account, proxy, qr);
 }
 
 void ProxiesBoxController::Show(
