@@ -9,71 +9,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/gl/gl_detection.h"
 #include "ui/power_saving.h"
-#include "base/debug_log.h"
-#include "base/platform/base_platform_info.h"
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-#include <rhi/qrhi.h>
-#if !defined(Q_OS_MAC) && !defined(Q_OS_WIN)
-#include <QtGui/QOffscreenSurface>
-#include <QtGui/QSurfaceFormat>
-#endif // !Q_OS_MAC && !Q_OS_WIN
-#endif // Qt >= 6.7
 
 namespace Ui::Premium {
 namespace {
 
 constexpr auto kBezierIterations = 40;
 constexpr auto kBezierEpsilon = 0.00001;
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-[[nodiscard]] bool ProbeGraphicsSupport() {
-	auto rhi = std::unique_ptr<QRhi>();
-#ifdef Q_OS_MAC
-	if (::Platform::MetalSupported()) {
-		auto params = QRhiMetalInitParams();
-		rhi.reset(QRhi::create(QRhi::Metal, &params));
-	}
-	if (!rhi) {
-		LOG(("Premium3d: probe failed — no Metal RHI"));
-		return false;
-	}
-#elif defined(Q_OS_WIN)
-	auto params = QRhiD3D11InitParams();
-	rhi.reset(QRhi::create(QRhi::D3D11, &params));
-	if (!rhi) {
-		LOG(("Premium3d: probe failed — no D3D11 RHI"));
-		return false;
-	}
-#else
-	auto format = QSurfaceFormat::defaultFormat();
-	auto offscreen = std::unique_ptr<QOffscreenSurface>(
-		QRhiGles2InitParams::newFallbackSurface(format));
-	if (!offscreen) {
-		LOG(("Premium3d: probe failed — no offscreen surface"));
-		return false;
-	}
-	auto params = QRhiGles2InitParams();
-	params.format = format;
-	params.fallbackSurface = offscreen.get();
-	rhi.reset(QRhi::create(QRhi::OpenGLES2, &params));
-	if (!rhi) {
-		LOG(("Premium3d: probe failed — no GL RHI"));
-		return false;
-	}
-#endif
-	LOG(("Premium3d: probe backend=%1 device=%2"
-		).arg(rhi->backendName()
-		).arg(rhi->driverInfo().deviceName));
-	rhi.reset();
-	return true;
-}
-
-[[nodiscard]] bool RhiGraphicsSupportedCached() {
-	static const auto cached = ProbeGraphicsSupport();
-	return cached;
-}
-#endif // Qt >= 6.7
 
 } // namespace
 
@@ -118,7 +59,7 @@ bool Object3dSupported() {
 	if (!GL::WidgetsRhiEnabled()) {
 		return false;
 	}
-	return RhiGraphicsSupportedCached();
+	return GL::CheckRhiCapabilities().supported;
 #else
 	return false;
 #endif
