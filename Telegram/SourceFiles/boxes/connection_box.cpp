@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/connection_box.h"
 
 #include "base/call_delayed.h"
+#include "base/qt/qt_key_modifiers.h"
 #include "base/qthelp_regex.h"
 #include "base/qthelp_url.h"
 #include "base/weak_ptr.h"
@@ -295,7 +296,12 @@ void ShareProxy(
 		}
 		return;
 	}
-	const auto shareLink = ProxyDataToPublicLink(account, proxy);
+	const auto internal = base::IsCtrlPressed()
+		|| base::IsAltPressed()
+		|| base::IsShiftPressed();
+	const auto shareLink = internal
+		? qrLink
+		: ProxyDataToPublicLink(account, proxy);
 	if (shareLink.isEmpty()) {
 		return;
 	}
