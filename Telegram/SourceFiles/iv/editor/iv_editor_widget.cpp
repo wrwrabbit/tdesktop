@@ -1522,6 +1522,43 @@ bool Widget::handleUndoRedoShortcut(QKeyEvent *e) {
 	return true;
 }
 
+bool Widget::handleSelectAllShortcut(QKeyEvent *e) {
+	if (e != QKeySequence::SelectAll) {
+		return false;
+	}
+	if (!_field->isHidden()) {
+		const auto committed = recordMutationTransaction([&] {
+			const auto committed = commitInlineField();
+			if (committed != ApplyResult::Failed) {
+				_pendingOrdinal = -1;
+				_pendingCursorOffset = 0;
+				hideInlineField();
+				clearInlineFieldEditSession();
+			}
+			return committed;
+		});
+		if (committed == ApplyResult::Failed) {
+			e->accept();
+			return true;
+		}
+		refreshAfterInlineFieldCommit(committed);
+	}
+	const auto blockCount = int(_state->richPage().blocks.size());
+	_selection = {};
+	_selectionEndpoints = {};
+	_articleSelectionDrag = {};
+	setStructuralSelection(blockCount > 0
+		? BlockSelectionFromIndexes(
+			PreparedEditBlockContainerPath(),
+			0,
+			blockCount - 1)
+		: PreparedEditSelection());
+	setFocus();
+	update();
+	e->accept();
+	return true;
+}
+
 bool Widget::performFieldUndoRedo(bool redo) {
 	if (!canPerformFieldUndoRedo(redo)) {
 		return false;
@@ -1674,6 +1711,7 @@ bool Widget::eventFilter(QObject *object, QEvent *event) {
 			} else if (type == QEvent::KeyPress) {
 				const auto keyEvent = static_cast<QKeyEvent*>(event);
 				if (handleUndoRedoShortcut(keyEvent)
+					|| handleSelectAllShortcut(keyEvent)
 					|| handleTabNavigation(keyEvent)
 					|| handleStructuralSelectionKey(keyEvent)
 					|| handleFieldKey(keyEvent)) {
@@ -1752,6 +1790,8 @@ bool Widget::focusNextPrevChild(bool next) {
 
 void Widget::keyPressEvent(QKeyEvent *e) {
 	if (handleUndoRedoShortcut(e)) {
+		return;
+	} else if (handleSelectAllShortcut(e)) {
 		return;
 	} else if (handleClipboardKey(e)) {
 		return;
