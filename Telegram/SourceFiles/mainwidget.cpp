@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "dialogs/dialogs_widget.h"
 #include "history/history_widget.h"
+#include "history/history_drag_area.h"
 #include "history/history_item_helpers.h" // GetErrorForSending.
 #include "history/view/media/history_view_media.h"
 #include "history/view/history_view_chat_section.h"
@@ -75,6 +76,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
+#include "core/click_handler_types.h"
 #include "core/changelogs.h"
 #include "core/mime_type.h"
 #include "calls/calls_call.h"
@@ -436,6 +438,15 @@ MainWidget::MainWidget(
 	cSetOtherOnline(0);
 
 	session().data().stickers().notifySavedGifsUpdated();
+
+	const auto weak = base::make_weak(controller);
+	DragArea::SetupProxyDropArea(this, [=](const QString &localUrl) {
+		Core::App().openLocalUrl(
+			localUrl,
+			QVariant::fromValue(ClickHandlerContext{
+				.sessionWindow = weak,
+			}));
+	});
 }
 
 MainWidget::~MainWidget() {

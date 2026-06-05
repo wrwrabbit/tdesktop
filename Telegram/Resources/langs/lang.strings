@@ -5565,6 +5565,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_drag_to_send_files" = "to send them as documents";
 "lng_drag_to_send_media" = "to send them as media files";
 
+"lng_drag_proxy_here" = "Connect to a proxy";
+"lng_drag_proxy_about" = "Drop the link here";
+
 "lng_selected_clear" = "Cancel";
 "lng_selected_delete" = "Delete";
 "lng_selected_forward" = "Forward";

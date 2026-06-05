@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document_media.h"
 #include "dialogs/ui/dialogs_layout.h"
 #include "history/history.h"
+#include "history/history_drag_area.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
@@ -296,6 +297,9 @@ void MainWindow::setupIntro(
 
 	clearWidgets();
 	_intro = std::move(created);
+	DragArea::SetupProxyDropArea(_intro.data(), [](const QString &localUrl) {
+		Core::App().openLocalUrl(localUrl, {});
+	});
 	if (_passcodeLock || _setupEmailLock) {
 		_intro->hide();
 	} else {
