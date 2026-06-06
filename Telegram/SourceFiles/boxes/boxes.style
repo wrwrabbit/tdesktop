@@ -899,12 +899,22 @@ scheduleTimeSeparator: FlatLabel(defaultFlatLabel) {
 }
 scheduleTimeSeparatorPadding: margins(2px, 0px, 2px, 0px);
 scheduleRepeatDropdownLock: IconEmoji {
-	icon: icon {{ "emoji/premium_lock", windowActiveTextFg }};
-	padding: margins(-2px, 1px, 0px, 0px);
+	icon: icon {{ "emoji/premium_lock", windowSubTextFg }};
+	padding: margins(1px, 1px, 0px, 0px);
 }
 scheduleRepeatDropdownArrow: IconEmoji {
-	icon: icon {{ "intro_country_dropdown", windowActiveTextFg }};
-	padding: margins(3px, 6px, 3px, 0px);
+	icon: icon {{ "arrows_select", windowSubTextFg }};
+	padding: margins(6px, 5px, 0px, 0px);
+}
+scheduleRepeatHeight: 28px;
+scheduleRepeatRadius: 14px;
+scheduleRepeatTextPadding: 12px;
+scheduleRepeatMargin: margins(0px, -4px, 0px, 10px);
+scheduleRepeatLabel: FlatLabel(defaultFlatLabel) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+	}
+	textFg: windowBoldFg;
 }
 
 muteBoxTimeField: InputField(scheduleDateField) {

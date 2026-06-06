@@ -10,10 +10,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/event_filter.h"
 #include "ui/boxes/calendar_box.h"
+#include "ui/effects/ripple_animation.h"
+#include "ui/painter.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/fields/input_field.h"
+#include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/widgets/shadow.h"
 #include "ui/widgets/time_input.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
@@ -47,6 +51,62 @@ QString TimeString(QTime time) {
 	return QString("%1:%2"
 	).arg(time.hour()
 	).arg(time.minute(), 2, 10, QLatin1Char('0'));
+}
+
+class RepeatButton final : public Ui::RippleButton {
+public:
+	explicit RepeatButton(not_null<QWidget*> parent);
+
+	void setMarkedText(TextWithEntities text);
+
+protected:
+	void paintEvent(QPaintEvent *e) override;
+
+	QImage prepareRippleMask() const override;
+
+private:
+	const not_null<Ui::FlatLabel*> _label;
+
+};
+
+RepeatButton::RepeatButton(not_null<QWidget*> parent)
+: RippleButton(parent, st::defaultRippleAnimation)
+, _label(Ui::CreateChild<Ui::FlatLabel>(this, st::scheduleRepeatLabel)) {
+	_label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	setPointerCursor(true);
+
+	_label->naturalWidthValue() | rpl::on_next([=](int natural) {
+		_label->resizeToWidth(natural);
+	}, lifetime());
+
+	_label->sizeValue() | rpl::on_next([=](QSize size) {
+		const auto padding = st::scheduleRepeatTextPadding;
+		const auto height = st::scheduleRepeatHeight;
+		resize(size.width() + 2 * padding, height);
+		_label->moveToLeft(padding, (height - size.height()) / 2);
+	}, lifetime());
+}
+
+void RepeatButton::setMarkedText(TextWithEntities text) {
+	_label->setMarkedText(std::move(text));
+}
+
+void RepeatButton::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	const auto radius = st::scheduleRepeatRadius;
+	{
+		auto hq = PainterHighQualityEnabler(p);
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(rect(), radius, radius);
+	}
+	paintRipple(p, QPoint());
+}
+
+QImage RepeatButton::prepareRippleMask() const {
+	return Ui::RippleAnimation::RoundRectMask(
+		size(),
+		st::scheduleRepeatRadius);
 }
 
 } // namespace
@@ -272,16 +332,14 @@ object_ptr<Ui::RpWidget> ChooseRepeatPeriod(
 		map.insert(begin(map) + 1, Entry{ 60, u"Every minute"_q });
 	}
 
-	const auto label = Ui::CreateChild<Ui::FlatLabel>(raw, QString());
+	const auto button = Ui::CreateChild<RepeatButton>(raw);
 	rpl::combine(
 		raw->widthValue(),
-		label->naturalWidthValue()
-	) | rpl::on_next([=](int outer, int natural) {
-		label->resizeToWidth(std::min(outer, natural));
+		button->sizeValue()
+	) | rpl::on_next([=](int outer, QSize size) {
+		raw->resize(outer, size.height());
+		button->moveToLeft((outer - size.width()) / 2, 0, outer);
 	}, raw->lifetime());
-	label->heightValue() | rpl::on_next([=](int height) {
-		raw->resize(raw->width(), height);
-	}, label->lifetime());
 
 	struct State {
 		rpl::variable<TimeId> value;
@@ -310,25 +368,24 @@ object_ptr<Ui::RpWidget> ChooseRepeatPeriod(
 			return (i != end(map)) ? i->text : map.back().text;
 		}();
 
-		label->setMarkedText(result.append(' ').append(tr::link(
+		button->setMarkedText(result.append(' ').append(
 			tr::bold(text).append(
 				Ui::Text::IconEmoji(locked
 					? &st::scheduleRepeatDropdownLock
-					: &st::scheduleRepeatDropdownArrow))
-		)));
+					: &st::scheduleRepeatDropdownArrow))));
 		return result;
-	}, label->lifetime());
+	}, button->lifetime());
 
-	label->setClickHandlerFilter([=](const auto &...) {
+	button->setClickedCallback([=] {
 		if (args.filter && args.filter()) {
-			return false;
+			return;
 		}
 		const auto changed = args.changed;
 
-		state->menu = std::make_unique<Ui::PopupMenu>(label);
+		state->menu = std::make_unique<Ui::PopupMenu>(button);
 		const auto menu = state->menu.get();
 
-		menu->setDestroyedCallback(crl::guard(label, [=] {
+		menu->setDestroyedCallback(crl::guard(button, [=] {
 			if (state->menu.get() == menu) {
 				state->menu.release();
 			}
@@ -340,8 +397,16 @@ object_ptr<Ui::RpWidget> ChooseRepeatPeriod(
 				changed(value);
 			});
 		}
-		menu->popup(QCursor::pos());
-		return false;
+		menu->setForcedOrigin(Ui::PanelAnimation::Origin::BottomLeft);
+		const auto anchor = button->mapToGlobal(
+			QPoint(button->width() / 2, 0));
+		if (menu->prepareGeometryFor(anchor)) {
+			menu->move(
+				anchor.x() - menu->width() / 2,
+				menu->y()
+					- Ui::BoxShadow::ExtendFor(menu->st().shadow).bottom());
+			menu->popupPrepared();
+		}
 	});
 
 	return result;

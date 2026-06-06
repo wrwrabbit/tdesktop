@@ -293,7 +293,7 @@ void ScheduleBox(
 			.filter = showPremiumPromo,
 			.changed = [=](TimeId value) { *repeat = value; },
 			.test = session->isTestMode(),
-		}), style::al_top);
+		}), st::scheduleRepeatMargin, style::al_top);
 		std::move(descriptor.width) | rpl::on_next([=](int width) {
 			row->setNaturalWidth(width);
 		}, row->lifetime());
