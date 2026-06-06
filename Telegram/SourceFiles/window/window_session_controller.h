@@ -555,6 +555,7 @@ public:
 	}
 	void removeLayerBlackout();
 	[[nodiscard]] bool isLayerShown() const;
+	[[nodiscard]] rpl::producer<bool> boxShownValue() const;
 	void registerActiveLayerSection(SectionWidget *section);
 	void unregisterActiveLayerSection(SectionWidget *section);
 	[[nodiscard]] SectionWidget *activeLayerSection() const;

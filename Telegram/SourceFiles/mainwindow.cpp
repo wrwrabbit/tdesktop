@@ -424,6 +424,11 @@ void MainWindow::ensureLayerCreated() {
 		destroyLayer();
 	}, _layer->lifetime());
 
+	_layer->boxShownValue(
+	) | rpl::on_next([=](bool shown) {
+		_boxShown = shown;
+	}, _layer->lifetime());
+
 	if (const auto controller = sessionController()) {
 		controller->enableGifPauseReason(Window::GifPauseReason::Layer);
 	}
@@ -435,6 +440,7 @@ void MainWindow::destroyLayer() {
 	}
 
 	auto layer = base::take(_layer);
+	_boxShown = false;
 	const auto resetFocus = Ui::InFocusChain(layer);
 	if (resetFocus) {
 		setFocus();
@@ -500,6 +506,10 @@ void MainWindow::showOrHideBoxOrLayer(
 
 bool MainWindow::ui_isLayerShown() const {
 	return _layer != nullptr;
+}
+
+rpl::producer<bool> MainWindow::ui_boxShownValue() const {
+	return _boxShown.value();
 }
 
 bool MainWindow::showMediaPreview(

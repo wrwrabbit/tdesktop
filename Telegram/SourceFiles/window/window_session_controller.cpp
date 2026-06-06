@@ -3129,6 +3129,10 @@ bool SessionController::isLayerShown() const {
 	return _window->isLayerShown();
 }
 
+rpl::producer<bool> SessionController::boxShownValue() const {
+	return _window->boxShownValue();
+}
+
 void SessionController::registerActiveLayerSection(SectionWidget *section) {
 	_activeLayerSection = section;
 }

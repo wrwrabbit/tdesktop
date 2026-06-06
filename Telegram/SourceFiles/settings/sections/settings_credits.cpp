@@ -138,7 +138,6 @@ private:
 	base::unique_qptr<Ui::IconButton> _close;
 	rpl::variable<bool> _backToggles;
 	rpl::variable<Info::Wrap> _wrap;
-	Fn<void(bool)> _setPaused;
 
 	rpl::event_stream<> _showBack;
 	rpl::event_stream<> _showFinished;
@@ -705,9 +704,10 @@ base::weak_qptr<Ui::RpWidget> Credits::createPinnedToTop(
 				.showFinished = _showFinished.events(),
 			});
 	}();
-	_setPaused = [=](bool paused) {
-		content->setPaused(paused);
-	};
+	controller()->boxShownValue(
+	) | rpl::on_next([=](bool shown) {
+		content->setPaused(shown);
+	}, content->lifetime());
 
 	_wrap.value(
 	) | rpl::on_next([=](Info::Wrap wrap) {

@@ -10,8 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 
-#include <QtGui/QColor>
-
 namespace Ui::Premium {
 
 class StarRenderer;
@@ -32,6 +30,7 @@ public:
 	[[nodiscard]] rpl::producer<float64> flungStrength() const;
 
 protected:
+	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void showEvent(QShowEvent *e) override;
 	void hideEvent(QHideEvent *e) override;
@@ -67,6 +66,8 @@ private:
 
 	void ensureSurface();
 	[[nodiscard]] QWidget *surfaceWidget() const;
+	void freeze();
+	void unfreeze();
 	void startAnimation();
 	void stopAnimation();
 	void frame();
@@ -87,6 +88,7 @@ private:
 
 	StarRenderer *_renderer = nullptr;
 	std::unique_ptr<RpWidgetWrap> _surface;
+	QImage _frozen;
 	Ui::Animations::Basic _animation;
 	crl::time _lastFrame = 0;
 
@@ -111,6 +113,8 @@ private:
 	rpl::event_stream<float64> _flung;
 
 	bool _paused = false;
+	bool _entered = false;
+	crl::time _pausedAt = 0;
 
 };
 

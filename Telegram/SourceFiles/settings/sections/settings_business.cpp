@@ -619,16 +619,7 @@ void BuildBusinessSectionContent(
 				const auto alwaysAvailable
 					= (feature == PremiumFeature::BusinessBots);
 				if (!alwaysAvailable && !session->premium()) {
-					if (state && state->setPaused) {
-						state->setPaused(true);
-					}
-					const auto hidden = crl::guard(content, [=] {
-						if (state && state->setPaused) {
-							state->setPaused(false);
-						}
-					});
-
-					ShowPremiumPreviewToBuy(controller, feature, hidden);
+					ShowPremiumPreviewToBuy(controller, feature, nullptr);
 					return;
 				} else if (!isReady(feature)) {
 					*waitingToShow = feature;
@@ -819,6 +810,10 @@ base::weak_qptr<Ui::RpWidget> Business::createPinnedToTop(
 			_subscribe->setGlarePaused(paused);
 		}
 	};
+	controller()->boxShownValue(
+	) | rpl::on_next([=](bool shown) {
+		_state->setPaused(shown);
+	}, content->lifetime());
 
 	_wrap.value(
 	) | rpl::on_next([=](Info::Wrap wrap) {

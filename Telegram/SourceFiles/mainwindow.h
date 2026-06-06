@@ -102,6 +102,7 @@ public:
 	void ui_hideSettingsAndLayer(anim::type animated);
 	void ui_removeLayerBlackout();
 	[[nodiscard]] bool ui_isLayerShown() const;
+	[[nodiscard]] rpl::producer<bool> ui_boxShownValue() const;
 	bool showMediaPreview(
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document);
@@ -133,6 +134,7 @@ private:
 	object_ptr<Intro::Widget> _intro = { nullptr };
 	object_ptr<MainWidget> _main = { nullptr };
 	base::unique_qptr<Ui::LayerStackWidget> _layer;
+	rpl::variable<bool> _boxShown = false;
 	object_ptr<Window::MediaPreviewWidget> _mediaPreview = { nullptr };
 
 	object_ptr<Window::Theme::WarningWidget> _testingThemeWarning = { nullptr };

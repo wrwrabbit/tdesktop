@@ -64,8 +64,48 @@ void Object3dCover::setPaused(bool paused) {
 	}
 	_paused = paused;
 	if (_paused) {
-		stopAnimation();
-	} else if (!isHidden()) {
+		freeze();
+	} else {
+		unfreeze();
+	}
+}
+
+void Object3dCover::freeze() {
+	stopAnimation();
+	_pausedAt = crl::now();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	const auto w = surfaceWidget();
+	if (!w || w->isHidden()) {
+		return;
+	}
+	const auto rhi = qobject_cast<QRhiWidget*>(w);
+	auto image = rhi ? rhi->grabFramebuffer() : QImage();
+	if (image.isNull()) {
+		return;
+	}
+	_frozen = std::move(image);
+	pushState();
+	w->update();
+	update();
+#endif // Qt >= 6.7
+}
+
+void Object3dCover::unfreeze() {
+	if (!_frozen.isNull()) {
+		_frozen = QImage();
+		update();
+	}
+	if (_pausedAt) {
+		const auto delta = crl::now() - _pausedAt;
+		if (_gesture) {
+			_gesture->start += delta;
+		}
+		if (_idleAt) {
+			_idleAt += delta;
+		}
+		_pausedAt = 0;
+	}
+	if (!isHidden()) {
 		startAnimation();
 	}
 }
@@ -205,7 +245,7 @@ void Object3dCover::pushState() {
 		float(_yaw),
 		float(_pitch),
 		float(_time),
-		float(_opacity),
+		_paused ? 0.f : float(_opacity),
 		_night);
 }
 
@@ -315,6 +355,14 @@ void Object3dCover::startTapTilt(QPoint position) {
 	play(std::move(gesture));
 }
 
+void Object3dCover::paintEvent(QPaintEvent *e) {
+	if (_frozen.isNull()) {
+		return;
+	}
+	auto p = QPainter(this);
+	p.drawImage(rect(), _frozen);
+}
+
 void Object3dCover::resizeEvent(QResizeEvent *e) {
 	if (const auto w = surfaceWidget()) {
 		w->setGeometry(rect());
@@ -326,14 +374,20 @@ void Object3dCover::showEvent(QShowEvent *e) {
 	if (const auto w = surfaceWidget()) {
 		w->show();
 	}
-	_yaw = _pitch = 0.;
-	_gesture.reset();
-	scheduleIdle(0);
+	if (!_entered) {
+		_entered = true;
+		_yaw = _pitch = 0.;
+		_gesture.reset();
+		scheduleIdle(0);
+	}
 	startAnimation();
 }
 
 void Object3dCover::hideEvent(QHideEvent *e) {
 	stopAnimation();
+	if (_entered) {
+		return;
+	}
 	_gesture.reset();
 	cancelIdle();
 	_yaw = _pitch = 0.;

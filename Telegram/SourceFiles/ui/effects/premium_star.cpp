@@ -13,6 +13,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/random.h"
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#include <QRhiWidget>
+#endif // Qt >= 6.7
+
 namespace Ui::Premium {
 namespace {
 
@@ -81,8 +85,48 @@ void Star::setPaused(bool paused) {
 	}
 	_paused = paused;
 	if (_paused) {
-		stopAnimation();
-	} else if (!isHidden()) {
+		freeze();
+	} else {
+		unfreeze();
+	}
+}
+
+void Star::freeze() {
+	stopAnimation();
+	_pausedAt = crl::now();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	const auto w = surfaceWidget();
+	if (!w || w->isHidden()) {
+		return;
+	}
+	const auto rhi = qobject_cast<QRhiWidget*>(w);
+	auto image = rhi ? rhi->grabFramebuffer() : QImage();
+	if (image.isNull()) {
+		return;
+	}
+	_frozen = std::move(image);
+	pushState();
+	w->update();
+	update();
+#endif // Qt >= 6.7
+}
+
+void Star::unfreeze() {
+	if (!_frozen.isNull()) {
+		_frozen = QImage();
+		update();
+	}
+	if (_pausedAt) {
+		const auto delta = crl::now() - _pausedAt;
+		if (_gesture) {
+			_gesture->start += delta;
+		}
+		if (_idleAt) {
+			_idleAt += delta;
+		}
+		_pausedAt = 0;
+	}
+	if (!isHidden()) {
 		startAnimation();
 	}
 }
@@ -221,7 +265,7 @@ void Star::pushState() {
 			.pitch = float(_pitch),
 			.bob = float(_bob),
 			.shimmer = float(_shimmer),
-			.alpha = float(_fadeIn * _opacity),
+			.alpha = _paused ? 0.f : float(_fadeIn * _opacity),
 		});
 	}
 #endif // Qt >= 6.7
@@ -410,6 +454,14 @@ void Star::sleepGesture() {
 	play(std::move(gesture));
 }
 
+void Star::paintEvent(QPaintEvent *e) {
+	if (_frozen.isNull()) {
+		return;
+	}
+	auto p = QPainter(this);
+	p.drawImage(rect(), _frozen);
+}
+
 void Star::resizeEvent(QResizeEvent *e) {
 	if (const auto w = surfaceWidget()) {
 		w->setGeometry(rect());
@@ -417,6 +469,10 @@ void Star::resizeEvent(QResizeEvent *e) {
 }
 
 void Star::startEnter() {
+	if (_entered) {
+		return;
+	}
+	_entered = true;
 	base::call_delayed(kEnterDelay, this, [=] {
 		if (isHidden()) {
 			return;
@@ -433,6 +489,13 @@ void Star::startEnter() {
 
 void Star::showEvent(QShowEvent *e) {
 	ensureSurface();
+	if (_entered) {
+		if (const auto w = surfaceWidget()) {
+			w->show();
+		}
+		startAnimation();
+		return;
+	}
 	_yaw = kEnterYaw;
 	_pitch = _bob = 0.;
 	_gesture.reset();
@@ -445,6 +508,9 @@ void Star::showEvent(QShowEvent *e) {
 
 void Star::hideEvent(QHideEvent *e) {
 	stopAnimation();
+	if (_entered) {
+		return;
+	}
 	_gesture.reset();
 	cancelIdle();
 	_yaw = _pitch = _bob = 0.;

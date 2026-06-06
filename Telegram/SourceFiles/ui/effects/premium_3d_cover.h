@@ -47,6 +47,7 @@ protected:
 		float alpha,
 		bool night) = 0;
 
+	void paintEvent(QPaintEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 	void showEvent(QShowEvent *e) override;
 	void hideEvent(QHideEvent *e) override;
@@ -79,6 +80,8 @@ private:
 
 	void ensureSurface();
 	[[nodiscard]] QWidget *surfaceWidget() const;
+	void freeze();
+	void unfreeze();
 	void startAnimation();
 	void stopAnimation();
 	void frame();
@@ -96,6 +99,7 @@ private:
 
 	const Descriptor _descriptor;
 	std::unique_ptr<RpWidgetWrap> _surface;
+	QImage _frozen;
 	Ui::Animations::Basic _animation;
 	crl::time _lastFrame = 0;
 
@@ -116,6 +120,8 @@ private:
 	rpl::event_stream<float64> _flung;
 
 	bool _paused = false;
+	bool _entered = false;
+	crl::time _pausedAt = 0;
 
 };
 
