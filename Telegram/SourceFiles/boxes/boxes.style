@@ -222,6 +222,22 @@ localStorageLimitSlider: MediaSlider(defaultContinuousSlider) {
 }
 localStorageLimitMargin: margins(22px, 5px, 20px, 10px);
 
+localStorageChartHeight: 240px;
+localStorageChartDiameter: 172px;
+localStorageChartThickness: 38px;
+localStorageChartThicknessThin: 12px;
+localStorageChartSelectGrow: 9px;
+localStorageChartSizeFont: font(32px semibold);
+localStorageChartUnitFont: font(13px);
+localStorageChartLabelFont: font(13px);
+localStorageChartPercentFont: font(15px semibold);
+localStorageChartParticle: 15px;
+localStorageParticlePhotos: icon{{ "local_storage/photos-72x72", windowFg }};
+localStorageParticleVideos: icon{{ "local_storage/videos-72x72", windowFg }};
+localStorageParticleDocuments: icon{{ "local_storage/documents-72x72", windowFg }};
+localStorageParticleMusic: icon{{ "local_storage/music-72x72", windowFg }};
+localStorageParticleStickers: icon{{ "local_storage/stickers-72x72", windowFg }};
+
 shareRowsTop: 12px;
 shareRowHeight: 108px;
 sharePhotoTop: 6px;

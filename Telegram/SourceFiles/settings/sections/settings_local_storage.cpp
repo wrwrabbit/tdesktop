@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "statistics/view/stack_linear_chart_common.h"
 #include "storage/storage_account.h"
 #include "storage/cache/storage_cache_database.h"
 #include "ui/text/format_values.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/shadow.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/emoji_config.h"
 #include "ui/painter.h"
@@ -113,7 +115,527 @@ size_type ValueToLimit(size_type timeLimit) {
 	return (timeLimit != kMaxTimeLimitValue) ? timeLimit : 0;
 }
 
+constexpr auto kChartPartsCount = 6;
+constexpr auto kChartSeparator = 2.;
+constexpr auto kChartMinFraction = 0.02;
+constexpr auto kChartMorphDuration = crl::time(650);
+constexpr auto kChartAppearDuration = crl::time(750);
+constexpr auto kChartSelectDuration = crl::time(200);
+constexpr auto kChartPercentFadeDuration = crl::time(200);
+
+QColor PartColor(int index) {
+	switch (index) {
+	case 0: return st::statisticsChartLineLightblue->c;
+	case 1: return st::statisticsChartLineOrange->c;
+	case 2: return st::statisticsChartLineLightgreen->c;
+	case 3: return st::statisticsChartLineGreen->c;
+	case 4: return st::statisticsChartLinePurple->c;
+	case 5: return st::statisticsChartLineBlue->c;
+	}
+	return st::statisticsChartLineCyan->c;
+}
+
+const style::icon &ParticleIcon(int index) {
+	switch (index) {
+	case 0: return st::localStorageParticlePhotos;
+	case 1: return st::localStorageParticleStickers;
+	case 2: return st::localStorageParticleMusic;
+	case 3: return st::localStorageParticleVideos;
+	case 4: return st::localStorageParticleVideos;
+	case 5: return st::localStorageParticleDocuments;
+	}
+	return st::localStorageParticleDocuments;
+}
+
+const QImage &ParticleImage(int index) {
+	static auto images = std::array<QImage, kChartPartsCount>();
+	auto &image = images[index];
+	if (image.isNull()) {
+		image = ParticleIcon(index).instance(Qt::white);
+	}
+	return image;
+}
+
 } // namespace
+
+class LocalStorage::Chart final : public Ui::RpWidget {
+public:
+	explicit Chart(QWidget *parent);
+
+	void setParts(std::array<int64, kChartPartsCount> sizes, int64 total);
+
+protected:
+	int resizeGetHeight(int newWidth) override;
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
+
+private:
+	struct Geometry {
+		float64 center = 0.;
+		float64 half = 0.;
+	};
+
+	void computeTargets();
+	[[nodiscard]] std::array<Geometry, kChartPartsCount> shown() const;
+	void setSelected(int index);
+	[[nodiscard]] QPointF radialPoint(
+		QPointF center,
+		float64 radius,
+		float64 angle) const;
+	void drawParticles(
+		QPainter &p,
+		QPointF center,
+		int index,
+		float64 from,
+		float64 to,
+		float64 innerRadius,
+		float64 outerRadius,
+		float64 alpha);
+
+	std::array<int64, kChartPartsCount> _sizes = { { 0 } };
+	std::array<Geometry, kChartPartsCount> _from;
+	std::array<Geometry, kChartPartsCount> _to;
+	std::array<int, kChartPartsCount> _percent = { { 0 } };
+	std::array<bool, kChartPartsCount> _showPercent = { { false } };
+	std::array<float64, kChartPartsCount> _percentTarget = { { 0. } };
+	std::array<Ui::Animations::Simple, kChartPartsCount> _percentAlpha;
+	int64 _total = 0;
+
+	Ui::Animations::Simple _morph;
+	Ui::Animations::Simple _appear;
+	bool _appeared = false;
+
+	int _selected = -1;
+	std::array<Ui::Animations::Simple, kChartPartsCount> _selectAnimations;
+
+	Ui::Animations::Basic _particles;
+	crl::time _particlesStart = 0;
+
+};
+
+LocalStorage::Chart::Chart(QWidget *parent) : RpWidget(parent) {
+	setMouseTracking(true);
+
+	if (!anim::Disabled()) {
+		_particlesStart = crl::now();
+		_particles.init([=](crl::time) {
+			update();
+			return true;
+		});
+		shownValue() | rpl::on_next([=](bool shown) {
+			if (shown) {
+				_particles.start();
+			} else {
+				_particles.stop();
+			}
+		}, lifetime());
+	}
+}
+
+void LocalStorage::Chart::drawParticles(
+		QPainter &p,
+		QPointF center,
+		int index,
+		float64 from,
+		float64 to,
+		float64 innerRadius,
+		float64 outerRadius,
+		float64 alpha) {
+	if (alpha <= 0. || anim::Disabled()) {
+		return;
+	}
+	const auto &image = ParticleImage(index);
+	const auto size = float64(st::localStorageChartParticle);
+	const auto sqrt2 = std::sqrt(2.);
+	const auto time = (crl::now() - _particlesStart) / 10000.;
+	const auto step = 7.;
+	const auto fromStep = int(std::floor(from / step));
+	const auto toStep = int(std::ceil(to / step));
+	const auto rFrom = innerRadius - size * sqrt2;
+	const auto rTo = outerRadius + size * sqrt2;
+	for (auto k = fromStep; k <= toStep; ++k) {
+		const auto angle = k * step;
+		const auto t = std::fmod(
+			(time + 100.) * (1. + (std::sin(angle * 2000.) + 1.) * 0.25),
+			1.);
+		const auto radius = rFrom + (rTo - rFrom) * t;
+		const auto point = radialPoint(center, radius, angle);
+		const auto distance = std::hypot(
+			point.x() - center.x(),
+			point.y() - center.y());
+		const auto centerFade = std::min(distance / 64., 1.);
+		auto particleAlpha = 0.65
+			* alpha
+			* (-1.75 * std::abs(t - 0.5) + 1.)
+			* (0.25 * (std::sin(t * M_PI) - 1.) + 1.)
+			* centerFade;
+		particleAlpha = std::clamp(particleAlpha, 0., 1.);
+		if (particleAlpha <= 0.) {
+			continue;
+		}
+		const auto scale = 0.75
+			* (0.25 * (std::sin(t * M_PI) - 1.) + 1.)
+			* (0.8 + (std::sin(angle) + 1.) * 0.25);
+		const auto side = size * scale;
+		p.setOpacity(particleAlpha);
+		p.drawImage(
+			Rect(point.x() - side / 2., point.y() - side / 2., Size(side)),
+			image);
+	}
+}
+
+void LocalStorage::Chart::setParts(
+		std::array<int64, kChartPartsCount> sizes,
+		int64 total) {
+	if (_sizes == sizes && _total == total) {
+		return;
+	}
+	_from = shown();
+	_sizes = sizes;
+	_total = total;
+	computeTargets();
+
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		const auto target = _showPercent[i] ? 1. : 0.;
+		if (_percentTarget[i] != target) {
+			const auto from = _percentAlpha[i].value(_percentTarget[i]);
+			_percentTarget[i] = target;
+			_percentAlpha[i].start(
+				[=] { update(); },
+				from,
+				target,
+				kChartPercentFadeDuration);
+		}
+	}
+
+	_morph.stop();
+	_morph.start(
+		[=] { update(); },
+		0.,
+		1.,
+		kChartMorphDuration,
+		anim::easeOutQuint);
+	if (!_appeared && total > 0) {
+		_appeared = true;
+		_appear.start(
+			[=] { update(); },
+			0.,
+			1.,
+			kChartAppearDuration,
+			anim::easeOutQuint);
+	}
+	update();
+}
+
+void LocalStorage::Chart::computeTargets() {
+	auto sum = int64();
+	auto count = 0;
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		if (_sizes[i] > 0) {
+			sum += _sizes[i];
+			++count;
+		}
+	}
+	_to = std::array<Geometry, kChartPartsCount>();
+	_percent = { { 0 } };
+	_showPercent = { { false } };
+	if (sum <= 0) {
+		for (auto i = 0; i != kChartPartsCount; ++i) {
+			_to[i].center = _from[i].center;
+		}
+		return;
+	}
+
+	auto under = 0;
+	auto minus = 0.;
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		const auto fraction = _sizes[i] / float64(sum);
+		if (fraction > 0. && fraction < kChartMinFraction) {
+			++under;
+			minus += fraction;
+		}
+	}
+
+	auto values = std::vector<float64>(kChartPartsCount);
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		values[i] = float64(_sizes[i]);
+	}
+	const auto percentage = Statistic::PiePartsPercentage(
+		values,
+		float64(sum),
+		true);
+
+	const auto separators = (count >= 2) ? count : 0;
+	const auto sweep = 360. - kChartSeparator * separators;
+	auto start = 0.;
+	auto drawn = 0;
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		const auto from = start + drawn * kChartSeparator;
+		const auto fraction = _sizes[i] / float64(sum);
+		if (fraction <= 0.) {
+			_to[i].center = from;
+			_to[i].half = 0.;
+			continue;
+		}
+		_percent[i] = int(base::SafeRound(
+			percentage.parts[i].roundedPercentage * 100.));
+		_showPercent[i] = (fraction > 0.05) && (fraction < 1.);
+		auto adjusted = fraction;
+		if (adjusted < kChartMinFraction) {
+			adjusted = kChartMinFraction;
+		} else {
+			adjusted *= 1. - (kChartMinFraction * under - minus);
+		}
+		const auto to = from + adjusted * sweep;
+		_to[i].center = (from + to) / 2.;
+		_to[i].half = (to - from) / 2.;
+		start += adjusted * sweep;
+		++drawn;
+	}
+}
+
+auto LocalStorage::Chart::shown() const
+-> std::array<Geometry, kChartPartsCount> {
+	const auto progress = _morph.value(1.);
+	auto result = std::array<Geometry, kChartPartsCount>();
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		result[i].center = _from[i].center
+			+ (_to[i].center - _from[i].center) * progress;
+		result[i].half = _from[i].half
+			+ (_to[i].half - _from[i].half) * progress;
+	}
+	return result;
+}
+
+QPointF LocalStorage::Chart::radialPoint(
+		QPointF center,
+		float64 radius,
+		float64 angle) const {
+	const auto radians = angle * M_PI / 180.;
+	return QPointF(
+		center.x() + radius * std::sin(radians),
+		center.y() - radius * std::cos(radians));
+}
+
+void LocalStorage::Chart::setSelected(int index) {
+	if (_selected == index) {
+		return;
+	}
+	const auto previous = _selected;
+	_selected = index;
+	const auto animate = [&](int i, float64 to) {
+		_selectAnimations[i].start(
+			[=] { update(); },
+			1. - to,
+			to,
+			kChartSelectDuration,
+			anim::easeOutQuint);
+	};
+	if (previous >= 0) {
+		animate(previous, 0.);
+	}
+	if (index >= 0) {
+		animate(index, 1.);
+	}
+	setCursor(index >= 0 ? style::cur_pointer : style::cur_default);
+	update();
+}
+
+int LocalStorage::Chart::resizeGetHeight(int newWidth) {
+	return st::localStorageChartHeight;
+}
+
+void LocalStorage::Chart::mouseMoveEvent(QMouseEvent *e) {
+	const auto center = QPointF(width() / 2., height() / 2.);
+	const auto outer = st::localStorageChartDiameter / 2.;
+	const auto thickness = st::localStorageChartThickness;
+	const auto inner = outer - thickness;
+	const auto dx = e->pos().x() - center.x();
+	const auto dy = e->pos().y() - center.y();
+	const auto distance = std::hypot(dx, dy);
+	auto found = -1;
+	if (distance >= inner - st::localStorageChartSelectGrow
+		&& distance <= outer + st::localStorageChartSelectGrow) {
+		auto angle = std::atan2(dx, -dy) * 180. / M_PI;
+		if (angle < 0.) {
+			angle += 360.;
+		}
+		const auto geometry = shown();
+		for (auto i = 0; i != kChartPartsCount; ++i) {
+			if (geometry[i].half <= 0.) {
+				continue;
+			}
+			auto delta = std::fmod(
+				std::abs(angle - geometry[i].center),
+				360.);
+			if (delta > 180.) {
+				delta = 360. - delta;
+			}
+			if (delta <= geometry[i].half) {
+				found = i;
+				break;
+			}
+		}
+	}
+	setSelected(found);
+}
+
+void LocalStorage::Chart::leaveEventHook(QEvent *e) {
+	setSelected(-1);
+}
+
+void LocalStorage::Chart::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	auto hq = PainterHighQualityEnabler(p);
+
+	const auto appear = (_total <= 0)
+		? 1.
+		: (_appeared ? _appear.value(1.) : 0.);
+	const auto center = QPointF(width() / 2., height() / 2.);
+	const auto outer = st::localStorageChartDiameter / 2.;
+	const auto thin = float64(st::localStorageChartThicknessThin);
+	const auto full = float64(st::localStorageChartThickness);
+	const auto thickness = thin + (full - thin) * appear;
+	const auto rotation = (1. - appear) * -120.;
+	const auto midRadius = outer - thickness / 2.;
+
+	p.setOpacity(appear);
+
+	auto background = QPen(st::windowBgOver->c);
+	background.setWidthF(thickness);
+	background.setCapStyle(Qt::FlatCap);
+	p.setPen(background);
+	p.setBrush(Qt::NoBrush);
+	p.drawEllipse(center, midRadius, midRadius);
+
+	const auto geometry = shown();
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		if (geometry[i].half <= 0.1) {
+			continue;
+		}
+		const auto selected = _selectAnimations[i].value(
+			(_selected == i) ? 1. : 0.);
+		const auto grow = selected * st::localStorageChartSelectGrow;
+		const auto segmentThickness = thickness + grow;
+		const auto segmentMid = midRadius + grow / 2.;
+		const auto segmentOuter = outer + grow;
+		const auto base = PartColor(i);
+
+		auto gradient = QRadialGradient(center, segmentOuter);
+		gradient.setColorAt(
+			0.3,
+			anim::color(base, QColor(255, 255, 255), 0.30));
+		gradient.setColorAt(1., base);
+
+		auto pen = QPen(QBrush(gradient), segmentThickness);
+		pen.setCapStyle(Qt::FlatCap);
+		p.setPen(pen);
+
+		const auto from = geometry[i].center - geometry[i].half + rotation;
+		const auto to = geometry[i].center + geometry[i].half + rotation;
+		const auto rect = Rect(
+			center.x() - segmentMid,
+			center.y() - segmentMid,
+			Size(segmentMid * 2.));
+		const auto startAngle = qRound((90. - from) * 16.);
+		const auto spanAngle = -qRound((to - from) * 16.);
+		p.drawArc(rect, startAngle, spanAngle);
+
+		const auto innerRadius = segmentOuter - segmentThickness;
+		const auto outerRect = Rect(
+			center.x() - segmentOuter,
+			center.y() - segmentOuter,
+			Size(segmentOuter * 2.));
+		const auto innerRect = Rect(
+			center.x() - innerRadius,
+			center.y() - innerRadius,
+			Size(innerRadius * 2.));
+		auto sector = QPainterPath();
+		sector.arcMoveTo(outerRect, startAngle / 16.);
+		sector.arcTo(outerRect, startAngle / 16., spanAngle / 16.);
+		sector.arcTo(
+			innerRect,
+			(startAngle + spanAngle) / 16.,
+			-spanAngle / 16.);
+		sector.closeSubpath();
+		p.save();
+		p.setClipPath(sector);
+		drawParticles(
+			p,
+			center,
+			i,
+			from,
+			to,
+			innerRadius,
+			segmentOuter,
+			appear);
+		p.restore();
+		p.setOpacity(appear);
+	}
+
+	p.setFont(st::localStorageChartPercentFont);
+	const auto percentFont = st::localStorageChartPercentFont;
+	for (auto i = 0; i != kChartPartsCount; ++i) {
+		const auto labelAlpha = _percentAlpha[i].value(_percentTarget[i]);
+		if (labelAlpha <= 0. || geometry[i].half <= 0.1) {
+			continue;
+		}
+		const auto selected = _selectAnimations[i].value(
+			(_selected == i) ? 1. : 0.);
+		const auto point = radialPoint(
+			center,
+			midRadius + selected * st::localStorageChartSelectGrow / 2.,
+			geometry[i].center + rotation);
+		const auto text = QString::number(_percent[i]) + '%';
+		const auto twidth = percentFont->width(text);
+		p.setOpacity(appear * labelAlpha);
+		p.setPen(QColor(255, 255, 255));
+		p.save();
+		p.translate(point);
+		const auto scale = 1. + selected * 0.1;
+		p.scale(scale, scale);
+		p.drawText(
+			QRectF(
+				-twidth,
+				-percentFont->height,
+				twidth * 2.,
+				percentFont->height * 2.),
+			text,
+			QTextOption(Qt::AlignCenter));
+		p.restore();
+	}
+	p.setOpacity(1.);
+
+	const auto number = QString::number(
+		(_total + kMegabyte - 1) / kMegabyte);
+	const auto unit = u"MB"_q;
+	const auto sizeFont = st::localStorageChartSizeFont;
+	const auto unitFont = st::localStorageChartUnitFont;
+	const auto blockHeight = sizeFont->height + unitFont->height;
+	const auto top = (st::localStorageChartHeight - blockHeight) / 2;
+
+	p.setOpacity(appear);
+	p.save();
+	const auto scale = 0.6 + 0.4 * appear;
+	p.translate(center);
+	p.scale(scale, scale);
+	p.translate(-center);
+	p.setFont(sizeFont);
+	p.setPen(st::windowBoldFg);
+	p.drawText(
+		QRect(0, top, width(), sizeFont->height),
+		number,
+		style::al_top);
+	p.setFont(unitFont);
+	p.setPen(st::windowSubTextFg);
+	p.drawText(
+		QRect(0, top + sizeFont->height, width(), unitFont->height),
+		unit,
+		style::al_top);
+	p.restore();
+	p.setOpacity(1.);
+}
 
 class LocalStorage::Row : public Ui::RpWidget {
 public:
@@ -316,6 +838,26 @@ void LocalStorage::update(
 			updateRow(entry.second, &full);
 		}
 	}
+	updateChart();
+}
+
+void LocalStorage::updateChart() {
+	if (!_chart) {
+		return;
+	}
+	const auto tagged = [&](uint8 tag) {
+		const auto i = _stats.tagged.find(tag);
+		return (i != end(_stats.tagged)) ? i->second.totalSize : int64();
+	};
+	auto sizes = std::array<int64, kChartPartsCount>{ {
+		tagged(Data::kImageCacheTag),
+		tagged(Data::kStickerCacheTag),
+		tagged(Data::kVoiceMessageCacheTag),
+		tagged(Data::kVideoMessageCacheTag),
+		tagged(Data::kAnimationCacheTag),
+		_statsBig.full.totalSize,
+	} };
+	_chart->setParts(sizes, summary().totalSize);
 }
 
 auto LocalStorage::summary() const -> Database::TaggedSummary {
@@ -397,6 +939,8 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 	auto mediaCacheTitle = [](size_type) {
 		return tr::lng_local_storage_media(tr::now);
 	};
+	_chart = container->add(object_ptr<Chart>(container));
+	updateChart();
 	createRow(
 		0,
 		std::move(summaryTitle),

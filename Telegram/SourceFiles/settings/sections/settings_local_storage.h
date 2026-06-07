@@ -49,8 +49,10 @@ public:
 
 private:
 	class Row;
+	class Chart;
 
 	void setupContent();
+	void updateChart();
 	void clearByTag(uint16 tag);
 	void update(Database::Stats &&stats, Database::Stats &&statsBig);
 	void updateRow(
@@ -91,6 +93,7 @@ private:
 	Database::Stats _statsBig;
 
 	base::flat_map<uint16, not_null<Ui::SlideWrap<Row>*>> _rows;
+	Chart *_chart = nullptr;
 	Ui::MediaSlider *_totalSlider = nullptr;
 	Ui::LabelSimple *_totalLabel = nullptr;
 	Ui::MediaSlider *_mediaSlider = nullptr;
