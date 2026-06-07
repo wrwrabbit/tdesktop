@@ -161,9 +161,13 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 			*args.style.atStyle),
 	});
 
+	const auto dayEdit = state->day->rawTextEdit().get();
+	const auto dayAlign = args.style.dateFieldStyle->textAlign;
+
 	state->date.value(
 	) | rpl::on_next([=](QDate date) {
 		state->day->setText(DayString(date));
+		dayEdit->setAlignment(dayAlign);
 		state->time->setFocusFast();
 	}, state->day->lifetime());
 
