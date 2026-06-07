@@ -35,6 +35,8 @@ class BoxContent;
 
 namespace Settings {
 
+inline constexpr auto kChartPartsCount = 6;
+
 [[nodiscard]] Type LocalStorageId();
 
 class LocalStorage : public Section<LocalStorage> {
@@ -52,12 +54,20 @@ private:
 	class Row;
 	class Chart;
 	class DeviceBar;
+	class ClearButton;
 
 	void setupContent();
 	void updateChart();
+	void updateCategoryPercents();
+	void updateRowCorners();
 	void updateDeviceBar();
+	void updateClearButton();
 	void showClearingBox();
-	void clearByTag(uint16 tag);
+	void clearSelected();
+	void startClearing();
+	void finishClearing();
+	void toggleSelected(int chartIndex, bool selected, not_null<Row*> row);
+	[[nodiscard]] std::array<int64, kChartPartsCount> chartedSizes() const;
 	void update(Database::Stats &&stats, Database::Stats &&statsBig);
 	void updateRow(
 		not_null<Ui::SlideWrap<Row>*> row,
@@ -97,7 +107,11 @@ private:
 	Database::Stats _statsBig;
 
 	base::flat_map<uint16, not_null<Ui::SlideWrap<Row>*>> _rows;
+	std::array<bool, kChartPartsCount> _selected
+		= { { true, true, true, true, true, true } };
+	rpl::variable<bool> _allSelected = true;
 	Chart *_chart = nullptr;
+	ClearButton *_clearButton = nullptr;
 	DeviceBar *_deviceBar = nullptr;
 	Ui::MediaSlider *_totalSlider = nullptr;
 	Ui::LabelSimple *_totalLabel = nullptr;
@@ -108,9 +122,10 @@ private:
 	int64 _mediaSizeLimit = 0;
 	size_type _timeLimit = 0;
 
-	bool _clearing = false;
 	bool _clearRequested = false;
 	int64 _clearFreedBase = 0;
+	bool _minDurationPassed = false;
+	bool _clearingStarted = false;
 	base::weak_qptr<Ui::BoxContent> _clearingBox;
 
 };

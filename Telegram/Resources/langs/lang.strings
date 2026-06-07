@@ -1149,6 +1149,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_summary" = "Summary";
 "lng_local_storage_clear_some" = "Clear";
 "lng_local_storage_clear" = "Clear all";
+"lng_local_storage_clear_selected" = "Clear selected";
 "lng_local_storage_clearing" = "Clearing...";
 "lng_local_storage_device_telegram" = "Telegram cache";
 "lng_local_storage_device_other" = "Other data";

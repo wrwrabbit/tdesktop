@@ -232,11 +232,46 @@ localStorageChartUnitFont: font(13px);
 localStorageChartLabelFont: font(13px);
 localStorageChartPercentFont: font(15px semibold);
 localStorageChartParticle: 15px;
+localStorageCompleteStar1: 18px;
+localStorageCompleteStar2: 12px;
+localStorageCompleteStar3: 10px;
+localStorageCompleteExclude: 80px;
+localStorageCompleteField: 150px;
+localStorageCompleteSpeed: 4px;
 localStorageParticlePhotos: icon{{ "local_storage/photos-72x72", windowFg }};
 localStorageParticleVideos: icon{{ "local_storage/videos-72x72", windowFg }};
 localStorageParticleDocuments: icon{{ "local_storage/documents-72x72", windowFg }};
 localStorageParticleMusic: icon{{ "local_storage/music-72x72", windowFg }};
 localStorageParticleStickers: icon{{ "local_storage/stickers-72x72", windowFg }};
+
+localStorageIslandRadius: 12px;
+
+localStorageCategoryHeight: 44px;
+localStorageCategoryPadding: margins(22px, 0px, 20px, 0px);
+localStorageCategoryCheckSkip: 14px;
+localStorageCategoryPercentSkip: 6px;
+localStorageCategoryCheck: Check(defaultCheck) {
+	diameter: 20px;
+}
+localStorageClearMargin: margins(12px, 6px, 12px, 4px);
+localStorageClearHeight: 38px;
+localStorageClearFont: font(13px semibold);
+localStorageClearSkip: 7px;
+localStorageCategoryName: FlatLabel(defaultFlatLabel) {
+	textFg: windowBoldFg;
+	maxHeight: 20px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+	}
+}
+localStorageCategoryPercent: FlatLabel(localStorageCategoryName) {
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px semibold);
+	}
+}
+localStorageCategorySize: FlatLabel(localStorageCategoryName) {
+	textFg: windowActiveTextFg;
+}
 
 localStorageUsageTopSkip: 2px;
 localStorageUsageBarSkip: 9px;
@@ -565,6 +600,7 @@ changePhoneButton: RoundButton(defaultActiveButton) {
 }
 changePhoneTitle: FlatLabel(boxTitle) {
 }
+localStorageClearingLottieSize: size(150px, 150px);
 changePhoneTitlePadding: margins(0px, 8px, 0px, 8px);
 changePhoneDescription: FlatLabel(defaultFlatLabel) {
 	minWidth: 332px;
