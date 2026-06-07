@@ -23,7 +23,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/labels.h"
-#include "ui/widgets/shadow.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/effects/animated_string.h"
@@ -202,6 +201,47 @@ const QImage &ParticleImage(int index) {
 		image = ParticleIcon(index).instance(Qt::white);
 	}
 	return image;
+}
+
+not_null<Ui::VerticalLayout*> AddIsland(
+		not_null<Ui::VerticalLayout*> parent,
+		bool topSkip = true) {
+	const auto island = parent->add(
+		object_ptr<Ui::VerticalLayout>(parent),
+		st::localStorageIslandMargin);
+	island->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(island);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto radius = st::localStorageIslandRadius;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::boxBg);
+		p.drawRoundedRect(island->rect(), radius, radius);
+	}, island->lifetime());
+	if (topSkip) {
+		Ui::AddSkip(island, st::localStorageIslandPadding);
+	}
+	return island;
+}
+
+not_null<Ui::SlideWrap<Ui::VerticalLayout>*> AddIslandWrap(
+		not_null<Ui::VerticalLayout*> parent) {
+	const auto wrap = parent->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			parent,
+			object_ptr<Ui::VerticalLayout>(parent),
+			st::localStorageIslandMargin));
+	const auto island = wrap->entity();
+	island->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(island);
+		auto hq = PainterHighQualityEnabler(p);
+		const auto radius = st::localStorageIslandRadius;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::boxBg);
+		p.drawRoundedRect(island->rect(), radius, radius);
+	}, island->lifetime());
+	return wrap;
 }
 
 [[nodiscard]] QString FormatStoragePercent(int64 part, int64 whole) {
@@ -699,9 +739,6 @@ void LocalStorage::Chart::computeTargets() {
 	_to = std::array<Geometry, kChartPartsCount>();
 	_percent = { { 0 } };
 	_showPercent = { { false } };
-	for (auto i = 0; i != kChartPartsCount; ++i) {
-		_to[i].center = _from[i].center;
-	}
 	if (sum <= 0) {
 		for (auto i = 0; i != kChartPartsCount; ++i) {
 			_to[i].center = _from[i].center;
@@ -1570,6 +1607,14 @@ rpl::producer<QString> LocalStorage::title() {
 	return tr::lng_local_storage_title();
 }
 
+bool LocalStorage::paintOuter(
+		not_null<QWidget*> outer,
+		int maxVisibleHeight,
+		QRect clip) {
+	QPainter(outer.get()).fillRect(clip, st::windowBgOver);
+	return true;
+}
+
 void LocalStorage::showFinished() {
 	Section::showFinished();
 
@@ -1620,7 +1665,18 @@ void LocalStorage::update(
 	updateChart();
 	updateDeviceBar();
 	updateClearButton();
+	updateCategoriesWrap();
 	finishClearing();
+}
+
+void LocalStorage::updateCategoriesWrap() {
+	if (!_categoriesWrap) {
+		return;
+	}
+	_categoriesWrap->toggle(
+		summary().totalSize > 0,
+		_categoriesInited ? anim::type::normal : anim::type::instant);
+	_categoriesInited = true;
 }
 
 void LocalStorage::toggleSelected(
@@ -1880,10 +1936,16 @@ void LocalStorage::finishClearing() {
 	}
 	updateChart();
 	updateClearButton();
+	updateCategoriesWrap();
 }
 
 void LocalStorage::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+
+	content->paintRequest(
+	) | rpl::on_next([=](QRect clip) {
+		QPainter(content).fillRect(clip, st::windowBgOver);
+	}, content->lifetime());
 
 	setupControls(content);
 
@@ -1986,7 +2048,8 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 
 	_deviceBar = container->add(object_ptr<DeviceBar>(container));
 
-	const auto categoriesIsland = container;
+	_categoriesWrap = AddIslandWrap(container);
+	const auto categoriesIsland = _categoriesWrap->entity();
 	createTagRow(
 		categoriesIsland,
 		Data::kImageCacheTag,
@@ -2017,14 +2080,34 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 		object_ptr<ClearButton>(categoriesIsland),
 		st::localStorageClearMargin);
 	_clearButton->setClickedCallback([=] { clearSelected(); });
+	Ui::AddSkip(categoriesIsland, st::localStorageIslandPadding);
 
-	const auto settingsIsland = container;
+	const auto addAbout = [&](rpl::producer<QString> text) {
+		const auto label = container->add(
+			object_ptr<Ui::FlatLabel>(
+				container,
+				std::move(text),
+				st::localStorageAbout),
+			st::localStorageAboutMargin,
+			style::al_top);
+		label->setTryMakeSimilarLines(true);
+		label->setAttribute(Qt::WA_TransparentForMouseEvents);
+	};
+
+	addAbout(tr::lng_local_storage_about());
+
+	const auto settingsIsland = AddIsland(container);
 	setupLimits(settingsIsland);
+	Ui::AddSkip(settingsIsland, st::localStorageIslandPadding);
+
+	addAbout(tr::lng_local_storage_max_size_about());
 
 	updateRowCorners();
 	updateChart();
 	updateDeviceBar();
 	updateClearButton();
+
+	Ui::AddSkip(container, st::localStorageBottomSkip);
 }
 
 template <
@@ -2112,9 +2195,9 @@ void LocalStorage::updateMediaLabel() {
 }
 
 void LocalStorage::setupLimits(not_null<Ui::VerticalLayout*> container) {
-	container->add(
-		object_ptr<Ui::PlainShadow>(container),
-		st::localStorageRowPadding);
+	Ui::AddSubsectionTitle(
+		container,
+		tr::lng_local_storage_max_size_title());
 
 	_totalSlider = createLimitsSlider(
 		container,

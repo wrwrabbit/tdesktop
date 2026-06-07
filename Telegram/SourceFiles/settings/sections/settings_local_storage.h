@@ -49,6 +49,10 @@ public:
 
 	[[nodiscard]] rpl::producer<QString> title() override;
 	void showFinished() override;
+	bool paintOuter(
+		not_null<QWidget*> outer,
+		int maxVisibleHeight,
+		QRect clip) override;
 
 private:
 	class Row;
@@ -62,6 +66,7 @@ private:
 	void updateRowCorners();
 	void updateDeviceBar();
 	void updateClearButton();
+	void updateCategoriesWrap();
 	void showClearingBox();
 	void clearSelected();
 	void startClearing();
@@ -111,6 +116,8 @@ private:
 		= { { true, true, true, true, true, true } };
 	rpl::variable<bool> _allSelected = true;
 	Chart *_chart = nullptr;
+	Ui::SlideWrap<Ui::VerticalLayout> *_categoriesWrap = nullptr;
+	bool _categoriesInited = false;
 	ClearButton *_clearButton = nullptr;
 	DeviceBar *_deviceBar = nullptr;
 	Ui::MediaSlider *_totalSlider = nullptr;

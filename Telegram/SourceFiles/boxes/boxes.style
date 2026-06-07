@@ -197,7 +197,6 @@ peerListBox: PeerList(defaultPeerList) {
 }
 
 localStorageRowHeight: 50px;
-localStorageRowPadding: margins(22px, 5px, 20px, 5px);
 localStorageRowTitle: FlatLabel(defaultFlatLabel) {
 	textFg: windowBoldFg;
 	maxHeight: 20px;
@@ -222,7 +221,7 @@ localStorageLimitSlider: MediaSlider(defaultContinuousSlider) {
 }
 localStorageLimitMargin: margins(22px, 5px, 20px, 10px);
 
-localStorageChartHeight: 240px;
+localStorageChartHeight: 200px;
 localStorageChartDiameter: 172px;
 localStorageChartThickness: 38px;
 localStorageChartThicknessThin: 12px;
@@ -244,7 +243,10 @@ localStorageParticleDocuments: icon{{ "local_storage/documents-72x72", windowFg 
 localStorageParticleMusic: icon{{ "local_storage/music-72x72", windowFg }};
 localStorageParticleStickers: icon{{ "local_storage/stickers-72x72", windowFg }};
 
+localStorageIslandMargin: margins(12px, 10px, 12px, 0px);
 localStorageIslandRadius: 12px;
+localStorageIslandPadding: 6px;
+localStorageBottomSkip: 12px;
 
 localStorageCategoryHeight: 44px;
 localStorageCategoryPadding: margins(22px, 0px, 20px, 0px);
@@ -253,7 +255,7 @@ localStorageCategoryPercentSkip: 6px;
 localStorageCategoryCheck: Check(defaultCheck) {
 	diameter: 20px;
 }
-localStorageClearMargin: margins(12px, 6px, 12px, 4px);
+localStorageClearMargin: margins(12px, 6px, 12px, 9px);
 localStorageClearHeight: 38px;
 localStorageClearFont: font(13px semibold);
 localStorageClearSkip: 7px;
@@ -281,6 +283,15 @@ localStorageUsageBottomSkip: 6px;
 localStorageUsageBarMargin: margins(6px, 6px, 6px, 6px);
 localStorageUsageTooltipMaxWidth: 240px;
 localStorageUsageTooltipSkip: 8px;
+localStorageAboutMargin: margins(28px, 9px, 28px, 12px);
+localStorageAbout: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	align: align(top);
+	minWidth: 240px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+	}
+}
 localStorageUsageSubtitle: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 	align: align(top);
