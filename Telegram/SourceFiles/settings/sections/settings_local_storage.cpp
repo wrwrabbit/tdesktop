@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_local_storage.h"
 
+#include "settings.h"
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
@@ -25,9 +26,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/emoji_config.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
+#include "ui/text/text_utilities.h"
+#include "ui/ui_utility.h"
+#include "ui/widgets/tooltip.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
+
+#include <QtCore/QStorageInfo>
 
 namespace Settings {
 namespace {
@@ -154,6 +160,32 @@ const QImage &ParticleImage(int index) {
 		image = ParticleIcon(index).instance(Qt::white);
 	}
 	return image;
+}
+
+[[nodiscard]] QString FormatStoragePercent(int64 part, int64 whole) {
+	if (whole <= 0) {
+		return u"0%"_q;
+	}
+	const auto ratio = part / float64(whole);
+	if (ratio < 0.001) {
+		return u"<0.1%"_q;
+	}
+	const auto percent = int(base::SafeRound(ratio * 100.));
+	return (percent <= 0)
+		? u"<1%"_q
+		: (QString::number(percent) + '%');
+}
+
+[[nodiscard]] QString FormatStorageSize(int64 size) {
+	constexpr auto kGigabyte = int64(1024) * 1024 * 1024;
+	if (size < kGigabyte) {
+		return Ui::FormatSizeText(size);
+	}
+	const auto tenthGb = size * 10 / kGigabyte;
+	return QString::number(tenthGb / 10)
+		+ '.'
+		+ QString::number(tenthGb % 10)
+		+ u" GB"_q;
 }
 
 } // namespace
@@ -637,6 +669,192 @@ void LocalStorage::Chart::paintEvent(QPaintEvent *e) {
 	p.setOpacity(1.);
 }
 
+class LocalStorage::DeviceBar final : public Ui::RpWidget {
+public:
+	explicit DeviceBar(QWidget *parent);
+
+	void setCache(int64 cache);
+
+protected:
+	int resizeGetHeight(int newWidth) override;
+	void paintEvent(QPaintEvent *e) override;
+	void mouseMoveEvent(QMouseEvent *e) override;
+	void leaveEventHook(QEvent *e) override;
+
+private:
+	void refresh();
+	void apply();
+	[[nodiscard]] QRect barRect() const;
+	[[nodiscard]] TextWithEntities tooltipText() const;
+	void showTooltip();
+	void hideTooltip();
+
+	object_ptr<Ui::FlatLabel> _subtitle;
+	std::unique_ptr<Ui::ImportantTooltip> _tooltip;
+	int64 _reported = 0;
+	int64 _cache = 0;
+	int64 _total = 0;
+	int64 _free = 0;
+
+};
+
+LocalStorage::DeviceBar::DeviceBar(QWidget *parent)
+: RpWidget(parent)
+, _subtitle(this, QString(), st::localStorageUsageSubtitle) {
+	_subtitle->setAttribute(Qt::WA_TransparentForMouseEvents);
+	setMouseTracking(true);
+	refresh();
+}
+
+void LocalStorage::DeviceBar::refresh() {
+	const auto weak = base::make_weak(this);
+	const auto dir = cWorkingDir();
+	crl::async([=] {
+		const auto info = QStorageInfo(dir);
+		const auto total = info.isValid() ? info.bytesTotal() : int64();
+		const auto free = info.isValid() ? info.bytesAvailable() : int64();
+		crl::on_main(weak, [=] {
+			_total = total;
+			_free = (free > total) ? total : free;
+			apply();
+		});
+	});
+}
+
+void LocalStorage::DeviceBar::apply() {
+	const auto used = std::max(_total - _free, int64());
+	_cache = std::min(_reported, used);
+	_subtitle->setText(tr::lng_local_storage_device_usage(
+		tr::now,
+		lt_percent,
+		FormatStoragePercent(_cache, _total)));
+	resizeToWidth(width());
+	update();
+}
+
+void LocalStorage::DeviceBar::setCache(int64 cache) {
+	_reported = cache;
+	apply();
+	refresh();
+}
+
+QRect LocalStorage::DeviceBar::barRect() const {
+	const auto width = std::min(st::localStorageUsageBarWidth, QWidget::width());
+	const auto top = st::localStorageUsageTopSkip
+		+ _subtitle->height()
+		+ st::localStorageUsageBarSkip;
+	return QRect(
+		(QWidget::width() - width) / 2,
+		top,
+		width,
+		st::localStorageUsageBarHeight);
+}
+
+int LocalStorage::DeviceBar::resizeGetHeight(int newWidth) {
+	_subtitle->resizeToWidth(newWidth);
+	_subtitle->moveToLeft(0, st::localStorageUsageTopSkip, newWidth);
+	return st::localStorageUsageTopSkip
+		+ _subtitle->height()
+		+ st::localStorageUsageBarSkip
+		+ st::localStorageUsageBarHeight
+		+ st::localStorageUsageBottomSkip;
+}
+
+void LocalStorage::DeviceBar::paintEvent(QPaintEvent *e) {
+	if (_total <= 0) {
+		return;
+	}
+	auto p = QPainter(this);
+	auto hq = PainterHighQualityEnabler(p);
+
+	const auto bar = QRectF(barRect());
+	const auto radius = bar.height() / 2.;
+	const auto used = _total - _free;
+	const auto cacheColor = st::activeButtonBg->c;
+	const auto usedColor = st::windowSubTextFg->c;
+	const auto freeColor = st::windowBg->c;
+
+	auto path = QPainterPath();
+	path.addRoundedRect(bar, radius, radius);
+	p.setClipPath(path);
+	p.fillRect(bar, freeColor);
+
+	const auto fill = [&](int64 from, int64 size, QColor color) {
+		if (size <= 0) {
+			return;
+		}
+		const auto x1 = bar.x() + bar.width() * (from / float64(_total));
+		const auto x2 = bar.x()
+			+ bar.width() * ((from + size) / float64(_total));
+		p.fillRect(QRectF(x1, bar.y(), x2 - x1, bar.height()), color);
+	};
+	fill(0, used, usedColor);
+	fill(0, _cache, cacheColor);
+}
+
+void LocalStorage::DeviceBar::mouseMoveEvent(QMouseEvent *e) {
+	if (_total > 0 && barRect().marginsAdded(st::localStorageUsageBarMargin)
+			.contains(e->pos())) {
+		showTooltip();
+	} else {
+		hideTooltip();
+	}
+}
+
+void LocalStorage::DeviceBar::leaveEventHook(QEvent *e) {
+	hideTooltip();
+}
+
+TextWithEntities LocalStorage::DeviceBar::tooltipText() const {
+	const auto used = _total - _free;
+	const auto other = std::max(used - _cache, int64());
+	auto result = TextWithEntities();
+	const auto line = [&](const QString &label, int64 size) {
+		if (!result.text.isEmpty()) {
+			result.append('\n');
+		}
+		result.append(label).append(u": "_q).append(
+			Ui::Text::Bold(FormatStorageSize(size)));
+	};
+	line(tr::lng_local_storage_device_telegram(tr::now), _cache);
+	line(tr::lng_local_storage_device_other(tr::now), other);
+	line(tr::lng_local_storage_device_free(tr::now), _free);
+	line(tr::lng_local_storage_device_total(tr::now), _total);
+	return result;
+}
+
+void LocalStorage::DeviceBar::showTooltip() {
+	if (_tooltip || _total <= 0) {
+		return;
+	}
+	const auto parent = window();
+	if (!parent) {
+		return;
+	}
+	_tooltip = std::make_unique<Ui::ImportantTooltip>(
+		parent,
+		Ui::MakeNiceTooltipLabel(
+			parent,
+			rpl::single(tooltipText()),
+			st::localStorageUsageTooltipMaxWidth,
+			st::defaultImportantTooltipLabel),
+		st::defaultImportantTooltip);
+	const auto tooltip = _tooltip.get();
+	const auto weak = base::make_weak(tooltip);
+	tooltip->setAttribute(Qt::WA_TransparentForMouseEvents);
+	tooltip->setHiddenCallback([=] { delete weak.get(); });
+	auto area = Ui::MapFrom(parent, this, barRect());
+	area.translate(0, -st::localStorageUsageTooltipSkip);
+	tooltip->pointAt(area, RectPart::Top);
+	tooltip->toggleAnimated(true);
+}
+
+void LocalStorage::DeviceBar::hideTooltip() {
+	if (const auto tooltip = _tooltip.release()) {
+		tooltip->toggleAnimated(false);
+	}
+}
+
 class LocalStorage::Row : public Ui::RpWidget {
 public:
 	Row(
@@ -839,6 +1057,7 @@ void LocalStorage::update(
 		}
 	}
 	updateChart();
+	updateDeviceBar();
 }
 
 void LocalStorage::updateChart() {
@@ -858,6 +1077,12 @@ void LocalStorage::updateChart() {
 		_statsBig.full.totalSize,
 	} };
 	_chart->setParts(sizes, summary().totalSize);
+}
+
+void LocalStorage::updateDeviceBar() {
+	if (_deviceBar) {
+		_deviceBar->setCache(summary().totalSize);
+	}
 }
 
 auto LocalStorage::summary() const -> Database::TaggedSummary {
@@ -940,7 +1165,9 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 		return tr::lng_local_storage_media(tr::now);
 	};
 	_chart = container->add(object_ptr<Chart>(container));
+	_deviceBar = container->add(object_ptr<DeviceBar>(container));
 	updateChart();
+	updateDeviceBar();
 	createRow(
 		0,
 		std::move(summaryTitle),

@@ -50,9 +50,11 @@ public:
 private:
 	class Row;
 	class Chart;
+	class DeviceBar;
 
 	void setupContent();
 	void updateChart();
+	void updateDeviceBar();
 	void clearByTag(uint16 tag);
 	void update(Database::Stats &&stats, Database::Stats &&statsBig);
 	void updateRow(
@@ -94,6 +96,7 @@ private:
 
 	base::flat_map<uint16, not_null<Ui::SlideWrap<Row>*>> _rows;
 	Chart *_chart = nullptr;
+	DeviceBar *_deviceBar = nullptr;
 	Ui::MediaSlider *_totalSlider = nullptr;
 	Ui::LabelSimple *_totalLabel = nullptr;
 	Ui::MediaSlider *_mediaSlider = nullptr;

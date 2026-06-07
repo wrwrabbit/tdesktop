@@ -238,6 +238,22 @@ localStorageParticleDocuments: icon{{ "local_storage/documents-72x72", windowFg 
 localStorageParticleMusic: icon{{ "local_storage/music-72x72", windowFg }};
 localStorageParticleStickers: icon{{ "local_storage/stickers-72x72", windowFg }};
 
+localStorageUsageTopSkip: 2px;
+localStorageUsageBarSkip: 9px;
+localStorageUsageBarWidth: 174px;
+localStorageUsageBarHeight: 4px;
+localStorageUsageBottomSkip: 6px;
+localStorageUsageBarMargin: margins(6px, 6px, 6px, 6px);
+localStorageUsageTooltipMaxWidth: 240px;
+localStorageUsageTooltipSkip: 8px;
+localStorageUsageSubtitle: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	align: align(top);
+	style: TextStyle(defaultTextStyle) {
+		font: font(13px);
+	}
+}
+
 shareRowsTop: 12px;
 shareRowHeight: 108px;
 sharePhotoTop: 6px;

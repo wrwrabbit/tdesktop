@@ -1150,6 +1150,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_clear_some" = "Clear";
 "lng_local_storage_clear" = "Clear all";
 "lng_local_storage_clearing" = "Clearing...";
+"lng_local_storage_device_telegram" = "Telegram cache";
+"lng_local_storage_device_other" = "Other data";
+"lng_local_storage_device_free" = "Free";
+"lng_local_storage_device_total" = "Total";
+"lng_local_storage_device_usage" = "Telegram uses {percent} of your device storage.";
 
 "lng_passcode_remove_button" = "Remove";
 
