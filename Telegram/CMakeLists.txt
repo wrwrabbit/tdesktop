@@ -318,8 +318,6 @@ PRIVATE
     boxes/gift_premium_box.h
     boxes/language_box.cpp
     boxes/language_box.h
-    boxes/local_storage_box.cpp
-    boxes/local_storage_box.h
     boxes/max_invite_box.cpp
     boxes/max_invite_box.h
     boxes/moderate_messages_box.cpp
@@ -1710,6 +1708,8 @@ PRIVATE
     settings/settings_intro.h
     settings/sections/settings_local_passcode.cpp
     settings/sections/settings_local_passcode.h
+    settings/sections/settings_local_storage.cpp
+    settings/sections/settings_local_storage.h
     settings/sections/settings_main.cpp
     settings/sections/settings_main.h
     settings/settings_recent_searches.cpp

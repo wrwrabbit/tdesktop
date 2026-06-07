@@ -19,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/auto_download_box.h"
 #include "boxes/connection_box.h"
 #include "boxes/download_path_box.h"
-#include "boxes/local_storage_box.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
@@ -37,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtp_instance.h"
 #include "platform/platform_specific.h"
 #include "settings/settings_builder.h"
+#include "settings/sections/settings_local_storage.h"
 #include "settings/sections/settings_main.h"
 #include "settings/sections/settings_chat.h"
 #include "settings/settings_experimental.h"
@@ -169,7 +169,7 @@ void BuildDataStorageSection(SectionBuilder &builder) {
 		.title = tr::lng_settings_manage_local_storage(),
 		.icon = { &st::menuIconStorage },
 		.onClick = [=] {
-			LocalStorageBox::Show(controller);
+			controller->showSettings(LocalStorageId());
 		},
 		.keywords = { u"storage"_q, u"cache"_q, u"local"_q },
 	});

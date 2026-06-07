@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/layers/box_content.h"
+#include "settings/settings_common_session.h"
 #include "storage/cache/storage_cache_database.h"
 
 namespace Main {
@@ -32,44 +32,39 @@ class LabelSimple;
 class MediaSlider;
 } // namespace Ui
 
-class LocalStorageBox : public Ui::BoxContent {
-	struct CreateTag {
-	};
+namespace Settings {
 
+[[nodiscard]] Type LocalStorageId();
+
+class LocalStorage : public Section<LocalStorage> {
 public:
 	using Database = Storage::Cache::Database;
 
-	LocalStorageBox(
-		QWidget*,
-		not_null<Main::Session*> session,
-		CreateTag);
+	LocalStorage(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller);
 
-	static void Show(
-		not_null<Window::SessionController*> controller,
-		const QString &highlightId = QString());
-
-protected:
-	void prepare() override;
+	[[nodiscard]] rpl::producer<QString> title() override;
 	void showFinished() override;
 
 private:
 	class Row;
 
+	void setupContent();
 	void clearByTag(uint16 tag);
 	void update(Database::Stats &&stats, Database::Stats &&statsBig);
 	void updateRow(
 		not_null<Ui::SlideWrap<Row>*> row,
 		const Database::TaggedSummary *data);
-	void setupControls();
+	void setupControls(not_null<Ui::VerticalLayout*> container);
 	void setupLimits(not_null<Ui::VerticalLayout*> container);
 	void updateMediaLimit();
 	void updateTotalLimit();
 	void updateTotalLabel();
 	void updateMediaLabel();
-	void limitsChanged();
-	void save();
+	void applyLimits();
 
-	Database::TaggedSummary summary() const;
+	[[nodiscard]] Database::TaggedSummary summary() const;
 
 	template <
 		typename Value,
@@ -104,7 +99,7 @@ private:
 	int64 _totalSizeLimit = 0;
 	int64 _mediaSizeLimit = 0;
 	size_type _timeLimit = 0;
-	bool _limitsChanged = false;
-	QString _highlightId;
 
 };
+
+} // namespace Settings

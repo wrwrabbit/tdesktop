@@ -5,27 +5,29 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
-#include "boxes/local_storage_box.h"
+#include "settings/sections/settings_local_storage.h"
 
-#include "ui/wrap/vertical_layout.h"
-#include "ui/wrap/slide_wrap.h"
-#include "ui/widgets/labels.h"
-#include "ui/widgets/buttons.h"
-#include "ui/widgets/shadow.h"
-#include "ui/widgets/continuous_sliders.h"
-#include "ui/effects/radial_animation.h"
-#include "ui/text/format_values.h"
-#include "ui/emoji_config.h"
-#include "storage/storage_account.h"
-#include "storage/cache/storage_cache_database.h"
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
-#include "settings/settings_common.h"
+#include "storage/storage_account.h"
+#include "storage/cache/storage_cache_database.h"
+#include "ui/text/format_values.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/continuous_sliders.h"
+#include "ui/widgets/labels.h"
+#include "ui/widgets/shadow.h"
+#include "ui/wrap/slide_wrap.h"
+#include "ui/wrap/vertical_layout.h"
+#include "ui/effects/radial_animation.h"
+#include "ui/emoji_config.h"
+#include "ui/painter.h"
+#include "ui/rect.h"
 #include "window/window_session_controller.h"
-#include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "styles/style_layers.h"
 
+namespace Settings {
 namespace {
 
 constexpr auto kMegabyte = int64(1024 * 1024);
@@ -81,14 +83,6 @@ size_type TimeLimitInDays(int index) {
 				(month >= 3) ? 0 :
 				(month >= 2) ? -1 :
 				(month >= 1) ? 1 : 0);
-			//+ (month >= 1 ? 1 : 0)
-			//- (month >= 2 ? 2 : 0)
-			//+ (month >= 3 ? 1 : 0)
-			//+ (month >= 5 ? 1 : 0)
-			//+ (month >= 7 ? 1 : 0)
-			//+ (month >= 8 ? 1 : 0)
-			//+ (month >= 10 ? 1 : 0)
-			//+ (month >= 12 ? 1 : 0);
 	}
 	return 0;
 }
@@ -121,7 +115,7 @@ size_type ValueToLimit(size_type timeLimit) {
 
 } // namespace
 
-class LocalStorageBox::Row : public Ui::RpWidget {
+class LocalStorage::Row : public Ui::RpWidget {
 public:
 	Row(
 		QWidget *parent,
@@ -137,7 +131,6 @@ public:
 
 protected:
 	int resizeGetHeight(int newWidth) override;
-	void paintEvent(QPaintEvent *e) override;
 
 private:
 	QString titleText(const Database::TaggedSummary &data) const;
@@ -153,7 +146,7 @@ private:
 
 };
 
-LocalStorageBox::Row::Row(
+LocalStorage::Row::Row(
 	QWidget *parent,
 	Fn<QString(size_type)> title,
 	rpl::producer<QString> clear,
@@ -172,7 +165,7 @@ LocalStorageBox::Row::Row(
 	_clear->setVisible(data.count != 0);
 }
 
-void LocalStorageBox::Row::update(const Database::TaggedSummary &data) {
+void LocalStorage::Row::update(const Database::TaggedSummary &data) {
 	if (data.count != 0) {
 		_title->setText(titleText(data));
 	}
@@ -180,7 +173,7 @@ void LocalStorageBox::Row::update(const Database::TaggedSummary &data) {
 	_clear->setVisible(data.count != 0);
 }
 
-void LocalStorageBox::Row::toggleProgress(bool shown) {
+void LocalStorage::Row::toggleProgress(bool shown) {
 	if (!shown) {
 		_progress = nullptr;
 		_description->show();
@@ -201,21 +194,21 @@ void LocalStorageBox::Row::toggleProgress(bool shown) {
 	}
 }
 
-void LocalStorageBox::Row::radialAnimationCallback() {
+void LocalStorage::Row::radialAnimationCallback() {
 	if (!anim::Disabled()) {
 		RpWidget::update();
 	}
 }
 
-rpl::producer<> LocalStorageBox::Row::clearRequests() const {
+rpl::producer<> LocalStorage::Row::clearRequests() const {
 	return _clear->clicks() | rpl::to_empty;
 }
 
-not_null<Ui::RoundButton*> LocalStorageBox::Row::clearButton() const {
+not_null<Ui::RoundButton*> LocalStorage::Row::clearButton() const {
 	return _clear.data();
 }
 
-int LocalStorageBox::Row::resizeGetHeight(int newWidth) {
+int LocalStorage::Row::resizeGetHeight(int newWidth) {
 	const auto height = st::localStorageRowHeight;
 	const auto padding = st::localStorageRowPadding;
 	const auto available = newWidth - padding.left() - padding.right();
@@ -227,114 +220,70 @@ int LocalStorageBox::Row::resizeGetHeight(int newWidth) {
 		height - padding.bottom() - _description->height(),
 		newWidth);
 	if (_clearing) {
-		const auto progressShift = st::proxyCheckingPosition.x()
-			+ st::proxyCheckingAnimation.size.width()
-			+ st::proxyCheckingSkip;
-		_clearing->resizeToWidth(available - progressShift);
+		_clearing->resizeToWidth(available);
 		_clearing->moveToLeft(
-			padding.left(),// + progressShift,
+			padding.left(),
 			_description->y(),
 			newWidth);
 	}
 	_clear->moveToRight(
-		st::layerBox.buttonPadding.right(),
+		padding.right(),
 		(height - _clear->height()) / 2,
 		newWidth);
 	return height;
 }
 
-void LocalStorageBox::Row::paintEvent(QPaintEvent *e) {
-#if 0 // not used
-	if (!_progress) {
-		return;
-	}
-	auto p = QPainter(this);
-	const auto padding = st::localStorageRowPadding;
-	const auto height = st::localStorageRowHeight;
-	const auto bottom = height - padding.bottom() - _description->height();
-	_progress->draw(
-		p,
-		{
-			st::proxyCheckingPosition.x() + padding.left(),
-			st::proxyCheckingPosition.y() + bottom
-		},
-		width());
-#endif
-}
-
-QString LocalStorageBox::Row::titleText(const Database::TaggedSummary &data) const {
+QString LocalStorage::Row::titleText(
+		const Database::TaggedSummary &data) const {
 	return _titleFactory(data.count);
 }
 
-QString LocalStorageBox::Row::sizeText(const Database::TaggedSummary &data) const {
+QString LocalStorage::Row::sizeText(
+		const Database::TaggedSummary &data) const {
 	return data.totalSize
 		? Ui::FormatSizeText(data.totalSize)
 		: tr::lng_local_storage_empty(tr::now);
 }
 
-LocalStorageBox::LocalStorageBox(
-	QWidget*,
-	not_null<Main::Session*> session,
-	CreateTag)
-: _session(session)
-, _db(&session->data().cache())
-, _dbBig(&session->data().cacheBigFile()) {
-	const auto &settings = session->local().cacheSettings();
-	const auto &settingsBig = session->local().cacheBigFileSettings();
+LocalStorage::LocalStorage(
+	QWidget *parent,
+	not_null<Window::SessionController*> controller)
+: Section(parent, controller)
+, _session(&controller->session())
+, _db(&_session->data().cache())
+, _dbBig(&_session->data().cacheBigFile()) {
+	const auto &settings = _session->local().cacheSettings();
+	const auto &settingsBig = _session->local().cacheBigFileSettings();
 	_totalSizeLimit = settings.totalSizeLimit + settingsBig.totalSizeLimit;
 	_mediaSizeLimit = settingsBig.totalSizeLimit;
 	_timeLimit = settings.totalTimeLimit;
+
+	setupContent();
 }
 
-void LocalStorageBox::Show(
-		not_null<Window::SessionController*> controller,
-		const QString &highlightId) {
-	auto shared = std::make_shared<object_ptr<LocalStorageBox>>(
-		Box<LocalStorageBox>(&controller->session(), CreateTag()));
-	const auto weak = shared->data();
-	weak->_highlightId = highlightId;
-	rpl::combine(
-		controller->session().data().cache().statsOnMain(),
-		controller->session().data().cacheBigFile().statsOnMain()
-	) | rpl::on_next([=](
-			Database::Stats &&stats,
-			Database::Stats &&statsBig) {
-		weak->update(std::move(stats), std::move(statsBig));
-		if (auto &strong = *shared) {
-			controller->uiShow()->show(std::move(strong));
-		}
-	}, weak->lifetime());
+rpl::producer<QString> LocalStorage::title() {
+	return tr::lng_local_storage_title();
 }
 
-void LocalStorageBox::prepare() {
-	setTitle(tr::lng_local_storage_title());
+void LocalStorage::showFinished() {
+	Section::showFinished();
 
-	addButton(tr::lng_box_ok(), [this] { closeBox(); });
-
-	setupControls();
-}
-
-void LocalStorageBox::showFinished() {
-	if (_highlightId.isEmpty()) {
-		return;
+	if (const auto i = _rows.find(0); i != end(_rows)) {
+		controller()->checkHighlightControl(
+			u"storage/clear-cache"_q,
+			i->second->entity()->clearButton(),
+			{ .rippleShape = true });
 	}
-	if (_highlightId == u"storage/clear-cache"_q) {
-		if (const auto i = _rows.find(0); i != _rows.end()) {
-			Settings::HighlightWidget(
-				i->second->entity()->clearButton(),
-				{ .rippleShape = true });
-		}
-	} else if (_highlightId == u"storage/max-cache"_q) {
-		if (_totalSlider) {
-			const auto add = st::roundRadiusSmall;
-			Settings::HighlightWidget(
-				_totalSlider,
-				{ .margin = { -add, -add, -add, -add }, .radius = add });
-		}
+	if (_totalSlider) {
+		const auto add = st::roundRadiusSmall;
+		controller()->checkHighlightControl(
+			u"storage/max-cache"_q,
+			_totalSlider,
+			{ .margin = Margins(-add), .radius = add });
 	}
 }
 
-void LocalStorageBox::updateRow(
+void LocalStorage::updateRow(
 		not_null<Ui::SlideWrap<Row>*> row,
 		const Database::TaggedSummary *data) {
 	const auto summary = (_rows.find(0)->second == row);
@@ -345,7 +294,7 @@ void LocalStorageBox::updateRow(
 	row->toggle(shown, anim::type::normal);
 }
 
-void LocalStorageBox::update(
+void LocalStorage::update(
 		Database::Stats &&stats,
 		Database::Stats &&statsBig) {
 	_stats = std::move(stats);
@@ -369,14 +318,14 @@ void LocalStorageBox::update(
 	}
 }
 
-auto LocalStorageBox::summary() const -> Database::TaggedSummary {
+auto LocalStorage::summary() const -> Database::TaggedSummary {
 	auto result = _stats.full;
 	result.count += _statsBig.full.count;
 	result.totalSize += _statsBig.full.totalSize;
 	return result;
 }
 
-void LocalStorageBox::clearByTag(uint16 tag) {
+void LocalStorage::clearByTag(uint16 tag) {
 	if (tag == kFakeMediaCacheTag) {
 		_dbBig->clear();
 	} else if (tag) {
@@ -388,10 +337,24 @@ void LocalStorageBox::clearByTag(uint16 tag) {
 	}
 }
 
-void LocalStorageBox::setupControls() {
-	const auto container = setInnerWidget(
-		object_ptr<Ui::VerticalLayout>(this),
-		st::defaultMultiSelect.scroll);
+void LocalStorage::setupContent() {
+	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+
+	setupControls(content);
+
+	rpl::combine(
+		_db->statsOnMain(),
+		_dbBig->statsOnMain()
+	) | rpl::on_next([=](
+			Database::Stats &&stats,
+			Database::Stats &&statsBig) {
+		update(std::move(stats), std::move(statsBig));
+	}, content->lifetime());
+
+	Ui::ResizeFitChild(this, content);
+}
+
+void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 	const auto createRow = [&](
 			uint16 tag,
 			Fn<QString(size_type)> title,
@@ -455,13 +418,7 @@ void LocalStorageBox::setupControls() {
 		tr::lng_local_storage_clear_some(),
 		_statsBig.full));
 	shadow->toggleOn(
-		std::move(tracker).atLeastOneShownValue()
-	);
-	container->resizeToWidth(st::boxWidth);
-	container->heightValue(
-	) | rpl::on_next([=](int height) {
-		setDimensions(st::boxWidth, height);
-	}, container->lifetime());
+		std::move(tracker).atLeastOneShownValue());
 }
 
 template <
@@ -469,7 +426,7 @@ template <
 	typename Convert,
 	typename Callback,
 	typename>
-not_null<Ui::MediaSlider*> LocalStorageBox::createLimitsSlider(
+not_null<Ui::MediaSlider*> LocalStorage::createLimitsSlider(
 		not_null<Ui::VerticalLayout*> container,
 		int valuesCount,
 		Convert &&convert,
@@ -493,7 +450,7 @@ not_null<Ui::MediaSlider*> LocalStorageBox::createLimitsSlider(
 	return slider;
 }
 
-void LocalStorageBox::updateMediaLimit() {
+void LocalStorage::updateMediaLimit() {
 	const auto good = [&](int64 mediaLimit) {
 		return (_totalSizeLimit - mediaLimit >= kMinimalSizeLimit);
 	};
@@ -513,7 +470,7 @@ void LocalStorageBox::updateMediaLimit() {
 	Ensures(good(_mediaSizeLimit));
 }
 
-void LocalStorageBox::updateTotalLimit() {
+void LocalStorage::updateTotalLimit() {
 	const auto good = [&](int64 totalLimit) {
 		return (totalLimit - _mediaSizeLimit >= kMinimalSizeLimit);
 	};
@@ -532,21 +489,23 @@ void LocalStorageBox::updateTotalLimit() {
 	Ensures(good(_totalSizeLimit));
 }
 
-void LocalStorageBox::updateTotalLabel() {
+void LocalStorage::updateTotalLabel() {
 	Expects(_totalLabel != nullptr);
 
 	const auto text = SizeLimitText(_totalSizeLimit);
-	_totalLabel->setText(tr::lng_local_storage_size_limit(tr::now, lt_size, text));
+	_totalLabel->setText(
+		tr::lng_local_storage_size_limit(tr::now, lt_size, text));
 }
 
-void LocalStorageBox::updateMediaLabel() {
+void LocalStorage::updateMediaLabel() {
 	Expects(_mediaLabel != nullptr);
 
 	const auto text = SizeLimitText(_mediaSizeLimit);
-	_mediaLabel->setText(tr::lng_local_storage_media_limit(tr::now, lt_size, text));
+	_mediaLabel->setText(
+		tr::lng_local_storage_media_limit(tr::now, lt_size, text));
 }
 
-void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
+void LocalStorage::setupLimits(not_null<Ui::VerticalLayout*> container) {
 	container->add(
 		object_ptr<Ui::PlainShadow>(container),
 		st::localStorageRowPadding);
@@ -561,7 +520,7 @@ void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
 			_totalLabel = label;
 			updateTotalLabel();
 			updateMediaLimit();
-			limitsChanged();
+			applyLimits();
 		});
 
 	_mediaSlider = createLimitsSlider(
@@ -574,7 +533,7 @@ void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
 			_mediaLabel = label;
 			updateMediaLabel();
 			updateTotalLimit();
-			limitsChanged();
+			applyLimits();
 		});
 
 	createLimitsSlider(
@@ -585,12 +544,13 @@ void LocalStorageBox::setupLimits(not_null<Ui::VerticalLayout*> container) {
 		[=](not_null<Ui::LabelSimple*> label, size_type limit) {
 			_timeLimit = ValueToLimit(limit);
 			const auto text = TimeLimitText(_timeLimit);
-			label->setText(tr::lng_local_storage_time_limit(tr::now, lt_limit, text));
-			limitsChanged();
+			label->setText(
+				tr::lng_local_storage_time_limit(tr::now, lt_limit, text));
+			applyLimits();
 		});
 }
 
-void LocalStorageBox::limitsChanged() {
+void LocalStorage::applyLimits() {
 	const auto &settings = _session->local().cacheSettings();
 	const auto &settingsBig = _session->local().cacheBigFileSettings();
 	const auto sizeLimit = _totalSizeLimit - _mediaSizeLimit;
@@ -598,30 +558,21 @@ void LocalStorageBox::limitsChanged() {
 		|| (settingsBig.totalSizeLimit != _mediaSizeLimit)
 		|| (settings.totalTimeLimit != _timeLimit)
 		|| (settingsBig.totalTimeLimit != _timeLimit);
-	if (_limitsChanged != changed) {
-		_limitsChanged = changed;
-		clearButtons();
-		if (_limitsChanged) {
-			addButton(tr::lng_settings_save(), [=] { save(); });
-			addButton(tr::lng_cancel(), [=] { closeBox(); });
-		} else {
-			addButton(tr::lng_box_ok(), [=] { closeBox(); });
-		}
-	}
-}
-
-void LocalStorageBox::save() {
-	if (!_limitsChanged) {
-		closeBox();
+	if (!changed) {
 		return;
 	}
 	auto update = Storage::Cache::Database::SettingsUpdate();
-	update.totalSizeLimit = _totalSizeLimit - _mediaSizeLimit;
+	update.totalSizeLimit = sizeLimit;
 	update.totalTimeLimit = _timeLimit;
 	auto updateBig = Storage::Cache::Database::SettingsUpdate();
 	updateBig.totalSizeLimit = _mediaSizeLimit;
 	updateBig.totalTimeLimit = _timeLimit;
 	_session->local().updateCacheSettings(update, updateBig);
 	_session->data().cache().updateSettings(update);
-	closeBox();
 }
+
+Type LocalStorageId() {
+	return LocalStorage::Id();
+}
+
+} // namespace Settings
