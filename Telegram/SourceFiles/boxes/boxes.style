@@ -254,6 +254,13 @@ localStorageUsageSubtitle: FlatLabel(defaultFlatLabel) {
 	}
 }
 
+localStorageClearingSpinner: InfiniteRadialAnimation(defaultInfiniteRadialAnimation) {
+	color: activeButtonBg;
+	thickness: 3px;
+	size: size(48px, 48px);
+}
+localStorageClearingSpinnerPadding: margins(0px, 20px, 0px, 14px);
+
 shareRowsTop: 12px;
 shareRowHeight: 108px;
 sharePhotoTop: 6px;

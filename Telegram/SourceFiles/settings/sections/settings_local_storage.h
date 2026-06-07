@@ -30,6 +30,7 @@ template <typename Widget>
 class SlideWrap;
 class LabelSimple;
 class MediaSlider;
+class BoxContent;
 } // namespace Ui
 
 namespace Settings {
@@ -55,6 +56,7 @@ private:
 	void setupContent();
 	void updateChart();
 	void updateDeviceBar();
+	void showClearingBox();
 	void clearByTag(uint16 tag);
 	void update(Database::Stats &&stats, Database::Stats &&statsBig);
 	void updateRow(
@@ -105,6 +107,11 @@ private:
 	int64 _totalSizeLimit = 0;
 	int64 _mediaSizeLimit = 0;
 	size_type _timeLimit = 0;
+
+	bool _clearing = false;
+	bool _clearRequested = false;
+	int64 _clearFreedBase = 0;
+	base::weak_qptr<Ui::BoxContent> _clearingBox;
 
 };
 

@@ -1155,6 +1155,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_device_free" = "Free";
 "lng_local_storage_device_total" = "Total";
 "lng_local_storage_device_usage" = "Telegram uses {percent} of your device storage.";
+"lng_local_storage_clearing_about" = "Please keep this window open while the cache is being cleared.";
+"lng_local_storage_cleared" = "{size} freed on your device!";
 
 "lng_passcode_remove_button" = "Remove";
 

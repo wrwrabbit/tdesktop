@@ -24,10 +24,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/emoji_config.h"
+#include "ui/layers/generic_box.h"
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/text/text_utilities.h"
 #include "ui/ui_utility.h"
+#include "ui/vertical_list.h"
 #include "ui/widgets/tooltip.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
@@ -128,6 +130,35 @@ constexpr auto kChartMorphDuration = crl::time(650);
 constexpr auto kChartAppearDuration = crl::time(750);
 constexpr auto kChartSelectDuration = crl::time(200);
 constexpr auto kChartPercentFadeDuration = crl::time(200);
+
+class ClearingSpinner final : public Ui::RpWidget {
+public:
+	explicit ClearingSpinner(QWidget *parent);
+
+protected:
+	int resizeGetHeight(int newWidth) override;
+	void paintEvent(QPaintEvent *e) override;
+
+private:
+	Ui::InfiniteRadialAnimation _animation;
+
+};
+
+ClearingSpinner::ClearingSpinner(QWidget *parent)
+: RpWidget(parent)
+, _animation([=] { update(); }, st::localStorageClearingSpinner) {
+	_animation.start();
+}
+
+int ClearingSpinner::resizeGetHeight(int newWidth) {
+	return st::localStorageClearingSpinner.size.height();
+}
+
+void ClearingSpinner::paintEvent(QPaintEvent *e) {
+	auto p = QPainter(this);
+	const auto size = st::localStorageClearingSpinner.size;
+	_animation.draw(p, QPoint((width() - size.width()) / 2, 0), width());
+}
 
 QColor PartColor(int index) {
 	switch (index) {
@@ -1039,9 +1070,32 @@ void LocalStorage::update(
 		Database::Stats &&statsBig) {
 	_stats = std::move(stats);
 	_statsBig = std::move(statsBig);
+	const auto clearing = _stats.clearing || _statsBig.clearing;
 	if (const auto i = _rows.find(0); i != end(_rows)) {
-		i->second->entity()->toggleProgress(
-			_stats.clearing || _statsBig.clearing);
+		i->second->entity()->toggleProgress(clearing);
+	}
+	if (clearing && !_clearing) {
+		_clearing = true;
+		if (_clearRequested) {
+			showClearingBox();
+		}
+	} else if (!clearing && _clearing) {
+		_clearing = false;
+		if (const auto strong = _clearingBox.get()) {
+			strong->closeBox();
+		}
+		if (_clearRequested) {
+			_clearRequested = false;
+			const auto freed = std::max(
+				_clearFreedBase - summary().totalSize,
+				int64());
+			if (freed > 0) {
+				controller()->showToast(tr::lng_local_storage_cleared(
+					tr::now,
+					lt_size,
+					Ui::FormatSizeText(freed)));
+			}
+		}
 	}
 	for (const auto &entry : _rows) {
 		if (entry.first == kFakeMediaCacheTag) {
@@ -1085,6 +1139,34 @@ void LocalStorage::updateDeviceBar() {
 	}
 }
 
+void LocalStorage::showClearingBox() {
+	if (_clearingBox) {
+		return;
+	}
+	auto box = Box([](not_null<Ui::GenericBox*> box) {
+		box->setWidth(st::boxWidth);
+		box->setCloseByOutsideClick(false);
+		box->addRow(
+			object_ptr<ClearingSpinner>(box),
+			st::localStorageClearingSpinnerPadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				tr::lng_local_storage_clearing(),
+				st::changePhoneTitle),
+			st::changePhoneTitlePadding);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				tr::lng_local_storage_clearing_about(),
+				st::changePhoneDescription),
+			st::changePhoneDescriptionPadding);
+	});
+	const auto raw = box.data();
+	controller()->show(std::move(box));
+	_clearingBox = base::make_weak(raw);
+}
+
 auto LocalStorage::summary() const -> Database::TaggedSummary {
 	auto result = _stats.full;
 	result.count += _statsBig.full.count;
@@ -1093,6 +1175,8 @@ auto LocalStorage::summary() const -> Database::TaggedSummary {
 }
 
 void LocalStorage::clearByTag(uint16 tag) {
+	_clearRequested = true;
+	_clearFreedBase = summary().totalSize;
 	if (tag == kFakeMediaCacheTag) {
 		_dbBig->clear();
 	} else if (tag) {
