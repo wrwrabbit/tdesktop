@@ -1196,6 +1196,16 @@ GroupedMediaBlock::GroupedMediaBlock(
 , _mediaRuntime(std::move(mediaRuntime)) {
 	_items.reserve(prepared.items.size());
 	for (const auto &item : prepared.items) {
+		if (_mediaRuntime) {
+			switch (item.media.kind) {
+			case PreparedMediaItemKind::Photo:
+				_mediaRuntime->registerPhoto(item.media.id);
+				break;
+			case PreparedMediaItemKind::Document:
+				_mediaRuntime->registerDocument(item.media.id);
+				break;
+			}
+		}
 		auto state = ItemState();
 		state.kind = item.media.kind;
 		state.id = item.media.id;
@@ -1831,6 +1841,7 @@ std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(
 				return block;
 			}
 		}
+		mediaRuntime->registerPhoto(prepared.photoId);
 	}
 	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 	result->setLayoutStyle(st);
@@ -1848,6 +1859,7 @@ std::shared_ptr<MediaBlock> CreateVideoMediaBlock(
 				return block;
 			}
 		}
+		mediaRuntime->registerDocument(prepared.media.id);
 	}
 	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 	result->setLayoutStyle(st);

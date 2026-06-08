@@ -140,6 +140,8 @@ public:
 		uint64 photoId) const = 0;
 	[[nodiscard]] virtual std::shared_ptr<DocumentRuntime> resolveDocument(
 		uint64 documentId) const;
+	virtual void registerPhoto(uint64 photoId) const;
+	virtual void registerDocument(uint64 documentId) const;
 	[[nodiscard]] virtual std::shared_ptr<MapRuntime> resolveMap(
 		double latitude,
 		double longitude,
@@ -165,6 +167,12 @@ inline QString MediaRuntime::mentionNameEntityData(uint64) const {
 inline std::shared_ptr<DocumentRuntime> MediaRuntime::resolveDocument(
 		uint64) const {
 	return nullptr;
+}
+
+inline void MediaRuntime::registerPhoto(uint64) const {
+}
+
+inline void MediaRuntime::registerDocument(uint64) const {
 }
 
 inline std::shared_ptr<MapRuntime> MediaRuntime::resolveMap(

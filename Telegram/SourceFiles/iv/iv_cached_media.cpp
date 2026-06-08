@@ -226,7 +226,9 @@ public:
 	CachedPagePhotoRuntime(
 		not_null<Main::Session*> session,
 		not_null<PhotoData*> photo,
-		::Data::FileOrigin origin);
+		::Data::FileOrigin origin,
+		FullMsgId itemId = FullMsgId(),
+		Fn<FullMsgId()> itemIdResolver = nullptr);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
 			QSize size) const override;
@@ -246,6 +248,8 @@ private:
 	const not_null<Main::Session*> _session;
 	const not_null<PhotoData*> _photo;
 	const ::Data::FileOrigin _origin;
+	const FullMsgId _itemId;
+	const Fn<FullMsgId()> _itemIdResolver;
 	const std::shared_ptr<::Data::PhotoMedia> _media;
 
 };
@@ -253,10 +257,14 @@ private:
 CachedPagePhotoRuntime::CachedPagePhotoRuntime(
 	not_null<Main::Session*> session,
 	not_null<PhotoData*> photo,
-	::Data::FileOrigin origin)
+	::Data::FileOrigin origin,
+	FullMsgId itemId,
+	Fn<FullMsgId()> itemIdResolver)
 : _session(session)
 , _photo(photo)
 , _origin(std::move(origin))
+, _itemId(itemId)
+, _itemIdResolver(std::move(itemIdResolver))
 , _media(photo->createMediaView()) {
 }
 
@@ -302,13 +310,14 @@ void CachedPagePhotoRuntime::open(Qt::MouseButton button) const {
 		return;
 	}
 	if (const auto window = Core::App().activeWindow()) {
-		const auto item = (HistoryItem*)nullptr;
+		const auto itemId = _itemIdResolver ? _itemIdResolver() : _itemId;
+		const auto item = itemId ? _session->data().message(itemId) : nullptr;
 		window->openInMediaView({
 			CurrentSessionController(_session),
 			_photo,
 			item,
-			MsgId(0),
-			PeerId(0),
+			item ? item->topicRootId() : MsgId(),
+			item ? item->sublistPeerId() : PeerId(),
 		});
 	}
 }
@@ -407,7 +416,9 @@ public:
 	CachedPageDocumentRuntime(
 		not_null<Main::Session*> session,
 		not_null<DocumentData*> document,
-		::Data::FileOrigin origin);
+		::Data::FileOrigin origin,
+		FullMsgId itemId = FullMsgId(),
+		Fn<FullMsgId()> itemIdResolver = nullptr);
 
 	[[nodiscard]] std::shared_ptr<Ui::DynamicImage> thumbnail(
 			QSize size) const override;
@@ -427,6 +438,8 @@ private:
 	const not_null<Main::Session*> _session;
 	const not_null<DocumentData*> _document;
 	const ::Data::FileOrigin _origin;
+	const FullMsgId _itemId;
+	const Fn<FullMsgId()> _itemIdResolver;
 	const std::shared_ptr<::Data::DocumentMedia> _media;
 
 };
@@ -434,10 +447,14 @@ private:
 CachedPageDocumentRuntime::CachedPageDocumentRuntime(
 	not_null<Main::Session*> session,
 	not_null<DocumentData*> document,
-	::Data::FileOrigin origin)
+	::Data::FileOrigin origin,
+	FullMsgId itemId,
+	Fn<FullMsgId()> itemIdResolver)
 : _session(session)
 , _document(document)
 , _origin(std::move(origin))
+, _itemId(itemId)
+, _itemIdResolver(std::move(itemIdResolver))
 , _media(document->createMediaView()) {
 }
 
@@ -468,13 +485,14 @@ void CachedPageDocumentRuntime::open(Qt::MouseButton button) const {
 		return;
 	}
 	if (const auto window = Core::App().activeWindow()) {
-		const auto item = (HistoryItem*)nullptr;
+		const auto itemId = _itemIdResolver ? _itemIdResolver() : _itemId;
+		const auto item = itemId ? _session->data().message(itemId) : nullptr;
 		window->openInMediaView({
 			CurrentSessionController(_session),
 			_document,
 			item,
-			MsgId(0),
-			PeerId(0),
+			item ? item->topicRootId() : MsgId(),
+			item ? item->sublistPeerId() : PeerId(),
 		});
 	}
 }
@@ -915,7 +933,19 @@ void CachedPageChannelRuntime::join(Qt::MouseButton button) const {
 	}
 }
 
-class CachedPageMediaRuntime final : public Markdown::MediaRuntime {
+struct PendingInstantViewMediaItem {
+	enum class Kind {
+		Photo,
+		Document,
+	};
+
+	Kind kind = Kind::Photo;
+	uint64 id = 0;
+};
+
+class CachedPageMediaRuntime final
+	: public Markdown::MediaRuntime
+	, public std::enable_shared_from_this<CachedPageMediaRuntime> {
 public:
 	CachedPageMediaRuntime(
 		not_null<Main::Session*> session,
@@ -942,6 +972,9 @@ public:
 
 	[[nodiscard]] std::shared_ptr<Markdown::DocumentRuntime> resolveDocument(
 			uint64 documentId) const override;
+
+	void registerPhoto(uint64 photoId) const override;
+	void registerDocument(uint64 documentId) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::MapRuntime> resolveMap(
 			double latitude,
@@ -971,6 +1004,13 @@ private:
 			uint64 channelId,
 			not_null<ChannelData*> channel) const;
 
+	[[nodiscard]] HistoryItem *directHostItem() const;
+	[[nodiscard]] HistoryItem *openContextItem() const;
+	void queuePendingInstantViewItem(
+		PendingInstantViewMediaItem::Kind kind,
+		uint64 id) const;
+	void flushPendingInstantViewItems(not_null<HistoryItem*> item) const;
+	[[nodiscard]] FullMsgId openContextItemId() const;
 	[[nodiscard]] ::Data::FileOrigin fileOrigin() const;
 
 	const not_null<Main::Session*> _session;
@@ -982,6 +1022,7 @@ private:
 	const Fn<void(QString)> _openChannel;
 	const Fn<void(QString)> _joinChannel;
 	mutable std::shared_ptr<Markdown::IvHistoryViewMediaHost> _hostedMediaHost;
+	mutable std::vector<PendingInstantViewMediaItem> _pendingInstantViewItems;
 	mutable base::flat_map<uint64, rpl::lifetime> _channelJoinedSubscriptions;
 	mutable rpl::event_stream<uint64> _channelJoinedChanges;
 
@@ -1046,10 +1087,16 @@ std::shared_ptr<Markdown::PhotoRuntime> CachedPageMediaRuntime::resolvePhoto(
 	if (photo->isNull()) {
 		return nullptr;
 	}
+	registerPhoto(photoId);
+	const auto itemIdResolver = [runtime = shared_from_this()] {
+		return runtime->openContextItemId();
+	};
 	return std::make_shared<CachedPagePhotoRuntime>(
 		_session,
 		photo,
-		fileOrigin());
+		fileOrigin(),
+		FullMsgId(),
+		std::move(itemIdResolver));
 }
 
 std::shared_ptr<Markdown::DocumentRuntime> CachedPageMediaRuntime::resolveDocument(
@@ -1058,10 +1105,44 @@ std::shared_ptr<Markdown::DocumentRuntime> CachedPageMediaRuntime::resolveDocume
 	if (document->isNull()) {
 		return nullptr;
 	}
+	registerDocument(documentId);
+	const auto itemIdResolver = [runtime = shared_from_this()] {
+		return runtime->openContextItemId();
+	};
 	return std::make_shared<CachedPageDocumentRuntime>(
 		_session,
 		document,
-		fileOrigin());
+		fileOrigin(),
+		FullMsgId(),
+		std::move(itemIdResolver));
+}
+
+void CachedPageMediaRuntime::registerPhoto(uint64 photoId) const {
+	const auto photo = _session->data().photo(PhotoId(photoId));
+	if (photo->isNull()) {
+		return;
+	}
+	if (const auto item = openContextItem()) {
+		item->addPhotoForInstantView(photo);
+		return;
+	}
+	queuePendingInstantViewItem(
+		PendingInstantViewMediaItem::Kind::Photo,
+		photoId);
+}
+
+void CachedPageMediaRuntime::registerDocument(uint64 documentId) const {
+	const auto document = _session->data().document(DocumentId(documentId));
+	if (document->isNull()) {
+		return;
+	}
+	if (const auto item = openContextItem()) {
+		item->addDocumentForInstantView(document);
+		return;
+	}
+	queuePendingInstantViewItem(
+		PendingInstantViewMediaItem::Kind::Document,
+		documentId);
 }
 
 std::shared_ptr<Markdown::MapRuntime> CachedPageMediaRuntime::resolveMap(
@@ -1201,7 +1282,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.photo = std::make_shared<CachedPagePhotoRuntime>(
 				session,
 				photo,
-				origin);
+				origin,
+				host->item()->fullId());
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				std::move(descriptor));
 		},
@@ -1246,7 +1328,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
 				session,
 				document,
-				origin);
+				origin,
+				host->item()->fullId());
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				std::move(descriptor));
 		},
@@ -1283,7 +1366,8 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.document = std::make_shared<CachedPageDocumentRuntime>(
 				session,
 				document,
-				origin);
+				origin,
+				host->item()->fullId());
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				std::move(descriptor));
 		},
@@ -1336,6 +1420,74 @@ void CachedPageMediaRuntime::subscribeToChannel(
 	Info::Profile::AmInChannelValue(channel) | rpl::on_next([=](bool) {
 		_channelJoinedChanges.fire_copy(channelId);
 	}, _channelJoinedSubscriptions[channelId]);
+}
+
+HistoryItem *CachedPageMediaRuntime::directHostItem() const {
+	if (const auto view = _view.get()) {
+		return view->data().get();
+	}
+	return _itemId ? _session->data().message(_itemId) : nullptr;
+}
+
+HistoryItem *CachedPageMediaRuntime::openContextItem() const {
+	if (const auto item = directHostItem()) {
+		flushPendingInstantViewItems(not_null{ item });
+		return item;
+	}
+	if (const auto controller = CurrentSessionController(_session)) {
+		if (const auto host = hostedMediaHost(not_null{ controller })) {
+			const auto item = host->item().get();
+			flushPendingInstantViewItems(not_null{ item });
+			return item;
+		}
+	}
+	return nullptr;
+}
+
+void CachedPageMediaRuntime::queuePendingInstantViewItem(
+		PendingInstantViewMediaItem::Kind kind,
+		uint64 id) const {
+	for (const auto &pending : _pendingInstantViewItems) {
+		if (pending.kind == kind && pending.id == id) {
+			return;
+		}
+	}
+	_pendingInstantViewItems.push_back({
+		.kind = kind,
+		.id = id,
+	});
+}
+
+void CachedPageMediaRuntime::flushPendingInstantViewItems(
+		not_null<HistoryItem*> item) const {
+	if (_pendingInstantViewItems.empty()) {
+		return;
+	}
+	for (const auto &pending : _pendingInstantViewItems) {
+		switch (pending.kind) {
+		case PendingInstantViewMediaItem::Kind::Photo: {
+			const auto photo = _session->data().photo(PhotoId(pending.id));
+			if (!photo->isNull()) {
+				item->addPhotoForInstantView(photo);
+			}
+		} break;
+		case PendingInstantViewMediaItem::Kind::Document: {
+			const auto document = _session->data().document(
+				DocumentId(pending.id));
+			if (!document->isNull()) {
+				item->addDocumentForInstantView(document);
+			}
+		} break;
+		}
+	}
+	_pendingInstantViewItems.clear();
+}
+
+FullMsgId CachedPageMediaRuntime::openContextItemId() const {
+	if (const auto item = openContextItem()) {
+		return item->fullId();
+	}
+	return FullMsgId();
 }
 
 ::Data::FileOrigin CachedPageMediaRuntime::fileOrigin() const {
