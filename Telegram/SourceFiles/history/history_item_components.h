@@ -144,6 +144,7 @@ struct HistoryMessageMediaForInstantView
 	base::flat_set<not_null<DocumentData*>> documents;
 	base::flat_set<not_null<PhotoData*>> photos;
 	std::vector<Item> items;
+	std::vector<TextWithEntities> captions;
 };
 
 struct HistoryMessageRichPageSource

@@ -142,6 +142,39 @@ using RecognitionCacheMap = base::flat_map<RecognitionId, RecognitionResult>;
 	return cache.get();
 }
 
+[[nodiscard]] bool InstantViewMediaItemMatches(
+		const HistoryMessageMediaForInstantView::Item &item,
+		PhotoData *photo,
+		DocumentData *document) {
+	if (const auto itemPhoto = std::get_if<PhotoData*>(&item)) {
+		return *itemPhoto == photo;
+	} else if (const auto itemDocument = std::get_if<DocumentData*>(&item)) {
+		return *itemDocument == document;
+	}
+	return false;
+}
+
+[[nodiscard]] std::optional<TextWithEntities> InstantViewMediaCaption(
+		HistoryItem *message,
+		PhotoData *photo,
+		DocumentData *document) {
+	if (!message || (!photo && !document)) {
+		return std::nullopt;
+	}
+	const auto media = message->Get<HistoryMessageMediaForInstantView>();
+	if (!media) {
+		return std::nullopt;
+	}
+	for (auto i = size_t(); i != media->items.size(); ++i) {
+		if (InstantViewMediaItemMatches(media->items[i], photo, document)) {
+			return (i < media->captions.size())
+				? media->captions[i]
+				: TextWithEntities();
+		}
+	}
+	return std::nullopt;
+}
+
 constexpr auto kPreloadCount = 3;
 constexpr auto kMaxZoomLevel = 7; // x8
 constexpr auto kZoomToScreenLevel = 1024;
@@ -3933,6 +3966,12 @@ void OverlayWidget::refreshCaption() {
 		if (_stories) {
 			return _stories->captionText();
 		} else if (_message) {
+			if (const auto caption = InstantViewMediaCaption(
+					_message,
+					_photo,
+					_document)) {
+				return *caption;
+			}
 			if (const auto media = _message->media()) {
 				if (media->webpage()) {
 					if (_message->isSponsored()) {

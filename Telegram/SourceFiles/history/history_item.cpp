@@ -183,6 +183,23 @@ template <typename T>
 		&& (document->isVideoFile() || document->isAnimation());
 }
 
+void UpdateInstantViewMediaCaption(
+		HistoryMessageMediaForInstantView *data,
+		const HistoryMessageMediaForInstantView::Item &item,
+		TextWithEntities caption) {
+	const auto i = ranges::find(data->items, item);
+	if (i == end(data->items)) {
+		return;
+	}
+	const auto index = size_t(i - begin(data->items));
+	if (index >= data->captions.size()) {
+		data->captions.resize(index + 1);
+	}
+	if (!caption.text.isEmpty() && data->captions[index].text.isEmpty()) {
+		data->captions[index] = std::move(caption);
+	}
+}
+
 } // namespace
 
 void HistoryItem::HistoryItem::Destroyer::operator()(HistoryItem *value) {
@@ -1595,33 +1612,51 @@ void HistoryItem::setMediaForInstantView(
 	data->documents.clear();
 	data->photos.clear();
 	data->items.clear();
+	data->captions.clear();
 	if (document) {
 		data->documents.emplace(document);
 		if (IsNavigableForInstantViewMedia(document)) {
 			data->items.emplace_back(document);
+			data->captions.emplace_back();
 		}
 	}
 	if (photo) {
 		data->photos.emplace(photo);
 		data->items.emplace_back(photo);
+		data->captions.emplace_back();
 	}
 }
 
 void HistoryItem::addDocumentForInstantView(
-		not_null<DocumentData*> document) {
+		not_null<DocumentData*> document,
+		TextWithEntities caption) {
 	AddComponents(HistoryMessageMediaForInstantView::Bit());
 	const auto data = Get<HistoryMessageMediaForInstantView>();
 	if (data->documents.emplace(document).second
 		&& IsNavigableForInstantViewMedia(document)) {
 		data->items.emplace_back(document.get());
+		data->captions.push_back(std::move(caption));
+	} else {
+		UpdateInstantViewMediaCaption(
+			data,
+			HistoryMessageMediaForInstantView::Item(document.get()),
+			std::move(caption));
 	}
 }
 
-void HistoryItem::addPhotoForInstantView(not_null<PhotoData*> photo) {
+void HistoryItem::addPhotoForInstantView(
+		not_null<PhotoData*> photo,
+		TextWithEntities caption) {
 	AddComponents(HistoryMessageMediaForInstantView::Bit());
 	const auto data = Get<HistoryMessageMediaForInstantView>();
 	if (data->photos.emplace(photo).second) {
 		data->items.emplace_back(photo.get());
+		data->captions.push_back(std::move(caption));
+	} else {
+		UpdateInstantViewMediaCaption(
+			data,
+			HistoryMessageMediaForInstantView::Item(photo.get()),
+			std::move(caption));
 	}
 }
 
@@ -4222,6 +4257,7 @@ void HistoryItem::setRichPage(std::shared_ptr<const Iv::RichPage> page) {
 		media->documents.clear();
 		media->photos.clear();
 		media->items.clear();
+		media->captions.clear();
 	} else {
 		clearRichPage();
 	}

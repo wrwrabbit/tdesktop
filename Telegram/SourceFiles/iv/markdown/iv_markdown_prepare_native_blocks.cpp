@@ -898,6 +898,11 @@ void RefreshPreparedNativeIvPlaceholderCopyText(PreparedBlock *block) {
 		SortPreparedIvRichText(&prepared);
 		preparedBlock->text = std::move(prepared.text);
 		preparedBlock->links = std::move(prepared.links);
+		if (preparedBlock->kind == PreparedBlockKind::Photo) {
+			preparedBlock->photo.caption = preparedBlock->text;
+		} else if (preparedBlock->kind == PreparedBlockKind::Video) {
+			preparedBlock->video.caption = preparedBlock->text;
+		}
 		RefreshPreparedNativeIvMediaCaptionPlaceholder(preparedBlock, state);
 		RefreshPreparedNativeIvPlaceholderCopyText(preparedBlock);
 	} break;

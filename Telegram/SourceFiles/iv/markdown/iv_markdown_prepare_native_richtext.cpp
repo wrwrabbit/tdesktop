@@ -448,6 +448,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.photo.width = CanonicalWidth(data);
 	block.photo.height = CanonicalHeight(data);
 	block.photo.urlOverride = data.url;
+	block.photo.caption = block.text;
 	block.photo.spoiler = data.spoiler;
 	block.photo.viewerOpen = true;
 	result->push_back(std::move(block));
@@ -491,6 +492,7 @@ bool PrepareNativeIvVideoBlock(
 	block.video.media.width = CanonicalWidth(data);
 	block.video.media.height = CanonicalHeight(data);
 	block.video.media.spoiler = data.spoiler;
+	block.video.caption = block.text;
 	result->push_back(std::move(block));
 	return true;
 }
@@ -637,6 +639,7 @@ bool PrepareNativeIvGroupedMediaBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(preparedCaption.anchorIds);
 	block.supplementary = true;
+	block.groupedMedia.caption = block.text;
 	result->push_back(std::move(block));
 	return true;
 }

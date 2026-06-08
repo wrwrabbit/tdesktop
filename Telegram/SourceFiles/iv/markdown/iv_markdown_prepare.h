@@ -505,6 +505,7 @@ struct PreparedPhotoBlockData {
 	int width = 0;
 	int height = 0;
 	QString urlOverride;
+	TextWithEntities caption;
 	bool spoiler = false;
 	bool viewerOpen = false;
 };
@@ -525,6 +526,7 @@ struct PreparedMediaItemData {
 struct PreparedVideoBlockData {
 	PreparedMediaBlockId id;
 	PreparedMediaItemData media;
+	TextWithEntities caption;
 };
 
 struct PreparedAudioBlockData {
@@ -568,6 +570,7 @@ struct PreparedGroupedMediaBlockData {
 	PreparedMediaBlockId id;
 	PreparedGroupedMediaIntent intent = PreparedGroupedMediaIntent::Collage;
 	std::vector<PreparedGroupedMediaItemData> items;
+	TextWithEntities caption;
 };
 
 struct PreparedPlaceholderBlockData {

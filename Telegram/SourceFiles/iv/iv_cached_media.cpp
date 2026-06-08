@@ -941,6 +941,7 @@ struct PendingInstantViewMediaItem {
 
 	Kind kind = Kind::Photo;
 	uint64 id = 0;
+	TextWithEntities caption;
 };
 
 class CachedPageMediaRuntime final
@@ -973,8 +974,12 @@ public:
 	[[nodiscard]] std::shared_ptr<Markdown::DocumentRuntime> resolveDocument(
 			uint64 documentId) const override;
 
-	void registerPhoto(uint64 photoId) const override;
-	void registerDocument(uint64 documentId) const override;
+	void registerPhoto(
+		uint64 photoId,
+		TextWithEntities caption) const override;
+	void registerDocument(
+		uint64 documentId,
+		TextWithEntities caption) const override;
 
 	[[nodiscard]] std::shared_ptr<Markdown::MapRuntime> resolveMap(
 			double latitude,
@@ -1008,7 +1013,8 @@ private:
 	[[nodiscard]] HistoryItem *openContextItem() const;
 	void queuePendingInstantViewItem(
 		PendingInstantViewMediaItem::Kind kind,
-		uint64 id) const;
+		uint64 id,
+		TextWithEntities caption) const;
 	void flushPendingInstantViewItems(not_null<HistoryItem*> item) const;
 	[[nodiscard]] FullMsgId openContextItemId() const;
 	[[nodiscard]] ::Data::FileOrigin fileOrigin() const;
@@ -1087,7 +1093,6 @@ std::shared_ptr<Markdown::PhotoRuntime> CachedPageMediaRuntime::resolvePhoto(
 	if (photo->isNull()) {
 		return nullptr;
 	}
-	registerPhoto(photoId);
 	const auto itemIdResolver = [runtime = shared_from_this()] {
 		return runtime->openContextItemId();
 	};
@@ -1105,7 +1110,6 @@ std::shared_ptr<Markdown::DocumentRuntime> CachedPageMediaRuntime::resolveDocume
 	if (document->isNull()) {
 		return nullptr;
 	}
-	registerDocument(documentId);
 	const auto itemIdResolver = [runtime = shared_from_this()] {
 		return runtime->openContextItemId();
 	};
@@ -1117,32 +1121,38 @@ std::shared_ptr<Markdown::DocumentRuntime> CachedPageMediaRuntime::resolveDocume
 		std::move(itemIdResolver));
 }
 
-void CachedPageMediaRuntime::registerPhoto(uint64 photoId) const {
+void CachedPageMediaRuntime::registerPhoto(
+		uint64 photoId,
+		TextWithEntities caption) const {
 	const auto photo = _session->data().photo(PhotoId(photoId));
 	if (photo->isNull()) {
 		return;
 	}
 	if (const auto item = openContextItem()) {
-		item->addPhotoForInstantView(photo);
+		item->addPhotoForInstantView(photo, std::move(caption));
 		return;
 	}
 	queuePendingInstantViewItem(
 		PendingInstantViewMediaItem::Kind::Photo,
-		photoId);
+		photoId,
+		std::move(caption));
 }
 
-void CachedPageMediaRuntime::registerDocument(uint64 documentId) const {
+void CachedPageMediaRuntime::registerDocument(
+		uint64 documentId,
+		TextWithEntities caption) const {
 	const auto document = _session->data().document(DocumentId(documentId));
 	if (document->isNull()) {
 		return;
 	}
 	if (const auto item = openContextItem()) {
-		item->addDocumentForInstantView(document);
+		item->addDocumentForInstantView(document, std::move(caption));
 		return;
 	}
 	queuePendingInstantViewItem(
 		PendingInstantViewMediaItem::Kind::Document,
-		documentId);
+		documentId,
+		std::move(caption));
 }
 
 std::shared_ptr<Markdown::MapRuntime> CachedPageMediaRuntime::resolveMap(
@@ -1446,15 +1456,20 @@ HistoryItem *CachedPageMediaRuntime::openContextItem() const {
 
 void CachedPageMediaRuntime::queuePendingInstantViewItem(
 		PendingInstantViewMediaItem::Kind kind,
-		uint64 id) const {
-	for (const auto &pending : _pendingInstantViewItems) {
+		uint64 id,
+		TextWithEntities caption) const {
+	for (auto &pending : _pendingInstantViewItems) {
 		if (pending.kind == kind && pending.id == id) {
+			if (!caption.text.isEmpty() && pending.caption.text.isEmpty()) {
+				pending.caption = std::move(caption);
+			}
 			return;
 		}
 	}
 	_pendingInstantViewItems.push_back({
 		.kind = kind,
 		.id = id,
+		.caption = std::move(caption),
 	});
 }
 
@@ -1463,19 +1478,23 @@ void CachedPageMediaRuntime::flushPendingInstantViewItems(
 	if (_pendingInstantViewItems.empty()) {
 		return;
 	}
-	for (const auto &pending : _pendingInstantViewItems) {
+	for (auto &pending : _pendingInstantViewItems) {
 		switch (pending.kind) {
 		case PendingInstantViewMediaItem::Kind::Photo: {
 			const auto photo = _session->data().photo(PhotoId(pending.id));
 			if (!photo->isNull()) {
-				item->addPhotoForInstantView(photo);
+				item->addPhotoForInstantView(
+					photo,
+					std::move(pending.caption));
 			}
 		} break;
 		case PendingInstantViewMediaItem::Kind::Document: {
 			const auto document = _session->data().document(
 				DocumentId(pending.id));
 			if (!document->isNull()) {
-				item->addDocumentForInstantView(document);
+				item->addDocumentForInstantView(
+					document,
+					std::move(pending.caption));
 			}
 		} break;
 		}

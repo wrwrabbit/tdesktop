@@ -1199,10 +1199,14 @@ GroupedMediaBlock::GroupedMediaBlock(
 		if (_mediaRuntime) {
 			switch (item.media.kind) {
 			case PreparedMediaItemKind::Photo:
-				_mediaRuntime->registerPhoto(item.media.id);
+				_mediaRuntime->registerPhoto(
+					item.media.id,
+					prepared.caption);
 				break;
 			case PreparedMediaItemKind::Document:
-				_mediaRuntime->registerDocument(item.media.id);
+				_mediaRuntime->registerDocument(
+					item.media.id,
+					prepared.caption);
 				break;
 			}
 		}
@@ -1835,13 +1839,13 @@ std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(
 	if (mediaRuntime
 		&& prepared.viewerOpen
 		&& prepared.urlOverride.isEmpty()) {
+		mediaRuntime->registerPhoto(prepared.photoId, prepared.caption);
 		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
 			if (const auto block = hosted->createPhoto(prepared)) {
 				block->setLayoutStyle(st);
 				return block;
 			}
 		}
-		mediaRuntime->registerPhoto(prepared.photoId);
 	}
 	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 	result->setLayoutStyle(st);
@@ -1853,13 +1857,13 @@ std::shared_ptr<MediaBlock> CreateVideoMediaBlock(
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st) {
 	if (mediaRuntime) {
+		mediaRuntime->registerDocument(prepared.media.id, prepared.caption);
 		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
 			if (const auto block = hosted->createVideo(prepared)) {
 				block->setLayoutStyle(st);
 				return block;
 			}
 		}
-		mediaRuntime->registerDocument(prepared.media.id);
 	}
 	auto result = std::make_shared<ImageBackedMediaBlock>(prepared, mediaRuntime);
 	result->setLayoutStyle(st);
