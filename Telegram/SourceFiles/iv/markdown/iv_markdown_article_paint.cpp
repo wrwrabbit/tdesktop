@@ -377,7 +377,7 @@ void PaintRevealBand(
 		return;
 	}
 
-	auto postprocess = reveal->postprocess->method(*lineIndex);
+	auto postprocess = reveal->postprocess->method(*lineIndex, band.width());
 	if (!postprocess) {
 		paintDirect();
 		return;
@@ -709,7 +709,9 @@ void PaintTextLeaf(
 						|| !articlePostprocess->method) {
 						return nullptr;
 					}
-					return articlePostprocess->method(globalLine);
+					return articlePostprocess->method(
+						globalLine,
+						availableWidth);
 				},
 				.cache = articlePostprocess->cache,
 			});

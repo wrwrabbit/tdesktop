@@ -863,7 +863,7 @@ void AppendRevealLine(
 		int bottom,
 		int baseline,
 		bool rtl) {
-	if (width <= 0) {
+	if (width < 0) {
 		return;
 	}
 	const auto previousBottom = lines->empty()
@@ -909,16 +909,19 @@ void AppendTextRevealLines(
 		return;
 	}
 	const auto geometry = leaf.countLinesGeometry(textWidth, true);
+	const auto viewportLeft = visibleRect.x();
+	const auto viewportRight = visibleRect.x() + visibleRect.width();
 	for (const auto &line : geometry) {
 		const auto left = textRect.x() + line.left;
 		const auto right = left + line.width;
-		const auto visibleLeft = std::max(left, visibleRect.x());
-		const auto visibleRight = std::min(
+		const auto visibleLeft = std::clamp(
+			left,
+			viewportLeft,
+			viewportRight);
+		const auto visibleRight = std::clamp(
 			right,
-			visibleRect.x() + visibleRect.width());
-		if (visibleRight <= visibleLeft) {
-			continue;
-		}
+			viewportLeft,
+			viewportRight);
 		AppendRevealLine(
 			lines,
 			visibleLeft,

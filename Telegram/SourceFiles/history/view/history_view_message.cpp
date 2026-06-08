@@ -3043,7 +3043,9 @@ void Message::paintRichText(
 	if (appearingClip) {
 		revealPostprocess.emplace(
 			Iv::Markdown::MarkdownArticleRevealPostprocess{
-				.method = [=](int lineIndex) -> Fn<void(QImage&)> {
+				.method = [=](
+						int lineIndex,
+						int availableWidth) -> Fn<void(QImage&)> {
 					if (lineIndex != appearing->shownLine
 						|| appearing->revealedLineWidth
 							>= appearing->lines[lineIndex].width) {
@@ -3053,7 +3055,7 @@ void Message::paintRichText(
 						ApplyRevealGradient(
 							appearing,
 							cache,
-							appearing->lines[lineIndex].width);
+							availableWidth);
 					};
 				},
 				.cache = &appearing->lineCache,

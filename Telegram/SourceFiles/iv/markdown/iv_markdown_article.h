@@ -152,7 +152,7 @@ struct MarkdownArticlePaintCaches {
 using MarkdownArticleRevealLine = Ui::Text::LineLayoutInfo;
 
 struct MarkdownArticleRevealPostprocess {
-	Fn<Fn<void(QImage&)>(int lineIndex)> method;
+	Fn<Fn<void(QImage&)>(int lineIndex, int availableWidth)> method;
 	not_null<QImage*> cache;
 };
 
