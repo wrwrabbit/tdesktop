@@ -325,6 +325,55 @@ void ShareProxy(
 	return proxy;
 };
 
+[[nodiscard]] ProxyData ProxyDataFromLocalUrl(const QString &local) {
+	const auto protocol = u"tg://"_q;
+	const auto proxyString = u"proxy"_q;
+	const auto socksString = u"socks"_q;
+	if (!local.startsWith(protocol + proxyString, Qt::CaseInsensitive)
+		&& !local.startsWith(protocol + socksString, Qt::CaseInsensitive)) {
+		return ProxyData();
+	}
+	const auto command = base::StringViewMid(local, protocol.size(), 8192);
+	using namespace qthelp;
+	const auto options = RegExOption::CaseInsensitive;
+	for (const auto &[expression, _] : Core::LocalUrlHandlers()) {
+		const auto midExpression = base::StringViewMid(expression, 1);
+		const auto isSocks = midExpression.startsWith(socksString);
+		if (!midExpression.startsWith(proxyString) && !isSocks) {
+			continue;
+		}
+		const auto match = regex_match(expression, command, options);
+		if (!match) {
+			continue;
+		}
+		const auto type = isSocks
+			? ProxyData::Type::Socks5
+			: ProxyData::Type::Mtproto;
+		auto fields = url_parse_params(
+			match->captured(1),
+			qthelp::UrlParamNameTransform::ToLower);
+		if (type == ProxyData::Type::Mtproto) {
+			auto &secret = fields[u"secret"_q];
+			secret.replace('+', '-').replace('/', '_');
+		}
+		return ProxyDataFromFields(type, fields);
+	}
+	return ProxyData();
+}
+
+[[nodiscard]] ProxyData ProxyDataFromClipboard() {
+	const auto candidates = ExtractLinkCandidates(
+		QGuiApplication::clipboard()->text());
+	if (candidates.size() != 1) {
+		return ProxyData();
+	}
+	const auto trimmed = candidates.front().trimmed();
+	const auto converted = Core::TryConvertUrlToLocal(trimmed);
+	const auto local = converted.isEmpty() ? trimmed : converted;
+	const auto proxy = ProxyDataFromLocalUrl(local);
+	return proxy.valid() ? proxy : ProxyData();
+}
+
 void AddProxyFromClipboard(
 		not_null<ProxiesBoxController*> controller,
 		std::shared_ptr<Ui::Show> show) {
@@ -344,68 +393,35 @@ void AddProxyFromClipboard(
 		Invalid,
 	};
 
-	const auto proceedUrl = [=](const auto &local) {
-		const auto command = base::StringViewMid(
-			local,
-			protocol.size(),
-			8192);
-
-		if (local.startsWith(protocol + proxyString, Qt::CaseInsensitive)
-			|| local.startsWith(protocol + socksString, Qt::CaseInsensitive)) {
-
-			using namespace qthelp;
-			const auto options = RegExOption::CaseInsensitive;
-			for (const auto &[expression, _] : Core::LocalUrlHandlers()) {
-				const auto midExpression = base::StringViewMid(
-					expression,
-					1);
-				const auto isSocks = midExpression.startsWith(
-					socksString);
-				if (!midExpression.startsWith(proxyString)
-					&& !isSocks) {
-					continue;
-				}
-				const auto match = regex_match(
-					expression,
-					command,
-					options);
-				if (!match) {
-					continue;
-				}
-				const auto type = isSocks
-					? ProxyData::Type::Socks5
-					: ProxyData::Type::Mtproto;
-				auto fields = url_parse_params(
-					match->captured(1),
-					qthelp::UrlParamNameTransform::ToLower);
-				if (type == ProxyData::Type::Mtproto) {
-					auto &secret = fields[u"secret"_q];
-					secret.replace('+', '-').replace('/', '_');
-				}
-				const auto proxy = ProxyDataFromFields(type, fields);
-				if (!proxy) {
-					const auto status = proxy.status();
-					return (status == ProxyData::Status::Unsupported)
-						? Result::Unsupported
-						: (status == ProxyData::Status::IncorrectSecret)
-						? Result::IncorrectSecret
-						: Result::Invalid;
-				}
-				const auto contains = controller->contains(proxy);
-				const auto toast = (contains
-					? tr::lng_proxy_add_from_clipboard_existing_toast
-					: tr::lng_proxy_add_from_clipboard_good_toast)(tr::now);
-				if (isSingle) {
-					show->showToast(toast);
-				}
-				if (!contains) {
-					controller->addNewItem(proxy);
-				}
-				break;
-			}
-			return Result::Success;
+	const auto proceedUrl = [=](const QString &local) {
+		const auto isProxyLink
+			= local.startsWith(protocol + proxyString, Qt::CaseInsensitive)
+			|| local.startsWith(protocol + socksString, Qt::CaseInsensitive);
+		if (!isProxyLink) {
+			return Result::Failed;
 		}
-		return Result::Failed;
+		const auto proxy = ProxyDataFromLocalUrl(local);
+		if (proxy.type == ProxyData::Type::None) {
+			return Result::Success;
+		} else if (!proxy) {
+			const auto status = proxy.status();
+			return (status == ProxyData::Status::Unsupported)
+				? Result::Unsupported
+				: (status == ProxyData::Status::IncorrectSecret)
+				? Result::IncorrectSecret
+				: Result::Invalid;
+		}
+		const auto contains = controller->contains(proxy);
+		const auto toast = (contains
+			? tr::lng_proxy_add_from_clipboard_existing_toast
+			: tr::lng_proxy_add_from_clipboard_good_toast)(tr::now);
+		if (isSingle) {
+			show->showToast(toast);
+		}
+		if (!contains) {
+			controller->addNewItem(proxy);
+		}
+		return Result::Success;
 	};
 
 	auto success = Result::Failed;
@@ -2219,7 +2235,8 @@ void ProxiesBoxController::replaceItemValue(
 }
 
 object_ptr<Ui::BoxContent> ProxiesBoxController::addNewItemBox() {
-	return Box<ProxyBox>(ProxyData(), [=](const ProxyData &result) {
+	const auto fromClipboard = ProxyDataFromClipboard();
+	return Box<ProxyBox>(fromClipboard, [=](const ProxyData &result) {
 		auto j = ranges::find(
 			_list,
 			result,
