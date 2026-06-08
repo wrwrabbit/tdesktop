@@ -97,38 +97,6 @@ constexpr auto kLogEntryPreviewLines = 2;
 	return result;
 }
 
-[[nodiscard]] QString ExtractHash(
-		not_null<WebPageData*> webpage,
-		const TextWithEntities &text) {
-	const auto simplify = [](const QString &url) {
-		auto result = url.split('#')[0].toLower();
-		if (result.endsWith('/')) {
-			result.chop(1);
-		}
-		const auto prefixes = { u"http://"_q, u"https://"_q };
-		for (const auto &prefix : prefixes) {
-			if (result.startsWith(prefix)) {
-				result = result.mid(prefix.size());
-				break;
-			}
-		}
-		return result;
-	};
-	const auto simplified = simplify(webpage->url);
-	for (const auto &entity : text.entities) {
-		const auto link = (entity.type() == EntityType::Url)
-			? text.text.mid(entity.offset(), entity.length())
-			: (entity.type() == EntityType::CustomUrl)
-			? entity.data()
-			: QString();
-		if (simplify(link) == simplified) {
-			const auto i = link.indexOf('#');
-			return (i > 0) ? link.mid(i + 1) : QString();
-		}
-	}
-	return QString();
-}
-
 [[nodiscard]] ClickHandlerPtr IvClickHandler(
 		not_null<WebPageData*> webpage,
 		const TextWithEntities &text) {
