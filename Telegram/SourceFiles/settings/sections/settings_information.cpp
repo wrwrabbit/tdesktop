@@ -1028,6 +1028,8 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
 	using Environment = MTP::Environment;
 	const auto add = [=](Environment environment, bool newWindow = false) {
 		auto &domain = _controller->session().domain();
+		domain.removeRedundantAccounts();
+
 		auto found = false;
 		for (const auto &[index, account] : domain.accounts()) {
 			const auto raw = account.get();
