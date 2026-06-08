@@ -629,6 +629,19 @@ struct SerializeContext {
 		: std::nullopt;
 }
 
+[[nodiscard]] bool AppendSerializedParagraphBlock(
+		QVector<MTPPageBlock> *blocks,
+		const RichText &text,
+		const QString &anchorId,
+		SerializeContext *context) {
+	const auto paragraph = SerializeParagraphBlock(text, anchorId, context);
+	if (!paragraph) {
+		return false;
+	}
+	blocks->push_back(*paragraph);
+	return true;
+}
+
 [[nodiscard]] std::optional<MTPPageTableCell> SerializeTableCell(
 		const TableCell &cell,
 		SerializeContext *context) {
@@ -759,10 +772,15 @@ struct SerializeContext {
 					*caption))
 				: std::nullopt;
 		}
-		if (HasRichTextContent(block.text)) {
+		auto blocks = QVector<MTPPageBlock>();
+		if (HasRichTextContent(block.text)
+			&& !AppendSerializedParagraphBlock(
+				&blocks,
+				block.text,
+				QString(),
+				context)) {
 			return std::nullopt;
 		}
-		auto blocks = QVector<MTPPageBlock>();
 		const auto nested = SerializeBlocks(block.blocks, context);
 		if (!nested) {
 			return std::nullopt;
@@ -793,14 +811,13 @@ struct SerializeContext {
 					flags |= Flag::f_num;
 					auto blocks = QVector<MTPPageBlock>();
 					if (HasRichTextContent(item.text) || !item.anchorId.isEmpty()) {
-						const auto paragraph = SerializeParagraphBlock(
-							item.text,
-							item.anchorId,
-							context);
-						if (!paragraph) {
+						if (!AppendSerializedParagraphBlock(
+								&blocks,
+								item.text,
+								item.anchorId,
+								context)) {
 							return std::nullopt;
 						}
-						blocks.push_back(*paragraph);
 					}
 					const auto nested = SerializeBlocks(item.blocks, context);
 					if (!nested) {
@@ -858,14 +875,13 @@ struct SerializeContext {
 				}
 				auto blocks = QVector<MTPPageBlock>();
 				if (HasRichTextContent(item.text) || !item.anchorId.isEmpty()) {
-					const auto paragraph = SerializeParagraphBlock(
-						item.text,
-						item.anchorId,
-						context);
-					if (!paragraph) {
+					if (!AppendSerializedParagraphBlock(
+							&blocks,
+							item.text,
+							item.anchorId,
+							context)) {
 						return std::nullopt;
 					}
-					blocks.push_back(*paragraph);
 				}
 				const auto nested = SerializeBlocks(item.blocks, context);
 				if (!nested) {

@@ -499,6 +499,9 @@ private:
 	[[nodiscard]] InsertionAnchor resolveActiveInsertionTarget() const;
 	[[nodiscard]] std::optional<int> normalizeTextOnlyListItemForInsertion(
 		const BlockContainerPath &container);
+	[[nodiscard]] std::optional<int> normalizeTextOnlyQuoteSurface(
+		const BlockContainerPath &container,
+		bool keepEmptyParagraph);
 	[[nodiscard]] std::optional<int> normalizeTextOnlyQuoteForInsertion(
 		const BlockContainerPath &container);
 	[[nodiscard]] bool shouldReplaceActiveTextOnlyBlock(

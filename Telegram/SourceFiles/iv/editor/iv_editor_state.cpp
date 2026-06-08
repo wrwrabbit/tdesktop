@@ -3135,8 +3135,9 @@ std::optional<int> State::normalizeTextOnlyListItemForInsertion(
 	return -1;
 }
 
-std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
-		const BlockContainerPath &container) {
+std::optional<int> State::normalizeTextOnlyQuoteSurface(
+		const BlockContainerPath &container,
+		bool keepEmptyParagraph) {
 	if (container.steps.empty()) {
 		return std::nullopt;
 	}
@@ -3159,12 +3160,17 @@ std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
 	auto paragraph = MakeParagraphBlock();
 	paragraph.text = std::move(owner->text);
 	owner->text = RichText();
-	if (!BlockIsEmpty(paragraph)) {
-		clearTemporaryDownParagraph();
-		owner->blocks.push_back(std::move(paragraph));
+	clearTemporaryDownParagraph();
+	if (keepEmptyParagraph || !BlockIsEmpty(paragraph)) {
+		owner->blocks.insert(owner->blocks.begin(), std::move(paragraph));
 		return 0;
 	}
 	return -1;
+}
+
+std::optional<int> State::normalizeTextOnlyQuoteForInsertion(
+		const BlockContainerPath &container) {
+	return normalizeTextOnlyQuoteSurface(container, false);
 }
 
 bool State::shouldReplaceActiveTextOnlyBlock(
@@ -3258,6 +3264,32 @@ auto State::resolveActiveTextInsertTarget()
 				.blockIndex = 0,
 			},
 		};
+	}
+	if (descriptor->leaf.kind == LeafKind::BlockText) {
+		if (const auto owner = block(descriptor->leaf.block);
+			owner
+			&& owner->kind == BlockKind::Quote
+			&& !owner->pullquote
+			&& owner->blocks.empty()) {
+			const auto container = BlockChildrenContainer(
+				descriptor->leaf.block);
+			if (!normalizeTextOnlyQuoteSurface(container, true)) {
+				return std::nullopt;
+			}
+			return ActiveTextInsertTarget{
+				.leaf = {
+					.kind = LeafKind::BlockText,
+					.block = {
+						.container = container,
+						.index = 0,
+					},
+				},
+				.anchor = {
+					.container = container,
+					.blockIndex = 0,
+				},
+			};
+		}
 	}
 	return ActiveTextInsertTarget{
 		.leaf = descriptor->leaf,
