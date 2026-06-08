@@ -1829,6 +1829,8 @@ PRIVATE
     ui/controls/userpic_button.h
     ui/controls/warning_tooltip.cpp
     ui/controls/warning_tooltip.h
+    ui/effects/animated_string.cpp
+    ui/effects/animated_string.h
     ui/effects/credits_graphics.cpp
     ui/effects/credits_graphics.h
     ui/effects/emoji_fly_animation.cpp
