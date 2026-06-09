@@ -251,10 +251,20 @@ void ClearBlockGeometry(LaidOutBlock *block) {
 		TextLineHeight(textStyle));
 }
 
+[[nodiscard]] bool TextNeedsRetainedLeaf(const QString &text) {
+	for (const auto ch : text) {
+		if (!Ui::Text::IsTrimmed(ch)
+			&& !Ui::Text::IsReplacedBySpace(ch)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] bool MissingRetainedLeaf(
 		const QString &text,
 		const Ui::Text::String &leaf) {
-	return !text.isEmpty() && leaf.isEmpty();
+	return TextNeedsRetainedLeaf(text) && leaf.isEmpty();
 }
 
 struct WidthAnalysisNode {
@@ -2961,7 +2971,7 @@ int LayoutBlocks(
 	}
 	const auto usePlaceholder = prepared.text.text.isEmpty()
 		&& !prepared.editPlaceholderText.isEmpty();
-	if ((!prepared.text.text.isEmpty() && block->leaf.isEmpty())
+	if (MissingRetainedLeaf(prepared.text.text, block->leaf)
 		|| (usePlaceholder && block->placeholderLeaf.isEmpty())) {
 		return std::nullopt;
 	}

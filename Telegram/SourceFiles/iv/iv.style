@@ -837,31 +837,31 @@ messageMarkdownDetailsIconOutSelected: icon{{
 	"history_down_arrow",
 	msgOutDateFgSelected
 }};
-messageMarkdownNavPreviousIcon: icon{{ "box_button_back", msgInDateFg }};
+messageMarkdownNavPreviousIcon: icon{{ "box_button_back", windowSubTextFg }};
 messageMarkdownNavPreviousIconSelected: icon{{
 	"box_button_back",
-	msgInDateFgSelected
+	windowFg
 }};
-messageMarkdownNavPreviousIconOut: icon{{ "box_button_back", msgOutDateFg }};
+messageMarkdownNavPreviousIconOut: icon{{ "box_button_back", windowSubTextFg }};
 messageMarkdownNavPreviousIconOutSelected: icon{{
 	"box_button_back",
-	msgOutDateFgSelected
+	windowFg
 }};
 messageMarkdownNavNextIcon: icon{{
 	"box_button_back-flip_horizontal",
-	msgInDateFg
+	windowSubTextFg
 }};
 messageMarkdownNavNextIconSelected: icon{{
 	"box_button_back-flip_horizontal",
-	msgInDateFgSelected
+	windowFg
 }};
 messageMarkdownNavNextIconOut: icon{{
 	"box_button_back-flip_horizontal",
-	msgOutDateFg
+	windowSubTextFg
 }};
 messageMarkdownNavNextIconOutSelected: icon{{
 	"box_button_back-flip_horizontal",
-	msgOutDateFgSelected
+	windowFg
 }};
 messageMarkdownList: MarkdownList(defaultMarkdownList) {
 	bulletFg: historyTextInFg;
@@ -938,18 +938,18 @@ messageMarkdownAudio: MarkdownAudio(defaultMarkdownAudio) {
 messageMarkdownGroupedMedia: MarkdownGroupedMedia(defaultMarkdownGroupedMedia) {
 	captionSkip: 8px;
 	itemSkip: 2px;
-	radius: 8px;
+	radius: 0px;
 	slideshowMinHeight: 160px;
 	fallbackBg: msgFileInBg;
 	fallbackFg: msgInDateFg;
 	navButtonSize: 28px;
 	navButtonSkip: 8px;
-	navButtonBg: msgFileInBg;
-	navButtonBgOver: msgFileInBgSelected;
+	navButtonBg: windowBg;
+	navButtonBgOver: windowBgOver;
 	navPreviousIcon: messageMarkdownNavPreviousIcon;
-	navPreviousIconOver: messageMarkdownNavPreviousIcon;
+	navPreviousIconOver: messageMarkdownNavPreviousIconSelected;
 	navNextIcon: messageMarkdownNavNextIcon;
-	navNextIconOver: messageMarkdownNavNextIcon;
+	navNextIconOver: messageMarkdownNavNextIconSelected;
 }
 messageMarkdownFailureLabel: FlatLabel(defaultMarkdownFailureLabel) {
 	textFg: msgInDateFg;
@@ -1061,12 +1061,12 @@ messageMarkdownOut: Markdown(messageMarkdown) {
 	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
 		fallbackBg: msgFileOutBg;
 		fallbackFg: msgOutDateFg;
-		navButtonBg: msgFileOutBg;
-		navButtonBgOver: msgFileOutBgSelected;
+		navButtonBg: windowBg;
+		navButtonBgOver: windowBgOver;
 		navPreviousIcon: messageMarkdownNavPreviousIconOut;
-		navPreviousIconOver: messageMarkdownNavPreviousIconOut;
+		navPreviousIconOver: messageMarkdownNavPreviousIconOutSelected;
 		navNextIcon: messageMarkdownNavNextIconOut;
-		navNextIconOver: messageMarkdownNavNextIconOut;
+		navNextIconOver: messageMarkdownNavNextIconOutSelected;
 	}
 	failure: MarkdownFailure(messageMarkdownFailure) {
 		label: messageMarkdownFailureLabelOut;
@@ -1122,8 +1122,8 @@ messageMarkdownSelected: Markdown(messageMarkdown) {
 	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
 		fallbackBg: msgFileInBgSelected;
 		fallbackFg: msgInDateFgSelected;
-		navButtonBg: msgFileInBgSelected;
-		navButtonBgOver: msgFileInBgSelected;
+		navButtonBg: windowBg;
+		navButtonBgOver: windowBgOver;
 		navPreviousIcon: messageMarkdownNavPreviousIconSelected;
 		navPreviousIconOver: messageMarkdownNavPreviousIconSelected;
 		navNextIcon: messageMarkdownNavNextIconSelected;
@@ -1183,8 +1183,8 @@ messageMarkdownOutSelected: Markdown(messageMarkdown) {
 	groupedMedia: MarkdownGroupedMedia(messageMarkdownGroupedMedia) {
 		fallbackBg: msgFileOutBgSelected;
 		fallbackFg: msgOutDateFgSelected;
-		navButtonBg: msgFileOutBgSelected;
-		navButtonBgOver: msgFileOutBgSelected;
+		navButtonBg: windowBg;
+		navButtonBgOver: windowBgOver;
 		navPreviousIcon: messageMarkdownNavPreviousIconOutSelected;
 		navPreviousIconOver: messageMarkdownNavPreviousIconOutSelected;
 		navNextIcon: messageMarkdownNavNextIconOutSelected;

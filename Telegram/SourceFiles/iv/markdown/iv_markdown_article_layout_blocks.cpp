@@ -858,10 +858,20 @@ void ResetTableRowGeometry(LaidOutTableRow *row) {
 	}
 }
 
+[[nodiscard]] bool TextNeedsRetainedLeaf(const QString &text) {
+	for (const auto ch : text) {
+		if (!Ui::Text::IsTrimmed(ch)
+			&& !Ui::Text::IsReplacedBySpace(ch)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 [[nodiscard]] bool MissingRetainedLeaf(
 		const QString &text,
 		const Ui::Text::String &leaf) {
-	return !text.isEmpty() && leaf.isEmpty();
+	return TextNeedsRetainedLeaf(text) && leaf.isEmpty();
 }
 
 [[nodiscard]] bool MissingRetainedPlaceholderLeaf(
@@ -1530,7 +1540,7 @@ bool IsFlowKind(PreparedBlockKind kind) {
 bool IsAnchorOnlyBlock(const PreparedBlock &block) {
 	return (block.kind == PreparedBlockKind::Paragraph)
 		&& !block.anchorId.isEmpty()
-		&& block.text.text.isEmpty()
+		&& !TextNeedsRetainedLeaf(block.text.text)
 		&& block.text.entities.empty()
 		&& block.links.empty()
 		&& block.children.empty();
