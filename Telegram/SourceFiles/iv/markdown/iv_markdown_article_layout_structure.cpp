@@ -134,6 +134,7 @@ void PrepareNestedContext(
 	context->useArticleBands = false;
 	context->articleLeft = left;
 	context->articleWidth = std::max(width, 1);
+	context->listItemContentShift = 0;
 }
 
 [[nodiscard]] bool FirstLineComesFromChildren(const LaidOutBlock &block) {
@@ -381,11 +382,11 @@ void FinalizeOwnerSelection(
 		std::max(st.quoteReadableMinWidth, 1));
 }
 
-[[nodiscard]] int QuoteRelatedScrollViewportMinimumWidth(
+[[nodiscard]] int NestedScrollViewportMinimumWidth(
 		LayoutContext context,
 		int contentMaxWidth,
 		const style::Markdown &st) {
-	return (context.quoteDepth > 0)
+	return (context.quoteDepth > 0 || context.listItemDepth > 0)
 		? ReadableScrollViewportMinimumWidth(contentMaxWidth, st)
 		: 1;
 }
@@ -562,7 +563,7 @@ void FinalizeOwnerSelection(
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
 		analysis.scrollOwnerMinimumWidth = analysis.outerMinimumWidth;
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				analysis.contentPreferredWidth,
 				st);
@@ -595,7 +596,7 @@ void FinalizeOwnerSelection(
 			analysis.contentPreferredWidth - HorizontalMarginsWidth(padding),
 			1);
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				contentMaxWidth,
 				st);
@@ -637,7 +638,7 @@ void FinalizeOwnerSelection(
 			analysis.contentPreferredWidth - HorizontalMarginsWidth(padding),
 			1);
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				contentMaxWidth,
 				st);
@@ -666,7 +667,7 @@ void FinalizeOwnerSelection(
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
 		analysis.scrollOwnerMinimumWidth = analysis.outerMinimumWidth;
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				analysis.contentPreferredWidth,
 				st);
@@ -687,7 +688,8 @@ void FinalizeOwnerSelection(
 		const auto depthDelta = std::max(
 			prepared.visualDepth - context.listDepth,
 			0);
-		const auto overhead = depthDelta * st.list.indent;
+		const auto overhead = depthDelta * st.textPadding.left()
+			- context.listItemContentShift;
 		const auto childWidth = std::max(availableWidth - overhead, 1);
 		visibleScrollViewportWidth = childWidth;
 		auto childContext = context;
@@ -741,6 +743,8 @@ void FinalizeOwnerSelection(
 		auto childContext = context;
 		childContext.tightList = false;
 		PrepareNestedContext(&childContext, 0, childWidth);
+		childContext.listItemDepth = context.listItemDepth + 1;
+		childContext.listItemContentShift = overhead;
 		analysis.children = AnalyzeBlocks(
 			prepared.children,
 			formulas,
@@ -1139,7 +1143,7 @@ void FinalizeOwnerSelection(
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
 		analysis.scrollOwnerMinimumWidth = analysis.outerMinimumWidth;
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				analysis.contentPreferredWidth,
 				st);
@@ -1170,7 +1174,7 @@ void FinalizeOwnerSelection(
 			analysis.contentPreferredWidth - HorizontalMarginsWidth(padding),
 			1);
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				contentMaxWidth,
 				st);
@@ -1221,7 +1225,7 @@ void FinalizeOwnerSelection(
 			analysis.contentPreferredWidth - HorizontalMarginsWidth(padding),
 			1);
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				contentMaxWidth,
 				st);
@@ -1261,7 +1265,7 @@ void FinalizeOwnerSelection(
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
 		analysis.scrollOwnerMinimumWidth = analysis.outerMinimumWidth;
 		analysis.scrollViewportMinimumWidth
-			= QuoteRelatedScrollViewportMinimumWidth(
+			= NestedScrollViewportMinimumWidth(
 				context,
 				analysis.contentPreferredWidth,
 				st);
@@ -1286,7 +1290,8 @@ void FinalizeOwnerSelection(
 		const auto depthDelta = std::max(
 			prepared.visualDepth - context.listDepth,
 			0);
-		const auto overhead = depthDelta * st.list.indent;
+		const auto overhead = depthDelta * st.textPadding.left()
+			- context.listItemContentShift;
 		const auto childWidth = std::max(availableWidth - overhead, 1);
 		visibleScrollViewportWidth = childWidth;
 		childContext.listDepth = prepared.visualDepth;
@@ -1349,6 +1354,8 @@ void FinalizeOwnerSelection(
 		auto childContext = context;
 		childContext.tightList = false;
 		PrepareNestedContext(&childContext, 0, childWidth);
+		childContext.listItemDepth = context.listItemDepth + 1;
+		childContext.listItemContentShift = overhead;
 		auto children = AnalyzeRetainedBlocks(
 			prepared.children,
 			block.children,
@@ -2649,6 +2656,8 @@ int LayoutBlocks(
 	auto childContext = context;
 	childContext.tightList = tight;
 	PrepareNestedContext(&childContext, bodyLeft, bodyLayoutWidth);
+	childContext.listItemDepth = context.listItemDepth + 1;
+	childContext.listItemContentShift = block->markerWidth + list.markerSkip;
 	const auto childBottom = layoutNestedBlocks(
 		prepared.children,
 		&block->children,
@@ -2749,10 +2758,10 @@ int LayoutBlocks(
 	}
 	ClearBlockGeometry(block);
 	const auto depthDelta = std::max(prepared.visualDepth - context.listDepth, 0);
-	const auto listLeft = left + depthDelta * st.list.indent;
-	const auto listWidth = std::max(
-		width - depthDelta * st.list.indent,
-		1);
+	const auto indent = depthDelta * st.textPadding.left()
+		- context.listItemContentShift;
+	const auto listLeft = left + indent;
+	const auto listWidth = std::max(width - indent, 1);
 	const auto currentScrollOwner = NextActiveScrollOwner(
 		analysis,
 		activeScrollOwner);
@@ -2761,9 +2770,7 @@ int LayoutBlocks(
 		analysis,
 		currentScrollOwner,
 		logicalWidth);
-	const auto listLogicalWidth = std::max(
-		outerLogicalWidth - depthDelta * st.list.indent,
-		1);
+	const auto listLogicalWidth = std::max(outerLogicalWidth - indent, 1);
 	const auto childActiveScrollOwner = currentScrollOwner;
 	const auto listLayoutWidth = ChildLayoutWidth(
 		childActiveScrollOwner,

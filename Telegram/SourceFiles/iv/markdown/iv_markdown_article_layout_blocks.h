@@ -291,6 +291,8 @@ struct CachedTextLeafPool {
 
 struct LayoutContext {
 	int listDepth = 0;
+	int listItemDepth = 0;
+	int listItemContentShift = 0;
 	int quoteDepth = 0;
 	int articleLeft = 0;
 	int articleWidth = 0;
