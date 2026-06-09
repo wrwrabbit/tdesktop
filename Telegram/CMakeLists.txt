@@ -1298,8 +1298,8 @@ PRIVATE
     intro/intro_widget.h
     iv/iv_cached_media.cpp
     iv/iv_cached_media.h
-    iv/editor/iv_editor_session.cpp
-    iv/editor/iv_editor_session.h
+#    iv/editor/iv_editor_session.cpp
+#    iv/editor/iv_editor_session.h
     iv/iv_delegate_impl.cpp
     iv/iv_delegate_impl.h
     iv/iv_instance.cpp

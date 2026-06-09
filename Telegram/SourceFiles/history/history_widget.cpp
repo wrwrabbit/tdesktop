@@ -139,7 +139,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_subsection_tabs.h"
 #include "history/view/history_view_translate_bar.h"
 #include "history/view/media/history_view_media.h"
+#ifdef TDESKTOP_IV_EDITOR
 #include "iv/editor/iv_editor_session.h"
+#endif // TDESKTOP_IV_EDITOR
 #include "core/click_handler_types.h"
 #include "chat_helpers/field_autocomplete.h"
 #include "chat_helpers/tabbed_panel.h"
@@ -9266,7 +9268,9 @@ void HistoryWidget::editMessage(
 		not_null<HistoryItem*> item,
 		const TextSelection &selection) {
 	if (item->richPage()) {
+#ifdef TDESKTOP_IV_EDITOR
 		Iv::Editor::ShowEditBox(controller(), item);
+#endif // TDESKTOP_IV_EDITOR
 		return;
 	} else if (_chooseTheme) {
 		toggleChooseChatTheme(_peer);

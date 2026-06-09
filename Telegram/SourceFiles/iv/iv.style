@@ -79,6 +79,7 @@ ivWrongLayoutLink: LinkButton(defaultLinkButton) {
 	overColor: windowSubTextFg;
 	padding: margins(5px, 5px, 5px, 5px);
 }
+/*
 ivEditorWindowMinSize: size(384px, 480px);
 ivEditorWindowDefaultSize: size(800px, 600px);
 ivEditorBodyPadding: margins(0px, 8px, 0px, 8px);
@@ -139,6 +140,7 @@ ivEditorInputField: InputField(defaultInputField) {
 	borderActive: 0px;
 	duration: 100;
 }
+*/
 
 MarkdownBlockSkips {
 	paragraph: pixels;

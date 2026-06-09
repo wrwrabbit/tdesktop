@@ -372,7 +372,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_edit_media_album_error" = "This file cannot be saved as a part of an album.";
 "lng_edit_media_invalid_file" = "Sorry, no way to use this file.";
+/*
 "lng_iv_editor_media_invalid_file" = "Sorry, only photos, video, and audio files are supported here.";
+*/
 "lng_edit_photo_editor_hint" = "Left-click on the photo to edit.";
 "lng_edit_caption_attach" = "Sorry, you can't attach new media while editing a message.";
 "lng_edit_caption_voice" = "Sorry, you can't edit messages when you have an unsent voice message.";
@@ -7166,6 +7168,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_polls_stop_warning" = "If you stop this poll now, nobody will be able to vote in it anymore. This action cannot be undone.";
 "lng_polls_stop_sure" = "Stop";
 "lng_article_menu_item" = "Article";
+/*
 "lng_article_editor_title" = "Article";
 "lng_article_insert_heading" = "Heading";
 "lng_article_insert_heading1" = "Heading 1";
@@ -7211,6 +7214,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_article_table_delete_table" = "Delete Table";
 "lng_article_table_bordered" = "Bordered Table";
 "lng_article_table_striped" = "Striped Table";
+*/
 "lng_polls_menu_item" = "Poll";
 "lng_polls_create" = "Create poll";
 "lng_polls_create_title" = "New poll";
@@ -7529,7 +7533,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_view_button_boost" = "Boost";
 "lng_view_button_giftcode" = "Open";
 "lng_view_button_iv" = "Instant View";
-"lng_view_button_full_article" = "Show full article";
+"lng_view_button_full_article" = "Show more";
 "lng_view_button_stickerset" = "View stickers";
 "lng_view_button_emojipack" = "View emoji";
 "lng_view_button_style" = "View Style";
@@ -7995,7 +7999,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_iv_window_title" = "Instant View";
 "lng_iv_wrong_layout" = "Wrong layout?";
 "lng_iv_not_supported" = "This link appears to be invalid.";
-"lng_iv_not_found_in_message" = "This section isn't found in the message.";
+"lng_iv_not_found_in_message" = "This link appears to be invalid.";
 "lng_iv_details_state_expanded" = "Expanded";
 "lng_iv_details_state_collapsed" = "Collapsed";
 "lng_iv_zoom_tooltip_ctrl" = "Hold Ctrl to zoom by 5%.\nHold Alt to zoom by 1%.";
