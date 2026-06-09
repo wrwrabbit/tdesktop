@@ -1,3 +1,8 @@
+6.9.1 (09.06.26)
+
+- Fix sending several same custom emoji.
+- Fix some rich messages layout glitches.
+
 6.9 (09.06.26)
 
 - Rich Text Formatting for Bots.
