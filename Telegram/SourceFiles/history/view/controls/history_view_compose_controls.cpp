@@ -3353,6 +3353,18 @@ void ComposeControls::initVoiceRecordBar() {
 				triggerAiApplyInPlace();
 				return true;
 			});
+		_preview
+			&& (_previewShown || _preview->draft().removed)
+			&& request->check(Command::ToggleWebPagePreview, 1)
+			&& request->handle([=] {
+				if (_previewShown) {
+					_preview->apply({ .removed = true });
+				} else {
+					_preview->apply({}, true);
+				}
+				saveDraftWithTextNow();
+				return true;
+			});
 	}, _voiceRecordBar->lifetime());
 }
 
@@ -4316,6 +4328,7 @@ void ComposeControls::tryProcessKeyInput(not_null<QKeyEvent*> e) {
 void ComposeControls::initWebpageProcess() {
 	if (!_history) {
 		_preview = nullptr;
+		_previewShown = false;
 		_header->previewUnregister();
 		return;
 	}
@@ -4323,6 +4336,11 @@ void ComposeControls::initWebpageProcess() {
 	_preview = std::make_unique<Controls::WebpageProcessor>(
 		_history,
 		_field);
+
+	_preview->parsedValue(
+	) | rpl::on_next([=](Controls::WebpageParsed parsed) {
+		_previewShown = !!parsed;
+	}, _historyLifetime);
 
 	_preview->repaintRequests(
 	) | rpl::on_next(crl::guard(_header.get(), [=] {

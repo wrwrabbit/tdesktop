@@ -2312,6 +2312,17 @@ void HistoryWidget::setupShortcuts() {
 				triggerAiApplyInPlace();
 				return true;
 			});
+		_preview
+			&& (_previewDrawPreview || _preview->draft().removed)
+			&& request->check(Command::ToggleWebPagePreview, 1)
+			&& request->handle([=] {
+				if (_previewDrawPreview) {
+					_preview->apply({ .removed = true });
+				} else {
+					_preview->apply({}, true);
+				}
+				return true;
+			});
 		if (showRecordButton()
 			&& _canSendMessages
 			&& _joinChannel->isHidden()
