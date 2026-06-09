@@ -2258,6 +2258,7 @@ if (MSVC)
         /DELAYLOAD:crypt32.dll
         /DELAYLOAD:bcrypt.dll
         /DELAYLOAD:netapi32.dll
+        /DELAYLOAD:mpr.dll
         /DELAYLOAD:imm32.dll
         /DELAYLOAD:userenv.dll
         /DELAYLOAD:wtsapi32.dll
