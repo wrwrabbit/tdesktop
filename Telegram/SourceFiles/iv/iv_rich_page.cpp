@@ -427,14 +427,6 @@ void AddRichAnchor(
 	}
 }
 
-void AppendRich(RichText *to, const RichText &from) {
-	to->text.append(from.text);
-	AddRichAnchor(&to->anchorId, &to->anchorIds, from.anchorId);
-	for (const auto &anchorId : from.anchorIds) {
-		AddRichAnchor(&to->anchorId, &to->anchorIds, anchorId);
-	}
-}
-
 void AppendRich(RichText *to, RichText &&from) {
 	to->text.append(std::move(from.text));
 	AddRichAnchor(&to->anchorId, &to->anchorIds, std::move(from.anchorId));

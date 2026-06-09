@@ -250,14 +250,6 @@ void NormalizeInlineFormulaRasterMetrics(Formula *formula);
 	return (ratio > 0.) ? int(std::round(ratio)) : 0;
 }
 
-[[nodiscard]] int ScaledInlineFormulaMetric(int logicalValue) {
-	const auto safe = std::clamp(
-		logicalValue,
-		0,
-		std::numeric_limits<int>::max() / kFormulaExactMetricScale);
-	return safe * kFormulaExactMetricScale;
-}
-
 [[nodiscard]] int RoundedInlineFormulaMetric(int scaledValue) {
 	return (scaledValue > 0)
 		? ((scaledValue + kFormulaExactMetricScale - 1)
@@ -274,28 +266,6 @@ void NormalizeInlineFormulaRasterMetrics(Formula *formula);
 
 [[nodiscard]] qreal LogicalInlineFormulaMetric(int scaledValue) {
 	return qreal(scaledValue) / qreal(kFormulaExactMetricScale);
-}
-
-[[nodiscard]] FormulaExactMetrics InlineFormulaExactMetricsFromLogical(
-		QSize logicalSize,
-		int logicalAscent,
-		QMargins logicalInsets = {}) {
-	const auto scaledHeight = ScaledInlineFormulaMetric(
-		std::max(logicalSize.height(), 0));
-	return {
-		.scaledSize = QSize(
-			ScaledInlineFormulaMetric(std::max(logicalSize.width(), 0)),
-			scaledHeight),
-		.scaledAscent = std::clamp(
-			ScaledInlineFormulaMetric(logicalAscent),
-			0,
-			scaledHeight),
-		.scaledInsets = QMargins(
-			ScaledInlineFormulaMetric(std::max(logicalInsets.left(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.top(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.right(), 0)),
-			ScaledInlineFormulaMetric(std::max(logicalInsets.bottom(), 0))),
-	};
 }
 
 struct InlineFormulaColorizedKey {

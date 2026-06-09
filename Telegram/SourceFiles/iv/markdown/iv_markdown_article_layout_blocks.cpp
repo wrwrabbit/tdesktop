@@ -126,10 +126,6 @@ thread_local const LayoutContext *CurrentLayoutContext = nullptr;
 	return bordered ? st.table.border : 0;
 }
 
-[[nodiscard]] LayoutContext ActiveLayoutContext() {
-	return CurrentLayoutContext ? *CurrentLayoutContext : LayoutContext();
-}
-
 [[nodiscard]] bool TextDependsOnMediaRuntime(
 		const TextWithEntities &text) {
 	for (const auto &entity : text.entities) {
