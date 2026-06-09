@@ -3494,6 +3494,127 @@ int LayoutBlocks(
 	return std::nullopt;
 }
 
+[[nodiscard]] const style::TextStyle &LaidOutFlowTextStyle(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	if (block.kind != PreparedBlockKind::Heading) {
+		return st.body;
+	}
+	switch (std::clamp(block.headingLevel, 1, 6)) {
+	case 1: return st.heading1;
+	case 2: return st.heading2;
+	case 3: return st.heading3;
+	case 4: return st.heading4;
+	case 5: return st.heading5;
+	case 6: return st.heading6;
+	}
+	return st.heading6;
+}
+
+[[nodiscard]] int BlockContentMaxRight(
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	const auto outerRight = block.outer.x() + block.outer.width();
+	const auto textRight = [&] {
+		const auto &leaf = block.placeholderLeaf.isEmpty()
+			? block.leaf
+			: block.placeholderLeaf;
+		return (leaf.isEmpty() || block.textRect.isEmpty())
+			? 0
+			: (block.textRect.x()
+				+ std::min(leaf.maxWidth(), block.textRect.width()));
+	};
+	const auto childrenRight = [&] {
+		auto result = 0;
+		for (const auto &child : block.children) {
+			result = std::max(result, BlockContentMaxRight(child, st));
+		}
+		return result;
+	};
+	if (block.insideHorizontalScroll
+		|| (!block.scrollViewportRect.isEmpty()
+			&& block.horizontalScrollMax > 0)) {
+		return outerRight;
+	}
+	switch (block.kind) {
+	case PreparedBlockKind::Paragraph:
+	case PreparedBlockKind::Thinking:
+	case PreparedBlockKind::Heading: {
+		if (block.flowTextAlign != style::al_left) {
+			return outerRight;
+		}
+		const auto &leaf = block.placeholderLeaf.isEmpty()
+			? block.leaf
+			: block.placeholderLeaf;
+		if (leaf.isEmpty() || block.textRect.isEmpty()) {
+			return 0;
+		}
+		const auto width = std::min(
+			std::max(
+				leaf.maxWidth(),
+				ReadableTextMinWidth(LaidOutFlowTextStyle(block, st))),
+			block.textRect.width());
+		return std::min(block.textRect.x() + width, outerRight);
+	}
+	case PreparedBlockKind::CodeBlock:
+		return std::min(
+			std::max(
+				textRight() + BlockquotePadding(st.code.pre).right(),
+				block.outer.x() + CodeBlockMinimumWidth(st)),
+			outerRight);
+	case PreparedBlockKind::Rule:
+		return block.outer.x();
+	case PreparedBlockKind::DisplayMath: {
+		if (!block.textRect.isEmpty()) {
+			return outerRight;
+		}
+		const auto &padding = st.displayMath.padding;
+		const auto formulaWidth = block.formulaRect.isEmpty()
+			? 1
+			: block.formulaRect.width();
+		return std::min(
+			block.outer.x()
+				+ padding.left()
+				+ formulaWidth
+				+ padding.right(),
+			outerRight);
+	}
+	case PreparedBlockKind::Table: {
+		const auto tableRight = block.tableRect.isEmpty()
+			? 0
+			: (block.tableRect.x() + block.tableRect.width());
+		return std::min(std::max(textRight(), tableRight), outerRight);
+	}
+	case PreparedBlockKind::List:
+		return std::min(childrenRight(), outerRight);
+	case PreparedBlockKind::ListItem:
+		return std::min(
+			std::max(
+				block.outer.x() + block.markerWidth,
+				childrenRight()),
+			outerRight);
+	case PreparedBlockKind::Quote:
+		return block.pullquote
+			? outerRight
+			: std::min(
+				childrenRight()
+					+ BlockquotePadding(st.body.blockquote).right(),
+				outerRight);
+	case PreparedBlockKind::Photo:
+	case PreparedBlockKind::Video:
+	case PreparedBlockKind::Audio:
+	case PreparedBlockKind::Map:
+	case PreparedBlockKind::Channel:
+	case PreparedBlockKind::GroupedMedia:
+	case PreparedBlockKind::RelatedArticle:
+	case PreparedBlockKind::Placeholder:
+	case PreparedBlockKind::Details:
+	case PreparedBlockKind::EmbedPost:
+		return outerRight;
+	}
+	return outerRight;
+}
+
 [[nodiscard]] std::optional<int> RecountBlocksInPlace(
 		const std::vector<PreparedBlock> &prepared,
 		const std::vector<PreparedFormulaSlot> &formulas,
@@ -3664,6 +3785,21 @@ std::optional<int> RecountLaidOutBlocks(
 		width,
 		width,
 		context);
+}
+
+int ArticleContentMaxRight(
+		const std::vector<LaidOutBlock> &blocks,
+		const style::Markdown &st) {
+	auto result = 0;
+	for (const auto &block : blocks) {
+		const auto bandPadding = UsesMediaBand(block.kind)
+			? st.mediaPadding
+			: st.textPadding;
+		result = std::max(
+			result,
+			BlockContentMaxRight(block, st) - bandPadding.left());
+	}
+	return result;
 }
 
 } // namespace Iv::Markdown

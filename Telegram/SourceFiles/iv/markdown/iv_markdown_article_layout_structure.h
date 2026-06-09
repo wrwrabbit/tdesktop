@@ -33,5 +33,8 @@ namespace Iv::Markdown {
 	int top,
 	int width,
 	LayoutContext context);
+[[nodiscard]] int ArticleContentMaxRight(
+	const std::vector<LaidOutBlock> &blocks,
+	const style::Markdown &st);
 
 } // namespace Iv::Markdown

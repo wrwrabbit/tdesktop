@@ -2036,15 +2036,6 @@ const style::TextStyle &TextStyleFor(
 	return st.heading6;
 }
 
-int BlockMaxRight(const std::vector<LaidOutBlock> &blocks) {
-	auto result = 0;
-	for (const auto &block : blocks) {
-		result = std::max(result, block.outer.right() + 1);
-		result = std::max(result, BlockMaxRight(block.children));
-	}
-	return result;
-}
-
 void ApplyPreparedEditSources(
 		LaidOutBlock *block,
 		const PreparedBlock &prepared) {

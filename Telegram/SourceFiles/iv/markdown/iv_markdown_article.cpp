@@ -4517,7 +4517,7 @@ void MarkdownArticle::Impl::finalizeRelayout(int width, int heightBottom) {
 	_laidOutWidth = std::min(
 		width,
 		std::max(
-			BlockMaxRight(_blocks) + page.right(),
+			ArticleContentMaxRight(_blocks, layoutStyle()) + page.right(),
 			page.left() + page.right() + 1));
 	pruneTaskMarkerRuntimes();
 	prunePlaceholderRuntimes();

@@ -401,7 +401,6 @@ private:
 [[nodiscard]] const style::TextStyle &TextStyleFor(
 	const PreparedBlock &block,
 	const style::Markdown &st);
-[[nodiscard]] int BlockMaxRight(const std::vector<LaidOutBlock> &blocks);
 void CopyCachedTextLeafs(
 	const std::vector<PreparedBlock> &preparedBlocks,
 	std::vector<LaidOutBlock> *blocks,
