@@ -1,3 +1,11 @@
+6.9 (09.06.26)
+
+- Rich Text Formatting for Bots.
+- Guardian Bots for Group Chats.
+- Links in Poll Options.
+- Viewer for Markdown files in .md format.
+- Instant View that's really instant.
+
 6.8.5 beta (04.06.26)
 
 - Animated 3D objects on settings covers (premium star, coin, diamond).
