@@ -1254,6 +1254,11 @@ futureOwnerBoxSelect: collectibleBox;
 guardBotReplaceBox: Box(futureOwnerBox) {
 }
 
+localAutomationBox: Box(defaultBox) {
+	buttonPadding: margins(0px, 0px, 0px, 12px);
+	buttonHeight: 0px;
+}
+
 disableSharingIconPadding: margins(12px, 12px, 12px, 8px);
 disableSharingButtonLock: IconEmoji {
 	icon: icon {{ "emoji/premium_lock", activeButtonFg }};

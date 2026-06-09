@@ -8,7 +8,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/external_control.h"
 
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "window/window_controller.h"
+#include "ui/layers/generic_box.h"
+#include "ui/widgets/buttons.h"
+#include "ui/widgets/labels.h"
+#include "ui/vertical_list.h"
+#include "base/random.h"
+#include "styles/style_boxes.h"
+#include "styles/style_layers.h"
+#include "styles/style_widgets.h"
 
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
@@ -19,10 +28,99 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Core {
 namespace {
 
+constexpr auto kAutomationKey = std::string_view("automation.enabled");
+
 struct WindowEntry {
 	not_null<Window::Controller*> controller;
 	QWidget *window = nullptr;
 };
+
+[[nodiscard]] bool AutomationEnabled() {
+	return Core::App().settings().readPref<bool>(kAutomationKey, false);
+}
+
+void FillAutomationConfirmBox(
+		not_null<Ui::GenericBox*> box,
+		const QString &text,
+		Fn<void()> enable) {
+	box->setTitle(rpl::single(u"Local automation"_q));
+	box->addRow(object_ptr<Ui::FlatLabel>(
+		box,
+		rpl::single(text),
+		st::boxLabel));
+
+	const auto cancel = [=] {
+		box->closeBox();
+	};
+	struct Entry {
+		QString text;
+		Fn<void()> callback;
+	};
+	auto entries = std::vector<Entry>{
+		{ u"Enable"_q, enable },
+		{ u"Cancel"_q, cancel },
+		{ u"Not sure"_q, cancel },
+	};
+	for (auto i = int(entries.size()) - 1; i > 0; --i) {
+		std::swap(entries[i], entries[base::RandomIndex(i + 1)]);
+	}
+
+	const auto content = box->verticalLayout();
+	for (const auto &entry : entries) {
+		Ui::AddSkip(content);
+		const auto button = content->add(
+			object_ptr<Ui::RoundButton>(
+				content,
+				rpl::single(entry.text),
+				st::defaultLightButton),
+			st::boxRowPadding,
+			style::al_justify);
+		button->setFullRadius(true);
+		button->setClickedCallback(entry.callback);
+	}
+	box->setStyle(st::localAutomationBox);
+}
+
+void RequestEnableAutomation() {
+	const auto window = Core::App().activePrimaryWindow();
+	if (!window) {
+		return;
+	}
+	static QPointer<Ui::GenericBox> current;
+	if (current) {
+		return;
+	}
+	const auto show = window->uiShow();
+
+	const auto second = [=](not_null<Ui::GenericBox*> box) {
+		current = box.get();
+		FillAutomationConfirmBox(
+			box,
+			u"Just to be sure — confirm once more to enable local "
+			u"automation."_q,
+			[=] {
+				Core::App().settings().writePref<bool>(
+					kAutomationKey,
+					true);
+				box->closeBox();
+			});
+	};
+	const auto first = [=](not_null<Ui::GenericBox*> box) {
+		current = box.get();
+		FillAutomationConfirmBox(
+			box,
+			u"An external program is trying to control "
+			u"Telegram Desktop over the local socket — read open "
+			u"windows and activate them.\n\nEnable local "
+			u"automation? While it is on, anything running under your "
+			u"user account can control the app."_q,
+			[=] {
+				box->closeBox();
+				show->showBox(Box(second));
+			});
+	};
+	show->show(Box(first));
+}
 
 [[nodiscard]] QByteArray Pack(QJsonObject object) {
 	return QJsonDocument(object).toJson(QJsonDocument::Compact);
@@ -118,6 +216,15 @@ struct WindowEntry {
 QByteArray HandleExternalControl(const QString &command) {
 	if (!IsAppLaunched()) {
 		return Error(u"application is not launched"_q);
+	} else if (!AutomationEnabled()) {
+		RequestEnableAutomation();
+		return Error(u"local automation is disabled — confirm in the "
+			u"Telegram window to enable"_q);
+	} else if (command == u"automation-off"_q) { // TEMP test helper.
+		Core::App().settings().writePref<bool>(kAutomationKey, false);
+		auto object = QJsonObject();
+		object.insert(u"ok"_q, true);
+		return Pack(object);
 	} else if (command == u"ping"_q) {
 		auto object = QJsonObject();
 		object.insert(u"ok"_q, true);
