@@ -507,20 +507,28 @@ not_null<Ui::RpWidget*> AddInnerToggle(
 			icon.paint(p, 0, 0, arrow->width());
 		}, arrow->lifetime());
 	}
-	button->sizeValue(
-	) | rpl::on_next([=, &st](const QSize &s) {
+	const auto reposition = [=, &st] {
+		const auto s = button->size();
 		const auto labelLeft = st.padding.left();
 		const auto labelRight = s.width() - toggleButton->width();
 
-		label->resizeToWidth(labelRight - labelLeft - arrow->width());
+		const auto arrowSkip = st::rightsButtonArrowSkip;
+		label->resizeToWidth(
+			labelRight - labelLeft - arrow->width() - arrowSkip);
 		label->moveToLeft(
 			labelLeft,
 			(s.height() - label->height()) / 2);
 		arrow->moveToLeft(
 			std::min(
-				labelLeft + label->textMaxWidth(),
+				labelLeft + label->textMaxWidth() + arrowSkip,
 				labelRight - arrow->width()),
 			(s.height() - arrow->height()) / 2);
+	};
+	rpl::merge(
+		button->sizeValue() | rpl::to_empty,
+		state->anyChanges.events_starting_with(rpl::empty_value())
+	) | rpl::on_next([=] {
+		reposition();
 	}, button->lifetime());
 	wrap->toggledValue(
 	) | rpl::skip(1) | rpl::on_next([=](bool toggled) {
