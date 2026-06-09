@@ -1570,6 +1570,8 @@ PRIVATE
     platform/mac/mac_iconv_helper.c
     platform/mac/main_window_mac.mm
     platform/mac/main_window_mac.h
+    platform/mac/native_event_mac.h
+    platform/mac/native_event_mac.mm
     platform/mac/notifications_manager_mac.mm
     platform/mac/notifications_manager_mac.h
     platform/mac/overlay_widget_mac.h

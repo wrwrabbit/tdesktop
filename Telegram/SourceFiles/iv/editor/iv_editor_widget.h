@@ -44,18 +44,28 @@ struct Markdown;
 } // namespace style
 
 class PeerData;
+class DocumentData;
 
-namespace Window {
-class SessionController;
-} // namespace Window
+namespace Main {
+class Session;
+class SessionShow;
+} // namespace Main
 
 namespace Iv::Editor {
+
+struct WidgetServices {
+	not_null<Main::Session*> session;
+	std::shared_ptr<Main::SessionShow> show;
+	not_null<QWidget*> outer;
+	Fn<bool()> customEmojiPaused;
+	rpl::producer<> imeCompositionStarts;
+};
 
 class Widget final : public Ui::RpWidget {
 public:
 	Widget(
 		QWidget *parent,
-		not_null<Window::SessionController*> controller,
+		WidgetServices services,
 		not_null<PeerData*> peer,
 		std::shared_ptr<State> state,
 		Fn<void(RichMessageLimitError)> showLimitToast = {});
@@ -72,6 +82,9 @@ public:
 	void insertPreparedBlocks(std::vector<RichPage::Block> blocks);
 	void insertHeading1();
 	void insertBlockquote();
+	void insertEmoji(EmojiPtr emoji);
+	void insertCustomEmoji(not_null<DocumentData*> document);
+	void setInlineFieldExternalInteractionActive(bool active);
 
 	int resizeGetHeight(int newWidth) override;
 
@@ -392,7 +405,10 @@ private:
 	[[nodiscard]] Markdown::MarkdownArticlePaintContext textPaintContext(
 		QRect clip);
 
-	const not_null<Window::SessionController*> _controller;
+	const not_null<Main::Session*> _session;
+	const std::shared_ptr<Main::SessionShow> _show;
+	const not_null<QWidget*> _outer;
+	const Fn<bool()> _customEmojiPaused;
 	const not_null<PeerData*> _peer;
 	const std::shared_ptr<State> _state;
 	const Fn<void(RichMessageLimitError)> _showLimitToast;
@@ -441,6 +457,7 @@ private:
 	std::optional<Qt::Orientation> _horizontalScrollLock;
 	bool _settingField = false;
 	bool _trackingPointerPress = false;
+	bool _inlineFieldExternalInteractionActive = false;
 	Markdown::MarkdownArticleEditControlHit _pressedControl;
 	std::optional<QPoint> _pressedControlPoint;
 	HorizontalScrollDrag _horizontalScrollDrag = HorizontalScrollDrag::None;

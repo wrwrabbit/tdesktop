@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_editing.h"
 #include "apiwrap.h"
 #include "base/weak_ptr.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "core/application.h"
 #include "core/shortcuts.h"
 #include "data/data_document.h"
@@ -46,6 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_media_prepare.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/controls/location_picker.h"
+#include "ui/rp_widget.h"
 #include "ui/widgets/separate_panel.h"
 #include "window/window_session_controller.h"
 
@@ -446,7 +448,7 @@ public:
 			std::move(action),
 			std::move(sendMenuDetails),
 			std::nullopt));
-		session->showBox();
+		session->showWindow();
 	}
 
 	static void ShowEdit(
@@ -471,7 +473,7 @@ public:
 				.summary = item->originalText(),
 				.fullPage = item->fullRichPage(),
 			}));
-		session->showBox();
+		session->showWindow();
 	}
 
 	~ArticleSession() {
@@ -541,6 +543,7 @@ private:
 		std::optional<EditedItemSnapshot> edited)
 	: _controller(controller)
 	, _session(&controller->session())
+	, _show(controller->uiShow())
 	, _peer(peer)
 	, _mode(mode)
 	, _articleId(articleId)
@@ -923,12 +926,15 @@ private:
 			SendMenu::DefaultCallback(_controller->uiShow(), submit));
 	}
 
-	void requestMedia(not_null<Widget*> editor) {
+	void requestMedia(not_null<Widget*> editor, QPointer<QWidget> parent) {
+		if (!parent) {
+			return;
+		}
 		_editor = editor;
 		const auto weak = base::make_weak(this);
 		const auto editorPointer = QPointer<Widget>(editor.get());
 		FileDialog::GetOpenPath(
-			QPointer<QWidget>(_controller->content().get()),
+			std::move(parent),
 			tr::lng_choose_file(tr::now),
 			FileDialog::PhotoVideoAudioFilesFilter(),
 			[weak, editorPointer](FileDialog::OpenResult &&result) mutable {
@@ -940,7 +946,13 @@ private:
 			});
 	}
 
-	void requestMap(not_null<Widget*> editor) {
+	void requestMap(
+			not_null<Widget*> editor,
+			QPointer<QWidget> parent,
+			rpl::producer<> closeRequests) {
+		if (!parent) {
+			return;
+		}
 		_editor = editor;
 		const auto config = ResolveMapsConfig(_session);
 		if (!Ui::LocationPicker::Available(config)) {
@@ -949,7 +961,7 @@ private:
 		const auto weak = base::make_weak(this);
 		const auto editorPointer = QPointer<Widget>(editor.get());
 		Ui::LocationPicker::Show({
-			.parent = _controller->content().get(),
+			.parent = static_cast<Ui::RpWidget*>(parent.data()),
 			.config = config,
 			.chooseLabel = tr::lng_maps_point_send(),
 			.session = _session,
@@ -960,18 +972,23 @@ private:
 			},
 			.quit = [] { Shortcuts::Launch(Shortcuts::Command::Quit); },
 			.storageId = _session->local().resolveStorageIdBots(),
-			.closeRequests = _controller->content()->death(),
+			.closeRequests = std::move(closeRequests),
 		});
 	}
 
-	void showBox() {
-		auto descriptor = ShowBoxDescriptor{
-			.controller = _controller,
+	void showWindow() {
+		_backgroundHold = shared_from_this();
+		auto descriptor = ShowWindowDescriptor{
+			.session = _session,
+			.show = _show,
 			.peer = _peer,
 			.state = _state,
 			.submitType = (_mode == Mode::Compose)
-				? ShowBoxDescriptor::SubmitType::Send
-				: ShowBoxDescriptor::SubmitType::Save,
+				? ShowWindowDescriptor::SubmitType::Send
+				: ShowWindowDescriptor::SubmitType::Save,
+			.customEmojiPaused = [show = _show] {
+				return show->paused(ChatHelpers::PauseReason::Layer);
+			},
 			.cancelled = [session = shared_from_this()] {
 				return session->cancelRequested();
 			},
@@ -983,16 +1000,34 @@ private:
 				session->setupSubmitButton(button);
 			},
 			.requestMedia = [session = shared_from_this()](
-					not_null<Widget*> editor) {
-				session->requestMedia(editor);
+					not_null<Widget*> editor,
+					QPointer<QWidget> parent) {
+				session->requestMedia(editor, std::move(parent));
 			},
 			.requestMap = [session = shared_from_this()](
-					not_null<Widget*> editor) {
-				session->requestMap(editor);
+					not_null<Widget*> editor,
+					QPointer<QWidget> parent,
+					rpl::producer<> closeRequests) {
+				session->requestMap(
+					editor,
+					std::move(parent),
+					std::move(closeRequests));
+			},
+			.closed = [session = shared_from_this()] {
+				session->windowClosed();
 			},
 			.showLimitToast = _showLimitToast,
 		};
-		ShowBox(std::move(descriptor));
+		_windowHost = ShowWindow(std::move(descriptor));
+	}
+
+	void windowClosed() {
+		_editor = nullptr;
+		_submitButton = nullptr;
+		_windowHost = nullptr;
+		if (!_submittedPage && !_submitApiRequested) {
+			_backgroundHold = nullptr;
+		}
 	}
 
 	void handleMediaDialogResult(
@@ -1794,6 +1829,7 @@ private:
 
 	const not_null<Window::SessionController*> _controller;
 	const not_null<Main::Session*> _session;
+	const std::shared_ptr<ChatHelpers::Show> _show;
 	const not_null<PeerData*> _peer;
 	const Mode _mode;
 	const FullMsgId _articleId;
@@ -1808,6 +1844,7 @@ private:
 	Api::SendOptions _submitOptions;
 	QPointer<Ui::RpWidget> _submitButton;
 	QPointer<Widget> _editor;
+	std::unique_ptr<WindowHost> _windowHost;
 	std::shared_ptr<ArticleSession> _backgroundHold;
 	std::shared_ptr<const RichPage> _submittedPage;
 	std::vector<AttachmentRecord> _attachments;

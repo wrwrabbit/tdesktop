@@ -7174,6 +7174,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_article_insert_heading4" = "Heading 4";
 "lng_article_insert_heading5" = "Heading 5";
 "lng_article_insert_heading6" = "Heading 6";
+"lng_article_insert_emoji" = "Emoji";
 "lng_article_insert_blockquote" = "Blockquote";
 "lng_article_insert_code" = "Code Block";
 "lng_article_insert_math" = "Math";

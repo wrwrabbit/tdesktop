@@ -79,9 +79,20 @@ ivWrongLayoutLink: LinkButton(defaultLinkButton) {
 	overColor: windowSubTextFg;
 	padding: margins(5px, 5px, 5px, 5px);
 }
+ivEditorWindowMinSize: size(384px, 480px);
+ivEditorWindowDefaultSize: size(800px, 600px);
 ivEditorBodyPadding: margins(0px, 8px, 0px, 8px);
-ivEditorToolbarPadding: margins(8px, defaultVerticalListSkip, 8px, defaultVerticalListSkip);
 ivEditorToolbarButtonSize: 36px;
+ivEditorTopControlsPadding: margins(8px, defaultVerticalListSkip, 8px, defaultVerticalListSkip);
+ivEditorTopControlsButtonSkip: 6px;
+ivEditorTopControlsContentSkip: 8px;
+ivEditorSubmitButton: RoundButton(defaultActiveButton) {
+	height: ivEditorToolbarButtonSize;
+}
+ivEditorCancelButton: RoundButton(defaultLightButton) {
+	height: ivEditorToolbarButtonSize;
+}
+ivEditorToolbarPadding: margins(8px, defaultVerticalListSkip, 8px, defaultVerticalListSkip);
 ivEditorToolbarButton: IconButton(defaultIconButton) {
 	width: ivEditorToolbarButtonSize;
 	height: ivEditorToolbarButtonSize;
@@ -93,6 +104,7 @@ ivEditorToolbarButton: IconButton(defaultIconButton) {
 ivEditorToolbarButtonSkip: 6px;
 ivEditorToolbarRowSkip: 0px;
 ivEditorToolbarHeadingIcon: icon {{ "menu/rich/heading-24x24", menuIconColor }};
+ivEditorToolbarEmojiIcon: icon {{ "chat/input_smile_face", menuIconColor }};
 ivEditorToolbarBlockquoteIcon: icon {{ "menu/rich/blockquote-24x24", menuIconColor }};
 ivEditorToolbarCodeIcon: icon {{ "chat/code_tags", menuIconColor }};
 ivEditorToolbarMathIcon: icon {{ "menu/rich/math-24x24", menuIconColor }};

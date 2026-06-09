@@ -21,6 +21,8 @@ PRIVATE
     iv/editor/iv_editor_text_entities.h
     iv/editor/iv_editor_widget.cpp
     iv/editor/iv_editor_widget.h
+    iv/editor/iv_editor_window.cpp
+    iv/editor/iv_editor_window.h
 
     iv/iv_controller.cpp
     iv/iv_controller.h

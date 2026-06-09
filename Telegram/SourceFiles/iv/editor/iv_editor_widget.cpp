@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/qthelp_url.h"
 #include "base/qt/qt_common_adapters.h"
+#include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/message_field.h"
 #include "data/data_msg_id.h"
 #include "data/data_types.h"
@@ -18,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_native_richtext.h"
 #include "lang/lang_keys.h"
+#include "main/session/session_show.h"
 #include "menu/menu_checked_action.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
@@ -30,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
-#include "window/window_session_controller.h"
 
 #include "styles/palette.h"
 #include "styles/style_chat.h"
@@ -943,12 +944,15 @@ LiftPreparedEditBlocksToCommonContainer(
 
 Widget::Widget(
 	QWidget *parent,
-	not_null<Window::SessionController*> controller,
+	WidgetServices services,
 	not_null<PeerData*> peer,
 	std::shared_ptr<State> state,
 	Fn<void(RichMessageLimitError)> showLimitToast)
 : Ui::RpWidget(parent)
-, _controller(controller)
+, _session(services.session)
+, _show(std::move(services.show))
+, _outer(services.outer)
+, _customEmojiPaused(std::move(services.customEmojiPaused))
 , _peer(peer)
 , _state(std::move(state))
 , _showLimitToast(std::move(showLimitToast))
@@ -965,8 +969,7 @@ Widget::Widget(
 	setFocusPolicy(Qt::StrongFocus);
 	setAttribute(Qt::WA_InputMethodEnabled);
 
-	_controller->imeCompositionStarts(
-	) | rpl::filter([=] {
+	std::move(services.imeCompositionStarts) | rpl::filter([=] {
 		return redirectImeToField();
 	}) | rpl::on_next([=] {
 		if (prepareFieldForInput()) {
@@ -1650,6 +1653,26 @@ void Widget::insertHeading1() {
 
 void Widget::insertBlockquote() {
 	insertBlock({ .type = State::InsertBlockType::Blockquote });
+}
+
+void Widget::insertEmoji(EmojiPtr emoji) {
+	if (!emoji || !prepareFieldForInput()) {
+		return;
+	}
+	_field->setFocusFast();
+	Ui::InsertEmojiAtCursor(_field->textCursor(), emoji);
+}
+
+void Widget::insertCustomEmoji(not_null<DocumentData*> document) {
+	if (!prepareFieldForInput()) {
+		return;
+	}
+	_field->setFocusFast();
+	Data::InsertCustomEmoji(_field.get(), document);
+}
+
+void Widget::setInlineFieldExternalInteractionActive(bool active) {
+	_inlineFieldExternalInteractionActive = active;
 }
 
 int Widget::resizeGetHeight(int newWidth) {
@@ -2546,7 +2569,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 			: -1;
 		if (const auto now = _state->codeBlockLanguage(ordinal)) {
 			const auto weak = QPointer<Widget>(this);
-			DefaultEditLanguageCallback(_controller->uiShow())(
+			DefaultEditLanguageCallback(_show)(
 				*now,
 				[=](QString language) {
 					if (!weak) {
@@ -2870,17 +2893,22 @@ void Widget::setupInlineField() {
 		};
 		_field->setInstantViewEditorTagsEnabled(true);
 		InitMessageFieldHandlers({
-			.session = &_controller->session(),
-			.show = _controller->uiShow(),
+			.session = _session,
+			.show = _show,
 			.field = _field.get(),
-			.customEmojiPaused = [=] {
-				return _controller->isGifPausedAtLeastFor(
-					Window::GifPauseReason::Layer);
-			},
+			.customEmojiPaused = _customEmojiPaused,
 			.allowPremiumEmoji = allowPremiumEmoji,
 			.fieldStyle = &_field->st(),
 			.linkValidator = ValidateInstantViewEditorLink,
 		});
+		Ui::Emoji::SuggestionsController::Init(
+			_outer,
+			_field.get(),
+			_session,
+			{
+				.suggestCustomEmoji = true,
+				.allowCustomWithoutPremium = allowPremiumEmoji,
+			});
 		auto messageFieldMimeHook = WrappedMessageFieldMimeHook(
 			Ui::InputField::MimeDataHook(),
 			_field.get());
@@ -2919,7 +2947,10 @@ void Widget::setupInlineField() {
 	}, _field->lifetime());
 	_field->focusedChanges(
 	) | rpl::on_next([=](bool focused) {
-		if (!focused && !_settingField && !_trackingPointerPress) {
+		if (!focused
+			&& !_settingField
+			&& !_trackingPointerPress
+			&& !_inlineFieldExternalInteractionActive) {
 			const auto committed = recordMutationTransaction([=] {
 				return commitInlineField();
 			});
