@@ -1640,9 +1640,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 	}
 	switch (block.kind) {
 	case RichPageBlockKind::Unsupported:
-		return PrepareNativeIvPlainPlaceholderBlock(
-			u"Unsupported Content"_q,
-			result);
+		return true;
 	case RichPageBlockKind::Heading:
 		return AppendNativeIvFlowBlock(
 			result,
@@ -1848,9 +1846,7 @@ void ClearPreparedEditSources(std::vector<PreparedBlock> *blocks) {
 			path,
 			PrepareNativeIvMapBlock);
 	}
-	return PrepareNativeIvPlainPlaceholderBlock(
-		u"Unsupported Content"_q,
-		result);
+	return true;
 }
 
 [[nodiscard]] bool PrepareCanonicalNativeIvBlocks(
