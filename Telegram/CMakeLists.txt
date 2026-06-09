@@ -544,6 +544,8 @@ PRIVATE
     core/deep_links/deep_links_settings.cpp
     core/deep_links/deep_links_settings.h
     core/deep_links/deep_links_types.h
+    core/external_control.cpp
+    core/external_control.h
     core/file_utilities.cpp
     core/file_utilities.h
     core/launcher.cpp

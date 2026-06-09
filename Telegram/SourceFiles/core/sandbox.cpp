@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/crash_reports.h"
 #include "core/crash_report_window.h"
 #include "core/application.h"
+#include "core/external_control.h"
 #include "core/launcher.h"
 #include "core/local_url_handlers.h"
 #include "core/update_checker.h"
@@ -478,6 +479,13 @@ void Sandbox::readClients() {
 					if (!activationRequired) {
 						activationRequired = StartUrlRequiresActivate(startUrls.back().toString());
 					}
+				} else if (cmd.startsWith(u"CTRL:"_q)) {
+					const auto payload = HandleExternalControl(
+						cmds.mid(from + 5, to - from - 5));
+					const auto response = QByteArray("DATA:")
+						+ payload.toBase64()
+						+ ';';
+					i->first->write(response);
 				} else {
 					LOG(("Sandbox Error: unknown command %1 passed in local socket").arg(cmd.toString()));
 				}
