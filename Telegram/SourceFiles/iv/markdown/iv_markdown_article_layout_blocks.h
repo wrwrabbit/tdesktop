@@ -302,6 +302,7 @@ struct LayoutContext {
 	CachedTextLeafPool *cachedTextLeafs = nullptr;
 	Fn<void()> repaint;
 	Fn<void(QRect)> repaintRect;
+	Fn<bool(const ClickContext&)> spoilerLinkFilter;
 	std::vector<int> preparedPath;
 	std::shared_ptr<EditableHeightOverride> editableHeightOverride;
 	std::function<std::shared_ptr<MediaBlock>(const PreparedBlock&)> mediaBlockFactory;
@@ -476,7 +477,8 @@ void RepopulateCodeBlockLeaf(
 	bool allowAsyncSyntaxHighlighting,
 	CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker = nullptr,
 	Fn<void()> repaint = nullptr,
-	Fn<void(QRect)> repaintRect = nullptr);
+	Fn<void(QRect)> repaintRect = nullptr,
+	Fn<bool(const ClickContext&)> spoilerLinkFilter = nullptr);
 void UpdateLaidOutLeafContent(
 	LaidOutBlock *block,
 	const PreparedBlock &prepared,

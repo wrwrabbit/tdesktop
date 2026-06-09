@@ -67,6 +67,7 @@ public:
 	[[nodiscard]] virtual MediaBlockSelectionData selectionData() const = 0;
 	[[nodiscard]] virtual bool hasHeavyPart() const;
 	virtual void unloadHeavyPart();
+	virtual void hideSpoilers();
 
 protected:
 	void requestRepaint(QRect articleRect) const;

@@ -510,6 +510,21 @@ void BindLinks(
 	}
 }
 
+void SetTextLeafSpoilerLinkFilter(
+		Ui::Text::String *leaf,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
+	if (!leaf->hasSpoilers()) {
+		return;
+	}
+	if (spoilerLinkFilter) {
+		leaf->setSpoilerLinkFilter(std::move(spoilerLinkFilter));
+	} else {
+		leaf->setSpoilerLinkFilter([](const ClickContext &context) {
+			return context.button == Qt::LeftButton;
+		});
+	}
+}
+
 const PreparedFormulaSlot *PreparedFormulaFor(
 		const std::vector<PreparedFormulaSlot> &formulas,
 		int formulaIndex) {
@@ -1110,7 +1125,8 @@ void SetTextLeaf(
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		int minResizeWidth,
 		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect) {
+		Fn<void(QRect)> repaintRect,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = mediaRuntime
 		? mediaRuntime->textContext()
@@ -1175,11 +1191,7 @@ void SetTextLeaf(
 		return std::unique_ptr<Ui::Text::CustomEmoji>();
 	};
 	leaf->setMarkedText(textStyle, text, kIvMarkedTextOptions, context);
-	if (leaf->hasSpoilers()) {
-		leaf->setSpoilerLinkFilter([](const ClickContext &context) {
-			return context.button == Qt::LeftButton;
-		});
-	}
+	SetTextLeafSpoilerLinkFilter(leaf, std::move(spoilerLinkFilter));
 }
 
 } // namespace Iv::Markdown

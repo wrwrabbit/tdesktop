@@ -29,6 +29,9 @@ class InlineFormulaObjectCache;
 void BindLinks(
 	Ui::Text::String *leaf,
 	const std::vector<PreparedLink> &links);
+void SetTextLeafSpoilerLinkFilter(
+	Ui::Text::String *leaf,
+	Fn<bool(const ClickContext&)> spoilerLinkFilter = nullptr);
 
 [[nodiscard]] std::shared_ptr<InlineFormulaObjectCache>
 CreateInlineFormulaObjectCache(std::shared_ptr<MathRenderer> renderer);
@@ -68,6 +71,7 @@ void SetTextLeaf(
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	int minResizeWidth,
 	Fn<void()> repaint = nullptr,
-	Fn<void(QRect)> repaintRect = nullptr);
+	Fn<void(QRect)> repaintRect = nullptr,
+	Fn<bool(const ClickContext&)> spoilerLinkFilter = nullptr);
 
 } // namespace Iv::Markdown

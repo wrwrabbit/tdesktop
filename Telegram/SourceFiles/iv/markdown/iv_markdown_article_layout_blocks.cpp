@@ -299,10 +299,12 @@ void BuildOrReuseCachedTextLeaf(
 			}
 			*leaf = std::move(i->second.leaf);
 			pool->entries.erase(i);
+			SetTextLeafSpoilerLinkFilter(leaf, context.spoilerLinkFilter);
 			return;
 		}
 	}
 	builder(leaf, syntaxHighlightProcessId);
+	SetTextLeafSpoilerLinkFilter(leaf, context.spoilerLinkFilter);
 }
 
 [[nodiscard]] LaidOutTableCell InitializeTableCellLayout(
@@ -612,7 +614,8 @@ void PopulateCodeBlockLeaf(
 		bool allowAsyncSyntaxHighlighting,
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
 		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect) {
+		Fn<void(QRect)> repaintRect,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
 	auto display = CodeBlockDisplayText(codeText);
 	auto highlightRequest = TextWithEntities();
 	highlightRequest.text = display.text;
@@ -648,7 +651,8 @@ void PopulateCodeBlockLeaf(
 		mediaRuntime,
 		CodeTextMinResizeWidth(st),
 		std::move(repaint),
-		std::move(repaintRect));
+		std::move(repaintRect),
+		std::move(spoilerLinkFilter));
 	BindLinks(leaf, codeLinks);
 	if (syntaxHighlightProcessId) {
 		*syntaxHighlightProcessId = processId;
@@ -1793,7 +1797,8 @@ int CodeBlockPreferredWidth(
 				context.allowAsyncSyntaxHighlighting,
 				context.syntaxHighlightTracker,
 				context.repaint,
-				context.repaintRect);
+				context.repaintRect,
+				context.spoilerLinkFilter);
 		},
 		[](const Ui::Text::String &leaf,
 				Spellchecker::HighlightProcessId) {
@@ -2057,7 +2062,8 @@ void RepopulateCodeBlockLeaf(
 		bool allowAsyncSyntaxHighlighting,
 		CodeBlockSyntaxHighlightTracker *syntaxHighlightTracker,
 		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect) {
+		Fn<void(QRect)> repaintRect,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter) {
 	PopulateCodeBlockLeaf(
 		&block.leaf,
 		&block.syntaxHighlightProcessId,
@@ -2071,7 +2077,8 @@ void RepopulateCodeBlockLeaf(
 		allowAsyncSyntaxHighlighting,
 		syntaxHighlightTracker,
 		std::move(repaint),
-		std::move(repaintRect));
+		std::move(repaintRect),
+		std::move(spoilerLinkFilter));
 }
 
 void UpdateLaidOutLeafContent(
@@ -2132,7 +2139,8 @@ void UpdateLaidOutLeafContent(
 			context.allowAsyncSyntaxHighlighting,
 			context.syntaxHighlightTracker,
 			context.repaint,
-			context.repaintRect);
+			context.repaintRect,
+			context.spoilerLinkFilter);
 		if (prepared.text.text.isEmpty()
 			&& !prepared.editPlaceholderText.isEmpty()) {
 			BuildOrReuseEditPlaceholderLeaf(
@@ -2523,7 +2531,8 @@ LaidOutBlock LayoutCodeBlock(
 				allowAsyncSyntaxHighlighting,
 				syntaxHighlightTracker,
 				context.repaint,
-				context.repaintRect);
+				context.repaintRect,
+				context.spoilerLinkFilter);
 		});
 	BindLinks(&block.leaf, block.codeLinks);
 	if (!block.syntaxHighlightProcessId

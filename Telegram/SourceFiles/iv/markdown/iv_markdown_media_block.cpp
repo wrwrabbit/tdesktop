@@ -1802,6 +1802,9 @@ bool MediaBlock::hasHeavyPart() const {
 void MediaBlock::unloadHeavyPart() {
 }
 
+void MediaBlock::hideSpoilers() {
+}
+
 void MediaBlock::setLayoutStyle(const style::Markdown &st) {
 	if (_st == &st) {
 		return;

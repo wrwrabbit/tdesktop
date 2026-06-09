@@ -281,7 +281,8 @@ public:
 	void setMediaBlockHost(MediaBlockHost *host);
 	void setTextRepaintCallbacks(
 		Fn<void()> repaint,
-		Fn<void(QRect)> repaintRect);
+		Fn<void(QRect)> repaintRect,
+		Fn<bool(const ClickContext&)> spoilerLinkFilter = nullptr);
 	void setContent(MarkdownArticleContent content);
 	void updatePreparedLeaf(
 		const PreparedEditLeafSource &source,
@@ -364,6 +365,7 @@ public:
 	void invalidateRasterCache();
 	[[nodiscard]] bool hasHeavyPart() const;
 	void unloadHeavyPart();
+	void hideSpoilers();
 	[[nodiscard]] MediaBlockHost *mediaBlockHost() const;
 	void setPlaceholderLoading(PreparedPlaceholderBlockId id);
 	void clearPlaceholderLoading(PreparedPlaceholderBlockId id);
