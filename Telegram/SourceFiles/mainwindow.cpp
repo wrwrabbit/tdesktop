@@ -512,6 +512,10 @@ rpl::producer<bool> MainWindow::ui_boxShownValue() const {
 	return _boxShown.value();
 }
 
+bool MainWindow::closeLayerByBackButton() {
+	return _layer && _layer->closeCurrentByBackButton();
+}
+
 bool MainWindow::showMediaPreview(
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document) {

@@ -103,6 +103,7 @@ public:
 	void ui_removeLayerBlackout();
 	[[nodiscard]] bool ui_isLayerShown() const;
 	[[nodiscard]] rpl::producer<bool> ui_boxShownValue() const;
+	bool closeLayerByBackButton();
 	bool showMediaPreview(
 		Data::FileOrigin origin,
 		not_null<DocumentData*> document);
