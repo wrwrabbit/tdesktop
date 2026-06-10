@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_map.h"
 #include "base/qthelp_url.h"
 #include "base/unixtime.h"
+#include "base/variant.h"
 #include "data/data_document.h"
 #include "data/data_peer.h"
 #include "data/data_photo.h"
@@ -1440,9 +1441,44 @@ void AppendBlocks(
 	}
 }
 
+void ExpandInlineTextObjects(TextWithEntities *text) {
+	auto &entities = text->entities;
+	for (auto i = entities.begin(); i != entities.end();) {
+		if (i->type() != EntityType::CustomEmoji) {
+			++i;
+			continue;
+		}
+		const auto object = Markdown::ParseInlineTextObjectEntity(
+			i->data());
+		if (!object) {
+			++i;
+			continue;
+		}
+		const auto replacement = v::match(object->data, [](
+				const Markdown::InlineTextObjectFormulaData &data) {
+			return data.trimmedTex;
+		}, [](const Markdown::InlineTextObjectIvImageData &data) {
+			return data.replacementText;
+		});
+		const auto offset = i->offset();
+		const auto length = i->length();
+		const auto delta = int(replacement.size()) - length;
+		text->text.replace(offset, length, replacement);
+		i = entities.erase(i);
+		for (auto &entity : entities) {
+			if (entity.offset() > offset) {
+				entity.shiftRight(delta);
+			} else if (entity.offset() + entity.length() > offset) {
+				entity.shrinkFromRight(-delta);
+			}
+		}
+	}
+}
+
 void AppendSummaryLine(
 		TextWithEntities *result,
 		TextWithEntities &&line) {
+	ExpandInlineTextObjects(&line);
 	TextUtilities::Trim(line);
 	if (line.empty()) {
 		return;
