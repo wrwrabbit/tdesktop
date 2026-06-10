@@ -1472,6 +1472,35 @@ void AppendSummaryLine(
 	AppendSummaryLine(result, line.text, prefix);
 }
 
+[[nodiscard]] QString MediaSummaryFallback(const Block &block) {
+	if (block.kind == BlockKind::Photo) {
+		return tr::lng_in_dlg_photo(tr::now);
+	} else if (block.kind == BlockKind::Video) {
+		return tr::lng_in_dlg_video(tr::now);
+	} else if (block.kind == BlockKind::Audio) {
+		return tr::lng_in_dlg_audio_file(tr::now);
+	} else if (block.kind == BlockKind::Map) {
+		return tr::lng_maps_point(tr::now);
+	} else if (block.kind == BlockKind::GroupedMedia) {
+		auto photos = false;
+		auto videos = false;
+		for (const auto &item : block.mediaItems) {
+			if (item.kind == BlockKind::Video) {
+				videos = true;
+			} else {
+				photos = true;
+			}
+		}
+		if (videos && !photos) {
+			return tr::lng_in_dlg_video(tr::now);
+		} else if (photos && !videos) {
+			return tr::lng_in_dlg_photo(tr::now);
+		}
+		return tr::lng_in_dlg_album(tr::now);
+	}
+	return QString();
+}
+
 [[nodiscard]] QString FooterText(const RelatedArticle &article) {
 	if (article.publishedDate && !article.author.isEmpty()) {
 		return article.author + u", "_q + DateText(article.publishedDate);
@@ -1559,7 +1588,13 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 	case BlockKind::Audio:
 	case BlockKind::GroupedMedia:
 	case BlockKind::Map:
-		AppendSummaryLine(result, block.caption);
+		if (!block.caption.text.empty()) {
+			AppendSummaryLine(result, block.caption);
+		} else {
+			AppendSummaryLine(
+				result,
+				TextWithEntities::Simple(MediaSummaryFallback(block)));
+		}
 		return;
 	case BlockKind::Embed:
 		if (!block.caption.text.empty()) {
@@ -1787,6 +1822,9 @@ std::shared_ptr<const RichPage> ParseRichPage(
 TextWithEntities FlattenRichPageSummary(const RichPage &page) {
 	auto result = FlattenSummaryBlocks(page.blocks);
 	TextUtilities::Trim(result);
+	if (result.empty()) {
+		result = TextWithEntities::Simple(tr::lng_message_empty(tr::now));
+	}
 	return result;
 }
 
