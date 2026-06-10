@@ -459,7 +459,7 @@ stage('patches', """
 mac:
     git clone https://github.com/desktop-app/qt6_highsierra_patches.git qt6_highsierra
     cd qt6_highsierra
-    git checkout abb2aefeadfc608d9695418f53ed55a86176ab91
+    git checkout 4aae812a405f47553e001faf566de572d3eccd16
 """)
 
 stage('msys64', """
