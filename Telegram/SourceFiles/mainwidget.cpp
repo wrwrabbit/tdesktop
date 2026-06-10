@@ -2852,6 +2852,9 @@ void MainWidget::handleAdaptiveLayoutUpdate() {
 }
 
 void MainWidget::handleHistoryBack() {
+	if (_mainSection && _mainSection->showBackInternal()) {
+		return;
+	}
 	const auto openedFolder = _controller->openedFolder().current();
 	const auto openedForum = _controller->shownForum().current();
 	const auto rootPeer = !_stack.empty()
