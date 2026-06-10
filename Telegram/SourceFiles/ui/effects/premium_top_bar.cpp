@@ -34,7 +34,7 @@ constexpr auto kStar3dScale = 2.;
 constexpr auto kDiamond3dScale = 1.58;
 constexpr auto kCoin3dScale = 1.85;
 
-constexpr auto kStarParticlesFieldScale = 2.2;
+constexpr auto kStarParticlesFieldScale = 3.;
 
 [[nodiscard]] QImage ScaleTo(QImage image) {
 	using namespace style;

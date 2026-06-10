@@ -59,8 +59,8 @@ constexpr auto kFlingSpeedLow = 5.;
 constexpr auto kFlingSpeedMedium = 9.;
 constexpr auto kFlingSpeedHigh = 15.;
 
-constexpr auto kSizesDp = std::array{ 4., 12., 10. };
-constexpr auto kDollarSizesDp = std::array{ 16., 12., 10. };
+constexpr auto kSizesDp = std::array{ 3., 8., 7. };
+constexpr auto kDollarSizesDp = std::array{ 16., 8., 7. };
 constexpr auto kRotationDegPerSec = std::array{ 9., 7.2, 6. };
 
 [[nodiscard]] QPainterPath StarPath(float64 size) {
@@ -351,7 +351,7 @@ void StarParticles::rebuildSprites(int ratio) {
 	const auto sizes = (_glyph == Glyph::Dollar)
 		? kDollarSizesDp
 		: (_glyph == Glyph::Star)
-		? std::array<float64, 3>{ { 11., 12., 13. } }
+		? std::array<float64, 3>{ { 8., 9., 10. } }
 		: kSizesDp;
 	_maxSpriteExtent = 0.;
 	for (auto i = 0; i != int(_sprites.size()); ++i) {
