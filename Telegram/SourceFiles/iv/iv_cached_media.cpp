@@ -1387,6 +1387,7 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			if (!controller) {
 				return std::shared_ptr<Markdown::MediaBlock>();
 			}
+			const auto mapSize = QSize(prepared.width, prepared.height);
 			const auto point = CachedPageMapPoint(
 				prepared.latitude,
 				prepared.longitude,
@@ -1397,7 +1398,7 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 					prepared.latitude,
 					prepared.longitude,
 					prepared.accessHash,
-					QSize(prepared.width, prepared.height),
+					mapSize,
 					prepared.zoom));
 			const auto mapImagePtr = mapImage.get();
 
@@ -1405,14 +1406,17 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 			descriptor.stableId = prepared.id.value;
 			descriptor.kind = Markdown::IvHistoryViewMediaKind::Map;
 			descriptor.copyText = tr::lng_maps_point(tr::now);
-			descriptor.layoutHint = QSize(prepared.width, prepared.height);
+			descriptor.layoutHint = mapSize;
 			descriptor.host = host;
-			descriptor.mediaFactory = [mapImagePtr, point](
+			descriptor.mediaFactory = [mapImagePtr, point, mapSize](
 					not_null<HistoryView::Element*> view) {
 				return std::make_unique<HistoryView::Location>(
 					view,
 					not_null{ mapImagePtr },
-					point);
+					point,
+					nullptr,
+					0,
+					mapSize);
 			};
 			descriptor.keepAlive.push_back(mapImage);
 			return Markdown::CreateIvHistoryViewMediaBlock(
