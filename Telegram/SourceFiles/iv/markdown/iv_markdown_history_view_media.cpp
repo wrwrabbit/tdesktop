@@ -22,7 +22,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings.h"
 #include "ui/image/image_location.h"
 #include "data/data_types.h"
+#include "data/data_document.h"
 #include "data/data_file_click_handler.h"
+#include "data/data_photo.h"
 #include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
@@ -218,6 +220,12 @@ private:
 	const QSize _layoutHint;
 	const std::shared_ptr<PhotoRuntime> _photoRuntime;
 	const std::shared_ptr<DocumentRuntime> _documentRuntime;
+	const base::flat_map<
+		uint64,
+		std::shared_ptr<PhotoRuntime>> _groupedPhotoRuntimes;
+	const base::flat_map<
+		uint64,
+		std::shared_ptr<DocumentRuntime>> _groupedDocumentRuntimes;
 	const std::shared_ptr<IvHistoryViewMediaHost> _host;
 	const std::vector<std::shared_ptr<void>> _keepAlive;
 	std::unique_ptr<HistoryView::Media> _media;
@@ -235,6 +243,8 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 , _layoutHint(descriptor.layoutHint)
 , _photoRuntime(std::move(descriptor.photo))
 , _documentRuntime(std::move(descriptor.document))
+, _groupedPhotoRuntimes(std::move(descriptor.groupedPhotos))
+, _groupedDocumentRuntimes(std::move(descriptor.groupedDocuments))
 , _host(std::move(descriptor.host))
 , _keepAlive(std::move(descriptor.keepAlive)) {
 	if (descriptor.mediaFactory) {
@@ -402,6 +412,28 @@ IvHistoryViewHit IvHistoryViewBlock::classifyHandler(
 		result.link = handler;
 		return result;
 	}
+	if (_kind == IvHistoryViewMediaKind::GroupedMedia) {
+		if (const auto photoOpen
+			= std::dynamic_pointer_cast<PhotoOpenClickHandler>(handler)) {
+			const auto i = _groupedPhotoRuntimes.find(photoOpen->photo()->id);
+			if (i != end(_groupedPhotoRuntimes)) {
+				result.activation.kind = MediaActivationKind::Photo;
+				result.activation.photo = i->second;
+				return result;
+			}
+		} else if (const auto documentOpen
+			= std::dynamic_pointer_cast<DocumentOpenClickHandler>(handler)) {
+			const auto i = _groupedDocumentRuntimes.find(
+				documentOpen->document()->id);
+			if (i != end(_groupedDocumentRuntimes)) {
+				result.activation.kind = MediaActivationKind::Document;
+				result.activation.document = i->second;
+				return result;
+			}
+		}
+		result.supported = false;
+		return result;
+	}
 	if (std::dynamic_pointer_cast<PhotoOpenClickHandler>(handler)
 		&& _photoRuntime) {
 		result.activation.kind = MediaActivationKind::Photo;
@@ -435,6 +467,8 @@ bool IvHistoryViewBlock::probeSupport() {
 	case IvHistoryViewMediaKind::Photo:
 		return supportsHitClassification();
 	case IvHistoryViewMediaKind::Document:
+		return supportsHitClassification();
+	case IvHistoryViewMediaKind::GroupedMedia:
 		return supportsHitClassification();
 	case IvHistoryViewMediaKind::Map:
 	case IvHistoryViewMediaKind::Audio:
@@ -655,12 +689,14 @@ IvHistoryViewMediaBlockFactory::IvHistoryViewMediaBlockFactory(
 	PhotoFactory createPhoto,
 	VideoFactory createVideo,
 	AudioFactory createAudio,
-	MapFactory createMap)
+	MapFactory createMap,
+	GroupedMediaFactory createGroupedMedia)
 : _controller(std::move(controller))
 , _createPhoto(std::move(createPhoto))
 , _createVideo(std::move(createVideo))
 , _createAudio(std::move(createAudio))
-, _createMap(std::move(createMap)) {
+, _createMap(std::move(createMap))
+, _createGroupedMedia(std::move(createGroupedMedia)) {
 }
 
 std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::createPhoto(
@@ -681,6 +717,12 @@ std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::createAudio(
 std::shared_ptr<MediaBlock> IvHistoryViewMediaBlockFactory::createMap(
 		const PreparedMapBlockData &prepared) const {
 	return create(prepared, _createMap);
+}
+
+auto IvHistoryViewMediaBlockFactory::createGroupedMedia(
+	const PreparedGroupedMediaBlockData &prepared) const
+-> std::shared_ptr<MediaBlock> {
+	return create(prepared, _createGroupedMedia);
 }
 
 std::shared_ptr<MediaBlock> CreateIvHistoryViewMediaBlock(

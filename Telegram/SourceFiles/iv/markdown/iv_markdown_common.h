@@ -104,6 +104,7 @@ struct PreparedPhotoBlockData;
 struct PreparedVideoBlockData;
 struct PreparedAudioBlockData;
 struct PreparedMapBlockData;
+struct PreparedGroupedMediaBlockData;
 
 class HostedMediaBlockFactory {
 public:
@@ -123,6 +124,10 @@ public:
 	}
 	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createMap(
 		const PreparedMapBlockData &prepared) const {
+		return nullptr;
+	}
+	[[nodiscard]] virtual std::shared_ptr<MediaBlock> createGroupedMedia(
+		const PreparedGroupedMediaBlockData &prepared) const {
 		return nullptr;
 	}
 };

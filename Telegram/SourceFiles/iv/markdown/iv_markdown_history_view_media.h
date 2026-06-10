@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "iv/markdown/iv_markdown_common.h"
+#include "base/flat_map.h"
 #include "base/weak_ptr.h"
 
 #include <functional>
@@ -71,6 +72,7 @@ enum class IvHistoryViewMediaKind {
 	Document,
 	Map,
 	Audio,
+	GroupedMedia,
 };
 
 struct IvHistoryViewMediaDescriptor {
@@ -86,6 +88,10 @@ struct IvHistoryViewMediaDescriptor {
 	std::vector<std::shared_ptr<void>> keepAlive;
 	std::shared_ptr<PhotoRuntime> photo;
 	std::shared_ptr<DocumentRuntime> document;
+	base::flat_map<uint64, std::shared_ptr<PhotoRuntime>> groupedPhotos;
+	base::flat_map<
+		uint64,
+		std::shared_ptr<DocumentRuntime>> groupedDocuments;
 };
 
 class IvHistoryViewMediaBlockFactory final : public HostedMediaBlockFactory {
@@ -102,13 +108,17 @@ public:
 	using MapFactory = std::function<std::shared_ptr<MediaBlock>(
 		Window::SessionController *controller,
 		const PreparedMapBlockData &prepared)>;
+	using GroupedMediaFactory = std::function<std::shared_ptr<MediaBlock>(
+		Window::SessionController *controller,
+		const PreparedGroupedMediaBlockData &prepared)>;
 
 	IvHistoryViewMediaBlockFactory(
 		base::weak_ptr<Window::SessionController> controller,
 		PhotoFactory createPhoto = {},
 		VideoFactory createVideo = {},
 		AudioFactory createAudio = {},
-		MapFactory createMap = {});
+		MapFactory createMap = {},
+		GroupedMediaFactory createGroupedMedia = {});
 
 	[[nodiscard]] std::shared_ptr<MediaBlock> createPhoto(
 		const PreparedPhotoBlockData &prepared) const override;
@@ -118,6 +128,8 @@ public:
 		const PreparedAudioBlockData &prepared) const override;
 	[[nodiscard]] std::shared_ptr<MediaBlock> createMap(
 		const PreparedMapBlockData &prepared) const override;
+	[[nodiscard]] std::shared_ptr<MediaBlock> createGroupedMedia(
+		const PreparedGroupedMediaBlockData &prepared) const override;
 
 private:
 	template <typename Prepared, typename Factory>
@@ -130,6 +142,7 @@ private:
 	const VideoFactory _createVideo;
 	const AudioFactory _createAudio;
 	const MapFactory _createMap;
+	const GroupedMediaFactory _createGroupedMedia;
 };
 
 template <typename Prepared, typename Factory>

@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
 #include "history/view/media/history_view_location.h"
+#include "history/view/media/history_view_media_grouped.h"
 #include "history/view/media/history_view_photo.h"
 #include "info/profile/info_profile_values.h"
 #include "iv/markdown/iv_markdown_common.h"
@@ -38,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_open_common.h"
 #include "storage/file_download.h"
 #include "ui/dynamic_image.h"
-#include "ui/dynamic_thumbnails.h"
 #include "ui/image/image.h"
 #include "ui/painter.h"
 #include "ui/text/text_entity.h"
@@ -381,6 +381,25 @@ void CachedPagePhotoRuntime::open(Qt::MouseButton button) const {
 	return document->isAudioFile() || document->isVoiceMessage();
 }
 
+[[nodiscard]] QString CachedPageGroupedMediaCopyText(
+		const Markdown::PreparedGroupedMediaBlockData &prepared) {
+	auto photos = 0;
+	auto videos = 0;
+	for (const auto &item : prepared.items) {
+		if (item.media.kind == Markdown::PreparedMediaItemKind::Photo) {
+			++photos;
+		} else {
+			++videos;
+		}
+	}
+	if (photos && !videos) {
+		return tr::lng_media_selected_photo(tr::now, lt_count, photos);
+	} else if (videos && !photos) {
+		return tr::lng_media_selected_video(tr::now, lt_count, videos);
+	}
+	return QString();
+}
+
 [[nodiscard]] QString CachedPageAudioTitleText(
 		const Markdown::PreparedAudioBlockData &audio) {
 	if (!audio.title.isEmpty()) {
@@ -456,16 +475,6 @@ CachedPageDocumentRuntime::CachedPageDocumentRuntime(
 , _itemId(itemId)
 , _itemIdResolver(std::move(itemIdResolver))
 , _media(document->createMediaView()) {
-}
-
-std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::thumbnail(
-		QSize size) const {
-	return Ui::MakeDocumentThumbnailFit(_document, _origin);
-}
-
-std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::full(
-		QSize size) const {
-	return Ui::MakeDocumentThumbnail(_document, _origin);
 }
 
 bool CachedPageDocumentRuntime::loaded() const {
@@ -692,6 +701,22 @@ QSize CachedPageInlineDocumentImage::requestedSize(int size) const {
 		return _requestedSize;
 	}
 	return (size > 0) ? QSize(size, size) : QSize();
+}
+
+std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::thumbnail(
+		QSize size) const {
+	return std::make_shared<CachedPageInlineDocumentImage>(
+		_document,
+		_origin,
+		size);
+}
+
+std::shared_ptr<Ui::DynamicImage> CachedPageDocumentRuntime::full(
+		QSize size) const {
+	return std::make_shared<CachedPageInlineDocumentImage>(
+		_document,
+		_origin,
+		size);
 }
 
 class CachedPageMapDynamicImage final : public Ui::DynamicImage {
@@ -1419,6 +1444,83 @@ auto CachedPageMediaRuntime::hostedMediaBlockFactory() const
 					mapSize);
 			};
 			descriptor.keepAlive.push_back(mapImage);
+			return Markdown::CreateIvHistoryViewMediaBlock(
+				std::move(descriptor));
+		},
+		[session = _session, host, origin = fileOrigin()](
+				Window::SessionController *controller,
+				const Markdown::PreparedGroupedMediaBlockData &prepared) {
+			if (!controller
+				|| (prepared.intent
+					!= Markdown::PreparedGroupedMediaIntent::Collage)
+				|| prepared.items.empty()
+				|| (int(prepared.items.size())
+					> HistoryView::GroupedMedia::kMaxSize)) {
+				return std::shared_ptr<Markdown::MediaBlock>();
+			}
+			auto descriptor = Markdown::IvHistoryViewMediaDescriptor();
+			const auto medias = std::make_shared<
+				std::vector<std::unique_ptr<::Data::Media>>>();
+			medias->reserve(prepared.items.size());
+			for (const auto &item : prepared.items) {
+				const auto kind = item.media.kind;
+				if (kind == Markdown::PreparedMediaItemKind::Photo) {
+					const auto photo = session->data().photo(
+						PhotoId(item.media.id));
+					if (photo->isNull()) {
+						return std::shared_ptr<Markdown::MediaBlock>();
+					}
+					host->registerPhoto(photo);
+					medias->push_back(std::make_unique<::Data::MediaPhoto>(
+						host->item(),
+						photo,
+						item.media.spoiler));
+					descriptor.groupedPhotos.emplace(
+						photo->id,
+						std::make_shared<CachedPagePhotoRuntime>(
+							session,
+							photo,
+							origin,
+							host->item()->fullId()));
+				} else {
+					const auto document = session->data().document(
+						DocumentId(item.media.id));
+					if (document->isNull()
+						|| !CanHostNativeIvVideoDocument(document)) {
+						return std::shared_ptr<Markdown::MediaBlock>();
+					}
+					host->registerDocument(document);
+					medias->push_back(std::make_unique<::Data::MediaFile>(
+						host->item(),
+						document,
+						CachedPageVideoMediaArgs(
+							session,
+							document,
+							item.media.spoiler)));
+					descriptor.groupedDocuments.emplace(
+						document->id,
+						std::make_shared<CachedPageDocumentRuntime>(
+							session,
+							document,
+							origin,
+							host->item()->fullId()));
+				}
+				if (!medias->back()->canBeGrouped()) {
+					return std::shared_ptr<Markdown::MediaBlock>();
+				}
+			}
+			descriptor.stableId = prepared.id.value;
+			descriptor.kind = Markdown::IvHistoryViewMediaKind::GroupedMedia;
+			descriptor.copyText = CachedPageGroupedMediaCopyText(prepared);
+			descriptor.layoutHint = QSize(st::historyGroupWidthMax, 0);
+			descriptor.host = host;
+			descriptor.mediaFactory = [medias](
+					not_null<HistoryView::Element*> view) {
+				return std::make_unique<HistoryView::GroupedMedia>(
+					view,
+					*medias);
+			};
+			descriptor.keepAlive.push_back(medias);
 			return Markdown::CreateIvHistoryViewMediaBlock(
 				std::move(descriptor));
 		});

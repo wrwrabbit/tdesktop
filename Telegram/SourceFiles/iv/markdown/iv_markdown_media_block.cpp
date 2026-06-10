@@ -1196,20 +1196,6 @@ GroupedMediaBlock::GroupedMediaBlock(
 , _mediaRuntime(std::move(mediaRuntime)) {
 	_items.reserve(prepared.items.size());
 	for (const auto &item : prepared.items) {
-		if (_mediaRuntime) {
-			switch (item.media.kind) {
-			case PreparedMediaItemKind::Photo:
-				_mediaRuntime->registerPhoto(
-					item.media.id,
-					prepared.caption);
-				break;
-			case PreparedMediaItemKind::Document:
-				_mediaRuntime->registerDocument(
-					item.media.id,
-					prepared.caption);
-				break;
-			}
-		}
 		auto state = ItemState();
 		state.kind = item.media.kind;
 		state.id = item.media.id;
@@ -1918,6 +1904,28 @@ std::shared_ptr<MediaBlock> CreateGroupedMediaBlock(
 		const PreparedGroupedMediaBlockData &prepared,
 		const std::shared_ptr<MediaRuntime> &mediaRuntime,
 		const style::Markdown &st) {
+	if (mediaRuntime) {
+		for (const auto &item : prepared.items) {
+			switch (item.media.kind) {
+			case PreparedMediaItemKind::Photo:
+				mediaRuntime->registerPhoto(
+					item.media.id,
+					prepared.caption);
+				break;
+			case PreparedMediaItemKind::Document:
+				mediaRuntime->registerDocument(
+					item.media.id,
+					prepared.caption);
+				break;
+			}
+		}
+		if (const auto hosted = mediaRuntime->hostedMediaBlockFactory()) {
+			if (const auto block = hosted->createGroupedMedia(prepared)) {
+				block->setLayoutStyle(st);
+				return block;
+			}
+		}
+	}
 	auto result = std::make_shared<GroupedMediaBlock>(prepared, mediaRuntime);
 	result->setLayoutStyle(st);
 	return result;
