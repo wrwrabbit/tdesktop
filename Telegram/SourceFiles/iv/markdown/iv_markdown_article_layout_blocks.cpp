@@ -713,7 +713,10 @@ void PopulateCodeBlockLeaf(
 	return std::clamp(limit, 1, std::max(availableWidth, 1));
 }
 
-void ApplyMediaBlockGeometry(LaidOutBlock *block, QRect geometry) {
+void ApplyMediaBlockGeometry(
+		LaidOutBlock *block,
+		QRect geometry,
+		const style::Markdown &st) {
 	if (!block->mediaBlock) {
 		return;
 	}
@@ -726,7 +729,15 @@ void ApplyMediaBlockGeometry(LaidOutBlock *block, QRect geometry) {
 		actual = block->mediaBlock->geometry();
 	}
 	block->mediaRect = actual;
-	block->firstLineBaseline = block->mediaBlock->firstLineBaseline();
+
+	// Media blocks without text report their top as the baseline, while
+	// the consumers (like list item marker placement) expect a text line
+	// baseline. Treat the media top as the top of a normal text line, so
+	// that markers are placed as if a text line started at the media top.
+	block->firstLineBaseline = std::max(
+		block->mediaBlock->firstLineBaseline(),
+		TextLineBaseline(st.body, block->mediaRect.y()));
+
 	block->visibleMediaRect = block->mediaRect;
 }
 
@@ -4039,7 +4050,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	block->mediaRect = QRect(mediaLeft, mediaTop, mediaWidth, mediaHeight);
 	block->visibleMediaRect = block->mediaRect;
 	if (block->mediaBlock) {
-		ApplyMediaBlockGeometry(block, block->mediaRect);
+		ApplyMediaBlockGeometry(block, block->mediaRect, st);
 	}
 	auto bottom = block->mediaRect.y() + block->mediaRect.height()
 		+ padding.bottom();
@@ -4090,7 +4101,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 	block->mediaRect = QRect(left, top, blockWidth, cardHeight);
 	block->visibleMediaRect = block->mediaRect;
 	if (block->mediaBlock) {
-		ApplyMediaBlockGeometry(block, block->mediaRect);
+		ApplyMediaBlockGeometry(block, block->mediaRect, st);
 	}
 	auto bottom = top + cardHeight;
 	if (!LayoutMediaCaptionGeometry(
