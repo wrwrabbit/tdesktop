@@ -56,10 +56,7 @@ bool Object3dSupported() {
 	if (PowerSaving::On(PowerSaving::kAnimations)) {
 		return false;
 	}
-	if (!GL::WidgetsRhiEnabled()) {
-		return false;
-	}
-	return GL::CheckRhiCapabilities().supported;
+	return GL::WidgetsRhiSupported();
 #else
 	return false;
 #endif
