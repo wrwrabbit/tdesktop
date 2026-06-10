@@ -5283,7 +5283,15 @@ int Message::monospaceMaxWidth() const {
 }
 
 int Message::bubbleTextWidth(int bubbleWidth) const {
-	return std::max(bubbleWidth, st::msgMinWidth)
+	// For rich pages the article is laid out exactly at the bubble width,
+	// so richPageWidthFor(bubbleTextWidth(width)) must give width back.
+	// Clamping by msgMinWidth here would lay the article out wider than
+	// the bubble shrunk to its content, painting centered blocks (like
+	// display math formulas) shifted right and cut by the bubble edge.
+	const auto floored = hasRichPage()
+		? bubbleWidth
+		: std::max(bubbleWidth, st::msgMinWidth);
+	return floored
 		- st::msgPadding.left()
 		- st::msgPadding.right();
 }
@@ -5572,7 +5580,10 @@ bool Message::unwrapped() const {
 }
 
 int Message::minWidthForMedia() const {
-	if (Get<InstantViewMediaRuntime>()) {
+	// InstantViewMediaRuntime without a rich page means a media view
+	// hosted inside an article, it doesn't draw a bubble with info.
+	// Rich page messages are real bubbles and need the minimal width.
+	if (Get<InstantViewMediaRuntime>() && !hasRichPage()) {
 		return 0;
 	}
 	auto result = infoWidth() + 2 * (st::msgDateImgDelta + st::msgDateImgPadding.x());
