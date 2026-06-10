@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "inline_bots/inline_bot_result.h"
 #include "base/event_filter.h"
+#include "base/options.h"
 #include "base/qt_signal_producer.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
@@ -106,6 +107,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_streamed_drafts.h"
 #include "history/history_unread_things.h"
 #include "history/admin_log/history_admin_log_section.h"
+#include "history/view/controls/compose_controls_common.h"
 #include "history/view/controls/history_view_characters_limit.h"
 #include "history/view/controls/history_view_compose_ai_button.h"
 #include "history/view/controls/history_view_compose_ai_tooltip.h"
@@ -5844,7 +5846,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			if (k->key() == Qt::Key_Up) {
 #ifdef Q_OS_MAC
 				// Cmd + Up is used instead of Home.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
@@ -5852,7 +5856,9 @@ bool HistoryWidget::eventFilter(QObject *obj, QEvent *e) {
 			} else if (k->key() == Qt::Key_Down) {
 #ifdef Q_OS_MAC
 				// Cmd + Down is used instead of End.
-				if (HasSendText(_field)) {
+				if (HasSendText(_field)
+					&& !base::options::value<bool>(
+						HistoryView::Controls::kOptionMacCmdReplyImmediately)) {
 					return false;
 				}
 #endif
