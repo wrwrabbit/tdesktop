@@ -2765,7 +2765,7 @@ private:
 		const MarkdownArticleScrollOwnerIdentity &identity,
 		int left);
 
-	void finalizeRelayout(int width, int heightBottom);
+	void finalizeRelayout(int heightBottom);
 	void relayout(int width);
 	void relayoutRetained(int width);
 	void retainBlocks();
@@ -4509,13 +4509,17 @@ void MarkdownArticle::Impl::endHorizontalScroll() {
 	_activeHorizontalScrollDrag.reset();
 }
 
-void MarkdownArticle::Impl::finalizeRelayout(int width, int heightBottom) {
+// The laid out width is passed through the _width field, assigned by the
+// callers right before the call, instead of a parameter, because GCC 15
+// IPA-CP with LTO wrongly constant-folded such a parameter to 1 (the lower
+// bound of the std::max(width, 1) clamps in the callers), collapsing rich
+// message bubbles to the minimum width in release Linux builds.
+void MarkdownArticle::Impl::finalizeRelayout(int heightBottom) {
 	const auto &page = layoutStyle().pagePadding;
-	_width = width;
 	restoreScrollState();
 	refreshScrolledGeometry(_blocks);
 	_laidOutWidth = std::min(
-		width,
+		_width,
 		std::max(
 			ArticleContentMaxRight(_blocks, layoutStyle()) + page.right(),
 			page.left() + page.right() + 1));
@@ -4605,7 +4609,8 @@ void MarkdownArticle::Impl::relayout(int width) {
 	RestoreRelatedArticleImageStates(
 		&_blocks,
 		_relatedArticleImages);
-	finalizeRelayout(width, y);
+	_width = width;
+	finalizeRelayout(y);
 }
 
 void MarkdownArticle::Impl::relayoutRetained(int width) {
@@ -4665,7 +4670,8 @@ void MarkdownArticle::Impl::relayoutRetained(int width) {
 		relayout(width);
 		return;
 	}
-	finalizeRelayout(width, *y);
+	_width = width;
+	finalizeRelayout(*y);
 }
 
 MarkdownArticle::MarkdownArticle(
