@@ -470,6 +470,7 @@ void DistributeSpanDelta(
 
 struct TableCellGeometryData {
 	LaidOutTableCell *cell = nullptr;
+	int minimumWidth = 0;
 	int preferredWidth = 0;
 	int preferredHeight = 0;
 	int textHeight = 0;
@@ -495,8 +496,27 @@ struct TableSpannedCellGeometryData {
 		bool *overflowed) {
 	const auto &padding = st.table.cellPadding;
 	const auto border = TableBorder(bordered, st);
-	const auto minimum = st.table.minColumnWidth;
-	auto result = std::vector<int>(std::max(columnCount, 0), minimum);
+	const auto paddingWidth = padding.left() + padding.right();
+	auto constraints = std::vector<TableCellMinimumWidthConstraint>();
+	for (auto &row : rows) {
+		for (auto &cellData : row.cells) {
+			if (!cellData.cell || cellData.minimumWidth <= 0) {
+				continue;
+			}
+			constraints.push_back({
+				.column = cellData.cell->column,
+				.colspan = cellData.cell->colspan,
+				.minimumWidth = std::max(
+					cellData.minimumWidth + paddingWidth,
+					st.table.minColumnWidth),
+			});
+		}
+	}
+	auto result = ComputeTableColumnMinimumWidths(
+		std::move(constraints),
+		columnCount,
+		st,
+		bordered);
 	auto singleColumnDeficits = std::vector<int>(std::max(columnCount, 0), 0);
 	auto spannedCells = std::vector<TableSpannedCellGeometryData>();
 	for (auto row = 0, rowCount = int(rows.size()); row != rowCount; ++row) {
@@ -518,7 +538,7 @@ struct TableSpannedCellGeometryData {
 			if ((to - from) == 1) {
 				singleColumnDeficits[from] = std::max(
 					singleColumnDeficits[from],
-					preferredWidth - minimum);
+					preferredWidth - result[from]);
 			} else {
 				spannedCells.push_back({ row, &cellData });
 			}
@@ -526,10 +546,9 @@ struct TableSpannedCellGeometryData {
 	}
 
 	const auto availableWidth = std::max(width, 1);
-	const auto minimumGridWidth = TableMinimumGridWidth(
-		columnCount,
-		st,
-		bordered);
+	const auto minimumGridWidth = (columnCount > 0)
+		? TableGridWidth(result, st, bordered)
+		: TableMinimumGridWidth(columnCount, st, bordered);
 	*overflowed = (minimumGridWidth > availableWidth);
 	if (*overflowed || !columnCount) {
 		return result;
@@ -1659,6 +1678,12 @@ int FlowTextMinResizeWidth(const style::TextStyle &style) {
 	return ReadableTextMinWidth(style);
 }
 
+int LeafMinimumWidth(const Ui::Text::String &leaf) {
+	return leaf.isEmpty()
+		? 0
+		: std::min(leaf.minResizeWidth(), leaf.maxWidth());
+}
+
 int FlowBlockMinimumWidth(
 		const PreparedBlock &prepared,
 		const style::Markdown &st) {
@@ -1735,6 +1760,94 @@ int FlowBlockPreferredWidth(
 		[](const Ui::Text::String &leaf,
 				Spellchecker::HighlightProcessId) {
 			return leaf.maxWidth();
+		});
+}
+
+int FlowBlockContentMinimumWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st,
+		LayoutContext context) {
+	const auto base = FlowBlockMinimumWidth(prepared, st);
+	if (IsAnchorOnlyBlock(prepared) || prepared.text.text.isEmpty()) {
+		return base;
+	}
+	const auto &textStyle = TextStyleFor(prepared, st);
+	const auto minResizeWidth = FlowBlockMinimumWidth(prepared, st);
+	return WithCachedTextLeaf(
+		context,
+		BlockCachedTextLeafKey(
+			CachedTextLeafSlot::Leaf,
+			prepared,
+			context.preparedPath),
+		MarkedTextLeafSourceSignature(
+			prepared.text,
+			textStyle,
+			minResizeWidth),
+		[&](Ui::Text::String *leaf,
+				Spellchecker::HighlightProcessId*) {
+			SetTextLeaf(
+				leaf,
+				textStyle,
+				st,
+				prepared.text,
+				&formulas,
+				inlineFormulaObjects,
+				mediaRuntime,
+				minResizeWidth,
+				context.repaint,
+				context.repaintRect);
+			BindLinks(leaf, prepared.links);
+		},
+		[&](const Ui::Text::String &leaf,
+				Spellchecker::HighlightProcessId) {
+			return std::max(base, LeafMinimumWidth(leaf));
+		});
+}
+
+int DetailsSummaryContentMinimumWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st,
+		LayoutContext context) {
+	const auto base = ReadableTextMinWidth(st.details.summaryStyle);
+	if (prepared.text.text.isEmpty()) {
+		return base;
+	}
+	const auto minResizeWidth = FlowTextMinResizeWidth(
+		st.details.summaryStyle);
+	return WithCachedTextLeaf(
+		context,
+		BlockCachedTextLeafKey(
+			CachedTextLeafSlot::Leaf,
+			prepared,
+			context.preparedPath),
+		MarkedTextLeafSourceSignature(
+			prepared.text,
+			st.details.summaryStyle,
+			minResizeWidth),
+		[&](Ui::Text::String *leaf,
+				Spellchecker::HighlightProcessId*) {
+			SetTextLeaf(
+				leaf,
+				st.details.summaryStyle,
+				st,
+				prepared.text,
+				&formulas,
+				inlineFormulaObjects,
+				mediaRuntime,
+				minResizeWidth,
+				context.repaint,
+				context.repaintRect);
+			BindLinks(leaf, prepared.links);
+		},
+		[&](const Ui::Text::String &leaf,
+				Spellchecker::HighlightProcessId) {
+			return std::max(base, LeafMinimumWidth(leaf));
 		});
 }
 
@@ -1937,19 +2050,6 @@ int TableMinimumGridWidth(
 	return border + columnCount * (minimum + border);
 }
 
-int TableBlockMinimumWidth(
-		const PreparedBlock &prepared,
-		const style::Markdown &st) {
-	return std::max(
-		prepared.text.text.isEmpty()
-			? 1
-			: FlowBlockMinimumWidth(prepared, st),
-		TableMinimumGridWidth(
-			prepared.tableColumnCount,
-			st,
-			prepared.tableBordered));
-}
-
 int TableCellTextMinResizeWidth(
 		const style::TextStyle &textStyle,
 		const style::Markdown &st) {
@@ -1959,6 +2059,257 @@ int TableCellTextMinResizeWidth(
 		textStyle.font->spacew,
 		1,
 	});
+}
+
+std::vector<int> ComputeTableColumnMinimumWidths(
+		std::vector<TableCellMinimumWidthConstraint> constraints,
+		int columnCount,
+		const style::Markdown &st,
+		bool bordered) {
+	// Fully empty columns may shrink below st.table.minColumnWidth,
+	// to the cell padding and some non-zero content width.
+	const auto &padding = st.table.cellPadding;
+	const auto emptyMinimum = padding.left()
+		+ padding.right()
+		+ std::max(st.table.bodyStyle.font->spacew, 1);
+	auto result = std::vector<int>(std::max(columnCount, 0), emptyMinimum);
+	if (result.empty()) {
+		return result;
+	}
+	const auto border = TableBorder(bordered, st);
+	auto spanned = std::vector<TableCellMinimumWidthConstraint>();
+	for (const auto &constraint : constraints) {
+		const auto from = std::clamp(constraint.column, 0, columnCount);
+		const auto to = std::clamp(
+			constraint.column + constraint.colspan,
+			0,
+			columnCount);
+		if (from >= to) {
+			continue;
+		} else if ((to - from) == 1) {
+			result[from] = std::max(result[from], constraint.minimumWidth);
+		} else {
+			spanned.push_back(constraint);
+		}
+	}
+	std::sort(
+		spanned.begin(),
+		spanned.end(),
+		[](const TableCellMinimumWidthConstraint &a,
+				const TableCellMinimumWidthConstraint &b) {
+			return (a.colspan < b.colspan)
+				|| ((a.colspan == b.colspan) && (a.column < b.column));
+		});
+	for (const auto &constraint : spanned) {
+		const auto from = std::clamp(constraint.column, 0, columnCount);
+		const auto to = std::clamp(
+			constraint.column + constraint.colspan,
+			0,
+			columnCount);
+		const auto current = TableSpanWidth(
+			result,
+			from,
+			to - from,
+			border);
+		const auto deficit = constraint.minimumWidth - current;
+		if (deficit > 0) {
+			DistributeSpanDelta(&result, from, to, deficit);
+		}
+	}
+	return result;
+}
+
+int TableGridWidth(
+		const std::vector<int> &columnWidths,
+		const style::Markdown &st,
+		bool bordered) {
+	if (columnWidths.empty()) {
+		return 0;
+	}
+	const auto border = TableBorder(bordered, st);
+	auto result = border;
+	for (const auto columnWidth : columnWidths) {
+		result += columnWidth + border;
+	}
+	return result;
+}
+
+int TableBlockContentMinimumWidth(
+		const PreparedBlock &prepared,
+		const std::vector<PreparedFormulaSlot> &formulas,
+		InlineFormulaObjectCache *inlineFormulaObjects,
+		const std::shared_ptr<MediaRuntime> &mediaRuntime,
+		const style::Markdown &st,
+		LayoutContext context) {
+	const auto captionMinimum = prepared.text.text.isEmpty()
+		? 1
+		: [&] {
+			const auto base = FlowBlockMinimumWidth(prepared, st);
+			const auto minResizeWidth = FlowTextMinResizeWidth(st.body);
+			return WithCachedTextLeaf(
+				context,
+				BlockCachedTextLeafKey(
+					CachedTextLeafSlot::Leaf,
+					prepared,
+					context.preparedPath),
+				MarkedTextLeafSourceSignature(
+					prepared.text,
+					st.body,
+					minResizeWidth),
+				[&](Ui::Text::String *leaf,
+						Spellchecker::HighlightProcessId*) {
+					SetTextLeaf(
+						leaf,
+						st.body,
+						st,
+						prepared.text,
+						&formulas,
+						inlineFormulaObjects,
+						mediaRuntime,
+						minResizeWidth,
+						context.repaint,
+						context.repaintRect);
+					BindLinks(leaf, prepared.links);
+				},
+				[&](const Ui::Text::String &leaf,
+						Spellchecker::HighlightProcessId) {
+					return std::max(base, LeafMinimumWidth(leaf));
+				});
+		}();
+	const auto columnCount = prepared.tableColumnCount;
+	if (columnCount <= 0 || prepared.tableRows.empty()) {
+		return std::max(
+			captionMinimum,
+			TableMinimumGridWidth(columnCount, st, prepared.tableBordered));
+	}
+	const auto &padding = st.table.cellPadding;
+	const auto paddingWidth = padding.left() + padding.right();
+	auto constraints = std::vector<TableCellMinimumWidthConstraint>();
+	for (auto rowIndex = 0, rowCount = int(prepared.tableRows.size());
+			rowIndex != rowCount;
+			++rowIndex) {
+		const auto &row = prepared.tableRows[rowIndex];
+		for (auto cellIndex = 0, cellCount = int(row.cells.size());
+				cellIndex != cellCount;
+				++cellIndex) {
+			const auto &cell = row.cells[cellIndex];
+			if (cell.text.text.isEmpty()) {
+				continue;
+			}
+			const auto &textStyle = TableCellTextStyle(cell, st);
+			const auto minResizeWidth = TableCellTextMinResizeWidth(
+				textStyle,
+				st);
+			const auto leafMinimum = WithCachedTextLeaf(
+				context,
+				TableCellCachedTextLeafKey(
+					CachedTextLeafSlot::TableCellText,
+					cell,
+					context.preparedPath,
+					rowIndex,
+					cellIndex),
+				MarkedTextLeafSourceSignature(
+					cell.text,
+					textStyle,
+					minResizeWidth),
+				[&](Ui::Text::String *leaf,
+						Spellchecker::HighlightProcessId*) {
+					SetTextLeaf(
+						leaf,
+						textStyle,
+						st,
+						cell.text,
+						&formulas,
+						inlineFormulaObjects,
+						mediaRuntime,
+						minResizeWidth,
+						context.repaint,
+						context.repaintRect);
+					BindLinks(leaf, cell.links);
+				},
+				[](const Ui::Text::String &leaf,
+						Spellchecker::HighlightProcessId) {
+					return LeafMinimumWidth(leaf);
+				});
+			if (leafMinimum > 0) {
+				constraints.push_back({
+					.column = std::max(cell.column, 0),
+					.colspan = std::max(cell.colspan, 1),
+					.minimumWidth = std::max(
+						leafMinimum + paddingWidth,
+						st.table.minColumnWidth),
+				});
+			}
+		}
+	}
+	const auto columns = ComputeTableColumnMinimumWidths(
+		std::move(constraints),
+		columnCount,
+		st,
+		prepared.tableBordered);
+	return std::max(
+		captionMinimum,
+		TableGridWidth(columns, st, prepared.tableBordered));
+}
+
+int RetainedTableBlockMinimumWidth(
+		const PreparedBlock &prepared,
+		const LaidOutBlock &block,
+		const style::Markdown &st) {
+	const auto &captionLeaf = block.placeholderLeaf.isEmpty()
+		? block.leaf
+		: block.placeholderLeaf;
+	const auto captionMinimum = prepared.text.text.isEmpty()
+		? 1
+		: std::max(
+			FlowBlockMinimumWidth(prepared, st),
+			LeafMinimumWidth(captionLeaf));
+	const auto columnCount = prepared.tableColumnCount;
+	if (columnCount <= 0 || block.tableRows.empty()) {
+		return std::max(
+			captionMinimum,
+			TableMinimumGridWidth(columnCount, st, prepared.tableBordered));
+	}
+	const auto &padding = st.table.cellPadding;
+	const auto paddingWidth = padding.left() + padding.right();
+	auto constraints = std::vector<TableCellMinimumWidthConstraint>();
+	const auto rowCount = int(std::min(
+		prepared.tableRows.size(),
+		block.tableRows.size()));
+	for (auto rowIndex = 0; rowIndex != rowCount; ++rowIndex) {
+		const auto &preparedCells = prepared.tableRows[rowIndex].cells;
+		const auto &cells = block.tableRows[rowIndex].cells;
+		const auto cellCount = int(std::min(
+			preparedCells.size(),
+			cells.size()));
+		for (auto cellIndex = 0; cellIndex != cellCount; ++cellIndex) {
+			const auto &preparedCell = preparedCells[cellIndex];
+			const auto &cell = cells[cellIndex];
+			const auto usePlaceholder = preparedCell.text.text.isEmpty()
+				&& !preparedCell.editPlaceholderText.isEmpty();
+			const auto &displayLeaf = usePlaceholder
+				? cell.placeholderLeaf
+				: cell.leaf;
+			const auto leafMinimum = LeafMinimumWidth(displayLeaf);
+			if (leafMinimum > 0) {
+				constraints.push_back({
+					.column = cell.column,
+					.colspan = cell.colspan,
+					.minimumWidth = std::max(
+						leafMinimum + paddingWidth,
+						st.table.minColumnWidth),
+				});
+			}
+		}
+	}
+	const auto columns = ComputeTableColumnMinimumWidths(
+		std::move(constraints),
+		columnCount,
+		st,
+		prepared.tableBordered);
+	return std::max(
+		captionMinimum,
+		TableGridWidth(columns, st, prepared.tableBordered));
 }
 
 int BlockSkip(
@@ -3566,6 +3917,7 @@ LaidOutBlock LayoutGroupedMediaBlock(
 			auto cellData = TableCellGeometryData();
 			cellData.cell = &cell;
 			cellData.usePlaceholder = usePlaceholder;
+			cellData.minimumWidth = LeafMinimumWidth(displayLeaf);
 			cellData.preferredWidth = displayLeaf.maxWidth();
 			cellData.preferredHeight = std::max(
 				displayLeaf.countHeight(

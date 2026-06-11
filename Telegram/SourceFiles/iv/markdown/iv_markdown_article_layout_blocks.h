@@ -382,11 +382,52 @@ private:
 	int columnCount,
 	const style::Markdown &st,
 	bool bordered);
-[[nodiscard]] int TableBlockMinimumWidth(
-	const PreparedBlock &prepared,
-	const style::Markdown &st);
 [[nodiscard]] int TableCellTextMinResizeWidth(
 	const style::TextStyle &textStyle,
+	const style::Markdown &st);
+
+// Minimal width a text leaf can be laid out in without overflowing,
+// counting wide inline objects (custom emoji / inline formulas).
+[[nodiscard]] int LeafMinimumWidth(const Ui::Text::String &leaf);
+
+struct TableCellMinimumWidthConstraint {
+	int column = 0;
+	int colspan = 1;
+	int minimumWidth = 0; // Outer width, including cell padding.
+};
+[[nodiscard]] std::vector<int> ComputeTableColumnMinimumWidths(
+	std::vector<TableCellMinimumWidthConstraint> constraints,
+	int columnCount,
+	const style::Markdown &st,
+	bool bordered);
+[[nodiscard]] int TableGridWidth(
+	const std::vector<int> &columnWidths,
+	const style::Markdown &st,
+	bool bordered);
+[[nodiscard]] int FlowBlockContentMinimumWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
+[[nodiscard]] int DetailsSummaryContentMinimumWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
+[[nodiscard]] int TableBlockContentMinimumWidth(
+	const PreparedBlock &prepared,
+	const std::vector<PreparedFormulaSlot> &formulas,
+	InlineFormulaObjectCache *inlineFormulaObjects,
+	const std::shared_ptr<MediaRuntime> &mediaRuntime,
+	const style::Markdown &st,
+	LayoutContext context = {});
+[[nodiscard]] int RetainedTableBlockMinimumWidth(
+	const PreparedBlock &prepared,
+	const LaidOutBlock &block,
 	const style::Markdown &st);
 [[nodiscard]] QString CodeBlockDisplayText(const QString &text);
 [[nodiscard]] TextWithEntities CodeBlockDisplayText(TextWithEntities text);

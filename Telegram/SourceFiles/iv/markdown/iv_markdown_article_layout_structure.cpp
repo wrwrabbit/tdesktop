@@ -551,7 +551,13 @@ void FinalizeOwnerSelection(
 	case PreparedBlockKind::Paragraph:
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading:
-		analysis.contentMinimumWidth = FlowBlockMinimumWidth(prepared, st);
+		analysis.contentMinimumWidth = FlowBlockContentMinimumWidth(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			st,
+			context);
 		analysis.contentPreferredWidth = FlowBlockPreferredWidth(
 			prepared,
 			formulas,
@@ -661,7 +667,13 @@ void FinalizeOwnerSelection(
 		analysis.ownerEligible = true;
 	} break;
 	case PreparedBlockKind::Table:
-		analysis.contentMinimumWidth = TableBlockMinimumWidth(prepared, st);
+		analysis.contentMinimumWidth = TableBlockContentMinimumWidth(
+			prepared,
+			formulas,
+			inlineFormulaObjects,
+			mediaRuntime,
+			st,
+			context);
 		analysis.contentPreferredWidth = analysis.contentMinimumWidth;
 		analysis.outerMinimumWidth = analysis.contentMinimumWidth;
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
@@ -894,7 +906,13 @@ void FinalizeOwnerSelection(
 			+ iconSkip
 			+ actionSkip
 			+ actionWidth
-			+ ReadableTextMinWidth(st.details.summaryStyle);
+			+ DetailsSummaryContentMinimumWidth(
+				prepared,
+				formulas,
+				inlineFormulaObjects,
+				mediaRuntime,
+				st,
+				context);
 		const auto bodyPaddingWidth = HorizontalMarginsWidth(bodyPadding);
 		auto bodyMinimumWidth = 1;
 		auto bodyPreferredWidth = 1;
@@ -1135,7 +1153,11 @@ void FinalizeOwnerSelection(
 	case PreparedBlockKind::Thinking:
 	case PreparedBlockKind::Heading: {
 		const auto &displayLeaf = DisplayedLeaf(block);
-		analysis.contentMinimumWidth = FlowBlockMinimumWidth(prepared, st);
+		analysis.contentMinimumWidth = std::max(
+			FlowBlockMinimumWidth(prepared, st),
+			IsAnchorOnlyBlock(prepared)
+				? 0
+				: LeafMinimumWidth(displayLeaf));
 		analysis.contentPreferredWidth = IsAnchorOnlyBlock(prepared)
 			? 1
 			: RetainedLeafMaxWidth(displayLeaf);
@@ -1259,7 +1281,10 @@ void FinalizeOwnerSelection(
 				return std::nullopt;
 			}
 		}
-		analysis.contentMinimumWidth = TableBlockMinimumWidth(prepared, st);
+		analysis.contentMinimumWidth = RetainedTableBlockMinimumWidth(
+			prepared,
+			block,
+			st);
 		analysis.contentPreferredWidth = analysis.contentMinimumWidth;
 		analysis.outerMinimumWidth = analysis.contentMinimumWidth;
 		analysis.outerPreferredWidth = analysis.contentPreferredWidth;
@@ -1506,12 +1531,15 @@ void FinalizeOwnerSelection(
 			? DetailsStateReserveWidth(st)
 			: 0;
 		const auto actionSkip = actionWidth ? st.details.stateSkip : 0;
+		const auto summaryMinimumWidth = std::max(
+			ReadableTextMinWidth(st.details.summaryStyle),
+			LeafMinimumWidth(DisplayedLeaf(block)));
 		const auto headerMinimumWidth = HorizontalMarginsWidth(headerPadding)
 			+ iconWidth
 			+ iconSkip
 			+ actionSkip
 			+ actionWidth
-			+ ReadableTextMinWidth(st.details.summaryStyle);
+			+ summaryMinimumWidth;
 		const auto bodyPaddingWidth = HorizontalMarginsWidth(bodyPadding);
 		auto bodyMinimumWidth = 1;
 		auto bodyPreferredWidth = 1;
