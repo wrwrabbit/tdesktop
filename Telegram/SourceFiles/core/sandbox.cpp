@@ -39,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QSessionManager>
 #include <QtGui/QScreen>
 #include <QtGui/qpa/qplatformscreen.h>
-#include <QtNetwork/QNetworkProxy>
 
 namespace Core {
 namespace {
@@ -50,20 +49,6 @@ base::options::toggle OptionDeadlockDetector({
 	.description = "Check once every 30 seconds that main thread is still responsive.",
 	.restartRequired = true,
 });
-
-// NTLM/Negotiate proxy authentication can be abused by a malicious proxy to
-// silently relay the user's Windows domain credentials. We refuse it for
-// proxies configured inside the app (including ones set via tg://proxy /
-// tg://socks links), but allow it for the system proxy, where the setup is
-// the responsibility of the OS. The control API is a desktop-app Qt patch;
-// when building against vanilla Qt this is a no-op.
-void SetProxyAuthenticationNtlmAllowed(bool allowed) {
-#ifdef DESKTOP_APP_QT_HAS_PROXY_NTLM_AUTH_CONTROL
-	QNetworkProxy::setProxyAuthenticationNtlmAllowed(allowed);
-#else // DESKTOP_APP_QT_HAS_PROXY_NTLM_AUTH_CONTROL
-	Q_UNUSED(allowed);
-#endif // DESKTOP_APP_QT_HAS_PROXY_NTLM_AUTH_CONTROL
-}
 
 } // namespace
 
@@ -536,15 +521,12 @@ void Sandbox::refreshGlobalProxy() {
 		: MTP::ProxyData();
 	if (proxy.type == MTP::ProxyData::Type::Socks5
 		|| proxy.type == MTP::ProxyData::Type::Http) {
-		SetProxyAuthenticationNtlmAllowed(false);
 		QNetworkProxy::setApplicationProxy(
 			MTP::ToNetworkProxy(MTP::ToDirectIpProxy(proxy)));
 	} else if (!Core::IsAppLaunched()
 		|| Core::App().settings().proxy().isSystem()) {
-		SetProxyAuthenticationNtlmAllowed(true);
 		QNetworkProxyFactory::setUseSystemConfiguration(true);
 	} else {
-		SetProxyAuthenticationNtlmAllowed(false);
 		QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
 	}
 }
