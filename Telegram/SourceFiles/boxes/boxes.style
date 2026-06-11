@@ -215,6 +215,9 @@ localStorageClear: defaultBoxButton;
 localStorageLimitLabel: LabelSimple(defaultLabelSimple) {
 	font: boxTextFont;
 }
+localStorageLimitValue: LabelSimple(localStorageLimitLabel) {
+	textFg: windowActiveTextFg;
+}
 localStorageLimitLabelMargin: margins(22px, 10px, 20px, 5px);
 localStorageLimitSlider: MediaSlider(defaultContinuousSlider) {
 	seekSize: size(15px, 15px);
@@ -251,7 +254,7 @@ localStorageBottomSkip: 12px;
 localStorageCategoryHeight: 44px;
 localStorageCategoryPadding: margins(22px, 0px, 20px, 0px);
 localStorageCategoryCheckSkip: 14px;
-localStorageCategoryPercentSkip: 6px;
+localStorageCategoryPercentSkip: 8px;
 localStorageCategoryCheck: Check(defaultCheck) {
 	diameter: 20px;
 }
@@ -286,7 +289,6 @@ localStorageUsageTooltipSkip: 8px;
 localStorageAboutMargin: margins(28px, 9px, 28px, 12px);
 localStorageAbout: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
-	align: align(top);
 	minWidth: 240px;
 	style: TextStyle(defaultTextStyle) {
 		font: font(13px);

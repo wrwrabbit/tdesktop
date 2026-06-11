@@ -1145,10 +1145,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_round#other" = "{count} video messages";
 "lng_local_storage_animation#one" = "{count} GIF animation";
 "lng_local_storage_animation#other" = "{count} GIF animations";
+"lng_local_storage_image_title" = "Images";
+"lng_local_storage_sticker_title" = "Stickers";
+"lng_local_storage_voice_title" = "Voice messages";
+"lng_local_storage_round_title" = "Video messages";
+"lng_local_storage_animation_title" = "GIFs";
+"lng_local_storage_media_title" = "Other media";
 "lng_local_storage_media" = "Media cache";
 "lng_local_storage_size_limit" = "Total size limit: {size}";
 "lng_local_storage_media_limit" = "Media cache limit: {size}";
 "lng_local_storage_time_limit" = "Clear files older than: {limit}";
+"lng_local_storage_size_limit_title" = "Total size limit";
+"lng_local_storage_media_limit_title" = "Media cache limit";
+"lng_local_storage_time_limit_title" = "Clear files older than";
 "lng_local_storage_limit_never" = "Never";
 "lng_local_storage_summary" = "Summary";
 "lng_local_storage_clear_some" = "Clear";
@@ -1162,9 +1171,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_local_storage_device_usage" = "Telegram uses {percent} of your device storage.";
 "lng_local_storage_clearing_about" = "Please keep this window open while the cache is being cleared.";
 "lng_local_storage_cleared" = "{size} freed on your device!";
-"lng_local_storage_about" = "All media will stay in the Telegram cloud and can be re-downloaded if you need it again.";
-"lng_local_storage_max_size_title" = "Maximum cache size";
-"lng_local_storage_max_size_about" = "If your cache size exceeds this limit, the oldest media will be removed from the device.";
+"lng_local_storage_about" = "All media will stay in the Telegram cloud and can be re-downloaded if you need them again.";
+"lng_local_storage_manage_title" = "Manage limits";
+"lng_local_storage_max_size_about" = "If your cache size exceeds this limit, the oldest unused media will be removed from the device.";
 
 "lng_passcode_remove_button" = "Remove";
 

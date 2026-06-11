@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/padding_wrap.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/effects/animated_string.h"
@@ -163,8 +164,8 @@ QColor PartColor(int index) {
 	case 0: return st::statisticsChartLineLightblue->c;
 	case 1: return st::statisticsChartLineOrange->c;
 	case 2: return st::statisticsChartLineLightgreen->c;
-	case 3: return st::statisticsChartLineGreen->c;
-	case 4: return st::statisticsChartLinePurple->c;
+	case 3: return st::statisticsChartLinePurple->c;
+	case 4: return st::statisticsChartLineGreen->c;
 	case 5: return st::statisticsChartLineBlue->c;
 	}
 	return st::statisticsChartLineCyan->c;
@@ -177,7 +178,19 @@ QString PartTitle(int index, size_type count) {
 	case 2: return tr::lng_local_storage_voice(tr::now, lt_count, count);
 	case 3: return tr::lng_local_storage_round(tr::now, lt_count, count);
 	case 4: return tr::lng_local_storage_animation(tr::now, lt_count, count);
-	case 5: return tr::lng_local_storage_media(tr::now);
+	case 5: return tr::lng_local_storage_media_title(tr::now);
+	}
+	return QString();
+}
+
+QString PartName(int index) {
+	switch (index) {
+	case 0: return tr::lng_local_storage_image_title(tr::now);
+	case 1: return tr::lng_local_storage_sticker_title(tr::now);
+	case 2: return tr::lng_local_storage_voice_title(tr::now);
+	case 3: return tr::lng_local_storage_round_title(tr::now);
+	case 4: return tr::lng_local_storage_animation_title(tr::now);
+	case 5: return tr::lng_local_storage_media_title(tr::now);
 	}
 	return QString();
 }
@@ -502,6 +515,9 @@ public:
 	void setParts(std::array<int64, kChartPartsCount> sizes, int64 total);
 	void setPartInfo(Fn<TextWithEntities(int)> info);
 	void setLoaded();
+	[[nodiscard]] int partPercent(int index) const {
+		return _percent[index];
+	}
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -644,7 +660,7 @@ void LocalStorage::Chart::drawParticles(
 			point.x() - center.x(),
 			point.y() - center.y());
 		const auto centerFade = std::min(distance / 64., 1.);
-		auto particleAlpha = 0.65
+		auto particleAlpha = 0.45
 			* alpha
 			* (-1.75 * std::abs(t - 0.5) + 1.)
 			* (0.25 * (std::sin(t * M_PI) - 1.) + 1.)
@@ -1238,8 +1254,8 @@ void LocalStorage::DeviceBar::paintEvent(QPaintEvent *e) {
 	const auto radius = bar.height() / 2.;
 	const auto used = _total - _free;
 	const auto cacheColor = st::activeButtonBg->c;
-	const auto usedColor = st::windowSubTextFg->c;
-	const auto freeColor = st::windowBg->c;
+	const auto usedColor = st::scrollBg->c;
+	const auto freeColor = st::windowBgRipple->c;
 
 	auto path = QPainterPath();
 	path.addRoundedRect(bar, radius, radius);
@@ -1407,7 +1423,7 @@ class LocalStorage::Row final : public Ui::RippleButton {
 public:
 	Row(
 		QWidget *parent,
-		Fn<QString(size_type)> title,
+		const QString &title,
 		int chartIndex,
 		bool checked,
 		const Database::TaggedSummary &data);
@@ -1428,11 +1444,9 @@ protected:
 	QPoint prepareRippleStartPosition() const override;
 
 private:
-	QString titleText(const Database::TaggedSummary &data) const;
 	QString sizeText(const Database::TaggedSummary &data) const;
 	void toggle();
 
-	Fn<QString(size_type)> _titleFactory;
 	style::complex_color _checkColor;
 	style::Check _checkStyle;
 	Ui::RoundCheckView _check;
@@ -1448,17 +1462,16 @@ private:
 
 LocalStorage::Row::Row(
 	QWidget *parent,
-	Fn<QString(size_type)> title,
+	const QString &title,
 	int chartIndex,
 	bool checked,
 	const Database::TaggedSummary &data)
 : RippleButton(parent, st::defaultRippleAnimation)
-, _titleFactory(std::move(title))
 , _checkColor([=] { return PartColor(chartIndex); })
 , _checkStyle(st::localStorageCategoryCheck)
 , _check(_checkStyle, checked, [=] { Ui::RpWidget::update(); })
 , _percent(this, QString(), st::localStorageCategoryPercent)
-, _name(this, titleText(data), st::localStorageCategoryName)
+, _name(this, title, st::localStorageCategoryName)
 , _size(this, sizeText(data), st::localStorageCategorySize) {
 	_checkStyle.toggledFg = _checkColor.color();
 	_percent->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -1499,9 +1512,6 @@ void LocalStorage::Row::setRoundedTop(bool rounded) {
 }
 
 void LocalStorage::Row::update(const Database::TaggedSummary &data) {
-	if (data.count != 0) {
-		_name->setText(titleText(data));
-	}
 	_size->setText(sizeText(data));
 	resizeToWidth(width());
 }
@@ -1518,7 +1528,7 @@ int LocalStorage::Row::resizeGetHeight(int newWidth) {
 	const auto height = st::localStorageCategoryHeight;
 	const auto pad = st::localStorageCategoryPadding;
 	const auto checkSize = _check.getSize();
-	auto left = pad.left()
+	const auto left = pad.left()
 		+ checkSize.width()
 		+ st::localStorageCategoryCheckSkip;
 
@@ -1527,19 +1537,20 @@ int LocalStorage::Row::resizeGetHeight(int newWidth) {
 
 	_percent->resizeToWidth(_percent->textMaxWidth());
 	_percent->setVisible(_hasPercent);
-	if (_hasPercent) {
-		_percent->moveToLeft(
-			left,
-			(height - _percent->height()) / 2,
-			newWidth);
-		left += _percent->width() + st::localStorageCategoryPercentSkip;
-	}
-
+	const auto percentWidth = _hasPercent
+		? (st::localStorageCategoryPercentSkip + _percent->width())
+		: 0;
 	const auto nameAvailable = std::max(
-		_size->x() - st::localStorageCategoryPercentSkip - left,
+		_size->x() - st::localStorageCategoryPercentSkip - percentWidth - left,
 		0);
 	_name->resizeToWidth(std::min(_name->textMaxWidth(), nameAvailable));
 	_name->moveToLeft(left, (height - _name->height()) / 2, newWidth);
+	if (_hasPercent) {
+		_percent->moveToLeft(
+			left + _name->width() + st::localStorageCategoryPercentSkip,
+			(height - _percent->height()) / 2,
+			newWidth);
+	}
 	return height;
 }
 
@@ -1575,11 +1586,6 @@ QPoint LocalStorage::Row::prepareRippleStartPosition() const {
 	return mapFromGlobal(QCursor::pos());
 }
 
-QString LocalStorage::Row::titleText(
-		const Database::TaggedSummary &data) const {
-	return _titleFactory(data.count);
-}
-
 QString LocalStorage::Row::sizeText(
 		const Database::TaggedSummary &data) const {
 	return data.totalSize
@@ -1593,7 +1599,8 @@ LocalStorage::LocalStorage(
 : Section(parent, controller)
 , _session(&controller->session())
 , _db(&_session->data().cache())
-, _dbBig(&_session->data().cacheBigFile()) {
+, _dbBig(&_session->data().cacheBigFile())
+, _bottomSkipRounding(st::boxRadius, st::windowBgOver) {
 	const auto &settings = _session->local().cacheSettings();
 	const auto &settingsBig = _session->local().cacheBigFileSettings();
 	_totalSizeLimit = settings.totalSizeLimit + settingsBig.totalSizeLimit;
@@ -1744,22 +1751,12 @@ void LocalStorage::updateChart() {
 }
 
 void LocalStorage::updateCategoryPercents() {
-	const auto sizes = chartedSizes();
-	auto total = int64();
-	for (auto i = 0; i != kChartPartsCount; ++i) {
-		if (_selected[i]) {
-			total += sizes[i];
-		}
-	}
 	for (const auto &[tag, row] : _rows) {
 		const auto index = ChartIndexForTag(tag);
 		if (index < 0) {
 			continue;
 		}
-		const auto percent = (total > 0 && _selected[index])
-			? int(base::SafeRound(sizes[index] / float64(total) * 100.))
-			: 0;
-		row->entity()->setPercent(percent);
+		row->entity()->setPercent(_chart->partPercent(index));
 	}
 }
 
@@ -1965,7 +1962,6 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 	const auto createRow = [&](
 			not_null<Ui::VerticalLayout*> into,
 			uint16 tag,
-			Fn<QString(size_type)> title,
 			const Database::TaggedSummary &data) {
 		const auto chartIndex = ChartIndexForTag(tag);
 		const auto checked = _selected[chartIndex];
@@ -1973,7 +1969,7 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 			into,
 			object_ptr<Row>(
 				into,
-				std::move(title),
+				PartName(chartIndex),
 				chartIndex,
 				checked,
 				data)));
@@ -1989,23 +1985,10 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 	};
 	const auto createTagRow = [&](
 			not_null<Ui::VerticalLayout*> into,
-			uint8 tag,
-			auto &&titleFactory) {
+			uint8 tag) {
 		static const auto empty = Database::TaggedSummary();
 		const auto i = _stats.tagged.find(tag);
-		const auto &data = (i != end(_stats.tagged)) ? i->second : empty;
-		auto factory = std::forward<decltype(titleFactory)>(titleFactory);
-		auto title = [factory = std::move(factory)](size_type count) {
-			return factory(tr::now, lt_count, count);
-		};
-		createRow(
-			into,
-			tag,
-			std::move(title),
-			data);
-	};
-	auto mediaCacheTitle = [](size_type) {
-		return tr::lng_local_storage_media(tr::now);
+		createRow(into, tag, (i != end(_stats.tagged)) ? i->second : empty);
 	};
 
 	_chart = container->add(object_ptr<Chart>(container, controller()));
@@ -2050,31 +2033,12 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 
 	_categoriesWrap = AddIslandWrap(container);
 	const auto categoriesIsland = _categoriesWrap->entity();
-	createTagRow(
-		categoriesIsland,
-		Data::kImageCacheTag,
-		tr::lng_local_storage_image);
-	createTagRow(
-		categoriesIsland,
-		Data::kStickerCacheTag,
-		tr::lng_local_storage_sticker);
-	createTagRow(
-		categoriesIsland,
-		Data::kVoiceMessageCacheTag,
-		tr::lng_local_storage_voice);
-	createTagRow(
-		categoriesIsland,
-		Data::kVideoMessageCacheTag,
-		tr::lng_local_storage_round);
-	createTagRow(
-		categoriesIsland,
-		Data::kAnimationCacheTag,
-		tr::lng_local_storage_animation);
-	createRow(
-		categoriesIsland,
-		kFakeMediaCacheTag,
-		std::move(mediaCacheTitle),
-		_statsBig.full);
+	createTagRow(categoriesIsland, Data::kImageCacheTag);
+	createTagRow(categoriesIsland, Data::kStickerCacheTag);
+	createTagRow(categoriesIsland, Data::kVoiceMessageCacheTag);
+	createTagRow(categoriesIsland, Data::kVideoMessageCacheTag);
+	createTagRow(categoriesIsland, Data::kAnimationCacheTag);
+	createRow(categoriesIsland, kFakeMediaCacheTag, _statsBig.full);
 
 	_clearButton = categoriesIsland->add(
 		object_ptr<ClearButton>(categoriesIsland),
@@ -2088,9 +2052,7 @@ void LocalStorage::setupControls(not_null<Ui::VerticalLayout*> container) {
 				container,
 				std::move(text),
 				st::localStorageAbout),
-			st::localStorageAboutMargin,
-			style::al_top);
-		label->setTryMakeSimilarLines(true);
+			st::localStorageAboutMargin);
 		label->setAttribute(Qt::WA_TransparentForMouseEvents);
 	};
 
@@ -2118,12 +2080,29 @@ template <
 not_null<Ui::MediaSlider*> LocalStorage::createLimitsSlider(
 		not_null<Ui::VerticalLayout*> container,
 		int valuesCount,
+		const QString &name,
 		Convert &&convert,
 		Value currentValue,
 		Callback &&callback) {
-	const auto label = container->add(
-		object_ptr<Ui::LabelSimple>(container, st::localStorageLimitLabel),
+	const auto row = container->add(
+		object_ptr<Ui::FixedHeightWidget>(
+			container,
+			st::localStorageLimitLabel.font->height),
 		st::localStorageLimitLabelMargin);
+	const auto title = Ui::CreateChild<Ui::LabelSimple>(
+		row,
+		st::localStorageLimitLabel,
+		name);
+	const auto label = Ui::CreateChild<Ui::LabelSimple>(
+		row,
+		st::localStorageLimitValue);
+	rpl::combine(
+		row->widthValue(),
+		label->widthValue()
+	) | rpl::on_next([=](int width, int) {
+		title->moveToLeft(0, 0, width);
+		label->moveToRight(0, 0, width);
+	}, row->lifetime());
 	callback(label, currentValue);
 	const auto slider = container->add(
 		object_ptr<Ui::MediaSlider>(container, st::localStorageLimitSlider),
@@ -2181,27 +2160,24 @@ void LocalStorage::updateTotalLimit() {
 void LocalStorage::updateTotalLabel() {
 	Expects(_totalLabel != nullptr);
 
-	const auto text = SizeLimitText(_totalSizeLimit);
-	_totalLabel->setText(
-		tr::lng_local_storage_size_limit(tr::now, lt_size, text));
+	_totalLabel->setText(SizeLimitText(_totalSizeLimit));
 }
 
 void LocalStorage::updateMediaLabel() {
 	Expects(_mediaLabel != nullptr);
 
-	const auto text = SizeLimitText(_mediaSizeLimit);
-	_mediaLabel->setText(
-		tr::lng_local_storage_media_limit(tr::now, lt_size, text));
+	_mediaLabel->setText(SizeLimitText(_mediaSizeLimit));
 }
 
 void LocalStorage::setupLimits(not_null<Ui::VerticalLayout*> container) {
 	Ui::AddSubsectionTitle(
 		container,
-		tr::lng_local_storage_max_size_title());
+		tr::lng_local_storage_manage_title());
 
 	_totalSlider = createLimitsSlider(
 		container,
 		kTotalSizeLimitsCount,
+		tr::lng_local_storage_size_limit_title(tr::now),
 		TotalSizeLimit,
 		_totalSizeLimit,
 		[=](not_null<Ui::LabelSimple*> label, int64 limit) {
@@ -2215,6 +2191,7 @@ void LocalStorage::setupLimits(not_null<Ui::VerticalLayout*> container) {
 	_mediaSlider = createLimitsSlider(
 		container,
 		kMediaSizeLimitsCount,
+		tr::lng_local_storage_media_limit_title(tr::now),
 		MediaSizeLimit,
 		_mediaSizeLimit,
 		[=](not_null<Ui::LabelSimple*> label, int64 limit) {
@@ -2228,13 +2205,12 @@ void LocalStorage::setupLimits(not_null<Ui::VerticalLayout*> container) {
 	createLimitsSlider(
 		container,
 		kTimeLimitsCount,
+		tr::lng_local_storage_time_limit_title(tr::now),
 		TimeLimit,
 		LimitToValue(_timeLimit),
 		[=](not_null<Ui::LabelSimple*> label, size_type limit) {
 			_timeLimit = ValueToLimit(limit);
-			const auto text = TimeLimitText(_timeLimit);
-			label->setText(
-				tr::lng_local_storage_time_limit(tr::now, lt_limit, text));
+			label->setText(TimeLimitText(_timeLimit));
 			applyLimits();
 		});
 }
