@@ -83,11 +83,16 @@ struct HistoryMessageRichPage
 
 	std::shared_ptr<const Iv::RichPage> page;
 	std::shared_ptr<Iv::Markdown::MediaRuntime> mediaRuntime;
+
+	// The article and its media blocks keep a raw MediaBlockHost pointer,
+	// while components are moved on each composer mask change, so the
+	// host must live on the heap to have a stable address.
+	std::unique_ptr<Host> host;
+
 	Iv::Markdown::MarkdownArticle article;
 	Iv::Markdown::MarkdownArticleThinkingPaintCache thinkingPaintCache;
 	rpl::lifetime highlightReadyLifetime;
 	int paletteVersion = -1;
-	Host host;
 	mutable ClickHandlerPtr handler;
 	mutable std::optional<Iv::Markdown::MarkdownArticleHorizontalScrollHit> handlerHorizontalScrollHit;
 	mutable QPoint handlerHorizontalScrollPoint;

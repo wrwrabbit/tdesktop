@@ -578,7 +578,8 @@ void HistoryMessageRichPage::Host::requestRelayout(QRect articleRect) {
 }
 
 HistoryMessageRichPage::HistoryMessageRichPage()
-: article(st::messageMarkdown) {
+: host(std::make_unique<Host>())
+, article(st::messageMarkdown) {
 }
 
 void Message::setInstantViewMediaRuntime(QString pageUrl) {

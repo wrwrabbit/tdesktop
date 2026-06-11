@@ -168,6 +168,7 @@ struct IvHistoryViewHit {
 class IvHistoryViewBlock final : public MediaBlock {
 public:
 	explicit IvHistoryViewBlock(IvHistoryViewMediaDescriptor descriptor);
+	~IvHistoryViewBlock();
 
 	[[nodiscard]] uint64 stableId() const override;
 
@@ -254,6 +255,13 @@ IvHistoryViewBlock::IvHistoryViewBlock(
 		_media->initDimensions();
 	}
 	_supported = _media && probeSupport();
+}
+
+IvHistoryViewBlock::~IvHistoryViewBlock() {
+	if (const auto registered = _registeredBridgeHost) {
+		_registeredBridgeHost = nullptr;
+		_host->unregisterViewRequestBridge(registered);
+	}
 }
 
 uint64 IvHistoryViewBlock::stableId() const {
