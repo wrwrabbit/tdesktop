@@ -293,6 +293,15 @@ void FinalizeFailure(MeasuredFormula *result) {
 			result.measured.error = u"invalid-render-size"_q;
 			return result;
 		}
+		// In partial mode MicroTeX swallows parse errors inside arguments
+		// (e.g. of \displaystyle) and renders an EmptyAtom, which measures
+		// 1x1 scaled units. Fall back to the source text instead of
+		// painting an invisible formula.
+		const auto scaledSize = result.measured.exact.scaledSize;
+		if (scaledSize.width() <= 1 && scaledSize.height() <= 1) {
+			result.measured.error = u"empty-render"_q;
+			return result;
+		}
 		if (logicalSize.width() > request.renderWidthCap
 			|| logicalSize.height() > request.renderHeightCap) {
 			result.measured.error = u"logical-size-cap-exceeded"_q;
