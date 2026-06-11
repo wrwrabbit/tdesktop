@@ -48,6 +48,11 @@ struct LaidOutTableCell {
 	QRect outer;
 	QRect textRect;
 	int textWidth = 0;
+
+	// Content-dependent, survives geometry resets, recomputed when
+	// the displayed leaf max width changes (so on content changes).
+	int cachedPreferredWidth = -1;
+	int cachedPreferredHeight = 0;
 	bool header = false;
 	PreparedTableCellVerticalAlignment verticalAlignment
 		= PreparedTableCellVerticalAlignment::Top;

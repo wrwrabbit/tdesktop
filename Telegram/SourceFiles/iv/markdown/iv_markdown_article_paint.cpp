@@ -329,12 +329,33 @@ void PaintSelectableTextLeaf(
 	return result;
 }
 
+template <typename CountCallback>
+[[nodiscard]] int CachedRevealLineCount(
+		const MarkdownArticlePaintContext &context,
+		const void *key,
+		CountCallback &&count) {
+	const auto cache = context.reveal ? context.reveal->lineCounts : nullptr;
+	if (!cache) {
+		return count();
+	}
+	const auto i = cache->counts.find(key);
+	if (i != end(cache->counts)) {
+		return i->second;
+	}
+	const auto result = count();
+	cache->counts.emplace(key, result);
+	return result;
+}
+
 void AdvanceRevealLinesForBlock(
 		const MarkdownArticlePaintContext &context,
 		const LaidOutBlock &block,
 		const style::Markdown &st) {
 	if (context.reveal) {
-		context.reveal->nextLine += CountRevealLinesForBlock(block, st);
+		context.reveal->nextLine += CachedRevealLineCount(
+			context,
+			&block,
+			[&] { return CountRevealLinesForBlock(block, st); });
 	}
 }
 
@@ -697,9 +718,16 @@ void PaintTextLeaf(
 	const auto availableWidth = std::max(width, 1);
 	auto linePostprocess = std::optional<Ui::Text::LinePostprocess>();
 	if (context.reveal && !elisionLines) {
-		const auto lines = leaf.countLinesGeometry(availableWidth, true);
+		const auto lineCount = CachedRevealLineCount(
+			context,
+			&leaf,
+			[&] {
+				return int(leaf.countLinesGeometry(
+					availableWidth,
+					true).size());
+			});
 		const auto baseLine = context.reveal->nextLine;
-		context.reveal->nextLine += int(lines.size());
+		context.reveal->nextLine += lineCount;
 		if (const auto articlePostprocess = context.reveal->postprocess) {
 			const auto activeLine = context.reveal->activeLine;
 			linePostprocess.emplace(Ui::Text::LinePostprocess{
@@ -756,7 +784,10 @@ void PaintSelectableTextLeaf(
 		&& ((context.hiddenTextSegmentIndex == segmentIndex)
 			|| (context.hiddenSegmentIndex == segmentIndex))) {
 		if (context.reveal && !elisionLines) {
-			context.reveal->nextLine += CountTextRevealLines(leaf, rect, width);
+			context.reveal->nextLine += CachedRevealLineCount(
+				context,
+				&leaf,
+				[&] { return CountTextRevealLines(leaf, rect, width); });
 		}
 		return;
 	}

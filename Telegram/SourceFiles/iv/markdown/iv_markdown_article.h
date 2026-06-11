@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/markdown/iv_markdown_media_block.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 
+#include "base/flat_map.h"
 #include "spellcheck/spellcheck_highlight_syntax.h"
 #include "ui/chat/chat_style.h"
 #include "ui/effects/radial_animation.h"
@@ -156,10 +157,21 @@ struct MarkdownArticleRevealPostprocess {
 	not_null<QImage*> cache;
 };
 
+// Caches per-block / per-leaf reveal line counts while the reveal
+// animation is active, so that painting doesn't re-run line breaking
+// for all the blocks above the clip on every frame. Owned by the
+// article, valid for a single layout generation, freed on the first
+// paint after the reveal finishes.
+struct MarkdownArticleRevealLineCountsCache {
+	int layoutGeneration = -1;
+	base::flat_map<const void*, int> counts;
+};
+
 struct MarkdownArticleRevealPaintState {
 	int activeLine = -1;
 	int nextLine = 0;
 	const MarkdownArticleRevealPostprocess *postprocess = nullptr;
+	MarkdownArticleRevealLineCountsCache *lineCounts = nullptr;
 };
 
 struct MarkdownArticlePaintContext final : Ui::ChatPaintContext {

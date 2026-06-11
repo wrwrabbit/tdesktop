@@ -882,32 +882,41 @@ void RefreshScrollableSegmentRects(
 		return;
 	}
 	for (const auto &block : blocks) {
-		const auto refreshIndex = [&](int index) {
-			if (index < 0 || index >= int(segments->size())) {
-				return;
-			}
-			RefreshBlockSegmentRect(block, &(*segments)[index]);
-		};
-		refreshIndex(block.segmentIndex);
-		refreshIndex(block.secondarySegmentIndex);
-		refreshIndex(block.tertiarySegmentIndex);
-		if (block.kind == PreparedBlockKind::Table) {
-			for (const auto &row : block.tableRows) {
-				for (const auto &cell : row.cells) {
-					if (cell.segmentIndex < 0
-						|| cell.segmentIndex >= int(segments->size())) {
-						continue;
-					}
-					auto &segment = (*segments)[cell.segmentIndex];
-					segment.outerRect = cell.outer;
-					segment.textRect = VisibleTextRect(
-						cell.textRect,
-						cell.outer);
+		RefreshScrollableSegmentRects(block, segments);
+	}
+}
+
+void RefreshScrollableSegmentRects(
+		const LaidOutBlock &block,
+		std::vector<SelectableSegment> *segments) {
+	if (!segments) {
+		return;
+	}
+	const auto refreshIndex = [&](int index) {
+		if (index < 0 || index >= int(segments->size())) {
+			return;
+		}
+		RefreshBlockSegmentRect(block, &(*segments)[index]);
+	};
+	refreshIndex(block.segmentIndex);
+	refreshIndex(block.secondarySegmentIndex);
+	refreshIndex(block.tertiarySegmentIndex);
+	if (block.kind == PreparedBlockKind::Table) {
+		for (const auto &row : block.tableRows) {
+			for (const auto &cell : row.cells) {
+				if (cell.segmentIndex < 0
+					|| cell.segmentIndex >= int(segments->size())) {
+					continue;
 				}
+				auto &segment = (*segments)[cell.segmentIndex];
+				segment.outerRect = cell.outer;
+				segment.textRect = VisibleTextRect(
+					cell.textRect,
+					cell.outer);
 			}
 		}
-		RefreshScrollableSegmentRects(block.children, segments);
 	}
+	RefreshScrollableSegmentRects(block.children, segments);
 }
 
 void CollectAnchors(

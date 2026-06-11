@@ -2782,6 +2782,8 @@ private:
 	int _width = -1;
 	int _laidOutWidth = 0;
 	int _height = 0;
+	int _layoutGeneration = 0;
+	MarkdownArticleRevealLineCountsCache _revealLineCounts;
 	CachedTextLeafPool _cachedTextLeafs;
 	std::vector<LaidOutBlock> _blocks;
 	std::vector<LaidOutBlock> _retainedBlocks;
@@ -3100,6 +3102,15 @@ void MarkdownArticle::Impl::paint(
 	auto markBg = MarkBgColorForStyle(paintSt);
 	const auto ownedMarkBg = style::internal::OwnedColor(markBg);
 	textPalette.markBg = ownedMarkBg.color();
+	if (local.reveal) {
+		if (_revealLineCounts.layoutGeneration != _layoutGeneration) {
+			_revealLineCounts.layoutGeneration = _layoutGeneration;
+			_revealLineCounts.counts.clear();
+		}
+		local.reveal->lineCounts = &_revealLineCounts;
+	} else if (!_revealLineCounts.counts.empty()) {
+		_revealLineCounts = {};
+	}
 	const auto &previousTextPalette = p.textPalette();
 	p.setTextPalette(textPalette);
 	PaintBlocks(
@@ -4354,7 +4365,7 @@ bool MarkdownArticle::Impl::setScrollLeft(
 		_capturedScrollLefts.erase(identity);
 	}
 	refreshScrolledGeometry(block);
-	RefreshScrollableSegmentRects(_blocks, &_segments);
+	RefreshScrollableSegmentRects(block, &_segments);
 	if (_textRepaintRect) {
 		_textRepaintRect(block.outer);
 	} else if (_textRepaint) {
@@ -4516,6 +4527,7 @@ void MarkdownArticle::Impl::endHorizontalScroll() {
 // message bubbles to the minimum width in release Linux builds.
 void MarkdownArticle::Impl::finalizeRelayout(int heightBottom) {
 	const auto &page = layoutStyle().pagePadding;
+	++_layoutGeneration;
 	restoreScrollState();
 	refreshScrolledGeometry(_blocks);
 	_laidOutWidth = std::min(

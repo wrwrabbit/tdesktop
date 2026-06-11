@@ -2632,6 +2632,8 @@ void UpdateLaidOutLeafContent(
 	cell->rowspan = std::max(prepared.rowspan, 1);
 	cell->placeholderText = QString();
 	cell->placeholderLeaf = Ui::Text::String();
+	cell->cachedPreferredWidth = -1;
+	cell->cachedPreferredHeight = 0;
 	BuildOrReuseCachedTextLeaf(
 		&cell->leaf,
 		nullptr,
@@ -3919,11 +3921,15 @@ LaidOutBlock LayoutGroupedMediaBlock(
 			cellData.usePlaceholder = usePlaceholder;
 			cellData.minimumWidth = LeafMinimumWidth(displayLeaf);
 			cellData.preferredWidth = displayLeaf.maxWidth();
-			cellData.preferredHeight = std::max(
-				displayLeaf.countHeight(
-					std::max(cellData.preferredWidth, 1),
-					true),
-				TextLineHeight(textStyle));
+			if (cell.cachedPreferredWidth != cellData.preferredWidth) {
+				cell.cachedPreferredWidth = cellData.preferredWidth;
+				cell.cachedPreferredHeight = std::max(
+					displayLeaf.countHeight(
+						std::max(cellData.preferredWidth, 1),
+						true),
+					TextLineHeight(textStyle));
+			}
+			cellData.preferredHeight = cell.cachedPreferredHeight;
 			row.cells.push_back(std::move(cellData));
 		}
 		rows.push_back(std::move(row));
