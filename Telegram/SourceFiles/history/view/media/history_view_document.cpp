@@ -176,7 +176,7 @@ void FillThumbnailOverlay(
 }
 
 void FillWaveform(VoiceData *roundData) {
-	if (!roundData->waveform.empty()) {
+	if (!roundData || !roundData->waveform.empty()) {
 		return;
 	}
 	const auto &size = ::Media::Player::kWaveformSamplesCount;
@@ -349,8 +349,10 @@ Document::Document(
 		_tooltipFilename.setTooltipText(named->name.toString());
 	}
 
+	const auto media = _parent->data()->media();
 	if ((_data->isVoiceMessage() || isRound)
-		&& _parent->data()->media()->ttlSeconds()) {
+		&& media
+		&& media->ttlSeconds()) {
 		const auto fullId = _realParent->fullId();
 		if (_parent->delegate()->elementContext() == Context::TTLViewer) {
 			auto lifetime = std::make_shared<rpl::lifetime>();
@@ -440,7 +442,8 @@ void Document::createComponents() {
 			_realParent->fullId());
 	}
 	if (const auto voice = Get<HistoryDocumentVoice>()) {
-		voice->seekl = !_parent->data()->media()->ttlSeconds()
+		const auto media = _parent->data()->media();
+		voice->seekl = (!media || !media->ttlSeconds())
 			? std::make_shared<VoiceSeekClickHandler>(_data, [](FullMsgId) {})
 			: nullptr;
 		if (_transcribedRound) {
@@ -463,7 +466,8 @@ QSize Document::countOptimalSize() {
 		const auto history = _realParent->history();
 		const auto session = &history->session();
 		const auto transcribes = &session->api().transcribes();
-		if (_parent->data()->media()->ttlSeconds()
+		const auto media = _parent->data()->media();
+		if ((media && media->ttlSeconds())
 			|| _realParent->isScheduled()
 			|| _realParent->isAdminLogEntry()
 			|| (!session->premium()
