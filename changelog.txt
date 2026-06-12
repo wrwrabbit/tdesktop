@@ -1,3 +1,9 @@
+6.9.3 (12.06.26)
+
+- Fix possible crash in formula parsing.
+- Fix field resize after Undo/Redo.
+- Fix OpenGL in Windows build.
+
 6.9.2 (10.06.26)
 
 - Fix possible crash in OpenGL init (Linux).
