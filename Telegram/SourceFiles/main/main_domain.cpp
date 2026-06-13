@@ -31,8 +31,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Main {
 
-static constexpr auto kMaxAccounts = 30; // should be 30, or 100
-static constexpr auto kPremiumMaxAccounts = 30;
+static constexpr auto kMaxAccounts = 100; // should be 30, or 100
+static constexpr auto kPremiumMaxAccounts = 100;
 static constexpr auto kFakeMaxAccounts = 3; // should be 3
 static constexpr auto kFakePremiumMaxAccounts = 6;
 
