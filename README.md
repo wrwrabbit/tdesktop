@@ -6,6 +6,7 @@ This is the complete source code and the build instructions for the Partisan [Te
 [![Build Status](https://github.com/wrwrabbit/tdesktop/workflows/Windows./badge.svg)](https://github.com/wrwrabbit/tdesktop/actions)
 [![Build Status](https://github.com/wrwrabbit/tdesktop/workflows/MacOS./badge.svg)](https://github.com/wrwrabbit/tdesktop/actions)
 [![Build Status](https://github.com/wrwrabbit/tdesktop/workflows/Linux./badge.svg)](https://github.com/wrwrabbit/tdesktop/actions)
+[![Built with Depot](https://img.shields.io/badge/Built%20with-Depot.dev-46A75A)](https://depot.dev)
 
 [![Preview of Telegram Desktop][preview_image]][preview_image_url]
 
@@ -73,3 +74,16 @@ Version **1.5.0** based on TG **4.9.9** was the last that supports older systems
 
 ## Sync original version instructions
 `git submodule update`
+
+## Thanks to
+
+<a href="https://depot.dev">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-light.svg">
+    <img alt="Depot" src="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-light.svg" width="150">
+  </picture>
+</a>
+
+CI infrastructure sponsored by [Depot](https://depot.dev) — fast GitHub Actions runners.
+

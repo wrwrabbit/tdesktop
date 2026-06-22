@@ -30,6 +30,8 @@ namespace Core {
 namespace {
 
 constexpr auto kInitialVideoQuality = 480; // Start with SD.
+constexpr auto kMinIvZoom = 25;
+constexpr auto kMaxIvZoom = 400;
 
 [[nodiscard]] int DefaultIvZoom() {
 	const auto exact = cScale() * 100 / cScreenScale();
@@ -41,7 +43,10 @@ constexpr auto kInitialVideoQuality = 480; // Start with SD.
 }
 
 [[nodiscard]] int ResolveIvZoom(int value) {
-	return (value > 0) ? value : DefaultIvZoom();
+	return std::clamp(
+		(value > 0) ? value : DefaultIvZoom(),
+		kMinIvZoom,
+		kMaxIvZoom);
 }
 
 [[nodiscard]] WindowPosition Deserialize(const QByteArray &data) {
@@ -1811,24 +1816,25 @@ rpl::producer<int> Settings::ivZoomValue() const {
 }
 
 void Settings::setIvZoom(int value) {
-	if (!value || value == DefaultIvZoom()) {
+	const auto resolved = ResolveIvZoom(value);
+	if (!value || resolved == ResolveIvZoom(0)) {
 		_ivZoom = 0;
 		return;
 	}
-#ifdef Q_OS_WIN
-	constexpr auto kMin = 25;
-	constexpr auto kMax = 500;
-#else
-	constexpr auto kMin = 30;
-	constexpr auto kMax = 200;
-#endif
-	_ivZoom = std::clamp(value, kMin, kMax);
+	_ivZoom = resolved;
 }
 
 bool Settings::normalizeIvZoom() {
 	const auto value = _ivZoom.current();
-	if (value && value == DefaultIvZoom()) {
+	if (!value) {
+		return false;
+	}
+	const auto resolved = ResolveIvZoom(value);
+	if (resolved == ResolveIvZoom(0)) {
 		_ivZoom = 0;
+		return true;
+	} else if (resolved != value) {
+		_ivZoom = resolved;
 		return true;
 	}
 	return false;

@@ -943,10 +943,12 @@ void StickerSetBox::updateButtons() {
 					raw->setForcedOrigin(
 						Ui::PanelAnimation::Origin::TopRight);
 					top->setForceRippled(true);
-					raw->setDestroyedCallback([=] {
-						if (const auto strong = top.data()) {
-							strong->setForceRippled(false);
-						}
+					raw->setDestroyedCallback([top] {
+						crl::on_main(top, [top] {
+							if (const auto strong = top.data()) {
+								strong->setForceRippled(false);
+							}
+						});
 					});
 					raw->popup(top->mapToGlobal(QPoint(
 						top->width(),
@@ -1016,10 +1018,12 @@ void StickerSetBox::updateButtons() {
 					raw->setForcedOrigin(
 						Ui::PanelAnimation::Origin::TopRight);
 					top->setForceRippled(true);
-					raw->setDestroyedCallback([=] {
-						if (const auto strong = top.data()) {
-							strong->setForceRippled(false);
-						}
+					raw->setDestroyedCallback([top] {
+						crl::on_main(top, [top] {
+							if (const auto strong = top.data()) {
+								strong->setForceRippled(false);
+							}
+						});
 					});
 					raw->popup(top->mapToGlobal(QPoint(
 						top->width(),
@@ -2465,8 +2469,9 @@ void StickerSetBox::Inner::paintAddCell(QPainter &p) const {
 			ltrRect.width(),
 			ltrRect.height())
 		: ltrRect;
+	const auto center = rect::center(rect);
 	const auto inner = QRect(
-		rect::center(rect) - QPoint(
+		center - QPoint(
 			st::stickersAddCellBgRadius,
 			st::stickersAddCellBgRadius),
 		Size(st::stickersAddCellBgRadius * 2));
@@ -2482,7 +2487,6 @@ void StickerSetBox::Inner::paintAddCell(QPainter &p) const {
 
 	const auto plusHalf = st::stickersAddCellPlusSize / 2;
 	const auto thickness = st::stickersAddCellPlusThickness;
-	const auto center = rect.center();
 	const auto plusH = QRectF(
 		center.x() - plusHalf,
 		center.y() - thickness / 2.,

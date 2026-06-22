@@ -46,6 +46,7 @@ public:
 	State state() const;
 	int already() const;
 	int size() const;
+	bool percent() const;
 
 	static void SetAcceptUpstreamRelease(bool value);
 	static void SetAcceptSameVersion(bool value);

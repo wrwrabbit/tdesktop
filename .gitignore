@@ -53,6 +53,7 @@ stage
 *.*~
 .idea/
 cmake-build-debug/
+*.qsb
 
 # PTG
 /build/

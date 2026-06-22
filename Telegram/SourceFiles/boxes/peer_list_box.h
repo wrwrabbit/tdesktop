@@ -127,6 +127,15 @@ public:
 		int outerWidth,
 		bool selected);
 
+	virtual int paintNameIconGetLeadingWidth(
+		Painter &p,
+		Fn<void()> repaint,
+		crl::time now,
+		int nameLeft,
+		int nameTop,
+		int outerWidth,
+		bool selected);
+
 	virtual QSize rightActionSize() const {
 		return QSize();
 	}
@@ -564,6 +573,9 @@ public:
 
 	[[nodiscard]] virtual QString savedMessagesChatStatus() const {
 		return QString();
+	}
+	[[nodiscard]] virtual rpl::producer<QString> searchPlaceholder() const {
+		return nullptr;
 	}
 	[[nodiscard]] virtual int customRowHeight() {
 		Unexpected("PeerListController::customRowHeight.");

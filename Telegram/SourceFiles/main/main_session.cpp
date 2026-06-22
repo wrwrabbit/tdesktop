@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/location_pickers.h"
 #include "data/components/passkeys.h"
 #include "data/components/promo_suggestions.h"
+#include "data/components/recent_inline_bots.h"
 #include "data/components/recent_peers.h"
 #include "data/components/recent_shared_media_gifts.h"
 #include "data/components/scheduled_messages.h"
@@ -125,6 +126,10 @@ Session::Session(
 , _topPeers(std::make_unique<Data::TopPeers>(this, Data::TopPeerType::Chat))
 , _topBotApps(
 	std::make_unique<Data::TopPeers>(this, Data::TopPeerType::BotApp))
+, _topGuestChatBots(std::make_unique<Data::TopPeers>(
+	this,
+	Data::TopPeerType::BotGuestChat))
+, _recentInlineBots(std::make_unique<Data::RecentInlineBots>(this))
 , _factchecks(std::make_unique<Data::Factchecks>(this))
 , _locationPickers(std::make_unique<Data::LocationPickers>())
 , _credits(std::make_unique<Data::Credits>(this))
