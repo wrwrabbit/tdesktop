@@ -83,6 +83,147 @@ bool finished = true;
 QMargins simpleMargins, margins;
 HICON bigIcon = 0, smallIcon = 0, overlayIcon = 0;
 
+[[nodiscard]] QString NormalizeRegistryPath(QString path) {
+	if (path.isEmpty()) {
+		return {};
+	}
+	path = QDir::toNativeSeparators(path);
+	const auto native = path.toStdWString();
+	wchar_t full[MAX_PATH] = {};
+	const auto fullLength = GetFullPathNameW(
+		native.c_str(),
+		MAX_PATH,
+		full,
+		nullptr);
+	auto result = (fullLength > 0 && fullLength < MAX_PATH)
+		? QString::fromWCharArray(full, int(fullLength))
+		: path;
+	wchar_t canonical[MAX_PATH] = {};
+	if (PathCanonicalizeW(canonical, result.toStdWString().c_str())) {
+		result = QString::fromWCharArray(canonical);
+	}
+	return QDir::cleanPath(QDir::fromNativeSeparators(result)).toLower();
+}
+
+[[nodiscard]] QString ExpandRegistryString(const QString &value, DWORD type) {
+	if (type != REG_EXPAND_SZ) {
+		return value;
+	}
+	const auto source = value.toStdWString();
+	const auto size = ExpandEnvironmentStringsW(source.c_str(), nullptr, 0);
+	if (size == 0) {
+		return value;
+	}
+	auto expanded = std::wstring(size, L'\0');
+	const auto written = ExpandEnvironmentStringsW(
+		source.c_str(),
+		expanded.data(),
+		size);
+	if (written == 0 || written > size) {
+		return value;
+	}
+	return QString::fromWCharArray(expanded.data());
+}
+
+[[nodiscard]] QString ReadRegistryStringValue(HKEY key, const wchar_t *name) {
+	DWORD type = 0;
+	DWORD size = 0;
+	if (RegQueryValueExW(key, name, nullptr, &type, nullptr, &size) != ERROR_SUCCESS
+		|| (type != REG_SZ && type != REG_EXPAND_SZ)
+		|| size == 0) {
+		return {};
+	}
+	auto data = std::wstring(size / sizeof(wchar_t), L'\0');
+	if (RegQueryValueExW(
+			key,
+			name,
+			nullptr,
+			&type,
+			reinterpret_cast<LPBYTE>(data.data()),
+			&size) != ERROR_SUCCESS) {
+		return {};
+	}
+	return ExpandRegistryString(QString::fromWCharArray(data.c_str()), type);
+}
+
+[[nodiscard]] QString RegistryCommandTargetPath(const QString &value) {
+	if (value.isEmpty()) {
+		return {};
+	}
+	int argc = 0;
+	const auto native = QDir::toNativeSeparators(value).toStdWString();
+	const auto argv = CommandLineToArgvW(native.c_str(), &argc);
+	if (!argv || argc <= 0) {
+		if (argv) {
+			LocalFree(argv);
+		}
+		return {};
+	}
+	const auto guard = gsl::finally([&] { LocalFree(argv); });
+	return NormalizeRegistryPath(QString::fromWCharArray(argv[0]));
+}
+
+[[nodiscard]] bool RegistryKeyMatchesInstallLocation(
+		HKEY key,
+		const QString &expectedInstallLocation) {
+	const auto installLocation = NormalizeRegistryPath(
+		ReadRegistryStringValue(key, L"InstallLocation"));
+	if (installLocation.isEmpty() || installLocation != expectedInstallLocation) {
+		return false;
+	}
+	const auto uninstallString = ReadRegistryStringValue(key, L"UninstallString");
+	if (!uninstallString.isEmpty()) {
+		const auto expectedUninstaller = NormalizeRegistryPath(
+			expectedInstallLocation + u"/unins000.exe"_q);
+		if (RegistryCommandTargetPath(uninstallString) != expectedUninstaller) {
+			return false;
+		}
+	}
+	const auto displayIcon = ReadRegistryStringValue(key, L"DisplayIcon");
+	if (!displayIcon.isEmpty()) {
+		const auto expectedIcon = NormalizeRegistryPath(
+			expectedInstallLocation + '/' + cExeName());
+		if (RegistryCommandTargetPath(displayIcon) != expectedIcon) {
+			return false;
+		}
+	}
+	return true;
+}
+
+void RemoveInnoSetupRegistryKey(
+		const std::wstring &subkey,
+		const QString &onlyIfInstallLocation) {
+	if (onlyIfInstallLocation.isEmpty()) {
+		RegDeleteKeyW(HKEY_CURRENT_USER, subkey.c_str());
+		return;
+	}
+	HKEY key = nullptr;
+	const auto status = RegOpenKeyExW(
+		HKEY_CURRENT_USER,
+		subkey.c_str(),
+		0,
+		KEY_QUERY_VALUE,
+		&key);
+	if (status != ERROR_SUCCESS) {
+		return;
+	}
+	const auto guard = gsl::finally([&] { RegCloseKey(key); });
+	const auto expectedInstallLocation = NormalizeRegistryPath(
+		onlyIfInstallLocation);
+	if (!RegistryKeyMatchesInstallLocation(key, expectedInstallLocation)) {
+		FAKE_LOG(("Platform: preserving uninstall key '%1' for '%2'").arg(
+			QString::fromStdWString(subkey),
+			onlyIfInstallLocation));
+		return;
+	}
+	RegCloseKey(key);
+	key = nullptr;
+	const auto deleted = RegDeleteKeyW(HKEY_CURRENT_USER, subkey.c_str());
+	FAKE_LOG(("Platform: cleanup uninstall key '%1': %2").arg(
+		QString::fromStdWString(subkey),
+		Logs::b(deleted == ERROR_SUCCESS)));
+}
+
 [[nodiscard]] uint64 WindowIdFromHWND(HWND value) {
 	return (reinterpret_cast<uint64>(value) & 0xFFFFFFFFULL);
 }
@@ -861,12 +1002,21 @@ bool CreateStartMenuShortcut(const QString &exePath, bool silent) {
 	return true;
 }
 
-void RemoveInnoSetupRegistryKey() {
+void RemoveInnoSetupRegistryKey(const QString &onlyIfInstallLocation) {
 	const auto appId = AppId.utf16();
 	const auto key1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
 	const auto key2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
-	RegDeleteKeyW(HKEY_CURRENT_USER, key1.c_str());
-	RegDeleteKeyW(HKEY_CURRENT_USER, key2.c_str());
+	RemoveInnoSetupRegistryKey(key1, onlyIfInstallLocation);
+	RemoveInnoSetupRegistryKey(key2, onlyIfInstallLocation);
+}
+
+void RemoveInstallerRegistration(const QString &onlyIfInstallLocation) {
+	if (onlyIfInstallLocation.isEmpty()) {
+		return;
+	}
+	const auto installLocation = QDir::cleanPath(onlyIfInstallLocation);
+	RemoveInnoSetupRegistryKey(installLocation);
+	RemoveStartMenuShortcut(installLocation + '/' + cExeName());
 }
 
 bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
