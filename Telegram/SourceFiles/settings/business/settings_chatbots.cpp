@@ -478,6 +478,7 @@ void AppendUsersFromPeerList(
 				finish();
 			}).send();
 			data->searchRequestId = session->api().request(MTPcontacts_Search(
+				MTP_flags(0),
 				MTP_string(extracted),
 				MTP_int(SearchPeopleLimit)
 			)).done([=](const MTPcontacts_Found &result) {
@@ -700,9 +701,10 @@ void Chatbots::setupContent() {
 		if (!resolved) {
 			return;
 		}
-		_committedBot = resolved;
 		_committedRecipients = _recipients.current();
 		_committedPermissions = _resolvePermissions();
+		_permissions = _committedPermissions;
+		_committedBot = resolved;
 		_chooserVisible = false;
 		_usernameWrap->toggle(false, anim::type::instant);
 		controller()->showToast(Ui::Toast::Config{
@@ -870,8 +872,13 @@ void Chatbots::save() {
 			show->showToast(tr::lng_chatbots_not_supported(tr::now));
 		}
 	};
+	const auto bot = _committedBot.current();
+	if (bot) {
+		_committedRecipients = _recipients.current();
+		_committedPermissions = _resolvePermissions();
+	}
 	controller()->session().data().chatbots().save({
-		.bot = _committedBot.current(),
+		.bot = bot,
 		.recipients = _committedRecipients,
 		.permissions = _committedPermissions,
 	}, [=] {

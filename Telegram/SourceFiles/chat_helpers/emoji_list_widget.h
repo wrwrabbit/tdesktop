@@ -374,6 +374,8 @@ private:
 		not_null<Ui::PopupMenu*> menu,
 		int section,
 		int index);
+	[[nodiscard]] base::unique_qptr<Ui::PopupMenu> fillSetContextMenu(
+		const CustomSet &set);
 
 	[[nodiscard]] EmojiPtr lookupOverEmoji(const OverEmoji *over) const;
 	[[nodiscard]] ResolvedCustom lookupCustomEmoji(
@@ -443,6 +445,7 @@ private:
 		QRect clip) const;
 	void paintEmptySearchResults(Painter &p);
 
+	void displaySet(not_null<DocumentData*> document);
 	void displaySet(uint64 setId);
 	void removeSet(uint64 setId);
 	void removeMegagroupSet(bool locally);
