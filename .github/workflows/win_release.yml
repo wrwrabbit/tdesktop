@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
-      - uses: Eden-CI/msvc-dev-cmd@master
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f9
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}

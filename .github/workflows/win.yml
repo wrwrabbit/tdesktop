@@ -120,7 +120,7 @@ jobs:
           Remove-Item vs_buildtools.exe -Force
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
 
-      - uses: Eden-CI/msvc-dev-cmd@master
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f9
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}
