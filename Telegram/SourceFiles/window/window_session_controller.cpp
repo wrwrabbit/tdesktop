@@ -1850,6 +1850,10 @@ not_null<::MainWindow*> SessionController::widget() const {
 	return _window->widget();
 }
 
+rpl::producer<> SessionController::imeCompositionStarts() const {
+	return widget()->imeCompositionStarts();
+}
+
 auto SessionController::sendingAnimation() const
 -> Ui::MessageSendingAnimationController & {
 	return *_sendingAnimation;
@@ -1901,7 +1905,8 @@ void SessionController::setupShortcuts() {
 		return !window().locked()
 			&& (_chatSwitchProcess
 				|| (request.started
-					&& (Core::App().activeWindow() == &window())));
+					&& (Core::App().activeWindow() == &window())
+					&& !isLayerShown()));
 	}) | rpl::on_next([=](const ChatSwitchRequest &request) {
 		if (!_chatSwitchProcess) {
 			_chatSwitchProcess = std::make_unique<ChatSwitchProcess>(
@@ -3126,6 +3131,10 @@ void SessionController::removeLayerBlackout() {
 
 bool SessionController::isLayerShown() const {
 	return _window->isLayerShown();
+}
+
+rpl::producer<bool> SessionController::boxShownValue() const {
+	return _window->boxShownValue();
 }
 
 void SessionController::registerActiveLayerSection(SectionWidget *section) {

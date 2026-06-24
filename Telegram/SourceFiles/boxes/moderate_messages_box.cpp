@@ -83,6 +83,8 @@ const char kModerateCommonGroups[] = "moderate-common-groups";
 
 namespace {
 
+constexpr auto kModerateMessagesBoxAnimationDuration = crl::time(80);
+
 struct ModerateOptions final {
 	bool reportSpam = false;
 	bool deleteAllMessages = false;
@@ -420,6 +422,8 @@ void CreateModerateMessagesBox(
 	const auto reaction = entry.reaction;
 	Expects(!items.empty() || reaction.has_value());
 
+	box->setLayerAnimationDuration(kModerateMessagesBoxAnimationDuration);
+
 	const auto hasItems = !items.empty();
 	const auto hasReaction = reaction.has_value();
 	const auto itemsCount = hasItems ? int(items.size()) : 0;
@@ -741,6 +745,7 @@ void CreateModerateMessagesBox(
 		Ui::AddExpandablePeerList(report, controller, inner);
 		handleSubmition(report);
 
+		const auto show = box->uiShow();
 		handleConfirmation(report, controller, [=](
 				not_null<PeerData*> p,
 				not_null<ChannelData*> c) {
@@ -750,7 +755,7 @@ void CreateModerateMessagesBox(
 					p
 				).canReport) {
 				Api::ReportReaction(
-					box->uiShow(),
+					show,
 					reaction->peer,
 					reaction->msgId,
 					p);

@@ -1053,40 +1053,58 @@ void ChatWidget::setupSwipeReplyAndBack() {
 	};
 
 	auto init = [=, show = controller()->uiShow()](
-			int cursorTop,
-			Qt::LayoutDirection direction) {
-		if (direction == Qt::RightToLeft) {
+			Ui::Controls::SwipeHandlerInitData data) {
+		auto result = Ui::Controls::SwipeHandlerFinishData();
+		const auto horizontalScrollDelta = (data.direction == Qt::LeftToRight)
+			? 1
+			: -1;
+		if (_inner->canConsumeHorizontalScroll(
+				data.cursorPosition,
+				horizontalScrollDelta)) {
+			return result;
+		}
+		if (data.direction == Qt::RightToLeft) {
 			return Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
 				controller()->showBackFromStack();
 			});
 		}
-		auto result = Ui::Controls::SwipeHandlerFinishData();
 		if (_inner->elementInSelectionMode(nullptr).inSelectionMode) {
 			return result;
 		}
-		const auto view = _inner->lookupItemByY(cursorTop);
+		const auto view = _inner->lookupItemByY(data.cursorPosition.y());
 		if (!view
 			|| !view->data()->isRegular()
 			|| view->data()->isService()) {
 			return result;
 		}
-		if (!can(view->data())) {
+		const auto item = _inner->lookupItemByPoint(
+			data.cursorPosition,
+			view);
+		if (!can(item)) {
 			return result;
 		}
 
 		_inner->hideElementOverlay();
-		result.msgBareId = view->data()->fullId().msg.bare;
-		result.callback = [=, itemId = view->data()->fullId()] {
-			const auto still = show->session().data().message(itemId);
-			const auto view = _inner->viewByPosition(still->position());
-			const auto selected = view
-				? view->selectedQuote(_inner->getSelectedTextRange(still))
+		const auto viewItemId = view->data()->fullId();
+		const auto itemId = item->fullId();
+		result.msgBareId = viewItemId.msg.bare;
+		result.callback = [=] {
+			const auto still = show->session().data().message(viewItemId);
+			const auto view = still
+				? _inner->viewByPosition(still->position())
+				: nullptr;
+			const auto selected = (still && view)
+				? view->selectedQuote(_inner->getSelectedTextSelection(still))
 				: SelectedQuote();
-			const auto replyToItemId = (selected.item
+			const auto exact = selected.item
 				? selected.item
-				: still)->fullId();
+				: show->session().data().message(itemId);
+			if (!exact) {
+				return;
+			}
+			Window::ActivateWindow(controller());
 			_inner->replyToMessageRequestNotify({
-				.messageId = replyToItemId,
+				.messageId = exact->fullId(),
 				.quote = selected.highlight.quote,
 				.quoteOffset = selected.highlight.quoteOffset,
 				.todoItemId = selected.highlight.todoItemId,
@@ -1102,6 +1120,15 @@ void ChatWidget::setupSwipeReplyAndBack() {
 		.update = std::move(update),
 		.init = std::move(init),
 		.dontStart = _inner->touchMaybeSelectingValue(),
+		.skipWheelEvent = [=](not_null<QWheelEvent*> event) {
+			const auto delta = Ui::ScrollDelta(event);
+			if (std::abs(delta.x()) <= std::abs(delta.y())) {
+				return false;
+			}
+			return _inner->canConsumeHorizontalScroll(
+				_inner->mapFromGlobal(event->globalPosition().toPoint()),
+				delta.x());
+		},
 	});
 }
 
@@ -1540,11 +1567,12 @@ void ChatWidget::edit(
 		}
 		return;
 	} else {
-		const auto maxCaptionSize = !hasMediaWithCaption
-			? MaxMessageSize
-			: Data::PremiumLimits(&session()).captionLengthCurrent();
+		const auto limits = Data::PremiumLimits(&session());
+		const auto maxTextSize = hasMediaWithCaption
+			? limits.captionLengthCurrent()
+			: limits.messageLengthCurrent();
 		const auto remove = _composeControls->fieldCharacterCount()
-			- maxCaptionSize;
+			- maxTextSize;
 		if (remove > 0) {
 			controller()->showToast(
 				tr::lng_edit_limit_reached(tr::now, lt_count, remove));
@@ -2272,7 +2300,7 @@ void ChatWidget::refreshPinnedBarButton(bool many, HistoryItem *item) {
 		this,
 		close ? st::historyReplyCancel : st::historyPinnedShowAll);
 	button->setAccessibleName(close
-		? tr::lng_cancel(tr::now)
+		? tr::lng_pinned_unpin(tr::now)
 		: tr::lng_settings_events_pinned(tr::now));
 	button->clicks(
 	) | rpl::on_next([=] {
@@ -3477,6 +3505,10 @@ base::unique_qptr<Ui::PopupMenu> ChatWidget::listFillSenderUserpicMenu(
 		searchInEntry,
 		Ui::Menu::CreateAddActionCallback(menu.get()));
 	return menu->empty() ? nullptr : std::move(menu);
+}
+
+Ui::ScrollArea *ChatWidget::listScrollArea() const {
+	return _scroll.get();
 }
 
 void ChatWidget::setupEmptyPainter() {

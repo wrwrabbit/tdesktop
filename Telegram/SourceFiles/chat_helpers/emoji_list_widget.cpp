@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "ui/ui_utility.h"
 #include "ui/cached_round_corners.h"
+#include "boxes/share_box.h"
 #include "boxes/sticker_set_box.h"
 #include "lang/lang_keys.h"
 #include "layout/layout_position.h"
@@ -573,6 +574,30 @@ EmojiListWidget::EmojiListWidget(
 	) | rpl::on_next([=] {
 		refreshCustom();
 		resizeToWidth(width());
+		if (!_searchMode
+			|| !searchShortcutSelected()
+			|| _searchSets.empty()) {
+			return;
+		}
+		// Skip refill when size already matches to preserve hover state.
+		const auto &sets = session().data().stickers().sets();
+		const auto it = sets.find(_searchSelectedSetId);
+		if (it == sets.end()) {
+			return;
+		}
+		const auto set = it->second.get();
+		const auto have = int(_searchSets.front().list.size());
+		const auto want = int(set->stickers.empty()
+			? set->covers.size()
+			: set->stickers.size());
+		if (have == want) {
+			return;
+		}
+		_searchSets.clear();
+		fillSelectedSearchShortcut();
+		resizeToWidth(width());
+		update();
+		updateSelected();
 	}, lifetime());
 
 	rpl::combine(
@@ -1022,6 +1047,7 @@ void EmojiListWidget::checkPaginateSearchCloud(
 		int visibleTop,
 		int visibleBottom) {
 	if (!_searchMode
+		|| searchShortcutSelected()
 		|| _searchRequestQuery.isEmpty()
 		|| (_searchRequestQuery != _searchNextRequestQuery)
 		|| _searchCloudRequestId) {
@@ -1387,6 +1413,16 @@ void EmojiListWidget::toggleSearchShortcut(int index) {
 		_searchSelectedSetId = target;
 		showSearchResults();
 	}, packToPack);
+	if (target) {
+		// Pull full stickers so the grid shows them instead of cover-only.
+		const auto set = _searchShortcutSets[index].set;
+		if (set->stickers.empty()
+			|| (set->flags & Data::StickersSetFlag::NotLoaded)) {
+			auto &api = session().api();
+			api.scheduleStickerSetRequest(set->id, set->accessHash);
+			api.requestStickerSets();
+		}
+	}
 }
 
 void EmojiListWidget::backToSearchResults() {
@@ -1895,6 +1931,26 @@ base::unique_qptr<Ui::PopupMenu> EmojiListWidget::fillContextMenu(
 	if (v::is_null(_selected)) {
 		return nullptr;
 	}
+	if (const auto setOver = std::get_if<OverSet>(&_selected)) {
+		const auto section = setOver->section;
+		if (_searchMode
+			&& section > 0
+			&& section <= int(_searchSets.size())) {
+			return fillSetContextMenu(searchSetBySection(section));
+		} else if (!_searchMode
+			&& section >= _staticCount
+			&& (section - _staticCount) < int(_custom.size())) {
+			return fillSetContextMenu(_custom[section - _staticCount]);
+		}
+		return nullptr;
+	}
+	if (const auto shortcut = std::get_if<OverSearchShortcut>(&_selected)) {
+		if (shortcut->index >= 0
+			&& shortcut->index < int(_searchShortcutSets.size())) {
+			return fillSetContextMenu(_searchShortcutSets[shortcut->index]);
+		}
+		return nullptr;
+	}
 	const auto over = std::get_if<OverEmoji>(&_selected);
 	if (!over) {
 		return nullptr;
@@ -1949,7 +2005,7 @@ void EmojiListWidget::fillRecentMenu(
 		if (recent && setId && _features.openStickerSets) {
 			addAction(
 				tr::lng_emoji_view_pack(tr::now),
-				crl::guard(this, [=] { displaySet(setId); }),
+				crl::guard(this, [=] { displaySet(document); }),
 				&st::menuIconShowAll);
 		}
 	} else if (recent && emoji) {
@@ -1981,7 +2037,7 @@ void EmojiListWidget::fillRecentMenu(
 			refreshRecent();
 			close();
 		};
-		checkHideWithBox(Ui::MakeConfirmBox({
+		showBoxPreventHide(Ui::MakeConfirmBox({
 			.text = tr::lng_emoji_reset_recent_sure(),
 			.confirmed = crl::guard(this, sure),
 			.confirmText = tr::lng_emoji_reset_recent_button(tr::now),
@@ -2021,6 +2077,18 @@ void EmojiListWidget::fillEmojiStatusMenu(
 		tr::lng_manage_messages_ttl_after_custom(tr::now),
 		crl::guard(this, [=] { selectWith(
 			TabbedSelector::kPickCustomTimeId); }));
+}
+
+base::unique_qptr<Ui::PopupMenu> EmojiListWidget::fillSetContextMenu(
+		const CustomSet &set) {
+	return FillStickerSetContextMenu(
+		this,
+		_show,
+		set.set,
+		_localSetsManager.get(),
+		crl::guard(this, [this](uint64 id) { removeSet(id); }),
+		crl::guard(this, [this] { update(); }),
+		st::popupMenuWithIcons);
 }
 
 void EmojiListWidget::paintEvent(QPaintEvent *e) {
@@ -2646,9 +2714,7 @@ EmojiPtr EmojiListWidget::lookupOverEmoji(const OverEmoji *over) const {
 			? v::get<EmojiPtr>(_searchResults[index].id.data)
 			: nullptr)
 		: (_searchMode && section > 0)
-		? ((index < int(searchSetBySection(section).list.size()))
-			? searchSetBySection(section).list[index].emoji
-			: nullptr)
+		? nullptr
 		: (section == int(Section::Recent)
 			&& index < _recent.size()
 			&& v::is<EmojiPtr>(_recent[index].id.data))
@@ -2853,6 +2919,10 @@ void EmojiListWidget::mouseReleaseEvent(QMouseEvent *e) {
 	}
 }
 
+void EmojiListWidget::displaySet(not_null<DocumentData*> document) {
+	preventHideWithBox(StickerSetBox::Show(_show, document));
+}
+
 void EmojiListWidget::displaySet(uint64 setId) {
 	if (setId == Data::Stickers::MegagroupSetId) {
 		if (_megagroupSet->mgInfo->emojiSet.id) {
@@ -2866,7 +2936,7 @@ void EmojiListWidget::displaySet(uint64 setId) {
 	const auto &sets = session().data().stickers().sets();
 	auto it = sets.find(setId);
 	if (it != sets.cend()) {
-		checkHideWithBox(Box<StickerSetBox>(_show, it->second.get()));
+		showBoxPreventHide(Box<StickerSetBox>(_show, it->second.get()));
 	}
 }
 
@@ -2877,7 +2947,7 @@ void EmojiListWidget::removeMegagroupSet(bool locally) {
 		refreshCustom();
 		return;
 	}
-	checkHideWithBox(Ui::MakeConfirmBox({
+	showBoxPreventHide(Ui::MakeConfirmBox({
 		.text = tr::lng_emoji_remove_group_set(),
 		.confirmed = crl::guard(this, [this, group = _megagroupSet](
 				Fn<void()> &&close) {
@@ -2902,7 +2972,7 @@ void EmojiListWidget::removeSet(uint64 setId) {
 		removeMegagroupSet(removeLocally);
 	} else if (setId == Data::Stickers::CollectibleSetId) {
 	} else if (auto box = MakeConfirmRemoveSetBox(&session(), labelSt, setId)) {
-		checkHideWithBox(std::move(box));
+		showBoxPreventHide(std::move(box));
 	}
 }
 
@@ -2971,7 +3041,8 @@ void EmojiListWidget::pickerHidden() {
 }
 
 bool EmojiListWidget::hasColorButton(int index) const {
-	return (_staticCount > int(Section::People))
+	return !_searchMode
+		&& (_staticCount > int(Section::People))
 		&& (index == int(Section::People));
 }
 
@@ -3320,12 +3391,6 @@ void EmojiListWidget::processHideFinished() {
 }
 
 void EmojiListWidget::processPanelHideFinished() {
-	if (_search) {
-		_search->cancel();
-	}
-	_nextSearchQuery.clear();
-	applyNextSearchQuery();
-	cancelSearchRequest();
 	unloadAllCustom();
 	if (_localSetsManager->clearInstalledLocally()) {
 		refreshCustom();
@@ -3346,6 +3411,10 @@ void EmojiListWidget::refreshCustom() {
 	if (_mode == Mode::RecentReactions || _mode == Mode::MessageEffects) {
 		return;
 	}
+	// Pin the section at the visible top across the rebuild.
+	const auto wasTop = getVisibleTop();
+	const auto wasActive = currentSet(wasTop);
+	const auto wasSectionTop = sectionInfoByOffset(wasTop).top;
 	auto old = base::take(_custom);
 	const auto session = &this->session();
 	const auto premiumPossible = session->premiumPossible();
@@ -3470,12 +3539,27 @@ void EmojiListWidget::refreshCustom() {
 	}
 	refreshMegagroupStickers(push, GroupStickersPlace::Hidden);
 
+	auto newSectionTop = wasSectionTop;
+	auto found = false;
+	enumerateSections([&](const SectionInfo &info) {
+		if (sectionSetId(info.section) == wasActive) {
+			newSectionTop = info.top;
+			found = true;
+			return false;
+		}
+		return true;
+	});
+
 	_footer->refreshIcons(
 		fillIcons(),
-		currentSet(getVisibleTop()),
+		found ? wasActive : currentSet(wasTop),
 		nullptr,
 		ValidateIconAnimations::None);
 	update();
+
+	if (found && newSectionTop != wasSectionTop) {
+		scrollTo(newSectionTop + (wasTop - wasSectionTop));
+	}
 }
 
 Fn<void()> EmojiListWidget::repaintCallback(
@@ -3810,8 +3894,10 @@ void EmojiListWidget::updateSelected() {
 			&& myrtlrect(buttonRect(section)).contains(p.x(), p.y())) {
 			newSelected = OverButton{ section };
 		} else if (_features.openStickerSets
-			&& section >= _staticCount
-			&& _mode == Mode::Full) {
+			&& ((_searchMode && section > 0)
+				|| (!_searchMode
+					&& section >= _staticCount
+					&& _mode == Mode::Full))) {
 			newSelected = OverSet{ section };
 		}
 	} else if (p.y() >= info.rowsTop && p.y() < info.rowsBottom) {

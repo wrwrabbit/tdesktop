@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/premium_preview_box.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h"
+#include "data/business/data_business_chatbots.h"
 #include "data/business/data_business_info.h"
 #include "data/business/data_shortcut_messages.h"
 #include "data/data_changes.h"
@@ -29,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/business/settings_away_message.h"
 #include "settings/business/settings_chat_intro.h"
 #include "settings/business/settings_chat_links.h"
+#include "settings/business/settings_chatbots.h"
 #include "settings/business/settings_greeting.h"
 #include "settings/business/settings_location.h"
 #include "settings/business/settings_quick_replies.h"
@@ -91,6 +93,7 @@ using Order = std::vector<QString>;
 		u"business_location"_q,
 		u"business_links"_q,
 		u"business_intro"_q,
+		u"business_bots"_q,
 		u"folder_tags"_q,
 	};
 }
@@ -140,6 +143,15 @@ using Order = std::vector<QString>;
 				tr::lng_business_subtitle_away_messages(),
 				tr::lng_business_about_away_messages(),
 				PremiumFeature::AwayMessage,
+			},
+		},
+		{
+			u"business_bots"_q,
+			Entry{
+				&st::settingsBusinessIconChatbots,
+				tr::lng_business_subtitle_chatbots(),
+				tr::lng_business_about_chatbots(),
+				PremiumFeature::BusinessBots,
 			},
 		},
 		{
@@ -338,6 +350,7 @@ void AddBusinessSummary(
 	case PremiumFeature::BusinessLocation: return u"business/location"_q;
 	case PremiumFeature::ChatLinks: return u"business/links"_q;
 	case PremiumFeature::ChatIntro: return u"business/intro"_q;
+	case PremiumFeature::BusinessBots: return u"business/bots"_q;
 	case PremiumFeature::FilterTags: return u"business/tags"_q;
 	default: return QString();
 	}
@@ -359,6 +372,8 @@ void AddBusinessSummary(
 		return tr::lng_business_subtitle_chat_links(tr::now);
 	case PremiumFeature::ChatIntro:
 		return tr::lng_business_subtitle_chat_intro(tr::now);
+	case PremiumFeature::BusinessBots:
+		return tr::lng_business_subtitle_chatbots(tr::now);
 	case PremiumFeature::FilterTags:
 		return tr::lng_premium_summary_subtitle_filter_tags(tr::now);
 	default: return QString();
@@ -514,6 +529,7 @@ void BuildBusinessSectionContent(
 
 	if (controller) {
 		const auto owner = &session->data();
+		owner->chatbots().preload();
 		owner->businessInfo().preload();
 		owner->shortcutMessages().preloadShortcuts();
 		owner->session().api().chatLinks().preload();
@@ -544,6 +560,7 @@ void BuildBusinessSectionContent(
 					case PremiumFeature::BusinessLocation: return LocationId();
 					case PremiumFeature::GreetingMessage: return GreetingId();
 					case PremiumFeature::QuickReplies: return QuickRepliesId();
+					case PremiumFeature::BusinessBots: return ChatbotsId();
 					case PremiumFeature::ChatIntro: return ChatIntroId();
 					case PremiumFeature::ChatLinks: return ChatLinksId();
 					}
@@ -566,6 +583,8 @@ void BuildBusinessSectionContent(
 						&& owner->shortcutMessages().shortcutsLoaded();
 				case PremiumFeature::QuickReplies:
 					return owner->shortcutMessages().shortcutsLoaded();
+				case PremiumFeature::BusinessBots:
+					return owner->chatbots().loaded();
 				case PremiumFeature::ChatIntro:
 					return owner->session().user()->isFullLoaded();
 				case PremiumFeature::ChatLinks:
@@ -589,6 +608,7 @@ void BuildBusinessSectionContent(
 				owner->businessInfo().greetingSettingsChanged(),
 				owner->businessInfo().timezonesValue() | rpl::to_empty,
 				owner->shortcutMessages().shortcutsChanged(),
+				owner->chatbots().changes() | rpl::to_empty,
 				owner->session().changes().peerUpdates(
 					owner->session().user(),
 					Data::PeerUpdate::Flag::FullInfo) | rpl::to_empty,
@@ -596,17 +616,10 @@ void BuildBusinessSectionContent(
 			) | rpl::on_next(check, content->lifetime());
 
 			AddBusinessSummary(content, controller, state, [=](PremiumFeature feature) {
-				if (!session->premium()) {
-					if (state && state->setPaused) {
-						state->setPaused(true);
-					}
-					const auto hidden = crl::guard(content, [=] {
-						if (state && state->setPaused) {
-							state->setPaused(false);
-						}
-					});
-
-					ShowPremiumPreviewToBuy(controller, feature, hidden);
+				const auto alwaysAvailable
+					= (feature == PremiumFeature::BusinessBots);
+				if (!alwaysAvailable && !session->premium()) {
+					ShowPremiumPreviewToBuy(controller, feature, nullptr);
 					return;
 				} else if (!isReady(feature)) {
 					*waitingToShow = feature;
@@ -719,8 +732,8 @@ void Business::setupSwipeBack() {
 		}
 	};
 
-	auto init = [=](int, Qt::LayoutDirection direction) {
-		return (direction == Qt::RightToLeft)
+	auto init = [=](Ui::Controls::SwipeHandlerInitData data) {
+		return (data.direction == Qt::RightToLeft)
 			? DefaultSwipeBackHandlerFinishData([=] {
 				_showBack.fire({});
 			})
@@ -788,6 +801,7 @@ base::weak_qptr<Ui::RpWidget> Business::createPinnedToTop(
 				.logo = u"dollar"_q,
 				.title = std::move(title),
 				.about = std::move(about),
+				.use3dCoin = true,
 			});
 	}();
 	_state->setPaused = [=](bool paused) {
@@ -796,6 +810,10 @@ base::weak_qptr<Ui::RpWidget> Business::createPinnedToTop(
 			_subscribe->setGlarePaused(paused);
 		}
 	};
+	controller()->boxShownValue(
+	) | rpl::on_next([=](bool shown) {
+		_state->setPaused(shown);
+	}, content->lifetime());
 
 	_wrap.value(
 	) | rpl::on_next([=](Info::Wrap wrap) {
