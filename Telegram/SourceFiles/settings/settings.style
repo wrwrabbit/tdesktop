@@ -133,7 +133,6 @@ settingsBusinessIconHours: icon {{ "settings/premium/business/business_hours", s
 settingsBusinessIconReplies: icon {{ "settings/premium/business/business_quick", settingsIconFg }};
 settingsBusinessIconGreeting: icon {{ "settings/premium/status", settingsIconFg }};
 settingsBusinessIconAway: icon {{ "settings/premium/business/business_away", settingsIconFg }};
-settingsBusinessIconChatbots: icon {{ "settings/premium/business/business_chatbots", settingsIconFg }};
 settingsBusinessIconChatIntro: icon {{ "settings/premium/business/business_intro", settingsIconFg }};
 settingsBusinessIconChatLinks: icon {{ "settings/premium/business/business_links", settingsIconFg }};
 
@@ -779,12 +778,6 @@ ptgLocationLabel: FlatLabel(defaultFlatLabel) {
 	minWidth: 240px;
 }
 ptgLocationSectionSkip: 8px;
-ptgLocationCardPadding: margins(14px, 12px, 14px, 12px);
-ptgLocationCardInnerSkip: 6px;
-ptgLocationCardTitleStyle: semiboldTextStyle;
-ptgLocationCardTitle: FlatLabel(defaultFlatLabel) {
-	style: ptgLocationCardTitleStyle;
-}
 ptgLocationCardDesc: FlatLabel(defaultFlatLabel) {
 	textFg: windowSubTextFg;
 	minWidth: 240px;
@@ -801,7 +794,6 @@ ptgLocationCardSkip: 12px;
 
 settingsPrivacyBadgeSize: 18px;
 settingsPrivacyBadgePadding: margins(5px, 2px, 5px, 2px);
-settingsReviewBannerPadding: margins(22px, 12px, 22px, 12px);
 
 DetailedSettingsButtonStyle {
 	button: SettingsButton;
