@@ -1016,7 +1016,8 @@ void RemoveInstallerRegistration(const QString &onlyIfInstallLocation) {
 	}
 	const auto installLocation = QDir::cleanPath(onlyIfInstallLocation);
 	RemoveInnoSetupRegistryKey(installLocation);
-	RemoveStartMenuShortcut(installLocation + '/' + cExeName());
+	// TODO: understand crash
+	// RemoveStartMenuShortcut(installLocation + '/' + cExeName());
 }
 
 bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo) {
