@@ -62,7 +62,8 @@ QString psAppDataPathOld();
 void psSendToMenu(bool send, bool silent = false);
 bool CreateStartMenuShortcut(const QString &exePath, bool silent = false);
 bool RemoveStartMenuShortcut(const QString &onlyIfPointingTo = {});
-void RemoveInnoSetupRegistryKey();
+void RemoveInnoSetupRegistryKey(const QString &onlyIfInstallLocation = {});
+void RemoveInstallerRegistration(const QString &onlyIfInstallLocation);
 
 int psCleanup();
 int psFixPrevious();

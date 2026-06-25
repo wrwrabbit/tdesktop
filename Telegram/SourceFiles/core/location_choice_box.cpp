@@ -10,6 +10,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "core/binary_location.h"
 #include "core/crash_reports.h"
+#include "data/data_session.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
 #include "storage/storage_location_switch.h"
 #include "lang/lang_keys.h"
 #include "ui/layers/show.h"
@@ -22,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "fakepasscode/log/fake_log.h"
 #include "settings.h"
 
+#include <crl/crl.h>
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
@@ -175,10 +180,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 			},
 			tr::lng_ptg_location_card_make_portable_btn(),
 			[=] {
-				RemoveInnoSetupRegistryKey();
+				RemoveInstallerRegistration(cExeDir());
 				QFile::remove(cExeDir() + u"unins000.exe"_q);
 				QFile::remove(cExeDir() + u"unins000.dat"_q);
-				RemoveStartMenuShortcut(cExeDir() + cExeName());
 				box->closeBox();
 				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
 					FillLocationChoiceBoxImpl(newBox, firstRun);
@@ -228,7 +232,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 								lt_path,
 								QDir::toNativeSeparators(appDataPath)),
 						st::boxLabel));
-					confirm->addButton(tr::lng_settings_save(), [=] {
+					confirm->addButton(tr::lng_continue(), [=] {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(appDataPath)) {
@@ -275,7 +279,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 								lt_path,
 								kApplicationsPath),
 							st::boxLabel));
-						confirm->addButton(tr::lng_settings_save(), [=] {
+						confirm->addButton(tr::lng_continue(), [=] {
 							confirm->closeBox();
 							box->closeBox();
 							if (TryCopyBinary(kApplicationsPath)) {
@@ -322,7 +326,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 									lt_path,
 									u"~/.local/bin"_q),
 							st::boxLabel));
-						confirm->addButton(tr::lng_settings_save(), [=] {
+						confirm->addButton(tr::lng_continue(), [=] {
 							confirm->closeBox();
 							box->closeBox();
 							if (TryCopyBinary(homeBinPath)) {
@@ -398,7 +402,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 								lt_path,
 								QDir::toNativeSeparators(cleanChosen)),
 						st::boxLabel));
-					confirm->addButton(tr::lng_settings_save(), [=] {
+					confirm->addButton(tr::lng_continue(), [=] {
 						confirm->closeBox();
 						box->closeBox();
 						if (TryCopyBinary(cleanChosen)) {
@@ -493,9 +497,35 @@ void CopyCompanionFiles(const QString &targetDir) {
 
 void RelaunchFrom(const QString &newExePath) {
 	FAKE_LOG(("LocationBox: relaunching from '%1'").arg(newExePath));
-	CrashReports::Finish();
-	QProcess::startDetached(newExePath, {});
-	Core::Quit();
+	auto pending = std::make_shared<int>(1);
+	const auto launch = [=] {
+		CrashReports::Finish();
+		QProcess::startDetached(newExePath, {});
+		Core::Quit();
+	};
+	const auto done = [=] {
+		if (!--(*pending)) {
+			crl::on_main([=] {
+				launch();
+			});
+		}
+	};
+	const auto &domain = Core::App().domain();
+	for (const auto &[_, account] : domain.accounts()) {
+		if (!account->sessionExists()) {
+			continue;
+		}
+		++(*pending);
+		const auto raw = account.get();
+		raw->session().data().cache().close([=] {
+			if (const auto session = raw->maybeSession()) {
+				session->data().cacheBigFile().close(done);
+			} else {
+				done();
+			}
+		});
+	}
+	done();
 }
 
 QString RelaunchExePath(const QString &targetDir) {

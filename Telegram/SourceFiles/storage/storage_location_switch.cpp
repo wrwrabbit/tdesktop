@@ -273,6 +273,9 @@ bool ApplyPendingSwitch() {
 			u"unins000.dat"_q,
 #endif
 		};
+#ifdef Q_OS_WIN
+		RemoveInstallerRegistration(cleanSource);
+#endif
 		for (const auto &name : filesToClean) {
 			const auto filePath = cleanSource + '/' + name;
 			if (QFile::exists(filePath)) {
@@ -331,13 +334,6 @@ bool ApplyPendingSwitch() {
 					Logs::b(QDir().rename(sourceTdata, tdataOld))));
 			}
 		}
-
-#ifdef Q_OS_WIN
-		if (QDir::cleanPath(sourceWorkingDir).toLower()
-				== QDir::cleanPath(psAppDataPath()).toLower()) {
-			RemoveStartMenuShortcut(cleanSource + '/' + cExeName());
-		}
-#endif
 	}
 
 	return true;
