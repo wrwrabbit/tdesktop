@@ -183,8 +183,9 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				RemoveInstallerRegistration(cExeDir());
 				QFile::remove(cExeDir() + u"unins000.exe"_q);
 				QFile::remove(cExeDir() + u"unins000.dat"_q);
+				const auto show = box->uiShow();
 				box->closeBox();
-				box->uiShow()->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
+				show->showBox(Box([firstRun](not_null<Ui::GenericBox*> newBox) {
 					FillLocationChoiceBoxImpl(newBox, firstRun);
 				}));
 			});

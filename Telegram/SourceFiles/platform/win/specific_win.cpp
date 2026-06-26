@@ -179,14 +179,6 @@ HICON bigIcon = 0, smallIcon = 0, overlayIcon = 0;
 			return false;
 		}
 	}
-	const auto displayIcon = ReadRegistryStringValue(key, L"DisplayIcon");
-	if (!displayIcon.isEmpty()) {
-		const auto expectedIcon = NormalizeRegistryPath(
-			expectedInstallLocation + '/' + cExeName());
-		if (RegistryCommandTargetPath(displayIcon) != expectedIcon) {
-			return false;
-		}
-	}
 	return true;
 }
 
@@ -213,7 +205,7 @@ void RemoveInnoSetupRegistryKey(
 	if (!RegistryKeyMatchesInstallLocation(key, expectedInstallLocation)) {
 		FAKE_LOG(("Platform: preserving uninstall key '%1' for '%2'").arg(
 			QString::fromStdWString(subkey),
-			onlyIfInstallLocation));
+			expectedInstallLocation));
 		return;
 	}
 	RegCloseKey(key);
