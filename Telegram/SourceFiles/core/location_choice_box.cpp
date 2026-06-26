@@ -214,7 +214,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				tr::lng_ptg_location_card_appdata_pro1(tr::now),
 				tr::lng_ptg_location_card_appdata_pro2(tr::now),
 				tr::lng_ptg_location_card_appdata_pro3(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_appdata_con1(tr::now),
+				u"\u2757 "_q + tr::lng_ptg_location_card_appdata_con1(tr::now),
 			},
 			tr::lng_ptg_location_card_appdata_btn(),
 			[=] {
@@ -267,7 +267,7 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				{
 					tr::lng_ptg_location_card_applications_pro1(tr::now),
 					tr::lng_ptg_location_card_applications_pro2(tr::now),
-					u"\u2212 "_q + tr::lng_ptg_location_card_applications_con1(tr::now),
+					u"\u2757 "_q + tr::lng_ptg_location_card_applications_con1(tr::now),
 				},
 				tr::lng_ptg_location_card_applications_btn(),
 				[=] {
@@ -360,8 +360,8 @@ void FillLocationChoiceBoxImpl(not_null<Ui::GenericBox*> box, bool firstRun) {
 				tr::lng_ptg_location_card_custom_pro1(tr::now),
 				tr::lng_ptg_location_card_custom_pro2(tr::now),
 				tr::lng_ptg_location_card_custom_pro3(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_custom_con1(tr::now),
-				u"\u2212 "_q + tr::lng_ptg_location_card_custom_con2(tr::now),
+				u"\u2757 "_q + tr::lng_ptg_location_card_custom_con1(tr::now),
+				u"\u2757 "_q + tr::lng_ptg_location_card_custom_con2(tr::now),
 			},
 			tr::lng_ptg_location_card_custom_btn(),
 			[=] {
