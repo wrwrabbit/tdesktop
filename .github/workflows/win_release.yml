@@ -84,6 +84,44 @@ jobs:
           echo "Configurate git for cherry-picks."
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
+            
+      - name: Install ATL and MFC build tools
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          if (!(Test-Path $setup)) {
+            throw "Visual Studio installer was not found at: $setup"
+          }
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (!(Test-Path $vswhere)) {
+            throw "vswhere.exe was not found at: $vswhere"
+          }
+
+          $installPath = & $vswhere -latest -products * -property installationPath
+          if (-not $installPath) {
+            throw "Could not detect a Visual Studio installation path."
+          }
+
+          Write-Host "Installing ATL/MFC into: $installPath"
+          $args = @(
+            'modify',
+            '--installPath', $installPath,
+            '--add', 'Microsoft.VisualStudio.Workload.VCTools',
+            '--add', 'Microsoft.VisualStudio.Component.VC.ATLMFC',
+            '--add', 'Microsoft.VisualStudio.Component.VC.ATL',
+            '--add', 'Microsoft.VisualStudio.Component.VC.v143.x86.x64',
+            '--quiet', '--norestart', '--wait'
+          )
+
+          $process = Start-Process -FilePath $setup -ArgumentList $args -Wait -PassThru
+          if (($process.ExitCode -ne 0) -and ($process.ExitCode -ne 3010)) {
+            throw "Visual Studio modify failed with exit code $($process.ExitCode)."
+          }
+
+          Write-Host "ATL and MFC components are installed"
 
       - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
         name: Native Tools Command Prompt.
