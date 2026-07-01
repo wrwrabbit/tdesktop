@@ -116,7 +116,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "core/ui_integration.h"
 #include "export/export_manager.h"
-
 #include "minizip/unzip.h"
 
 #include <QtCore/QFile>
@@ -2051,8 +2050,6 @@ void Filler::addSetPersonalChannel() {
 	}, &st::menuIconProfile);
 }
 
-// --------------- WhatsApp import helpers ---------------
-
 constexpr int kImportPartSize = 512 * 1024;
 
 struct ImportState {
@@ -2061,12 +2058,10 @@ struct ImportState {
 	int64 importId = 0;
 
 	struct Entry { QString name; QByteArray data; };
-	std::vector<Entry> media; // media files to upload after init
+	std::vector<Entry> media;
 	size_t mediaIndex = 0;
 };
 
-// Upload `data` as a new file (name=`name`) via upload.saveFilePart,
-// then invoke `done(MTPInputFile)` or `fail(errorText)`.
 void ImportUploadFile(
 		std::shared_ptr<ImportState> st,
 		const QByteArray &data,
@@ -2089,9 +2084,8 @@ void ImportUploadFile(
 	ctx->total = totalParts;
 	ctx->fileId = fileId;
 	ctx->name = name;
-	ctx->data = &data; // safe: data lives in ImportState entry
+	ctx->data = &data;
 
-	// sendPart is a recursive lambda via shared_ptr<std::function>
 	const auto sendPart = std::make_shared<std::function<void(int)>>();
 	*sendPart = [=](int idx) {
 		const int offset = idx * kImportPartSize;
@@ -2112,7 +2106,7 @@ void ImportUploadFile(
 					MTP_long(ctx->fileId),
 					MTP_int(ctx->total),
 					MTP_string(ctx->name),
-					MTP_string(QString()))); // md5 optional
+					MTP_string(QString())));
 			}
 		}).fail([=](const MTP::Error &err) {
 			fail(u"upload: "_q + err.type());
@@ -2121,7 +2115,6 @@ void ImportUploadFile(
 	(*sendPart)(0);
 }
 
-// Upload the next pending media entry, then recurse; on last one → finalize.
 void ImportUploadNextMedia(
 		std::shared_ptr<ImportState> st,
 		Fn<void()> done,
@@ -2183,7 +2176,6 @@ void ImportUploadNextMedia(
 void StartWhatsAppImport(
 		not_null<PeerData*> peer,
 		const QString &zipPath) {
-	// Read entire ZIP into memory.
 	const auto utf = zipPath.toUtf8();
 	const auto zf = unzOpen(utf.constData());
 	if (!zf) {
@@ -2232,7 +2224,6 @@ void StartWhatsAppImport(
 	st->inputPeer = peer->input();
 	st->media = std::move(media);
 
-	// Keep chatTxt alive inside st.
 	const auto chatTxtEntry = std::make_shared<QByteArray>(std::move(chatTxt));
 
 	Ui::Toast::Show(u"Import: uploading chat text..."_q);
@@ -2251,11 +2242,9 @@ void StartWhatsAppImport(
 			Ui::Toast::Show(
 				u"Import: uploading %1 media file(s)..."_q
 					.arg(st->media.size()));
-			ImportUploadNextMedia(st,
-			/*done=*/[=] {
+			ImportUploadNextMedia(st, [=] {
 				Ui::Toast::Show(u"Import complete!"_q);
-			},
-			/*fail=*/[=](const QString &err) {
+			}, [=](const QString &err) {
 				Ui::Toast::Show(u"Import error: "_q + err);
 			});
 		}).fail([=](const MTP::Error &err) {
@@ -2266,8 +2255,6 @@ void StartWhatsAppImport(
 		Ui::Toast::Show(u"Upload error: "_q + err);
 	});
 }
-
-// --------------- end WhatsApp import helpers ---------------
 
 } // namespace
 
