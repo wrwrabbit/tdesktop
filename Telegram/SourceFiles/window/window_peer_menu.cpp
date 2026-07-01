@@ -113,8 +113,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "dialogs/dialogs_key.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "core/ui_integration.h"
 #include "export/export_manager.h"
+#include "minizip/unzip.h"
+
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include "boxes/peers/edit_participants_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/premium_preview_box.h"
@@ -325,6 +330,7 @@ private:
 	void addDirectMessages();
 	void addToggleTopicClosed();
 	void addExportChat();
+	void addImportChat();
 	void addTranslate();
 	void addReport();
 	void addNewContact();
@@ -957,6 +963,15 @@ void Filler::addDirectMessages() {
 			monoforum,
 			Window::SectionShow::Way::Forward);
 	}, &st::menuIconChatDiscuss);
+}
+
+void Filler::addImportChat() {
+	const auto peer = _peer;
+	const auto navigation = _controller;
+	_addAction(
+		u"Import WhatsApp chat..."_q,
+		[=] { PeerMenuImportChat(navigation, peer); },
+		&st::menuIconExport);
 }
 
 void Filler::addExportChat() {
@@ -1816,6 +1831,7 @@ void Filler::fillHistoryActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addImportChat();
 	addTranslate();
 	addReport();
 	addClearHistory();
@@ -1847,6 +1863,7 @@ void Filler::fillProfileActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addImportChat();
 	addToggleNoForwards();
 	addToggleFolder();
 	addBlockUser();
@@ -2033,6 +2050,212 @@ void Filler::addSetPersonalChannel() {
 	}, &st::menuIconProfile);
 }
 
+constexpr int kImportPartSize = 512 * 1024;
+
+struct ImportState {
+	PeerData* peer = nullptr;
+	MTPInputPeer inputPeer;
+	int64 importId = 0;
+
+	struct Entry { QString name; QByteArray data; };
+	std::vector<Entry> media;
+	size_t mediaIndex = 0;
+};
+
+void ImportUploadFile(
+		std::shared_ptr<ImportState> st,
+		const QByteArray &data,
+		const QString &name,
+		Fn<void(MTPInputFile)> done,
+		Fn<void(QString)> fail) {
+	const auto fileId = base::RandomValue<int64>();
+	const int totalParts = std::max(
+		1,
+		(data.size() + kImportPartSize - 1) / kImportPartSize);
+
+	struct PartCtx {
+		int sent = 0;
+		int total = 0;
+		int64 fileId = 0;
+		QString name;
+		const QByteArray *data = nullptr;
+	};
+	const auto ctx = std::make_shared<PartCtx>();
+	ctx->total = totalParts;
+	ctx->fileId = fileId;
+	ctx->name = name;
+	ctx->data = &data;
+
+	const auto sendPart = std::make_shared<std::function<void(int)>>();
+	*sendPart = [=](int idx) {
+		const int offset = idx * kImportPartSize;
+		const auto chunk = QByteArray::fromRawData(
+			ctx->data->constData() + offset,
+			std::min(kImportPartSize, int(ctx->data->size()) - offset));
+
+		st->peer->session().api().request(MTPupload_SaveFilePart(
+			MTP_long(ctx->fileId),
+			MTP_int(idx),
+			MTP_bytes(chunk)
+		)).done([=](const MTPBool &) {
+			++ctx->sent;
+			if (ctx->sent < ctx->total) {
+				(*sendPart)(idx + 1);
+			} else {
+				done(MTP_inputFile(
+					MTP_long(ctx->fileId),
+					MTP_int(ctx->total),
+					MTP_string(ctx->name),
+					MTP_string(QString())));
+			}
+		}).fail([=](const MTP::Error &err) {
+			fail(u"upload: "_q + err.type());
+		}).toDC(MTP::uploadDcId(0)).send();
+	};
+	(*sendPart)(0);
+}
+
+void ImportUploadNextMedia(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail);
+
+void ImportFinalize(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	st->peer->session().api().request(MTPmessages_StartHistoryImport(
+		st->inputPeer,
+		MTP_long(st->importId)
+	)).done([=](const MTPBool &) {
+		done();
+	}).fail([=](const MTP::Error &err) {
+		fail(u"startHistoryImport: "_q + err.type());
+	}).send();
+}
+
+void ImportUploadNextMedia(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	if (st->mediaIndex >= st->media.size()) {
+		ImportFinalize(st, done, fail);
+		return;
+	}
+	const auto &entry = st->media[st->mediaIndex];
+	const auto name = entry.name;
+	ImportUploadFile(st, entry.data, name,
+	[=](MTPInputFile uploaded) {
+		const auto media = MTP_inputMediaUploadedDocument(
+			MTP_flags(0),
+			uploaded,
+			MTPInputFile(),
+			MTP_string(u"application/octet-stream"_q),
+			MTP_vector<MTPDocumentAttribute>(
+				1,
+				MTP_documentAttributeFilename(MTP_string(name))),
+			MTP_vector<MTPInputDocument>(0),
+			MTPInputPhoto(),
+			MTP_int(0),
+			MTP_int(0));
+
+		st->peer->session().api().request(MTPmessages_UploadImportedMedia(
+			st->inputPeer,
+			MTP_long(st->importId),
+			MTP_string(name),
+			media
+		)).done([=](const MTPMessageMedia &) {
+			++st->mediaIndex;
+			ImportUploadNextMedia(st, done, fail);
+		}).fail([=](const MTP::Error &err) {
+			fail(u"uploadImportedMedia for %1: "_q.arg(name) + err.type());
+		}).send();
+	}, fail);
+}
+
+void StartWhatsAppImport(
+		not_null<PeerData*> peer,
+		const QString &zipPath) {
+	const auto utf = zipPath.toUtf8();
+	const auto zf = unzOpen(utf.constData());
+	if (!zf) {
+		Ui::Toast::Show(u"Cannot open ZIP: "_q + zipPath);
+		return;
+	}
+	const auto closeGuard = gsl::finally([&] { unzClose(zf); });
+
+	QByteArray chatTxt;
+	auto media = std::vector<ImportState::Entry>();
+
+	if (unzGoToFirstFile(zf) != UNZ_OK) {
+		Ui::Toast::Show(u"ZIP is empty"_q);
+		return;
+	}
+	do {
+		char nameBuf[512] = {};
+		unz_file_info fi{};
+		if (unzGetCurrentFileInfo(
+				zf, &fi, nameBuf, sizeof(nameBuf),
+				nullptr, 0, nullptr, 0) != UNZ_OK) {
+			continue;
+		}
+		if (unzOpenCurrentFile(zf) != UNZ_OK) {
+			continue;
+		}
+		QByteArray data(int(fi.uncompressed_size), Qt::Uninitialized);
+		unzReadCurrentFile(zf, data.data(), data.size());
+		unzCloseCurrentFile(zf);
+
+		const auto name = QString::fromUtf8(nameBuf);
+		if (name == u"_chat.txt"_q) {
+			chatTxt = std::move(data);
+		} else {
+			media.push_back({ name, std::move(data) });
+		}
+	} while (unzGoToNextFile(zf) == UNZ_OK);
+
+	if (chatTxt.isEmpty()) {
+		Ui::Toast::Show(u"_chat.txt not found in ZIP"_q);
+		return;
+	}
+
+	const auto st = std::make_shared<ImportState>();
+	st->peer = peer;
+	st->inputPeer = peer->input();
+	st->media = std::move(media);
+
+	const auto chatTxtEntry = std::make_shared<QByteArray>(std::move(chatTxt));
+
+	Ui::Toast::Show(u"Import: uploading chat text..."_q);
+
+	ImportUploadFile(st, *chatTxtEntry, u"_chat.txt"_q,
+	[=](MTPInputFile uploaded) {
+		peer->session().api().request(MTPmessages_InitHistoryImport(
+			st->inputPeer,
+			uploaded,
+			MTP_int(int(st->media.size()))
+		)).done([=](const MTPmessages_HistoryImport &result) {
+			st->importId = result.match(
+				[](const MTPDmessages_historyImport &d) {
+					return d.vid().v;
+				});
+			Ui::Toast::Show(
+				u"Import: uploading %1 media file(s)..."_q
+					.arg(st->media.size()));
+			ImportUploadNextMedia(st, [=] {
+				Ui::Toast::Show(u"Import complete!"_q);
+			}, [=](const QString &err) {
+				Ui::Toast::Show(u"Import error: "_q + err);
+			});
+		}).fail([=](const MTP::Error &err) {
+			Ui::Toast::Show(u"initHistoryImport: "_q + err.type());
+		}).send();
+	},
+	[=](const QString &err) {
+		Ui::Toast::Show(u"Upload error: "_q + err);
+	});
+}
+
 } // namespace
 
 void PeerMenuExportChat(
@@ -2040,6 +2263,24 @@ void PeerMenuExportChat(
 		not_null<PeerData*> peer) {
 	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
 		Core::App().exportManager().start(peer);
+	});
+}
+
+void PeerMenuImportChat(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer) {
+	const auto widget = controller->widget();
+	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
+		FileDialog::GetOpenPath(
+			QPointer<QWidget>(widget),
+			u"Choose WhatsApp ZIP export"_q,
+			u"ZIP files (*.zip)"_q,
+			[=](const FileDialog::OpenResult &result) {
+				if (result.paths.isEmpty()) {
+					return;
+				}
+				StartWhatsAppImport(peer, result.paths.front());
+			});
 	});
 }
 

@@ -80,6 +80,9 @@ void ChooseFormatBox(
 	addFormatOption(
 		tr::lng_export_option_html_and_json(tr::now),
 		Format::HtmlAndJson);
+	addFormatOption(
+		tr::lng_export_option_whatsapp(tr::now),
+		Format::WhatsApp);
 	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
@@ -292,6 +295,7 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
+	addFormatOption(tr::lng_export_option_whatsapp(tr::now), Format::WhatsApp);
 }
 
 void SettingsWidget::addLocationLabel(
@@ -367,6 +371,8 @@ void SettingsWidget::addFormatAndLocationLabel(
 			? "HTML"
 			: (format == Format::Json)
 			? "JSON"
+			: (format == Format::WhatsApp)
+			? tr::lng_export_option_whatsapp(tr::now)
 			: tr::lng_export_option_html_and_json(tr::now);
 		return tr::link(text, u"internal:edit_format"_q);
 	});
