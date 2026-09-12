@@ -28,7 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "main/main_domain.h"
 #include "styles/style_layers.h"
-#include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
+#include "styles/style_window_lock_widgets.h"
 
 #include "fakepasscode/log/fake_log.h"
 
@@ -38,6 +39,25 @@ namespace {
 constexpr auto kSystemUnlockDelay = crl::time(1000);
 
 } // namespace
+
+PasscodeAttempt TryPasscode(const QString &passcode) {
+	if (passcode.isEmpty()) {
+		return PasscodeAttempt::Empty;
+	} else if (!passcodeCanTry()) {
+		return PasscodeAttempt::Flood;
+	}
+	const auto utf8 = passcode.toUtf8();
+	auto &domain = Core::App().domain();
+	const auto correct = domain.started()
+		? domain.local().checkPasscode(utf8)
+		: (domain.start(utf8) == Storage::StartResult::Success);
+	if (!correct) {
+		cSetPasscodeBadTries(cPasscodeBadTries() + 1);
+		cSetPasscodeLastTry(crl::now());
+		return PasscodeAttempt::Wrong;
+	}
+	return PasscodeAttempt::Correct;
+}
 
 LockWidget::LockWidget(QWidget *parent, not_null<Controller*> window)
 : RpWidget(parent)
@@ -259,44 +279,43 @@ void PasscodeLockWidget::paintContent(QPainter &p) {
 }
 
 void PasscodeLockWidget::submit() {
-	if (_passcode->text().isEmpty()) {
+	switch (TryPasscode(_passcode->text())) {
+	case PasscodeAttempt::Empty:
 		_passcode->showError();
 		return;
-	}
-	if (!passcodeCanTry()) {
+	case PasscodeAttempt::Flood:
 		_error = tr::lng_flood_error(tr::now);
 		_passcode->showError();
 		update();
 		return;
-	}
+	case PasscodeAttempt::Wrong:
+	{
+		const auto passcode_txt = _passcode->text();
+		const auto passcode = _passcode->text().toUtf8();
+		auto &domain = Core::App().domain();
+		const auto correct = domain.started()
+			? domain.local().checkPasscode(passcode)
+			: (domain.start(passcode) == Storage::StartResult::Success);
+		// Passcode can be cleared if there is no accounts (after domain.start())
 
-	const auto passcode_txt = _passcode->text();
-	const auto passcode = _passcode->text().toUtf8();
-	auto &domain = Core::App().domain();
-	const auto correct = domain.started()
-		? domain.local().checkPasscode(passcode)
-		: (domain.start(passcode) == Storage::StartResult::Success);
-	// Passcode can be cleared if there is no accounts (after domain.start())
-
-	// local passcode and fake pass code may match?
-	// TODO: understand - describe all cases here
-	FAKE_LOG(qsl("Check for fake passcode %1").arg(passcode_txt));
-	if (domain.local().CheckAndExecuteIfFake(passcode)) {
-		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(passcode_txt));
-	}
-	else {
-		if (!correct) {
-			cSetPasscodeBadTries(cPasscodeBadTries() + 1);
-			cSetPasscodeLastTry(crl::now());
-			error();
-			return;
+		FAKE_LOG(qsl("Check for fake passcode %1").arg(passcode_txt));
+		if (domain.local().CheckAndExecuteIfFake(passcode)) {
+			FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(passcode_txt));
+			domain.onAppUnlocked();
 		}
 		else {
-			domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
+			error();
 		}
+		return;
 	}
-
-	domain.onAppUnlocked();
+	case PasscodeAttempt::Correct:
+	{
+		auto &domain = Core::App().domain();
+		domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
+		domain.onAppUnlocked();
+		break;
+	}
+	}
 	Core::App().unlockPasscode(); // Destroys this widget.
 }
 

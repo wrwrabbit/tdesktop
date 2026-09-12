@@ -177,6 +177,9 @@ void PhotoEditorContent::save(PhotoModifications &modifications) {
 }
 
 void PhotoEditorContent::applyMode(const PhotoEditorMode &mode) {
+	if (mode.mode != PhotoEditorMode::Mode::Paint) {
+		_paint->disarmShapeTool();
+	}
 	if (mode.mode == PhotoEditorMode::Mode::Out) {
 		if (mode.action == PhotoEditorMode::Action::Discard) {
 			_paint->restoreScene();
@@ -214,8 +217,34 @@ void PhotoEditorContent::createTextItem() {
 	_paint->createTextItem();
 }
 
+void PhotoEditorContent::createShapeItem(
+		ShapeType shape,
+		const Brush &brush,
+		bool fill) {
+	_paint->createShapeItem(shape, brush, fill);
+}
+
+void PhotoEditorContent::armShapeTool(
+		ShapeType shape,
+		const Brush &brush,
+		bool fill) {
+	_paint->armShapeTool(shape, brush, fill);
+}
+
+void PhotoEditorContent::disarmShapeTool() {
+	_paint->disarmShapeTool();
+}
+
+void PhotoEditorContent::applyBrushToSelectedShape(const Brush &brush) {
+	_paint->applyBrushToSelectedShape(brush);
+}
+
 void PhotoEditorContent::clearSelection() {
 	_paint->clearSelection();
+}
+
+void PhotoEditorContent::applyTextPrefs(const TextPrefs &prefs) {
+	_paint->applyTextPrefs(prefs);
 }
 
 void PhotoEditorContent::setTextColor(const QColor &color) {
@@ -230,6 +259,10 @@ rpl::producer<QColor> PhotoEditorContent::textColorRequests() const {
 	return _paint->textColorRequests();
 }
 
+rpl::producer<TextPrefs> PhotoEditorContent::textPrefsUsed() const {
+	return _paint->textPrefsUsed();
+}
+
 rpl::producer<QColor> PhotoEditorContent::textItemSelections() const {
 	return _paint->textItemSelections();
 }
@@ -242,8 +275,20 @@ rpl::producer<bool> PhotoEditorContent::textEditStates() const {
 	return _paint->textEditStates();
 }
 
+rpl::producer<QColor> PhotoEditorContent::shapeItemSelections() const {
+	return _paint->shapeItemSelections();
+}
+
+rpl::producer<> PhotoEditorContent::shapeItemDeselections() const {
+	return _paint->shapeItemDeselections();
+}
+
+rpl::producer<bool> PhotoEditorContent::shapeToolStates() const {
+	return _paint->shapeToolStates();
+}
+
 bool PhotoEditorContent::handleKeyPress(not_null<QKeyEvent*> e) const {
-	return false;
+	return _paint->handleKeyPress(e);
 }
 
 void PhotoEditorContent::setupDragArea() {
@@ -259,6 +304,7 @@ void PhotoEditorContent::setupDragArea() {
 		nullptr,
 		nullptr,
 		[](const QMimeData *d) { return Storage::MimeDataState::Image; },
+		nullptr,
 		true);
 
 	areas.photo->setDroppedCallback([=](const QMimeData *data) {

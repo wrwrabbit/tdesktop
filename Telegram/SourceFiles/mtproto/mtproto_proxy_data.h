@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <QtNetwork/QNetworkProxy>
+
 namespace MTP {
 
 struct ProxyData {
@@ -20,6 +22,7 @@ struct ProxyData {
 		Socks5,
 		Http,
 		Mtproto,
+		Web,
 	};
 	enum class Status {
 		Valid,
@@ -51,6 +54,8 @@ struct ProxyData {
 
 };
 
+[[nodiscard]] QString NormalizeWebProxyHost(const QString &value);
+[[nodiscard]] QString WebProxyBridgeCapability(const ProxyData &proxy);
 [[nodiscard]] ProxyData ToDirectIpProxy(
 	const ProxyData &proxy,
 	int ipIndex = 0);

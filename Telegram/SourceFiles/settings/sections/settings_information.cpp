@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/box_content_divider.h"
 #include "ui/widgets/menu/menu_add_action_callback_factory.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/controls/button_context_menu.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/new_badges.h"
 #include "ui/text/text_utilities.h"
@@ -49,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_phone_menu.h"
 #include "lang/lang_keys.h"
+#include "menu/menu_mark_as_read.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
 #include "main/main_domain.h"
@@ -65,7 +67,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "base/random.h"
 #include "styles/style_chat.h" // popupMenuExpandedSeparator
-#include "styles/style_dialogs.h" // dialogsPremiumIcon
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "styles/style_menu_icons.h"
@@ -140,7 +141,7 @@ ComposedBadge::ComposedBadge(
 		) | rpl::then(
 			session->data().unreadBadgeChanges()
 		) | rpl::map([=] {
-			auto &owner = session->data();
+			const auto &owner = session->data();
 			return Badge::UnreadBadge{
 				owner.unreadWithMentionsBadge(),
 				owner.unreadWithMentionsBadgeMuted(),
@@ -283,6 +284,7 @@ void SetupPhoto(
 		targets->uploadPhoto = upload;
 	}
 
+	upload->setVideoAllowed(true);
 	upload->chosenImages(
 	) | rpl::on_next([=](Ui::UserpicButton::ChosenImage &&chosen) {
 		auto &image = chosen.image;
@@ -292,9 +294,10 @@ void SetupPhoto(
 		self->session().api().peerPhoto().upload(
 			self,
 			{
-				std::move(image),
-				chosen.markup.documentId,
-				chosen.markup.colors,
+				.image = std::move(image),
+				.markupDocumentId = chosen.markup.documentId,
+				.markupColors = chosen.markup.colors,
+				.video = std::move(chosen.video),
 			});
 		if (!isMarkup) {
 			photo->showUploadProgress();
@@ -867,7 +870,6 @@ void SetupAccountsWrap(
 
 		Ui::RpWidget userpic;
 		Ui::PeerUserpicView view;
-		base::unique_qptr<Ui::PopupMenu> menu;
 	};
 	const auto state = raw->lifetime().make_state<State>(raw);
 
@@ -908,22 +910,15 @@ void SetupAccountsWrap(
 	) | rpl::on_next([=](Qt::MouseButton which) {
 		if (which == Qt::LeftButton) {
 			callback(raw->clickModifiers());
-			return;
 		} else if (which == Qt::MiddleButton) {
 			callback(Qt::ControlModifier);
-			return;
-		} else if (which != Qt::RightButton) {
-			return;
 		}
-		if (state->menu) {
-			return;
-		}
+	}, raw->lifetime());
+
+	Ui::SetupButtonContextMenu(raw, &st::popupMenuExpandedSeparator, [=](
+			not_null<Ui::PopupMenu*> menu) {
 		const auto isActive = session == &window->session();
-		state->menu = base::make_unique_q<Ui::PopupMenu>(
-			raw,
-			st::popupMenuExpandedSeparator);
-		const auto addAction = Ui::Menu::CreateAddActionCallback(
-			state->menu);
+		const auto addAction = Ui::Menu::CreateAddActionCallback(menu);
 		if (!isActive) {
 			addAction(tr::lng_context_new_window(tr::now), [=] {
 				Ui::PreventDelayedActivation();
@@ -943,7 +938,7 @@ void SetupAccountsWrap(
 					callback({});
 				}, &st::menuIconProfile);
 			}
-			Window::MenuAddMarkAsReadAllChatsAction(
+			MarkAsReadMenu::AddAllChatsAction(
 				session,
 				window->uiShow(),
 				addAction);
@@ -971,8 +966,7 @@ void SetupAccountsWrap(
 				.isAttention = true,
 			});
 		}
-		state->menu->popup(QCursor::pos());
-	}, raw->lifetime());
+	});
 
 	return result;
 }
@@ -1072,6 +1066,7 @@ not_null<Ui::SlideWrap<Ui::SettingsButton>*> AccountsList::setupAdd() {
 			domain.addActivated(environment, true);
 		} else {
 			_controller->window().preventOrInvoke([=] {
+				Core::App().setActivePrimaryWindow(&_controller->window());
 				_controller->session().domain().addActivated(environment);
 			});
 		}

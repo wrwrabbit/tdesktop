@@ -387,7 +387,7 @@ void StickersListFooter::enumerateIcons(
 	const auto emojiId = AllEmojiSectionSetId();
 	const auto right = width();
 	for (auto i = 0, count = int(_icons.size()); i != count; ++i) {
-		auto &icon = _icons[i];
+		const auto &icon = _icons[i];
 		const auto width = (icon.setId == emojiId)
 			? _subiconsWidthAnimation.value(_subiconsExpanded
 				? _subiconsWidth
@@ -1227,6 +1227,7 @@ void StickersListFooter::validateIconWebmAnimation(
 		const StickerIcon &icon) {
 	icon.ensureMediaCreated();
 	if (icon.webm
+		|| icon.webm.isBad()
 		|| !icon.sticker
 		|| !HasWebmThumbnail(
 			icon.set ? icon.set->thumbnailType() : StickerType(),
