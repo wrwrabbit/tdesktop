@@ -4,10 +4,6 @@ on:
   push:
     branches:
       - master
-    # Pushes to the canary branches run only canary.yml, see there.
-    branches-ignore:
-      - public-canary
-      - private-canary
     paths-ignore:
       - 'docs/**'
       - '**.md'
