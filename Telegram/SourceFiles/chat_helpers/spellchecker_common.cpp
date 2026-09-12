@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "spellcheck/spellcheck_value.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "core/version.h"
 
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -393,7 +394,10 @@ MTP::DedicatedLoader::Location GetDownloadLocation(int id) {
 	if (i == end(DictionariesList)) {
 		return MTP::DedicatedLoader::Location{};
 	}
-	return MTP::DedicatedLoader::Location{ i->channel, i->postId };
+	return MTP::DedicatedLoader::Location{
+		.username = i->channel,
+		.postId = i->postId,
+	};
 }
 
 QString DictPathByLangId(int langId) {
@@ -556,6 +560,11 @@ void Start(not_null<Main::Session*> session) {
 		onEnabled(settings->spellcheckerEnabled());
 	});
 
+	// The custom dictionary of user-added words is stored here on every
+	// platform, including those using the system spellchecker, so the
+	// working dir must be set before the early return below.
+	Spellchecker::SetWorkingDirPath(DictionariesPath());
+
 	if (Platform::Spellchecker::IsSystemSpellchecker()) {
 		Spellchecker::SupportedScriptsChanged()
 		| rpl::take(1)
@@ -566,8 +575,6 @@ void Start(not_null<Main::Session*> session) {
 
 	Spellchecker::SupportedScriptsChanged(
 	) | rpl::on_next(AddExceptions, lifetime);
-
-	Spellchecker::SetWorkingDirPath(DictionariesPath());
 
 	settings->dictionariesEnabledChanges(
 	) | rpl::on_next([](auto dictionaries) {

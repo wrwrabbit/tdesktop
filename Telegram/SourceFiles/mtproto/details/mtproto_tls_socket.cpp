@@ -24,6 +24,7 @@ constexpr auto kMaxGrease = 8;
 constexpr auto kClientHelloLimit = 2048;
 constexpr auto kHelloDigestLength = 32;
 constexpr auto kLengthSize = sizeof(uint16);
+constexpr auto kMaxServerHelloLength = 65536;
 const auto kServerHelloPart1 = qstr("\x16\x03\x03");
 const auto kServerHelloPart3 = qstr("\x14\x03\x03\x00\x01\x01\x17\x03\x03");
 constexpr auto kServerHelloDigestPosition = 11;
@@ -164,8 +165,8 @@ using BigNumContext = openssl::Context;
 		}
 		StartPermutationElement(); {
 			S(""
-				"\x00\x0d\x00\x12\x00\x10\x04\x03\x08\x04\x04\x01\x05\x03"
-				"\x08\x05\x05\x01\x08\x06\x06\x01"_q);
+				"\x00\x0d\x00\x18\x00\x16\x09\x04\x09\x05\x09\x06\x04\x03"
+				"\x08\x04\x04\x01\x05\x03\x08\x05\x05\x01\x08\x06\x06\x01"_q);
 		}
 		StartPermutationElement(); {
 			S(""
@@ -210,7 +211,7 @@ using BigNumContext = openssl::Context;
 			S("\x00\x00\x01\x00\x01"_q);
 			R(1);
 			S("\x00\x20"_q);
-			R(32);
+			K();
 			OpenScope();
 			E();
 			CloseScope();
@@ -246,7 +247,7 @@ using BigNumContext = openssl::Context;
 }
 
 [[nodiscard]] bytes::vector GeneratePublicKey() {
-	const auto context = EVP_PKEY_CTX_new_id(NID_ED25519, nullptr);
+	const auto context = EVP_PKEY_CTX_new_id(NID_X25519, nullptr);
 	if (!context) {
 		return {};
 	}
@@ -711,6 +712,11 @@ void TlsSocket::checkHelloParts12(int parts1Size) {
 		+ part2Size
 		+ kServerHelloPart3.size()
 		+ kLengthSize;
+	if (parts123Size > kMaxServerHelloLength) {
+		logError(888, "Bad Server Hello size.");
+		handleError();
+		return;
+	}
 	if (_serverHelloLength == parts1Size) {
 		const auto part1Offset = parts1Size
 			- kLengthSize
@@ -735,6 +741,11 @@ void TlsSocket::checkHelloParts34(int parts123Size) {
 		parts123Size);
 	const auto part4Size = ReadPartLength(data, parts123Size - kLengthSize);
 	const auto full = parts123Size + part4Size;
+	if (full > kMaxServerHelloLength) {
+		logError(888, "Bad Server Hello size.");
+		handleError();
+		return;
+	}
 	if (_serverHelloLength == parts123Size) {
 		const auto part3Offset = parts123Size
 			- kLengthSize
@@ -754,6 +765,11 @@ void TlsSocket::checkHelloParts34(int parts123Size) {
 }
 
 void TlsSocket::checkHelloDigest() {
+	if (_serverHelloLength < kServerHelloDigestPosition + kHelloDigestLength) {
+		logError(888, "Bad Server Hello size.");
+		handleError();
+		return;
+	}
 	const auto fulldata = bytes::make_detached_span(_incoming).subspan(
 		0,
 		kHelloDigestLength + _serverHelloLength);

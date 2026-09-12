@@ -9,17 +9,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "ui/style/style_core_palette.h"
 #include "styles/style_layers.h"
-#include "styles/style_menu_icons.h"
 #include "styles/style_payments.h"
 
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 
-#ifdef Q_OS_LINUX
+#if !defined Q_OS_WIN && !defined Q_OS_MAC
 
 namespace Ui::BotWebView::LinuxShell {
 namespace {
+
+constexpr auto kShellOriginCheck =
+	"window.location.protocol === 'https:'"
+	" && window.location.hostname === 'web.telegram.org'"
+	" && (!window.location.port || window.location.port === '443')";
 
 [[nodiscard]] QByteArray JsonValue(QJsonValue value) {
 	auto array = QJsonArray();
@@ -69,8 +73,9 @@ QByteArray InstallScript(const QString &shellToken) {
 		JsonValue(shellToken));
 
 	auto script = QByteArray();
-	script += "if (window === window.top"
-		" && !window.TelegramDesktopShell"
+	script += "if (window === window.top && ";
+	script += kShellOriginCheck;
+	script += " && !window.TelegramDesktopShell"
 		" && !window.TelegramDesktopShellInstalling) {"
 		"window.TelegramDesktopShellInstalling = true;"
 		"try {"
@@ -115,8 +120,10 @@ QByteArray MethodCallScript(
 	const auto payload = JsonObject(data);
 	const auto token = JsonValue(shellToken);
 	auto script = QByteArray();
-	script.reserve(method.size() * 2 + payload.size() + token.size() + 98);
-	script += "if (window.TelegramDesktopShell"
+	script.reserve(method.size() * 2 + payload.size() + token.size() + 256);
+	script += "if (window === window.top && ";
+	script += kShellOriginCheck;
+	script += " && window.TelegramDesktopShell"
 		" && window.TelegramDesktopShell.";
 	script += method;
 	script += ") { window.TelegramDesktopShell.";
@@ -137,7 +144,9 @@ QByteArray EventScript(
 	const auto payload = JsonObject(data);
 	const auto token = JsonValue(shellToken);
 	auto script = QByteArray();
-	script += "if (window.TelegramDesktopShell) {"
+	script += "if (window === window.top && ";
+	script += kShellOriginCheck;
+	script += " && window.TelegramDesktopShell) {"
 		"window.TelegramDesktopShell.nativeEvent(";
 	script += eventValue;
 	script += ", ";
@@ -221,4 +230,4 @@ QJsonObject ColorPayload(const ResolvedColors &colors) {
 
 } // namespace Ui::BotWebView::LinuxShell
 
-#endif // Q_OS_LINUX
+#endif // !Q_OS_WIN && !Q_OS_MAC
