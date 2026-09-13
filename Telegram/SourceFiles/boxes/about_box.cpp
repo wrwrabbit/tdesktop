@@ -197,6 +197,8 @@ namespace {
 	return result;
 }
 
+} // namespace
+
 QString currentPTelegramVersionText() {
     auto result = QString::fromLatin1(PTelegramAppVersionStr);
     if (PTelegramAppBetaVersion) {
@@ -211,8 +213,6 @@ QString currentPTelegramVersionText() {
     }
     return result;
 }
-
-} // namespace
 
 QString currentVersionText() {
 	return CurrentVersionText(true);

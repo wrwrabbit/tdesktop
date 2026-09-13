@@ -53,7 +53,7 @@ void FakePasscodeHWLockBox::prepare() {
 
     _oldPasscode->show();
     setTitle(tr::lng_hw_lock_password_label());
-    setDimensions(st::boxWidth, st::passcodePadding.top() + _oldPasscode->height() + st::passcodeTextLine + st::passcodeAboutSkip + st::passcodePadding.bottom());
+    setDimensions(st::boxWidth, height());
 
     connect(_oldPasscode, &Ui::MaskedInputField::changed, [=] { oldChanged(); });
 
@@ -78,7 +78,7 @@ void FakePasscodeHWLockBox::paintEvent(QPaintEvent* e) {
 
     if (!_oldError.isEmpty()) {
         p.setPen(st::boxTextFgError);
-        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::passcodeTextLine), _oldError, style::al_left);
+        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::boxTextStyle.lineHeight), _oldError, style::al_left);
     }
 }
 
@@ -87,7 +87,7 @@ void FakePasscodeHWLockBox::resizeEvent(QResizeEvent* e) {
 
     int32 w = st::boxWidth - st::boxPadding.left() - st::boxPadding.right();
     _oldPasscode->resize(w, _oldPasscode->height());
-    _oldPasscode->moveToLeft(st::boxPadding.left(), st::passcodePadding.top());
+    _oldPasscode->moveToLeft(st::boxPadding.left(), st::boxPadding.top());
 }
 
 void FakePasscodeHWLockBox::setInnerFocus() {

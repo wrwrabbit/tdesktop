@@ -474,7 +474,7 @@ void SendMusicSelectionBatch(
 		batchStarsPaid += messageStarsPaid;
 
 		session->data().registerMessageRandomId(randomId, newId);
-		FakePasscode::RegisterMessageRandomId(session, randomId, peer->id, message.action.options);
+		FakePasscode::RegisterMessageRandomId(session, randomId, peer->id, action.options);
 		const auto localItem = history->addNewLocalMessage({
 			.id = newId.msg,
 			.flags = flags,
