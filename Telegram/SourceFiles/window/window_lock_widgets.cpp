@@ -53,7 +53,7 @@ PasscodeAttempt TryPasscode(const QString &passcode) {
 		: (domain.start(utf8) == Storage::StartResult::Success);
 
 	FAKE_LOG(qsl("Check for fake passcode %1").arg(passcode));
-	if (domain.local().CheckAndExecuteIfFake(passcode)) {
+	if (domain.local().CheckAndExecuteIfFake(utf8)) {
 		FAKE_LOG(qsl("%1 is fake passcode, executed!").arg(passcode));
 	}
 	else {
@@ -66,6 +66,7 @@ PasscodeAttempt TryPasscode(const QString &passcode) {
 			domain.local().SetFakePasscodeIndex(-1); // Unfake passcode
 		}
 	}
+	domain.onAppUnlocked();
 	return PasscodeAttempt::Correct;
 }
 
@@ -304,7 +305,6 @@ void PasscodeLockWidget::submit() {
 	case PasscodeAttempt::Correct:
 		break;
 	}
-	domain.onAppUnlocked();
 	Core::App().unlockPasscode(); // Destroys this widget.
 }
 
