@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/weak_ptr.h"
 #include "ui/cached_round_corners.h"
 #include "ui/chat/message_bubble.h"
 #include "ui/chat/chat_style_radius.h"
@@ -79,6 +80,7 @@ struct MessageStyle {
 	style::icon historySentIcon = { Qt::Uninitialized };
 	style::icon historyReceivedIcon = { Qt::Uninitialized };
 	style::icon historyPsaIcon = { Qt::Uninitialized };
+	style::icon historyEphemeralIcon = { Qt::Uninitialized };
 	style::icon historyCommentsOpen = { Qt::Uninitialized };
 	style::icon historyComments = { Qt::Uninitialized };
 	style::icon historyCallArrow = { Qt::Uninitialized };
@@ -326,7 +328,9 @@ struct ColorIndexValues {
 [[nodiscard]] std::vector<Text::SpecialColor> SyntaxHighlightColors(
 	not_null<const style::palette*> palette);
 
-class ChatStyle final : public style::palette {
+class ChatStyle final
+	: public style::palette
+	, public base::has_weak_ptr {
 public:
 	explicit ChatStyle(rpl::producer<ColorIndicesCompressed> colorIndices);
 	explicit ChatStyle(not_null<const style::palette*> isolated);
@@ -354,6 +358,10 @@ public:
 	template <typename Type>
 	[[nodiscard]] Type value(const Type &original) const {
 		auto my = Type();
+		// The result belongs to the caller and we know nothing about how
+		// long it lives, so its icons must not be tracked for reset.
+		_collectOwnedIcons = false;
+		const auto guard = gsl::finally([&] { _collectOwnedIcons = true; });
 		make(my, original);
 		return my;
 	}
@@ -363,7 +371,24 @@ public:
 			rpl::lifetime &parentLifetime,
 			const Type &original) const {
 		const auto my = parentLifetime.make_state<Type>();
+		const auto from = _ownedIcons.size();
 		make(*my, original);
+		if (_ownedIcons.size() != from) {
+			// These live in the caller's lifetime, not ours, so they have
+			// to leave _ownedIcons when it ends - otherwise the next
+			// assignPalette() resets through freed icons.
+			auto added = std::vector<not_null<style::icon*>>(
+				_ownedIcons.begin() + from,
+				_ownedIcons.end());
+			parentLifetime.add([
+				weak = base::make_weak(this),
+				added = std::move(added)
+			] {
+				if (const auto strong = weak.get()) {
+					strong->forgetOwnedIcons(added);
+				}
+			});
+		}
 		return *my;
 	}
 
@@ -449,6 +474,9 @@ public:
 	}
 	[[nodiscard]] const style::icon &historySilentInvertedIcon() const {
 		return _historySilentInvertedIcon;
+	}
+	[[nodiscard]] const style::icon &historyEphemeralInvertedIcon() const {
+		return _historyEphemeralInvertedIcon;
 	}
 	[[nodiscard]] const style::icon &historySendingIcon() const {
 		return _historySendingIcon;
@@ -588,17 +616,38 @@ private:
 		style::MarkdownDetails &my,
 		const style::MarkdownDetails &original) const;
 	void make(
+		style::MarkdownEmbedPost &my,
+		const style::MarkdownEmbedPost &original) const;
+	void make(
+		style::MarkdownPlaceholder &my,
+		const style::MarkdownPlaceholder &original) const;
+	void make(
 		style::MarkdownPhoto &my,
 		const style::MarkdownPhoto &original) const;
 	void make(
 		style::MarkdownAudio &my,
 		const style::MarkdownAudio &original) const;
 	void make(
+		style::MarkdownChannelButton &my,
+		const style::MarkdownChannelButton &original) const;
+	void make(
+		style::MarkdownChannel &my,
+		const style::MarkdownChannel &original) const;
+	void make(
+		style::MarkdownRelatedArticle &my,
+		const style::MarkdownRelatedArticle &original) const;
+	void make(
 		style::MarkdownGroupedMedia &my,
 		const style::MarkdownGroupedMedia &original) const;
 	void make(
 		style::MarkdownFailure &my,
 		const style::MarkdownFailure &original) const;
+	void make(
+		style::MarkdownButtonRow &my,
+		const style::MarkdownButtonRow &original) const;
+	void make(
+		style::MarkdownInlineButton &my,
+		const style::MarkdownInlineButton &original) const;
 	void make(style::Markdown &my, const style::Markdown &original) const;
 	void make(
 		style::TwoIconButton &my,
@@ -675,6 +724,7 @@ private:
 	style::icon _historyViewsSendingInvertedIcon = { Qt::Uninitialized };
 	style::icon _historyPinInvertedIcon = { Qt::Uninitialized };
 	style::icon _historySilentInvertedIcon = { Qt::Uninitialized };
+	style::icon _historyEphemeralInvertedIcon = { Qt::Uninitialized };
 	style::icon _historySendingIcon = { Qt::Uninitialized };
 	style::icon _historySendingInvertedIcon = { Qt::Uninitialized };
 	style::icon _historySentInvertedIcon = { Qt::Uninitialized };
@@ -706,6 +756,15 @@ private:
 	rpl::event_stream<> _paletteChanged;
 
 	rpl::lifetime _defaultPaletteChangeLifetime;
+	void forgetOwnedIcons(
+		const std::vector<not_null<style::icon*>> &icons) const;
+
+	// Every icon this palette copy owns, collected by make(): they are
+	// withPalette() copies of it, so assignPalette() resets exactly these
+	// instead of every icon in the process.
+	mutable std::vector<not_null<style::icon*>> _ownedIcons;
+	mutable bool _collectOwnedIcons = true;
+
 	rpl::lifetime _colorIndicesLifetime;
 
 };

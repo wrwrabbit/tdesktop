@@ -307,6 +307,9 @@ public:
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
 
+	[[nodiscard]] ChannelId linkedCommunityId() const;
+	void setLinkedCommunityId(ChannelId id);
+
 	[[nodiscard]] UserId botManagerId() const;
 	void setBotManagerId(UserId managerId);
 
@@ -357,6 +360,7 @@ private:
 
 	ChannelId _personalChannelId = 0;
 	MsgId _personalChannelMessageId = 0;
+	ChannelId _linkedCommunityId = 0;
 	UserId _botManagerId = 0;
 
 	uint64 _accessHash = 0;

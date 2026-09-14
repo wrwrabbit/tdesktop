@@ -1341,7 +1341,7 @@ void Instance::Private::exportDone(
 		return;
 	}
 
-	auto &data = result.c_auth_exportedAuthorization();
+	const auto &data = result.c_auth_exportedAuthorization();
 	_instance->send(MTPauth_ImportAuthorization(
 		data.vid(),
 		data.vbytes()

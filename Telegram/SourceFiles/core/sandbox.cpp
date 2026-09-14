@@ -48,8 +48,10 @@ base::options::toggle OptionDeadlockDetector({
 	.id = kOptionDeadlockDetector,
 	.name = "Deadlock Detector",
 	.description = "Check once every 30 seconds that main thread is still responsive.",
-	.restartRequired = true,
 });
+
+constexpr auto kCleanupIpcTimeout = 10 * crl::time(1000);
+constexpr auto kCleanupQuitTimeout = 30 * crl::time(1000);
 
 } // namespace
 
@@ -67,17 +69,24 @@ Sandbox::Sandbox(int &argc, char **argv)
 }
 
 int Sandbox::start() {
-	if (!Core::UpdaterDisabled()) {
-		_updateChecker = std::make_unique<Core::UpdateChecker>();
-	}
-	_verifyUpdater = std::make_unique<PTG::VerifyUpdater>();
-
 	{
 		const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
 		char h[33] = { 0 };
 		hashMd5Hex(d.constData(), d.size(), h);
 		_localServerName = Platform::SingleInstanceLocalServerName(h);
 	}
+
+	if (cLaunchMode() == LaunchModeCleanup) {
+		const auto result = stopRunningInstance();
+		psCleanup();
+		closeApplication();
+		return result;
+	}
+
+	if (!Core::UpdaterDisabled()) {
+		_updateChecker = std::make_unique<Core::UpdateChecker>();
+	}
+	_verifyUpdater = std::make_unique<PTG::VerifyUpdater>();
 
 	{
 		const auto d = QFile::encodeName(cExeDir() + cExeName());
@@ -174,6 +183,48 @@ int Sandbox::start() {
 	return exec();
 }
 
+int Sandbox::stopRunningInstance() {
+	LOG(("Cleanup: connecting to %1...").arg(_localServerName));
+	_localSocket.connectToServer(_localServerName);
+	if (!_localSocket.waitForConnected(int(kCleanupIpcTimeout))) {
+		if (_localSocket.error() == QLocalSocket::ServerNotFoundError) {
+			LOG(("Cleanup: no running instance found."));
+			return 0;
+		}
+		LOG(("Cleanup: connect error %1.").arg(_localSocket.error()));
+		return 1;
+	}
+	_localSocket.write("CMD:quit;");
+	if (!_localSocket.waitForBytesWritten(int(kCleanupIpcTimeout))) {
+		LOG(("Cleanup: could not send the quit command."));
+		return 1;
+	}
+	auto response = QByteArray();
+	const auto deadline = crl::now() + kCleanupIpcTimeout;
+	while (!response.contains(';')) {
+		const auto timeout = deadline - crl::now();
+		if (timeout <= 0 || !_localSocket.waitForReadyRead(int(timeout))) {
+			LOG(("Cleanup: no response to the quit command."));
+			return 1;
+		}
+		response.append(_localSocket.readAll());
+	}
+	const auto match = QRegularExpression(u"RES:(\\d+)_(\\d+);"_q).match(
+		QString::fromLatin1(response));
+	if (!match.hasMatch()) {
+		LOG(("Cleanup: bad response to the quit command."));
+		return 1;
+	}
+	const auto processId = match.capturedView(1).toULongLong();
+	LOG(("Cleanup: waiting for process %1 to quit...").arg(processId));
+	if (!Platform::WaitForProcessExit(processId, kCleanupQuitTimeout)) {
+		LOG(("Cleanup: the process did not quit in time."));
+		return 1;
+	}
+	LOG(("Cleanup: the running instance quit."));
+	return 0;
+}
+
 void Sandbox::NotifySystemShuttingDown() {
 	SystemShuttingDown = true;
 }
@@ -202,10 +253,18 @@ void Sandbox::launchApplication() {
 		}
 		setupScreenScale();
 
-		if (OptionDeadlockDetector.value()) {
+		rpl::single(
+			rpl::empty
+		) | rpl::then(
+			OptionDeadlockDetector.changes()
+		) | rpl::on_next([=] {
 			using DeadlockDetector::PingThread;
-			_deadlockDetector = std::make_unique<PingThread>(this);
-		}
+			// The test agent always wants a stuck main thread to crash with a
+			// report instead of hanging silently, so force it on for -testagent.
+			_deadlockDetector = (OptionDeadlockDetector.value() || cTestAgent())
+				? std::make_unique<PingThread>(this)
+				: nullptr;
+		}, _lifetime);
 
 		_application = std::make_unique<Application>();
 
@@ -263,6 +322,14 @@ void Sandbox::setupScreenScale() {
 }
 
 Sandbox::~Sandbox() {
+	// When WM_ENDSESSION deferred closeApplication() to a main-loop
+	// tick that never came, the Application is still alive here and
+	// would be destroyed by member teardown at base nesting level,
+	// where Ui::PostponeCall bookkeeping is not allowed. Destroy it
+	// inside enter-from-event-loop instead, like a normal quit does.
+	customEnterFromEventLoop([&] {
+		closeApplication();
+	});
 #ifdef Q_OS_MAC
 	Platform::DestroyGlobalMenu();
 #endif // Q_OS_MAC
@@ -539,7 +606,8 @@ void Sandbox::checkForEmptyLoopNestingLevel() {
 	// after. That means we already have exited the nesting loop and
 	// there must not be any postponed calls with that nesting level.
 	if (_loopNestingLevel == _eventNestingLevel) {
-		Assert(_postponedCalls.empty()
+		Assert(_postponedCallsDeferred
+			|| _postponedCalls.empty()
 			|| _postponedCalls.back().loopNestingLevel < _loopNestingLevel);
 		Assert(!_previousLoopNestingLevels.empty());
 
@@ -587,17 +655,9 @@ void Sandbox::registerEnterFromEventLoop() {
 	}
 }
 
-bool Sandbox::notifyOrInvoke(QObject *receiver, QEvent *e) {
-	if (e->type() == base::InvokeQueuedEvent::Type()) {
-		static_cast<base::InvokeQueuedEvent*>(e)->invoke();
-		return true;
-	}
-	return QApplication::notify(receiver, e);
-}
-
 bool Sandbox::notify(QObject *receiver, QEvent *e) {
 	if (QThread::currentThreadId() != _mainThreadId) {
-		return notifyOrInvoke(receiver, e);
+		return QApplication::notify(receiver, e);
 	}
 
 	const auto wrap = createEventNestingLevel();
@@ -608,10 +668,13 @@ bool Sandbox::notify(QObject *receiver, QEvent *e) {
 			return true;
 		}
 	}
-	return notifyOrInvoke(receiver, e);
+	return QApplication::notify(receiver, e);
 }
 
 void Sandbox::processPostponedCalls(int level) {
+	if (_postponedCallsDeferred) {
+		return;
+	}
 	while (!_postponedCalls.empty()) {
 		auto &last = _postponedCalls.back();
 		if (last.loopNestingLevel != level) {
@@ -621,6 +684,32 @@ void Sandbox::processPostponedCalls(int level) {
 		_postponedCalls.pop_back();
 		taken.callable();
 	}
+}
+
+void Sandbox::drainPostponedCalls() {
+	Expects(QThread::currentThreadId() == _mainThreadId);
+
+	if (!cTestAgent()) {
+		return;
+	}
+	const auto wasDeferred = std::exchange(_postponedCallsDeferred, true);
+	const auto guard = gsl::finally([&] {
+		_postponedCallsDeferred = wasDeferred;
+	});
+	while (!_postponedCalls.empty()) {
+		auto taken = std::move(_postponedCalls.back());
+		_postponedCalls.pop_back();
+		taken.callable();
+	}
+}
+
+void Sandbox::setPostponedCallsDeferred(bool deferred) {
+	Expects(QThread::currentThreadId() == _mainThreadId);
+
+	if (!cTestAgent()) {
+		return;
+	}
+	_postponedCallsDeferred = deferred;
 }
 
 bool Sandbox::nativeEventFilter(

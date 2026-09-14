@@ -96,9 +96,9 @@ static ChooseTimeoutBoxDescriptor ChooseTimeoutBox(
     box->setTitle(std::move(args.title));
     box->setWidth(st::boxWidth);
 
-    const auto content = box->addRow(object_ptr<FixedHeightWidget>(box, st::scheduleHeight));
+    const auto content = box->addRow(object_ptr<FixedHeightWidget>(box, st::scheduleDateField.heightMin));
     auto style = box->lifetime().make_state<style::InputField>(*args.style.dateFieldStyle);
-    style->width = st::scheduleTimeWidth/2;
+    style->width = st::scheduleDateField.width/2;
     const auto state = box->lifetime().make_state<State>(State{
         .labelHours = CreateChild<FlatLabel>(
             content,
@@ -162,17 +162,17 @@ static ChooseTimeoutBoxDescriptor ChooseTimeoutBox(
                 - state->minutes->width()
                 - state->seconds->width();
             int left = paddings / 2;
-            state->labelHours->moveToLeft(left, st::scheduleDateTop, width);
+            state->labelHours->moveToLeft(left, 0, width);
             left += state->labelHours->width();
-            state->hours->moveToLeft(left, st::scheduleDateTop, width);
+            state->hours->moveToLeft(left, 0, width);
             left += state->hours->width();
-            state->labelMinutes->moveToLeft(left, st::scheduleDateTop, width);
+            state->labelMinutes->moveToLeft(left, 0, width);
             left += state->labelMinutes->width();
-            state->minutes->moveToLeft(left, st::scheduleDateTop, width);
-            left += state->hours->width();
-            state->labelSecond->moveToLeft(left, st::scheduleDateTop, width);
+            state->minutes->moveToLeft(left, 0, width);
+            left += state->minutes->width();
+            state->labelSecond->moveToLeft(left, 0, width);
             left += state->labelSecond->width();
-            state->seconds->moveToLeft(left, st::scheduleDateTop, width);
+            state->seconds->moveToLeft(left, 0, width);
         }, content->lifetime());
 
     const auto collect = [=]() -> std::optional<TimeId> {

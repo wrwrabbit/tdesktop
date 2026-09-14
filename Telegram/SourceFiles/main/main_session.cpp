@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "storage/storage_facade.h"
 #include "data/components/credits.h"
+#include "data/components/ephemeral_messages.h"
 #include "data/components/factchecks.h"
 #include "data/components/gift_auctions.h"
 #include "data/components/location_pickers.h"
@@ -43,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/components/scheduled_messages.h"
 #include "data/components/sponsored_messages.h"
 #include "data/components/top_peers.h"
+#include "data/components/welcome_messages.h"
 #include "settings/settings_faq_suggestions.h"
 #include "settings/settings_privacy_security_helpers.h"
 #include "settings/settings_recent_searches.h"
@@ -122,6 +124,8 @@ Session::Session(
 , _recentSharedGifts(std::make_unique<Data::RecentSharedMediaGifts>(this))
 , _giftAuctions(std::make_unique<Data::GiftAuctions>(this))
 , _scheduledMessages(std::make_unique<Data::ScheduledMessages>(this))
+, _welcomeMessages(std::make_unique<Data::WelcomeMessages>(this))
+, _ephemeralMessages(std::make_unique<Data::EphemeralMessages>(this))
 , _sponsoredMessages(std::make_unique<Data::SponsoredMessages>(this))
 , _topPeers(std::make_unique<Data::TopPeers>(this, Data::TopPeerType::Chat))
 , _topBotApps(
@@ -285,6 +289,10 @@ void Session::appConfigRefreshed() {
 		u"premium_purchase_blocked"_q,
 		true);
 #endif // OS_MAC_STORE
+
+	_messagePrimaryEditedDate = config.get<bool>(
+		u"message_primary_edited_date"_q,
+		false);
 }
 
 void Session::setTmpPassword(const QByteArray &password, TimeId validUntil) {
