@@ -24,6 +24,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
 #include "fakepasscode/log/fake_log.h"
 FakePasscodeBox::FakePasscodeBox(
         QWidget*,
@@ -82,16 +83,16 @@ void FakePasscodeBox::prepare() {
     if (onlyCheck) {
         _oldPasscode->show();
         setTitle(tr::lng_remove_fakepasscode());
-        setDimensions(st::boxWidth, height());
+        setDimensions(st::boxWidth, st::passcodePadding.top() + _oldPasscode->height() + st::passcodeTextLine + st::passcodeAboutSkip + _aboutHeight + st::passcodePadding.bottom());
     } else {
         if (currentlyHave()) {
             _oldPasscode->show();
             setTitle(tr::lng_fakepasscode_change());
-            setDimensions(st::boxWidth, height());
+            setDimensions(st::boxWidth, st::passcodePadding.top() + _oldPasscode->height() + st::passcodeTextLine + _newPasscode->height() + st::passcodeLittleSkip + _reenterPasscode->height() + st::passcodeLittleSkip + _passwordName->height() + st::passcodeSkip + st::passcodeAboutSkip + _aboutHeight + st::passcodePadding.bottom());
         } else {
             _oldPasscode->hide();
             setTitle(tr::lng_fakepasscode_create());
-            setDimensions(st::boxWidth, height());
+            setDimensions(st::boxWidth, st::passcodePadding.top() + _newPasscode->height() + st::passcodeLittleSkip + _reenterPasscode->height() + st::passcodeLittleSkip + _passwordName->height() + st::passcodeSkip + st::passcodeAboutSkip + _aboutHeight + st::passcodePadding.bottom());
         }
     }
 
