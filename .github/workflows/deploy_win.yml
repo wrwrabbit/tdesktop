@@ -2,14 +2,29 @@ name: Public Release - Windows
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
   workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner type'
+        required: true
+        default: 'windows-latest'
+        type: choice
+        options:
+          - windows-latest
+          - depot-windows-latest-16
 
 jobs:
 
   deps:
     environment: Release
     name: Libraries
-    runs-on: windows-latest
+#    runs-on: windows-latest
+#    runs-on: depot-windows-latest-16
+    runs-on: ${{ github.event.inputs.runner}}
 
     strategy:
       matrix:
@@ -105,12 +120,13 @@ jobs:
       matrix:
         include:
           - arch: "x64"
-            runner: "windows-latest"
+#            runner: "windows-latest"
             #runner: "t-desktop"
           - arch: "x64_x86"
-            runner: "windows-latest"
+#            runner: "windows-latest"
 
-    runs-on: ${{ matrix.runner }}
+#    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ github.event.inputs.runner}}
 
     env:
       UPLOAD_ARTIFACT: "true"
