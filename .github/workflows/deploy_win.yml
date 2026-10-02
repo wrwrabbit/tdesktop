@@ -28,7 +28,9 @@ jobs:
 
     strategy:
       matrix:
-        arch: [x64_x86, x64]
+#        arch: [x64_x86, x64]
+# debug only
+        arch: [x64]
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -53,7 +55,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -65,11 +67,16 @@ jobs:
           SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
           echo "SDK=$SDK" >> $GITHUB_ENV
 
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
           echo "Configurate git for cherry-picks."
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
 
       - name: Install Visual Studio Build Tools
+        if: 0
         shell: pwsh
         run: |
           Write-Host "Installing VS 2026 Build Tools..."
@@ -90,117 +97,44 @@ jobs:
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
+      - name: ThirdParty cache.
+        id: cache-third-party
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+
       - name: Libraries cache.
-        id: cache
-        uses: actions/cache@v5
+        id: cache-libs
+        uses: actions/cache@v6
         with:
           path: |
-              ${{ env.TBUILD }}\Libraries
-              ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ matrix.arch }}-${{ github.sha }}
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
+
+      - name: Qt cache.
+        id: cache-qt
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-
 
       - name: Libraries.
         run: |
           %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent
 
       - name: Free up some disk space.
-        run: |
-          cd %TBUILD%
-          del /S Libraries\*.pdb
-          del /S Libraries\*.pch
-          del /S Libraries\*.obj
-
-  build:
-    needs: deps
-    environment: Release
-    name: Build
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: "x64"
-#            runner: "windows-latest"
-            #runner: "t-desktop"
-          - arch: "x64_x86"
-#            runner: "windows-latest"
-
-#    runs-on: ${{ matrix.runner }}
-    runs-on: ${{ github.event.inputs.runner}}
-
-    env:
-      UPLOAD_ARTIFACT: "true"
-      ONLY_CACHE: "false"
-      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
-      PreferredToolArchitecture: "x64"
-
-    defaults:
-      run:
-        shell: cmd
-
-    steps:
-      - name: Prepare directories.
-        run: |
-          mkdir %userprofile%\TBuild\Libraries
-          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
-          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
-          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
-
-      - name: Get repository name.
         shell: bash
-        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
-
-      - name: Clone.
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
-
-      - name: Detect SDK
-        shell: bash
-        run: |
-          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
-          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
-          echo "SDK=$SDK" >> $GITHUB_ENV
-
-      - name: Install Visual Studio Build Tools
-        shell: pwsh
-        run: |
-          Write-Host "Installing VS 2026 Build Tools..."
-          choco install visualstudio2026buildtools `
-            --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL --add Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64 --add Microsoft.VisualStudio.Component.VC.14.44.17.14.CLI.Support --includeRecommended --quiet" `
-            -y --ignore-package-exit-codes=3010
-          Write-Host "VS 2026 Build Tools installation completed"
-
-      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
-        name: Native Tools Command Prompt.
-        with:
-          arch: ${{ matrix.arch }}
-          sdk: ${{ env.SDK }}
-          toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
-
-      - name: Set up environment paths.
-        shell: bash
-        run: |
-          echo "Configurate git for cherry-picks."
-          git config --global user.email "you@example.com"
-          git config --global user.name "Sample"
-
-      - name: NuGet sources.
-        run: |
-          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
-          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
-
-      - name: Libraries cache.
-        id: cache
-        uses: actions/cache@v5
-        with:
-          path: |
-              ${{ env.TBUILD }}\Libraries
-              ${{ env.TBUILD }}\ThirdParty
-          key: cache-${{ matrix.arch }}-${{ github.sha }}
-          restore-keys: cache-${{ matrix.arch }}-${{ github.sha }}
-          fail-on-cache-miss: true
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Read configuration matrix.
         shell: bash
@@ -218,6 +152,7 @@ jobs:
           fi
 
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
@@ -231,7 +166,7 @@ jobs:
           python3 release_build.py ${{ matrix.arch }}
 
       - name: Move artifact.
-        if: (env.UPLOAD_ARTIFACT == 'true') || ${{ github.ref == 'refs/heads/nightly' }}
+        if: (env.UPLOAD_ARTIFACT == 'true')
         run: |
           mkdir artifact
           mkdir symbols
