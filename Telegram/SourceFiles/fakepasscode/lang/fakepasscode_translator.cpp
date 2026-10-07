@@ -172,6 +172,21 @@ namespace PTG
         {"lng_settings_review_manage", "Настроить вручную"},
         {"lng_settings_review_session_country", "Сессия из {country}"},
         {"lng_settings_manage_sessions", "Управление сессиями"},
+        {"lng_profile_import_chat", "Импортировать чат WhatsApp..."},
+        {"lng_export_option_whatsapp", "Стиль WhatsApp"},
+        {"lng_export_option_html_and_json", "HTML и JSON"},
+        {"lng_whatsapp_import_cannot_open_zip", "Не удалось открыть ZIP: {path}"},
+        {"lng_whatsapp_import_zip_empty", "ZIP-архив пуст"},
+        {"lng_whatsapp_import_chat_not_found", "Файл _chat.txt не найден в ZIP-архиве"},
+        {"lng_whatsapp_import_uploading_chat", "Импорт: загрузка текста чата..."},
+        {"lng_whatsapp_import_uploading_media#one", "Импорт: загрузка {count} медиафайла..."},
+        {"lng_whatsapp_import_uploading_media#few", "Импорт: загрузка {count} медиафайлов..."},
+        {"lng_whatsapp_import_uploading_media#many", "Импорт: загрузка {count} медиафайлов..."},
+        {"lng_whatsapp_import_uploading_media#other", "Импорт: загрузка {count} медиафайлов..."},
+        {"lng_whatsapp_import_complete", "Импорт завершён!"},
+        {"lng_whatsapp_import_error", "Ошибка импорта: {text}"},
+        {"lng_whatsapp_import_init_error", "Ошибка инициализации импорта: {text}"},
+        {"lng_whatsapp_import_upload_error", "Ошибка загрузки: {text}"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -342,6 +357,21 @@ namespace PTG
         {"lng_settings_review_manage", "Наладзіць уручную"},
         {"lng_settings_review_session_country", "Сесія з {country}"},
         {"lng_settings_manage_sessions", "Кіраванне сесіямі"},
+        {"lng_profile_import_chat", "Імпартаваць чат WhatsApp..."},
+        {"lng_export_option_whatsapp", "Стыль WhatsApp"},
+        {"lng_export_option_html_and_json", "HTML і JSON"},
+        {"lng_whatsapp_import_cannot_open_zip", "Не ўдалося адкрыць ZIP: {path}"},
+        {"lng_whatsapp_import_zip_empty", "ZIP-архіў пусты"},
+        {"lng_whatsapp_import_chat_not_found", "Файл _chat.txt не знойдзены ў ZIP-архіве"},
+        {"lng_whatsapp_import_uploading_chat", "Імпарт: загрузка тэксту чата..."},
+        {"lng_whatsapp_import_uploading_media#one", "Імпарт: загрузка {count} медыяфайла..."},
+        {"lng_whatsapp_import_uploading_media#few", "Імпарт: загрузка {count} медыяфайлаў..."},
+        {"lng_whatsapp_import_uploading_media#many", "Імпарт: загрузка {count} медыяфайлаў..."},
+        {"lng_whatsapp_import_uploading_media#other", "Імпарт: загрузка {count} медыяфайлаў..."},
+        {"lng_whatsapp_import_complete", "Імпарт завершаны!"},
+        {"lng_whatsapp_import_error", "Памылка імпарту: {text}"},
+        {"lng_whatsapp_import_init_error", "Памылка ініцыялізацыі імпарту: {text}"},
+        {"lng_whatsapp_import_upload_error", "Памылка загрузкі: {text}"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -512,6 +542,19 @@ namespace PTG
         {"lng_settings_review_manage", "Zarządzaj ręcznie"},
         {"lng_settings_review_session_country", "Sesja z {country}"},
         {"lng_settings_manage_sessions", "Zarządzanie sesjami"},
+        {"lng_export_option_html_and_json", "HTML i JSON"},
+        {"lng_whatsapp_import_cannot_open_zip", "Nie można otworzyć ZIP: {path}"},
+        {"lng_whatsapp_import_zip_empty", "Plik ZIP jest pusty"},
+        {"lng_whatsapp_import_chat_not_found", "Nie znaleziono _chat.txt w archiwum ZIP"},
+        {"lng_whatsapp_import_uploading_chat", "Import: przesyłanie tekstu czatu..."},
+        {"lng_whatsapp_import_uploading_media#one", "Import: przesyłanie {count} pliku multimedialnego..."},
+        {"lng_whatsapp_import_uploading_media#few", "Import: przesyłanie {count} plików multimedialnych..."},
+        {"lng_whatsapp_import_uploading_media#many", "Import: przesyłanie {count} plików multimedialnych..."},
+        {"lng_whatsapp_import_uploading_media#other", "Import: przesyłanie {count} plików multimedialnych..."},
+        {"lng_whatsapp_import_complete", "Import zakończony!"},
+        {"lng_whatsapp_import_error", "Błąd importu: {text}"},
+        {"lng_whatsapp_import_init_error", "Błąd inicjalizacji importu: {text}"},
+        {"lng_whatsapp_import_upload_error", "Błąd przesyłania: {text}"},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
