@@ -34,7 +34,7 @@ void LogoutAction::ExecuteAccountAction(int index, Main::Account* account, const
         }
         break;
     case HideAccountKind::Logout:
-        Core::App().logoutWithChecksAndClear(account);
+        Core::App().logoutWithChecks(account);
         break;
     default:
         break; // nothing for Logout
