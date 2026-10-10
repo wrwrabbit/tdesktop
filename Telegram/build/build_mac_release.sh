@@ -181,7 +181,7 @@ else
   
   create-dmg \
     --volname "Telegram Desktop" \
-    --volicon "./Telegram.app/Contents/Resources/AppIcon.icns" \
+    --volicon "./Telegram.app/Contents/Resources/Icon.icns" \
     --hide-extension "Telegram.app" \
     --icon-size 100 \
     --app-drop-link 400 20 \
