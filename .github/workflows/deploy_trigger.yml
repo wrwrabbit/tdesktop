@@ -8,6 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+      releaseWindowsFree:
+        description: 'Build Windows assets (free)?'
+        type: boolean
+        required: false
+        default: false
       releaseLinux:
         description: 'Build Linux assets?'
         type: boolean
@@ -67,6 +72,25 @@ jobs:
               repo: 'tdesktop',
               workflow_id: 'deploy_win.yml',
               ref: 'master',
+              inputs: {
+                runner: 'depot-windows-latest-16',
+              }
+            });
+
+      - name: Trigger Windows build Free
+        if: github.event.inputs.releaseWindowsFree == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_win.yml',
+              ref: 'master',
+              inputs: {
+                runner: 'windows-latest',
+              }
             });
 
       - name: Trigger Linux build
