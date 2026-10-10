@@ -138,7 +138,7 @@ jobs:
             throw "$atlComponent completed without installing $header."
           }
 
-          - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
+      - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}
