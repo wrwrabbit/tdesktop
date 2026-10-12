@@ -28,9 +28,8 @@ jobs:
 
     strategy:
       matrix:
-#        arch: [x64_x86, x64]
-# debug only
-        arch: [x64]
+        arch: [x64_x86, x64]
+#        arch: [x64]
 
     env:
       UPLOAD_ARTIFACT: "true"
