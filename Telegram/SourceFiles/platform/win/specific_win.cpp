@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtWidgets/QApplication>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QWindow>
+#include <QtCore/QSettings>
 
 #include <Shobjidl.h>
 #include <ShObjIdl_core.h>
@@ -891,44 +892,8 @@ namespace {
 // Result is cached in static variable to avoid repeated registry queries
 [[nodiscard]] QString GetMachineGUID() {
     static const QString kCachedGUID = [] {
-        HKEY hKey = nullptr;
-        LSTATUS status = RegOpenKeyEx(
-            HKEY_LOCAL_MACHINE,
-            L"SOFTWARE\\Microsoft\\Cryptography",
-            0,
-            KEY_READ,
-            &hKey);
-        
-        if (status != ERROR_SUCCESS) {
-            FAKE_LOG(qsl("GetMachineGUID: Failed to open registry key, error: 0x%1")
-                .arg(status, 0, 16));
-            return QString();
-        }
-        
-        auto guard = gsl::finally([&] {
-            if (hKey) RegCloseKey(hKey);
-        });
-        
-        wchar_t guidBuffer[40] = { 0 };
-        DWORD bufferSize = sizeof(guidBuffer);
-        
-        status = RegQueryValueEx(
-            hKey,
-            L"MachineGuid",
-            nullptr,
-            nullptr,
-            (LPBYTE)guidBuffer,
-            &bufferSize);
-        
-        if (status != ERROR_SUCCESS) {
-            FAKE_LOG(qsl("GetMachineGUID: Failed to read MachineGuid, error: 0x%1")
-                .arg(status, 0, 16));
-            return QString();
-        }
-        
-        QString machineGuid = QString::fromWCharArray(guidBuffer);
-        FAKE_LOG(qsl("GetMachineGUID: %1").arg(machineGuid));
-        return machineGuid;
+		QSettings settings("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography", QSettings::Registry64Format);
+		return settings.value("MachineGuid").toString();
     }();
     
     return kCachedGUID;

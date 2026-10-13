@@ -28,6 +28,11 @@ on:
         type: boolean
         required: false
         default: false
+      releaseMacOSFree:
+        description: 'Build MacOS assets (free)?'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   release:
@@ -127,6 +132,19 @@ jobs:
 
       - name: Trigger MacOS build
         if: github.event.inputs.releaseMacOS == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER  }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'deploy_mac_depot.yml',
+              ref: 'master',
+            });
+
+      - name: Trigger MacOS build free
+        if: github.event.inputs.releaseMacOSFree == 'true'
         uses: actions/github-script@v8
         with:
           github-token: ${{ secrets.PAT_TRIGGER  }}

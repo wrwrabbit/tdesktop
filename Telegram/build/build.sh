@@ -550,7 +550,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         if [ "$CP_MAC_SKIPDMG" != "1" ]; then
           create-dmg \
               --volname "Telegram Desktop" \
-              --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
+              --volicon "./$BundleName/Contents/Resources/Icon.icns" \
               --hide-extension "$BundleName" \
               --icon-size 100 \
               --app-drop-link 400 20 \

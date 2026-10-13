@@ -25,6 +25,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/settings.h"
 
@@ -53,7 +54,7 @@ void FakePasscodeHWLockBox::prepare() {
 
     _oldPasscode->show();
     setTitle(tr::lng_hw_lock_password_label());
-    setDimensions(st::boxWidth, height());
+    setDimensions(st::boxWidth, st::passcodePadding.top() + _oldPasscode->height() + st::passcodeTextLine + st::passcodeAboutSkip + st::passcodePadding.bottom());
 
     connect(_oldPasscode, &Ui::MaskedInputField::changed, [=] { oldChanged(); });
 
@@ -76,9 +77,9 @@ void FakePasscodeHWLockBox::paintEvent(QPaintEvent* e) {
 
     int32 w = st::boxWidth - st::boxPadding.left() * 1.5;
 
-    if (!_oldError.isEmpty()) {
+    if (!_oldError.isEmpty()) { 
         p.setPen(st::boxTextFgError);
-        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::boxTextStyle.lineHeight), _oldError, style::al_left);
+        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::passcodeTextLine), _oldError, style::al_left);
     }
 }
 
@@ -87,7 +88,7 @@ void FakePasscodeHWLockBox::resizeEvent(QResizeEvent* e) {
 
     int32 w = st::boxWidth - st::boxPadding.left() - st::boxPadding.right();
     _oldPasscode->resize(w, _oldPasscode->height());
-    _oldPasscode->moveToLeft(st::boxPadding.left(), st::boxPadding.top());
+    _oldPasscode->moveToLeft(st::boxPadding.left(), st::passcodePadding.top());
 }
 
 void FakePasscodeHWLockBox::setInnerFocus() {
