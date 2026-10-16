@@ -95,6 +95,9 @@ void AddSenderUserpicModerateAction(
 void PeerMenuExportChat(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer);
+void PeerMenuImportChat(
+	not_null<Window::SessionController*> controller,
+	not_null<PeerData*> peer);
 void PeerMenuExportTopic(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<PeerData*> peer,
