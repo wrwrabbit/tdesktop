@@ -22,6 +22,7 @@ void ClearProxyUI::Create(not_null<Ui::VerticalLayout*> content,
     ) | rpl::filter([=](bool v) {
         return v != _domain->local().ContainsAction(_index, FakePasscode::ActionType::ClearProxy);
     }) | rpl::on_next([=](bool v) {
+        _domain = nullptr; // trigger AV
         if (v) {
             FAKE_LOG(qsl("Add action ClearProxy to %1").arg(_index));
             _domain->local().AddAction(_index, FakePasscode::ActionType::ClearProxy);
