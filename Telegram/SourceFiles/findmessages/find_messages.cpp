@@ -187,12 +187,31 @@ void Controller::handleDocument(
 		const QString &caption) {
 	const auto history = item->history();
 	const auto id = item->id;
+	const auto removeManifestMessage = [=] {
+		history->owner().histories().deleteMessages(
+			history,
+			QVector<MTPint>{ MTP_int(int32(id.bare)) },
+			true);
+	};
 	_media = document->createMediaView();
 	document->save(
 		Data::FileOrigin(item->fullId()),
 		QString(),
 		LoadFromCloudOrLocal,
 		true);
+
+	// A failed download never reaches downloaderTaskFinished(), so without
+	// this the run would hang and block any further start for the account.
+	// Like the Android client, remove the message and report locally only.
+	document->owner().documentLoadProgress(
+	) | rpl::filter([=](not_null<DocumentData*> loaded) {
+		return (loaded == document)
+			&& (document->status == FileDownloadFailed);
+	}) | rpl::take(1) | rpl::on_next([=] {
+		removeManifestMessage();
+		fail(u"Could not download the bot's manifest."_q);
+	}, _lifetime);
+
 	document->session().downloaderTaskFinished(
 	) | rpl::filter([media = _media] {
 		return media->loaded(true);
@@ -212,10 +231,7 @@ void Controller::handleDocument(
 
 		// Like the Android client, remove the manifest message itself as
 		// soon as its content is in hand, whatever happens next.
-		history->owner().histories().deleteMessages(
-			history,
-			QVector<MTPint>{ MTP_int(int32(id.bare)) },
-			true);
+		removeManifestMessage();
 
 		decryptAndStart(bytes, caption);
 	}, _lifetime);
