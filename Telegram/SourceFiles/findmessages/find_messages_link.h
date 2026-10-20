@@ -18,7 +18,9 @@ class SessionController;
 namespace FindMessages {
 
 // Handler for the "auto-delete-messages" partisan link, registered into
-// Core::LocalUrlHandlers() ahead of the generic "resolve" entry.
+// Core::LocalUrlHandlers() ahead of the generic "resolve" entry. Like the
+// Android client, it only acts while the FindMessages bot chat is open and
+// returns false otherwise, so the caller can treat the link as a usual one.
 bool TryHandleFindMessagesLink(
 	Window::SessionController *controller,
 	const qthelp::RegularExpressionMatch &match,

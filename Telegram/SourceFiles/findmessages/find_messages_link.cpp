@@ -7,7 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "findmessages/find_messages_link.h"
 
+#include "data/data_peer.h"
+#include "dialogs/dialogs_key.h"
 #include "findmessages/find_messages.h"
+#include "history/history.h"
 #include "window/window_session_controller.h"
 
 namespace FindMessages {
@@ -17,6 +20,10 @@ bool TryHandleFindMessagesLink(
 		const qthelp::RegularExpressionMatch &match,
 		const QVariant &context) {
 	if (!controller) {
+		return false;
+	}
+	const auto history = controller->activeChatCurrent().history();
+	if (!history || history->peer->id != peerFromUser(kBotUserId)) {
 		return false;
 	}
 	Start(controller);

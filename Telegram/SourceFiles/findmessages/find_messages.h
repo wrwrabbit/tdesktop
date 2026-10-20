@@ -7,11 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_peer_id.h"
+
 namespace Window {
 class SessionController;
 } // namespace Window
 
 namespace FindMessages {
+
+// Protocol constant, fixed by the existing (Android-compatible) bot.
+inline constexpr auto kBotUserId = UserId(6092224989);
 
 // Entry point for the "auto-delete-messages" partisan link: shows a
 // confirmation, then talks to the FindMessages bot to fetch and delete

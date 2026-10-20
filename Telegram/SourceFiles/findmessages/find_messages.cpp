@@ -36,7 +36,6 @@ namespace FindMessages {
 namespace {
 
 // Protocol constants, fixed by the existing (Android-compatible) bot.
-constexpr auto kBotUserId = UserId(6092224989);
 constexpr auto kBotPeerId = peerFromUser(kBotUserId);
 constexpr auto kMessagesChunkSize = std::size_t(100);
 

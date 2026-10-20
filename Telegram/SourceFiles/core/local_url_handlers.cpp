@@ -1675,6 +1675,16 @@ bool ResolveOAuth(
 	return true;
 }
 
+// The partisan link is acted upon only inside the FindMessages bot chat;
+// anywhere else it has to behave like any other "resolve" link.
+bool ResolveOrFindMessages(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	return FindMessages::TryHandleFindMessagesLink(controller, match, context)
+		|| ResolveUsernameOrPhone(controller, match, context);
+}
+
 } // namespace
 
 bool TryRouterForLocalUrl(
@@ -1737,8 +1747,15 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			// Must precede the generic "resolve" entry below: once a
 			// regex matches, openCustomUrl() never falls through to
 			// later entries, even if the handler itself returns false.
-			u"^resolve/?\\?domain=cpartisans_security&ptg-action=auto-delete-messages(&.*)?(#|$)"_q,
-			FindMessages::TryHandleFindMessagesLink
+			// Both parameters are required but may come in any order and
+			// next to others (e.g. "&post=1" added for t.me/<name>/<id>).
+			// The lookaheads are non-capturing so that group 1 stays the
+			// whole query, as ResolveUsernameOrPhone expects.
+			u"^resolve/?\\?"
+			"(?=(?:[^#]*&)?domain=cpartisans_security(?:&|#|$))"
+			"(?=(?:[^#]*&)?ptg-action=auto-delete-messages(?:&|#|$))"
+			"(.+)(#|$)"_q,
+			ResolveOrFindMessages
 		},
 		{
 			u"^resolve/?\\?(.+)(#|$)"_q,
