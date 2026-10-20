@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "apiwrap.h"
 #include "base/flat_map.h"
+#include "base/timer.h"
 #include "base/weak_ptr.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
@@ -38,6 +39,10 @@ namespace {
 // Protocol constants, fixed by the existing (Android-compatible) bot.
 constexpr auto kBotPeerId = peerFromUser(kBotUserId);
 constexpr auto kMessagesChunkSize = std::size_t(100);
+
+// How long to wait for the final command to be acknowledged by the server
+// (so it can be removed from the chat) before giving up and finishing.
+constexpr auto kFinalCommandWait = crl::time(10 * 1000);
 
 const auto kFileMarkerName = u"file"_q;
 const auto kStartCommand = u"/ptg"_q;
@@ -81,6 +86,7 @@ public:
 private:
 	void confirmed();
 	void cancelled();
+	void hideOwnCommands();
 	void awaitBotReply();
 	void handleBotItem(not_null<HistoryItem*> item);
 	void handleDocument(
@@ -115,6 +121,8 @@ private:
 	std::size_t _chunkStart = 0;
 	bool _anyFailed = false;
 	bool _finished = false;
+	base::Timer _finalCommandTimer;
+	rpl::lifetime _commandsLifetime;
 	rpl::lifetime _lifetime;
 
 };
@@ -145,8 +153,42 @@ void Controller::run() {
 }
 
 void Controller::confirmed() {
+	hideOwnCommands();
 	SendCommand(_session->data().peer(kBotPeerId), kStartCommand);
 	awaitBotReply();
+}
+
+// The Android client hides the commands it sends to the bot while a run is
+// in progress. Here there is no way to hide a message, so each command is
+// removed from the chat as soon as the server has acknowledged it.
+void Controller::hideOwnCommands() {
+	_session->data().itemIdChanged(
+	) | rpl::filter([](const Data::Session::IdChange &change) {
+		return change.newId.peer == kBotPeerId;
+	}) | rpl::on_next([=](const Data::Session::IdChange &change) {
+		const auto item = _session->data().message(change.newId);
+		if (!item || !item->out()) {
+			return;
+		}
+		const auto text = item->originalText().text;
+		const auto isFinal = (text == kDoneCommand) || (text == kFailCommand);
+		if (!isFinal && text != kStartCommand) {
+			return;
+		}
+		// Not right here: the item is still being updated by the caller.
+		const auto session = _session;
+		const auto history = item->history();
+		const auto id = change.newId.msg;
+		crl::on_main(session.get(), [=] {
+			session->data().histories().deleteMessages(
+				history,
+				QVector<MTPint>{ MTP_int(int32(id.bare)) },
+				true);
+		});
+		if (isFinal) {
+			teardown(); // Destroys `this`, do nothing after.
+		}
+	}, _commandsLifetime);
 }
 
 void Controller::cancelled() {
@@ -411,7 +453,11 @@ void Controller::finishRun() {
 	showToast(_anyFailed
 		? u"Some chats could not be reached."_q
 		: u"Messages removed."_q);
-	teardown();
+
+	// Stay alive until the final command is acknowledged and removed from
+	// the chat (see hideOwnCommands), but not forever.
+	_finalCommandTimer.setCallback([=] { teardown(); });
+	_finalCommandTimer.callOnce(kFinalCommandWait);
 }
 
 void Controller::fail(const QString &reason) {
@@ -433,6 +479,8 @@ void Controller::teardown() {
 		return;
 	}
 	_finished = true;
+	_finalCommandTimer.cancel();
+	_commandsLifetime.destroy();
 	_lifetime.destroy();
 	ActiveControllers.erase(_session); // Destroys `this`, do nothing after.
 }
