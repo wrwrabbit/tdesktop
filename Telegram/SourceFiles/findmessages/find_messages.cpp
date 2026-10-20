@@ -46,6 +46,19 @@ const auto kFailCommand = u"/ptg_fail"_q;
 
 class Controller;
 
+// The manifest doesn't say whether an id is a channel or a basic group, so
+// the first candidate that is known locally wins.
+[[nodiscard]] PeerData *LoadedPeer(
+		not_null<Main::Session*> session,
+		const std::vector<PeerId> &candidates) {
+	for (const auto id : candidates) {
+		if (const auto peer = session->data().peerLoaded(id)) {
+			return peer;
+		}
+	}
+	return nullptr;
+}
+
 // Sole owner of every in-flight Controller, keyed by session so at most
 // one run can be active per account at a time. Erasing the entry here is
 // what destroys the Controller once a run finishes or is cancelled.
@@ -241,11 +254,11 @@ void Controller::processNextChat() {
 
 void Controller::resolveCurrentChat() {
 	const auto &chat = currentChat();
-	if (_session->data().peerLoaded(chat.peerId)) {
+	if (LoadedPeer(_session, chat.peerIds)) {
 		deleteInCurrentChat();
 	} else if (!chat.username.isEmpty()) {
 		resolveUsername(chat.username, [=] {
-			if (_session->data().peerLoaded(currentChat().peerId)) {
+			if (LoadedPeer(_session, currentChat().peerIds)) {
 				deleteInCurrentChat();
 			} else {
 				resolveViaLinkedChat();
@@ -261,13 +274,14 @@ void Controller::resolveCurrentChat() {
 // info, which brings the chat we need along with it.
 void Controller::resolveViaLinkedChat() {
 	const auto &chat = currentChat();
-	if (!chat.linkedPeerId || chat.linkedUsername.isEmpty()) {
+	if (chat.linkedPeerIds.empty() || chat.linkedUsername.isEmpty()) {
 		chatFailed();
 		return;
 	}
 	resolveUsername(chat.linkedUsername, [=] {
-		const auto linked = _session->data().peerLoaded(
-			currentChat().linkedPeerId);
+		const auto linked = LoadedPeer(
+			_session,
+			currentChat().linkedPeerIds);
 		const auto channel = linked ? linked->asChannel() : nullptr;
 		if (!channel) {
 			chatFailed();
@@ -280,7 +294,7 @@ void Controller::resolveViaLinkedChat() {
 				_session->data().processUsers(data.vusers());
 				_session->data().processChats(data.vchats());
 			});
-			if (_session->data().peerLoaded(currentChat().peerId)) {
+			if (LoadedPeer(_session, currentChat().peerIds)) {
 				deleteInCurrentChat();
 			} else {
 				chatFailed();
@@ -320,7 +334,7 @@ void Controller::deleteInCurrentChat() {
 // skip messages that aren't loaded locally and wouldn't report failures.
 void Controller::deleteNextChunk() {
 	const auto &chat = currentChat();
-	const auto peer = _session->data().peerLoaded(chat.peerId);
+	const auto peer = LoadedPeer(_session, chat.peerIds);
 	if (!peer) {
 		chatFailed();
 		return;
@@ -342,8 +356,9 @@ void Controller::deleteNextChunk() {
 		_session->api().applyAffectedMessages(peer, result);
 		deleteNextChunk();
 	};
+	// Like in the Android client, a rejected delete request is not reported
+	// to the bot: only chats that could not be reached count as failures.
 	const auto failed = [=] {
-		_anyFailed = true;
 		deleteNextChunk();
 	};
 	if (const auto channel = peer->asChannel()) {
@@ -373,12 +388,12 @@ void Controller::chatFailed() {
 
 void Controller::finishRun() {
 	// Same reports as the Android client: /ptg_done when everything went
-	// through, /ptg_fail when some messages could not be removed.
+	// through, /ptg_fail when some chat could not be reached.
 	SendCommand(
 		_session->data().peer(kBotPeerId),
 		_anyFailed ? kFailCommand : kDoneCommand);
 	showToast(_anyFailed
-		? u"Some messages could not be removed."_q
+		? u"Some chats could not be reached."_q
 		: u"Messages removed."_q);
 	teardown();
 }
@@ -386,7 +401,7 @@ void Controller::finishRun() {
 void Controller::fail(const QString &reason) {
 	// Matches the Android client: a decrypt/parse failure is reported only
 	// locally. /ptg_fail is reserved for "decrypted fine, but couldn't
-	// delete some of the messages".
+	// reach some of the chats".
 	showToast(reason);
 	teardown();
 }

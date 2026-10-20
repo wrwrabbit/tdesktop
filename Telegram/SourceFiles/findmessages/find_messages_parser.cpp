@@ -26,11 +26,19 @@ constexpr auto kChannelIdOffset = int64(1'000'000'000'000);
 
 } // namespace
 
-PeerId PeerIdFromBotApiChatId(int64 rawId) {
+std::vector<PeerId> PeerIdCandidatesFromChatId(int64 rawId) {
 	const auto magnitude = std::abs(rawId);
-	return (magnitude >= kChannelIdOffset)
-		? peerFromChannel(ChannelId(BareId(magnitude - kChannelIdOffset)))
-		: peerFromChat(ChatId(BareId(magnitude)));
+	if (!magnitude) {
+		return {};
+	} else if (magnitude >= kChannelIdOffset) {
+		return {
+			peerFromChannel(ChannelId(BareId(magnitude - kChannelIdOffset))),
+		};
+	}
+	return {
+		peerFromChannel(ChannelId(BareId(magnitude))),
+		peerFromChat(ChatId(BareId(magnitude))),
+	};
 }
 
 std::optional<std::vector<ChatToClean>> ParseManifest(
@@ -56,12 +64,13 @@ std::optional<std::vector<ChatToClean>> ParseManifest(
 		auto chat = ChatToClean();
 		// QJsonDocument stores numbers as double; safe here since real
 		// chat-id magnitudes stay far below 2^53.
-		chat.peerId = PeerIdFromBotApiChatId(int64(chatIdValue.toDouble()));
+		chat.peerIds = PeerIdCandidatesFromChatId(
+			int64(chatIdValue.toDouble()));
 		chat.username = StringOrEmpty(object, u"chat_username"_q);
 
 		const auto linkedIdValue = object.value(u"linked_chat_id"_q);
 		if (linkedIdValue.isDouble()) {
-			chat.linkedPeerId = PeerIdFromBotApiChatId(
+			chat.linkedPeerIds = PeerIdCandidatesFromChatId(
 				int64(linkedIdValue.toDouble()));
 		}
 		chat.linkedUsername = StringOrEmpty(object, u"linked_chat_username"_q);
@@ -75,7 +84,7 @@ std::optional<std::vector<ChatToClean>> ParseManifest(
 			chat.messageIds.push_back(MsgId(int64(id.toDouble())));
 		}
 
-		if (!chat.peerId || chat.messageIds.empty()) {
+		if (chat.peerIds.empty() || chat.messageIds.empty()) {
 			continue;
 		}
 		result.push_back(std::move(chat));

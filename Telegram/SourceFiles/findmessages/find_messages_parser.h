@@ -15,17 +15,19 @@ namespace FindMessages {
 // A single chat mentioned in the bot's manifest: messages to delete there,
 // plus enough info to resolve the chat if it isn't loaded locally yet.
 struct ChatToClean {
-	PeerId peerId = 0;
+	std::vector<PeerId> peerIds;
 	QString username;
-	PeerId linkedPeerId = 0;
+	std::vector<PeerId> linkedPeerIds;
 	QString linkedUsername;
 	std::vector<MsgId> messageIds;
 };
 
-// The bot encodes chat ids using the classic Bot API convention:
-// supergroups/channels as -100<id>, basic groups as -<id>. Only the
-// magnitude matters for recovering the real bare id.
-[[nodiscard]] PeerId PeerIdFromBotApiChatId(int64 rawId);
+// The bot sends bare chat ids with no type information (Android just
+// negates them to get its dialog id), so a single id can stand for either
+// a channel or a basic group. Candidates come in the order they should be
+// tried: channel first, as the bot works with public chats. An id carrying
+// the Bot API "-100" prefix is unambiguously a channel.
+[[nodiscard]] std::vector<PeerId> PeerIdCandidatesFromChatId(int64 rawId);
 
 [[nodiscard]] std::optional<std::vector<ChatToClean>> ParseManifest(
 	const QByteArray &json);
