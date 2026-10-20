@@ -55,24 +55,22 @@ std::optional<QByteArray> DecryptManifest(
 		AES_DECRYPT);
 
 	// Same two steps as the Android client. Its Java cipher strips standard
-	// PKCS7 padding inside doFinal(); raw AES_cbc_encrypt() does not, so do
-	// it here when the padding is valid. Then the real payload ends at the
-	// first zero byte (small manifests are zero-padded to a fixed size).
+	// PKCS7 padding inside doFinal() and throws on invalid padding (which is
+	// what a wrong key looks like); raw AES_cbc_encrypt() does neither, so do
+	// both here. Then the real payload ends at the first zero byte (small
+	// manifests are zero-padded to a fixed size).
 	const auto raw = reinterpret_cast<const uchar*>(plain.data());
 	auto size = int(plain.size());
 	const auto padLength = int(raw[size - 1]);
-	if (padLength >= 1 && padLength <= kAesBlockSize && padLength <= size) {
-		auto valid = true;
-		for (auto i = 0; i != padLength; ++i) {
-			if (raw[size - 1 - i] != padLength) {
-				valid = false;
-				break;
-			}
-		}
-		if (valid) {
-			size -= padLength;
+	if (padLength < 1 || padLength > kAesBlockSize || padLength > size) {
+		return std::nullopt;
+	}
+	for (auto i = 0; i != padLength; ++i) {
+		if (raw[size - 1 - i] != padLength) {
+			return std::nullopt;
 		}
 	}
+	size -= padLength;
 	const auto zero = std::find(raw, raw + size, uchar(0));
 	return QByteArray(reinterpret_cast<const char*>(raw), int(zero - raw));
 }

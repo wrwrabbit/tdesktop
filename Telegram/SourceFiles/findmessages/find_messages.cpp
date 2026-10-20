@@ -198,6 +198,7 @@ void Controller::run() {
 			close();
 			cancelled();
 		},
+		.confirmText = tr::lng_continue(),
 		.title = tr::lng_ptg_find_messages_title(),
 	}));
 }
