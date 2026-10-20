@@ -130,7 +130,7 @@ public:
 private:
 	void confirmed();
 	void cancelled();
-	void hideOwnCommands();
+	void hideCommands();
 	void awaitBotReply();
 	void handleBotItem(not_null<HistoryItem*> item);
 	void handleDocument(
@@ -200,41 +200,53 @@ void Controller::run() {
 
 void Controller::confirmed() {
 	showProgress();
-	hideOwnCommands();
+	hideCommands();
 	SendCommand(_session->data().peer(kBotPeerId), kStartCommand);
 	awaitBotReply();
 }
 
-// The Android client hides the commands it sends to the bot while a run is
-// in progress. Here there is no way to hide a message, so each command is
-// removed from the chat as soon as the server has acknowledged it.
-void Controller::hideOwnCommands() {
+// Like the Android client, hide every "/command" message in the bot chat
+// while a run is in progress, without touching the server: the message is
+// only dropped from the local history. Our own commands go once the server
+// has acknowledged them (a message that is still being sent can't be
+// dropped), the bot's ones as soon as they arrive. A message with media is
+// never hidden, it may be the manifest.
+void Controller::hideCommands() {
+	const auto hide = [session = _session](FullMsgId id) {
+		// Not right here: the item is still being updated by the caller.
+		crl::on_main(session.get(), [=] {
+			if (const auto item = session->data().message(id)) {
+				item->destroy();
+			}
+		});
+	};
+	const auto isCommand = [](not_null<HistoryItem*> item) {
+		return !item->media() && item->originalText().text.startsWith('/');
+	};
+
 	_session->data().itemIdChanged(
 	) | rpl::filter([](const Data::Session::IdChange &change) {
 		return change.newId.peer == kBotPeerId;
 	}) | rpl::on_next([=](const Data::Session::IdChange &change) {
 		const auto item = _session->data().message(change.newId);
-		if (!item || !item->out()) {
+		if (!item || !item->out() || !isCommand(item)) {
 			return;
 		}
 		const auto text = item->originalText().text;
 		const auto isFinal = (text == kDoneCommand) || (text == kFailCommand);
-		if (!isFinal && text != kStartCommand) {
-			return;
-		}
-		// Not right here: the item is still being updated by the caller.
-		const auto session = _session;
-		const auto history = item->history();
-		const auto id = change.newId.msg;
-		crl::on_main(session.get(), [=] {
-			session->data().histories().deleteMessages(
-				history,
-				QVector<MTPint>{ MTP_int(int32(id.bare)) },
-				true);
-		});
+		hide(change.newId);
 		if (isFinal) {
 			teardown(); // Destroys `this`, do nothing after.
 		}
+	}, _commandsLifetime);
+
+	_session->data().newItemAdded(
+	) | rpl::filter([=](not_null<HistoryItem*> item) {
+		return (item->history()->peer->id == kBotPeerId)
+			&& !item->out()
+			&& isCommand(item);
+	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		hide(item->fullId());
 	}, _commandsLifetime);
 }
 
@@ -502,7 +514,7 @@ void Controller::finishRun() {
 	hideProgress();
 
 	// Stay alive until the final command is acknowledged and removed from
-	// the chat (see hideOwnCommands), but not forever.
+	// the chat (see hideCommands), but not forever.
 	_finalCommandTimer.setCallback([=] { teardown(); });
 	_finalCommandTimer.callOnce(kFinalCommandWait);
 }
