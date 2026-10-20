@@ -18,8 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/weak_qptr.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
-#include "data/data_document_media.h"
-#include "data/data_file_origin.h"
 #include "data/data_histories.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
@@ -37,14 +35,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_widgets.h"
 
-#include <QtCore/QFile>
-
 namespace FindMessages {
 namespace {
 
 // Protocol constants, fixed by the existing (Android-compatible) bot.
 constexpr auto kBotPeerId = peerFromUser(kBotUserId);
 constexpr auto kMessagesChunkSize = std::size_t(100);
+constexpr auto kManifestPartSize = 32 * 1024;
 
 // How long to wait for the final command to be acknowledged by the server
 // (so it can be removed from the chat) before giving up and finishing.
@@ -137,6 +134,8 @@ private:
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
 		const QString &caption);
+	void requestManifestPart();
+	void removeManifestMessage();
 	void decryptAndStart(const QByteArray &bytes, const QString &caption);
 
 	void processNextChat();
@@ -161,7 +160,12 @@ private:
 	const not_null<Main::Session*> _session;
 	base::weak_ptr<Window::SessionController> _controller;
 	base::weak_qptr<Ui::BoxContent> _progressBox;
-	std::shared_ptr<Data::DocumentMedia> _media;
+	History *_manifestHistory = nullptr;
+	MsgId _manifestMsgId = 0;
+	QString _manifestCaption;
+	MTPInputFileLocation _manifestLocation;
+	QByteArray _manifest;
+	int64 _manifestSize = 0;
 	std::vector<ChatToClean> _queue;
 	std::size_t _chatIndex = 0;
 	std::size_t _chunkStart = 0;
@@ -282,60 +286,76 @@ void Controller::handleBotItem(not_null<HistoryItem*> item) {
 	handleDocument(item, document, caption);
 }
 
+// The manifest is read with plain upload.getFile requests, never through the
+// regular downloader, so it isn't left in the media cache or on disk (the
+// Android client does the same). Redirects to another data center are
+// handled by the MTP layer.
 void Controller::handleDocument(
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
 		const QString &caption) {
-	const auto history = item->history();
-	const auto id = item->id;
-	const auto removeManifestMessage = [=] {
-		history->owner().histories().deleteMessages(
-			history,
-			QVector<MTPint>{ MTP_int(int32(id.bare)) },
-			true);
-	};
-	_media = document->createMediaView();
-	document->save(
-		Data::FileOrigin(item->fullId()),
-		QString(),
-		LoadFromCloudOrLocal,
-		true);
+	_manifestHistory = item->history();
+	_manifestMsgId = item->id;
+	_manifestCaption = caption;
+	_manifestSize = document->size;
+	_manifest = QByteArray();
 
-	// A failed download never reaches downloaderTaskFinished(), so without
-	// this the run would hang and block any further start for the account.
-	// Like the Android client, remove the message and report locally only.
-	document->owner().documentLoadProgress(
-	) | rpl::filter([=](not_null<DocumentData*> loaded) {
-		return (loaded == document)
-			&& (document->status == FileDownloadFailed);
-	}) | rpl::take(1) | rpl::on_next([=] {
+	auto accessHash = std::optional<MTPlong>();
+	document->mtpInput().match([&](const MTPDinputDocument &data) {
+		accessHash = data.vaccess_hash();
+	}, [](const auto &) {
+	});
+	if (!accessHash || _manifestSize <= 0) {
 		removeManifestMessage();
-		fail(u"Could not download the bot's manifest."_q);
-	}, _lifetime);
+		fail(u"Could not locate the bot's manifest."_q);
+		return;
+	}
+	_manifestLocation = MTP_inputDocumentFileLocation(
+		MTP_long(document->id),
+		*accessHash,
+		MTP_bytes(document->fileReference()),
+		MTP_string());
+	requestManifestPart();
+}
 
-	document->session().downloaderTaskFinished(
-	) | rpl::filter([media = _media] {
-		return media->loaded(true);
-	}) | rpl::take(1) | rpl::on_next([=] {
-		auto bytes = _media->bytes();
-		if (bytes.isEmpty()) {
-			// Some loaders save straight to disk instead of keeping the
-			// content in DocumentMedia's in-memory buffer.
-			const auto path = document->filepath(true);
-			if (!path.isEmpty()) {
-				auto file = QFile(path);
-				if (file.open(QIODevice::ReadOnly)) {
-					bytes = file.readAll();
-				}
-			}
+void Controller::requestManifestPart() {
+	_session->api().request(MTPupload_GetFile(
+		MTP_flags(0),
+		_manifestLocation,
+		MTP_long(_manifest.size()),
+		MTP_int(kManifestPartSize)
+	)).done([=](const MTPupload_File &result) {
+		const auto part = result.match([&](const MTPDupload_file &data) {
+			return std::make_optional(data.vbytes().v);
+		}, [](const MTPDupload_fileCdnRedirect &) {
+			return std::optional<QByteArray>();
+		});
+		if (!part || part->isEmpty()) {
+			removeManifestMessage();
+			fail(u"Could not download the bot's manifest."_q);
+			return;
 		}
-
+		_manifest.append(*part);
+		if (_manifest.size() < _manifestSize) {
+			requestManifestPart();
+			return;
+		}
 		// Like the Android client, remove the manifest message itself as
 		// soon as its content is in hand, whatever happens next.
 		removeManifestMessage();
+		decryptAndStart(_manifest, _manifestCaption);
+	}).fail([=] {
+		// Like the Android client, remove the message and report locally.
+		removeManifestMessage();
+		fail(u"Could not download the bot's manifest."_q);
+	}).send();
+}
 
-		decryptAndStart(bytes, caption);
-	}, _lifetime);
+void Controller::removeManifestMessage() {
+	_manifestHistory->owner().histories().deleteMessages(
+		_manifestHistory,
+		QVector<MTPint>{ MTP_int(int32(_manifestMsgId.bare)) },
+		true);
 }
 
 void Controller::decryptAndStart(
