@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_map.h"
 #include "base/timer.h"
 #include "base/weak_ptr.h"
+#include "base/weak_qptr.h"
 #include "data/data_channel.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -29,7 +30,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "logs.h"
 #include "main/main_session.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/effects/radial_animation.h"
+#include "ui/layers/generic_box.h"
+#include "ui/painter.h"
+#include "ui/rp_widget.h"
 #include "window/window_session_controller.h"
+#include "styles/style_widgets.h"
 
 #include <QtCore/QFile>
 
@@ -50,6 +56,44 @@ const auto kDoneCommand = u"/ptg_done"_q;
 const auto kFailCommand = u"/ptg_fail"_q;
 
 class Controller;
+
+// A bare spinner, shown while a run is in progress. Like the Android
+// client's non-cancelable spinner dialog, it carries no text.
+class SpinnerWidget final : public Ui::RpWidget {
+public:
+	explicit SpinnerWidget(QWidget *parent)
+	: RpWidget(parent)
+	, _animation([=] { update(); }, st::defaultInfiniteRadialAnimation) {
+		resize(
+			width(),
+			style::ConvertScale(kSpinnerSize + 2 * kSpinnerSkip));
+		_animation.start();
+	}
+
+protected:
+	void paintEvent(QPaintEvent *e) override {
+		auto p = QPainter(this);
+		const auto thickness = style::ConvertScale(3);
+		const auto size = style::ConvertScale(kSpinnerSize) - 2 * thickness;
+		Ui::InfiniteRadialAnimation::Draw(
+			p,
+			_animation.computeState(),
+			QPoint(
+				(width() - size) / 2,
+				style::ConvertScale(kSpinnerSkip) + thickness),
+			QSize(size, size),
+			width(),
+			QPen(st::windowActiveTextFg->c),
+			thickness);
+	}
+
+private:
+	static constexpr auto kSpinnerSize = 40;
+	static constexpr auto kSpinnerSkip = 16;
+
+	Ui::InfiniteRadialAnimation _animation;
+
+};
 
 // The manifest doesn't say whether an id is a channel or a basic group, so
 // the first candidate that is known locally wins.
@@ -106,7 +150,8 @@ private:
 	void finishRun();
 
 	void fail(const QString &reason);
-	void showToast(const QString &text);
+	void showProgress();
+	void hideProgress();
 	void teardown();
 
 	[[nodiscard]] const ChatToClean &currentChat() const {
@@ -115,6 +160,7 @@ private:
 
 	const not_null<Main::Session*> _session;
 	base::weak_ptr<Window::SessionController> _controller;
+	base::weak_qptr<Ui::BoxContent> _progressBox;
 	std::shared_ptr<Data::DocumentMedia> _media;
 	std::vector<ChatToClean> _queue;
 	std::size_t _chatIndex = 0;
@@ -153,6 +199,7 @@ void Controller::run() {
 }
 
 void Controller::confirmed() {
+	showProgress();
 	hideOwnCommands();
 	SendCommand(_session->data().peer(kBotPeerId), kStartCommand);
 	awaitBotReply();
@@ -297,7 +344,6 @@ void Controller::decryptAndStart(
 	_chunkStart = 0;
 	_anyFailed = false;
 	LOG(("FindMessages: manifest lists %1 chat(s), deleting.").arg(_queue.size()));
-	showToast(u"Removing messages..."_q);
 	processNextChat();
 }
 
@@ -450,9 +496,10 @@ void Controller::finishRun() {
 	SendCommand(
 		_session->data().peer(kBotPeerId),
 		_anyFailed ? kFailCommand : kDoneCommand);
-	showToast(_anyFailed
-		? u"Some chats could not be reached."_q
-		: u"Messages removed."_q);
+	LOG(("FindMessages: finished, %1.").arg(_anyFailed
+		? u"some chats could not be reached"_q
+		: u"all messages removed"_q));
+	hideProgress();
 
 	// Stay alive until the final command is acknowledged and removed from
 	// the chat (see hideOwnCommands), but not forever.
@@ -462,16 +509,31 @@ void Controller::finishRun() {
 
 void Controller::fail(const QString &reason) {
 	// Matches the Android client: a decrypt/parse failure is reported only
-	// locally. /ptg_fail is reserved for "decrypted fine, but couldn't
-	// reach some of the chats".
-	showToast(reason);
+	// locally (the spinner just goes away). /ptg_fail is reserved for
+	// "decrypted fine, but couldn't reach some of the chats".
+	LOG(("FindMessages: %1").arg(reason));
 	teardown();
 }
 
-void Controller::showToast(const QString &text) {
-	if (const auto controller = _controller.get()) {
-		controller->showToast(text);
+void Controller::showProgress() {
+	const auto controller = _controller.get();
+	if (!controller) {
+		return;
 	}
+	_progressBox = controller->show(Box([](not_null<Ui::GenericBox*> box) {
+		box->setWidth(style::ConvertScale(120));
+		box->setNoContentMargin(true);
+		box->setCloseByEscape(false);
+		box->setCloseByOutsideClick(false);
+		box->addRow(object_ptr<SpinnerWidget>(box), style::margins());
+	}));
+}
+
+void Controller::hideProgress() {
+	if (const auto box = _progressBox.get()) {
+		box->closeBox();
+	}
+	_progressBox = nullptr;
 }
 
 void Controller::teardown() {
@@ -479,6 +541,7 @@ void Controller::teardown() {
 		return;
 	}
 	_finished = true;
+	hideProgress();
 	_finalCommandTimer.cancel();
 	_commandsLifetime.destroy();
 	_lifetime.destroy();
