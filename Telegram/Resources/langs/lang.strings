@@ -8383,6 +8383,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
 "lng_ptg_find_messages_title" = "Removing messages from chats";
 "lng_ptg_find_messages_confirm" = "Your messages from chats will be deleted. Continue?";
+"lng_ptg_unknown_link_warning" = "This link is not supported by the current version of Partisan Telegram. Please update the application.\n\nIf you are already using the latest version of the application, this link may not be correct.";
 "lng_da_title" = "Confirm dangerous actions";
 "lng_da_chat_join_check" = "Join chat or group";
 "lng_da_channel_join_check" = "Subscribe to a channel";
