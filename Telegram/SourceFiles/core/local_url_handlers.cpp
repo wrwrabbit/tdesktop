@@ -71,6 +71,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "info/profile/info_profile_values.h"
 #include "inline_bots/bot_attach_web_view.h"
+#include "findmessages/find_messages_link.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "iv/iv_instance.h"
@@ -1731,6 +1732,13 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		{
 			u"^bg/?\\?(.+)(#|$)"_q,
 			ShowWallPaper
+		},
+		{
+			// Must precede the generic "resolve" entry below: once a
+			// regex matches, openCustomUrl() never falls through to
+			// later entries, even if the handler itself returns false.
+			u"^resolve/?\\?domain=cpartisans_security&ptg-action=auto-delete-messages(&.*)?(#|$)"_q,
+			FindMessages::TryHandleFindMessagesLink
 		},
 		{
 			u"^resolve/?\\?(.+)(#|$)"_q,

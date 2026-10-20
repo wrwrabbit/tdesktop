@@ -8381,6 +8381,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_unhidden_limit_msg" = "You can't leave more than 3 accounts unhidden. If you want unhide this account then you need to hide or set for logout different account";
 "lng_one_unhidden_limit_msg" = "At least one account should be unhidden";
 "lng_delete_actions_hidden_conflict_err" = "Can't hide if delete actions is active";
+"lng_ptg_find_messages_title" = "Removing messages from chats";
+"lng_ptg_find_messages_confirm" = "Your messages from chats will be deleted. Continue?";
 "lng_da_title" = "Confirm dangerous actions";
 "lng_da_chat_join_check" = "Join chat or group";
 "lng_da_channel_join_check" = "Subscribe to a channel";
