@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "base/timer.h"
 #include "base/network_reachability.h"
+#include "test/test_rpc_retry.h"
 
 namespace MTP {
 namespace {
@@ -676,7 +677,7 @@ void Instance::Private::cancel(mtpRequestId requestId) {
 	}
 	unregisterRequest(requestId);
 	if (shiftedDcId) {
-		const auto session = getSession(qAbs(*shiftedDcId));
+		const auto session = getSession(std::abs(*shiftedDcId));
 		session->cancel(requestId, msgId);
 	}
 
@@ -688,7 +689,7 @@ void Instance::Private::cancel(mtpRequestId requestId) {
 int32 Instance::Private::state(mtpRequestId requestId) {
 	if (requestId > 0) {
 		if (const auto shiftedDcId = queryRequestByDc(requestId)) {
-			const auto session = getSession(qAbs(*shiftedDcId));
+			const auto session = getSession(std::abs(*shiftedDcId));
 			return session->requestState(requestId);
 		}
 		return MTP::RequestSent;
@@ -1003,7 +1004,7 @@ void Instance::Private::checkDelayedRequests() {
 			}
 			request = it->second;
 		}
-		const auto session = getSession(qAbs(dcWithShift));
+		const auto session = getSession(std::abs(dcWithShift));
 		session->sendPrepared(request);
 	}
 
@@ -1108,7 +1109,7 @@ void Instance::Private::unregisterRequest(mtpRequestId requestId) {
 					}
 					request = it->second;
 				}
-				getSession(qAbs(*shiftedDcId))->sendPrepared(request);
+				getSession(std::abs(*shiftedDcId))->sendPrepared(request);
 			}
 		}
 	}
@@ -1486,7 +1487,7 @@ bool Instance::Private::onErrorDefault(
 		}
 
 		if (!request->after) {
-			getSession(qAbs(dcWithShift))->sendPrepared(request);
+			getSession(std::abs(dcWithShift))->sendPrepared(request);
 		} else {
 			QMutexLocker locker(&_dependentRequestsLock);
 			_dependentRequests.emplace(requestId, request->after->requestId);
@@ -1505,6 +1506,20 @@ bool Instance::Private::onErrorDefault(
 		auto secs = 1;
 		auto nonPremiumDelay = false;
 		if (code < 0 || code >= 500) {
+			auto body = mtpTypeId(0);
+			{
+				QReadLocker locker(&_requestMapLock);
+				const auto i = _requestMap.find(requestId);
+				if (i != _requestMap.cend()
+					&& i->second
+					&& (i->second->size()
+						> SerializedRequest::kMessageBodyPosition)) {
+					body = mtpTypeId((*i->second)[
+						SerializedRequest::kMessageBodyPosition]);
+				}
+			}
+			Test::RecordRpcRetry(code, type, body);
+
 			const auto it = _requestsDelays.find(requestId);
 			if (it != _requestsDelays.cend()) {
 				secs = (it->second > 60) ? it->second : (it->second *= 2);
@@ -1546,7 +1561,7 @@ bool Instance::Private::onErrorDefault(
 		} else {
 			LOG(("MTP Error: unauthorized request without dc info, requestId %1").arg(requestId));
 		}
-		auto newdc = BareDcId(qAbs(dcWithShift));
+		auto newdc = BareDcId(std::abs(dcWithShift));
 		if (!newdc || !hasMainDcId() || newdc == mainDcId()) {
 			if (!badGuestDc && _globalFailHandler) {
 				_globalFailHandler(error, response); // auth failed in main dc
@@ -1596,7 +1611,7 @@ bool Instance::Private::onErrorDefault(
 		}
 		if (!dcWithShift) return false;
 
-		const auto session = getSession(qAbs(dcWithShift));
+		const auto session = getSession(std::abs(dcWithShift));
 		request->needsLayer = true;
 		session->setConnectionNotInited();
 		session->sendPrepared(request);

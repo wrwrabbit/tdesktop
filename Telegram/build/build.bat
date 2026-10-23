@@ -31,6 +31,23 @@ if "%BuildTarget%" equ "win64" (
   set "BuildUWP=1"
 )
 
+set "HomePath=%FullScriptPath%.."
+set "ResourcesPath=%HomePath%\Resources"
+rem Update signing settings. Edit these directly when rotating keys, they are
+rem the single source of truth (no environment overrides).
+set "ReleaseCloudVault=tdesktop-release-kv"
+set "ReleaseCloudKeyId=rc-2026a"
+set "ReleaseCloudKeyName=release-2026a"
+set "ReleaseLocalKey=%HomePath%\..\..\DesktopPrivate\modern\release-local-2026b.pem"
+set "ReleaseLocalKeyId=rl-2026b"
+if %BuildUWP% equ 0 (
+  if not exist "%ReleaseLocalKey%" (
+    echo Release local key not found: %ReleaseLocalKey%
+    exit /b 1
+  )
+  python "%FullScriptPath%sign_update.py" --check --az-vault "%ReleaseCloudVault%" --az-key "%ReleaseCloudKeyName%" --keys-loc "%ResourcesPath%\update" --key-id %ReleaseCloudKeyId% || goto error
+)
+
 if %Build64% neq 0 (
   if "%Platform%" neq "x64" (
     echo Bad environment. Make sure to run from 'x64 Native Tools Command Prompt for VS 2022'.
@@ -57,7 +74,7 @@ if %Build64% neq 0 (
   if "%Platform%" neq "x86" (
     echo Bad environment. Make sure to run from 'x86 Native Tools Command Prompt for VS 2022'.
     exit /b
-  ) else if "%VSCMD_ARG_HOST_ARCH%" neq "x64" (
+  ) else if "%VSCMD_ARG_HOST_ARCH%" neq "x86" (
     echo Bad environment. Make sure to run from 'x86 Native Tools Command Prompt for VS 2022'.
     exit /b
   ) else if "%VSCMD_ARG_TGT_ARCH%" neq "x86" (
@@ -68,9 +85,12 @@ if %Build64% neq 0 (
 
 FOR /F "tokens=1,2* delims= " %%i in (%FullScriptPath%version) do set "%%i=%%j"
 
-FOR /F "tokens=1,2* delims= " %%i in (%FullScriptPath%ptg_version) do set "%%i=%%j"
+if %AppVersion% lss 7002000 (
+  echo The v2 update format requires version 7.2 or newer.
+  exit /b 1
+)
 
-set "VersionForPacker=%PtgAppVersion%"
+set "VersionForPacker=%AppVersion%"
 if %AlphaVersion% neq 0 (
   set "AppVersion=%AlphaVersion%"
   set "AppVersionStrFull=%AppVersionStr%_%AlphaVersion%"
@@ -106,75 +126,42 @@ if %BuildUWP% neq 0 (
 )
 echo.
 
-set "HomePath=%FullScriptPath%.."
-set "ResourcesPath=%HomePath%\Resources"
 set "SolutionPath=%HomePath%\..\out"
-if %Build64% neq 0 (
-  set "UpdateFile=tx64upd%PtgAppVersion%"
-  set "SetupFile=tsetup-x64.latest.exe"
-  set "PortableFile=tportable-x64.latest.zip"
-  set "DeployFolder=tx64"
-  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\win64\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
-) else if %BuildARM% neq 0 (
-  set "UpdateFile=tarm64upd%AppVersion%"
-  set "SetupFile=tsetup-arm64.%AppVersionStrFull%.exe"
-  set "PortableFile=tportable-arm64.%AppVersionStrFull%.zip"
-  set "DeployFolder=tarm64"
-  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
-) else (
-  set "UpdateFile=tupdate%PtgAppVersion%"
-  set "SetupFile=tsetup.latest.exe"
-  set "PortableFile=tportable.latest.zip"
-  set "DeployFolder=tsetup"
-  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
-)
-
-rem TDESKTOP_UPDATE_V2=1 switches the update packaging to the v2 signed
-rem envelope (2-of-2: the local Ed25519 release key plus the cloud ES256
-rem key through an interactive az login) and every artifact to the v2
-rem names: td-update-win-{arch}-{version}[-beta] and
-rem td-(setup|portable)-win-{arch}-{version_str}[-beta].(exe|zip). Without
-rem the switch the classical v1 update and the classical names are built,
-rem so the stepping-stone releases keep coming out exactly as before.
 set "UpdateChannel=stable"
-set "V2Suffix="
+set "ArtifactSuffix="
 if %BetaChannel% neq 0 (
   set "UpdateChannel=beta"
-  set "V2Suffix=-beta"
+  set "ArtifactSuffix=-beta"
 )
 set "IsccNameParam="
-if "%TDESKTOP_RELEASE_KEYVAULT%" equ "" set "TDESKTOP_RELEASE_KEYVAULT=tdesktop-release-kv"
-if "%TDESKTOP_RELEASE_CLOUD_KEY_ID%" equ "" set "TDESKTOP_RELEASE_CLOUD_KEY_ID=rc-2026a"
-if "%TDESKTOP_RELEASE_LOCAL_KEY%" equ "" set "TDESKTOP_RELEASE_LOCAL_KEY=%HomePath%\..\..\DesktopPrivate\release-local.pem"
-if "%TDESKTOP_RELEASE_LOCAL_KEY_ID%" equ "" set "TDESKTOP_RELEASE_LOCAL_KEY_ID=rl-2026a"
-if "%TDESKTOP_UPDATE_V2%" equ "1" (
-  if %AlphaVersion% neq 0 (
-    echo The v2 update format has no alpha channel!
-    exit /b 1
-  )
-  if %Build64% neq 0 (
-    set "UpdateFile=td-update-win-x64-%AppVersion%%V2Suffix%"
-    set "SetupFile=td-setup-win-x64-%AppVersionStr%%V2Suffix%.exe"
-    set "PortableFile=td-portable-win-x64-%AppVersionStr%%V2Suffix%.zip"
-    set "DeployFolder=win-x64"
-    set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-x64-%AppVersionStr%%V2Suffix%"
-  ) else if %BuildARM% neq 0 (
-    set "UpdateFile=td-update-win-arm-%AppVersion%%V2Suffix%"
-    set "SetupFile=td-setup-win-arm-%AppVersionStr%%V2Suffix%.exe"
-    set "PortableFile=td-portable-win-arm-%AppVersionStr%%V2Suffix%.zip"
-    set "DeployFolder=win-arm"
-    set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-arm-%AppVersionStr%%V2Suffix%"
-  ) else (
-    set "UpdateFile=td-update-win-x86-%AppVersion%%V2Suffix%"
-    set "SetupFile=td-setup-win-x86-%AppVersionStr%%V2Suffix%.exe"
-    set "PortableFile=td-portable-win-x86-%AppVersionStr%%V2Suffix%.zip"
-    set "DeployFolder=win-x86"
-    set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-x86-%AppVersionStr%%V2Suffix%"
-  )
+if %AlphaVersion% neq 0 (
+  echo The v2 update format has no alpha channel!
+  exit /b 1
+)
+if %Build64% neq 0 (
+  set "UpdateFile=td-update-win-x64-%AppVersion%%ArtifactSuffix%"
+  set "SetupFile=td-setup-win-x64-%AppVersionStr%%ArtifactSuffix%.exe"
+  set "PortableFile=td-portable-win-x64-%AppVersionStr%%ArtifactSuffix%.zip"
+  set "DeployFolder=win-x64"
+  set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-x64-%AppVersionStr%%ArtifactSuffix%"
+  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\win64\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
+) else if %BuildARM% neq 0 (
+  set "UpdateFile=td-update-win-arm-%AppVersion%%ArtifactSuffix%"
+  set "SetupFile=td-setup-win-arm-%AppVersionStr%%ArtifactSuffix%.exe"
+  set "PortableFile=td-portable-win-arm-%AppVersionStr%%ArtifactSuffix%.zip"
+  set "DeployFolder=win-arm"
+  set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-arm-%AppVersionStr%%ArtifactSuffix%"
+  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
+) else (
+  set "UpdateFile=td-update-win-x86-%AppVersion%%ArtifactSuffix%"
+  set "SetupFile=td-setup-win-x86-%AppVersionStr%%ArtifactSuffix%.exe"
+  set "PortableFile=td-portable-win-x86-%AppVersionStr%%ArtifactSuffix%.zip"
+  set "DeployFolder=win-x86"
+  set "IsccNameParam=/dMyOutputBaseFilename=td-setup-win-x86-%AppVersionStr%%ArtifactSuffix%"
+  set "DumpSymsPath=%SolutionPath%\..\..\Libraries\breakpad\src\tools\windows\dump_syms\Release\dump_syms.exe"
 )
 set "ReleasePath=%SolutionPath%\Release"
 set "DeployPath=%ReleasePath%\deploy\%AppVersionStrMajor%\%AppVersionStrFull%"
-set "DeployPath=%ReleasePath%\deploy"
 set "SignPath=%HomePath%\..\..\DesktopPrivate\Sign.bat"
 set "BinaryName=Telegram"
 set "DropboxSymbolsPath=Y:\Telegram\symbols"
@@ -207,10 +194,10 @@ if %BuildUWP% neq 0 (
   )
 )
 if %AlphaVersion% neq 0 (
-  rem if exist %DeployPath%\ (
-  rem   echo Deploy folder for version %AppVersionStr% already exists!
-  rem   exit /b 1
-  rem )
+  if exist %DeployPath%\ (
+    echo Deploy folder for version %AppVersionStr% already exists!
+    exit /b 1
+  )
   if exist %ReleasePath%\%AlphaKeyFile% (
     echo Alpha version key file for version %AppVersion% already exists!
     exit /b 1
@@ -232,13 +219,28 @@ if %AlphaVersion% neq 0 (
     echo Update file for version %AppVersion% already exists!
     exit /b 1
   )
+  if exist %ReleasePath%\%PortableFile% (
+    echo Portable file %PortableFile% already exists!
+    exit /b 1
+  )
 )
 
+set "LockDir=%SolutionPath%\.build.lock"
+if exist "%LockDir%\" (
+  echo Another build.bat seems to be running ^(found %LockDir%, remove it if stale^)!
+  exit /b 1
+)
+mkdir "%LockDir%" || exit /b 1
+call :build
+set "ErrorCode=%errorlevel%"
+rmdir "%LockDir%"
+cd "%FullExecPath%"
+exit /b %ErrorCode%
+
+:build
 cd "%HomePath%"
 
-call configure.bat -DDESKTOP_APP_NO_PDB=ON || goto error
-rem Not using -DDESKTOP_APP_ENABLE_LTO=ON
-rem call configure.bat -DDESKTOP_APP_ENABLE_LTO=ON || goto error
+call configure.bat -DDESKTOP_APP_ENABLE_LTO=ON || goto error
 
 cd "%SolutionPath%"
 call cmake --build . --config Release --target Telegram || goto error
@@ -270,20 +272,14 @@ if %BuildUWP% equ 0 (
     if not exist "%SetupFile%" goto error
   )
 
-  if "%TDESKTOP_UPDATE_V2%" equ "1" (
-    if %BuildARM% neq 0 (
-      call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -target %BuildTarget% -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -emit-signing-input signing-input.bin || goto error
-    ) else (
-      call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -emit-signing-input signing-input.bin || goto error
-    )
-    python "%FullScriptPath%sign_update.py" --input signing-input.bin --output release-cloud.sig --az-vault "%TDESKTOP_RELEASE_KEYVAULT%" --az-key "%TDESKTOP_RELEASE_CLOUD_KEY_ID%" || goto error
-    call Packer.exe -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -unsigned "%UpdateFile%.unsigned" -embed-signatures %TDESKTOP_RELEASE_CLOUD_KEY_ID%:release-cloud.sig -local-key "%TDESKTOP_RELEASE_LOCAL_KEY%" -local-key-id %TDESKTOP_RELEASE_LOCAL_KEY_ID% || goto error
-    del signing-input.bin release-cloud.sig "%UpdateFile%.unsigned"
-  ) else if %BuildARM% neq 0 (
-    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -target %BuildTarget% %AlphaBetaParam% || goto error
+  if %BuildARM% neq 0 (
+    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -target %BuildTarget% -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -emit-signing-input signing-input.bin || goto error
   ) else (
-    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% %AlphaBetaParam% || goto error
+    call Packer.exe -version %VersionForPacker% -path %BinaryName%.exe -path Updater.exe -path "modules\%Platform%\d3d\d3dcompiler_47.dll" -target %BuildTarget% -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -emit-signing-input signing-input.bin || goto error
   )
+  call :signupdate
+  call Packer.exe -channel %UpdateChannel% -keys-loc "%ResourcesPath%\update" -unsigned "%UpdateFile%.unsigned" -embed-signatures %ReleaseCloudKeyId%:release-cloud.sig -local-key "%ReleaseLocalKey%" -local-key-id %ReleaseLocalKeyId% || goto error
+  del signing-input.bin release-cloud.sig "%UpdateFile%.unsigned"
 
   if %AlphaVersion% neq 0 (
     if not exist "%ReleasePath%\%AlphaKeyFile%" (
@@ -340,7 +336,7 @@ if %BuildUWP% neq 0 (
   if not exist "%ReleasePath%\deploy\%AppVersionStrMajor%" mkdir "%ReleasePath%\deploy\%AppVersionStrMajor%"
   mkdir "%DeployPath%"
 
-  rem move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
+  move "%ReleasePath%\%BinaryName%.pdb" "%DeployPath%\"
   move "%ReleasePath%\%BinaryName%.%Platform%.appx" "%DeployPath%\"
   move "%ReleasePath%\%BinaryName%.exe" "%DeployPath%\"
 
@@ -391,15 +387,17 @@ if %BuildUWP% equ 0 (
   if %AlphaVersion% equ 0 (
     if not exist "%DeployPath%\%SetupFile%" goto error
   )
-rem  if not exist "%DeployPath%\%BinaryName%.pdb" goto error
+  if not exist "%DeployPath%\%BinaryName%.pdb" goto error
   if not exist "%DeployPath%\Updater.exe" goto error
-rem  if not exist "%DeployPath%\Updater.pdb" goto error
+  if not exist "%DeployPath%\Updater.pdb" goto error
   md "%FinalDeployPath%"
 
   xcopy "%DeployPath%\%UpdateFile%" "%FinalDeployPath%\" /Y
   xcopy "%DeployPath%\%PortableFile%" "%FinalDeployPath%\" /Y
   if %AlphaVersion% equ 0 (
     xcopy "%DeployPath%\%SetupFile%" "%FinalDeployPath%\" /Y
+  ) else (
+    xcopy "%DeployPath%\%AlphaKeyFile%" "%FinalDeployPath%\" /Y
   )
 )
 
@@ -448,6 +446,12 @@ call "%SignPath%" %1 && exit /b 0
 echo Signing %1 failed, retrying in 3 seconds..
 timeout /t 3
 goto sign
+
+:signupdate
+python "%FullScriptPath%sign_update.py" --input signing-input.bin --output release-cloud.sig --az-vault "%ReleaseCloudVault%" --az-key "%ReleaseCloudKeyName%" && exit /b 0
+echo Cloud signing of %UpdateFile% failed, retrying in 10 seconds (fix az login / network in another terminal)..
+timeout /t 10
+goto signupdate
 
 :packportable
 7z a -mx9 %PortableFile% %BinaryName%\ || goto packportableretry
