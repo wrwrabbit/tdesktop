@@ -27,6 +27,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "logs.h"
 #include "main/main_session.h"
+#include "mtproto/facade.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/effects/radial_animation.h"
 #include "ui/layers/generic_box.h"
@@ -160,8 +161,7 @@ private:
 	const not_null<Main::Session*> _session;
 	base::weak_ptr<Window::SessionController> _controller;
 	base::weak_qptr<Ui::BoxContent> _progressBox;
-	History *_manifestHistory = nullptr;
-	MsgId _manifestMsgId = 0;
+	FullMsgId _manifestId;
 	QString _manifestCaption;
 	MTPInputFileLocation _manifestLocation;
 	QByteArray _manifest;
@@ -289,14 +289,14 @@ void Controller::handleBotItem(not_null<HistoryItem*> item) {
 
 // The manifest is read with plain upload.getFile requests, never through the
 // regular downloader, so it isn't left in the media cache or on disk (the
-// Android client does the same). Redirects to another data center are
-// handled by the MTP layer.
+// Android client does the same). The requests go through a download session
+// on purpose: a FILE_MIGRATE redirect of a plain request would switch the
+// main data center of the whole account, and hang the run on the way.
 void Controller::handleDocument(
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
 		const QString &caption) {
-	_manifestHistory = item->history();
-	_manifestMsgId = item->id;
+	_manifestId = item->fullId();
 	_manifestCaption = caption;
 	_manifestSize = document->size;
 	_manifest = QByteArray();
@@ -349,14 +349,11 @@ void Controller::requestManifestPart() {
 		// Like the Android client, remove the message and report locally.
 		removeManifestMessage();
 		fail(u"Could not download the bot's manifest."_q);
-	}).send();
+	}).toDC(MTP::downloadDcId(_session->mainDcId(), 0)).send();
 }
 
 void Controller::removeManifestMessage() {
-	_manifestHistory->owner().histories().deleteMessages(
-		_manifestHistory,
-		QVector<MTPint>{ MTP_int(int32(_manifestMsgId.bare)) },
-		true);
+	_session->data().histories().deleteMessages({ _manifestId }, true);
 }
 
 void Controller::decryptAndStart(
