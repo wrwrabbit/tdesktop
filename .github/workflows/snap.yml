@@ -23,6 +23,21 @@ on:
     types: [opened, reopened]
     branches-ignore:
       - 'compare/**'
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
+      - 'Telegram/build/**'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/Resources/winrc/**'
+      - 'Telegram/SourceFiles/platform/win/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.bat'
+      - 'Telegram/Telegram.plist'
   workflow_dispatch:
 
 jobs:
@@ -38,7 +53,7 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive
@@ -79,3 +94,4 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact
+          retention-days: 1

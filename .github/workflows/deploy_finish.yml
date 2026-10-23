@@ -32,6 +32,11 @@ on:
         description: 'Release MacOS assets?'
         type: boolean
         required: false
+        default: false
+      releaseMacOSDepot:
+        description: 'Release MacOS Depot assets?'
+        type: boolean
+        required: false
         default: true
       releaseSnap:
         description: 'Release Snap assets?'
@@ -182,6 +187,18 @@ jobs:
           path: MacOS
           name: telegram-dmg
 
+      - name: Download MacOS artifacts (depot)
+        uses: dawidd6/action-download-artifact@v2
+        if: github.event.inputs.releaseMacOSDepot == 'true'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: deploy_mac_depot.yml
+          workflow_conclusion: success
+          branch: master
+          repo: cpartisans/tdesktop
+          path: MacOS
+          name: telegram-dmg
+
       - name: Download Snap artifacts
         uses: dawidd6/action-download-artifact@v2
         if: github.event.inputs.releaseSnap == 'true'
@@ -306,7 +323,7 @@ jobs:
 
       - name: Upload MacOS Files
         uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseMacOS == 'true'
+        if: github.event.inputs.releaseMacOS == 'true' || github.event.inputs.releaseMacOSDepot == 'true'
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           script: |

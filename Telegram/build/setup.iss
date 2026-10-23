@@ -35,19 +35,27 @@ DisableDirPage=no
 DisableProgramGroupPage=no
 WizardStyle=modern
 
+#ifndef MyOutputBaseFilename
+  #if MyBuildTarget == "winarm"
+    #define MyOutputBaseFilename "tsetup-arm64.latest"
+  #elif MyBuildTarget == "win64"
+    #define MyOutputBaseFilename "tsetup-x64.latest"
+  #else
+    #define MyOutputBaseFilename "tsetup.latest"
+  #endif
+#endif
+OutputBaseFilename={#MyOutputBaseFilename}
+
 #if MyBuildTarget == "winarm"
   ArchitecturesAllowed="arm64"
-  OutputBaseFilename=tsetup-arm64.{#MyAppVersionFull}
   #define ArchModulesFolder "arm64"
   AppVerName={#MyAppName} {#MyAppVersion} arm64
 #elif MyBuildTarget == "win64"
   ArchitecturesAllowed="x64compatible"
   ArchitecturesInstallIn64BitMode="x64compatible"
-  OutputBaseFilename=tsetup-x64.latest
   #define ArchModulesFolder "x64"
   AppVerName={#MyAppName} {#MyAppVersion} 64bit
 #else
-  OutputBaseFilename=tsetup.latest
   #define ArchModulesFolder "x86"
   AppVerName={#MyAppName} {#MyAppVersion} 32bit
 #endif
@@ -112,7 +120,7 @@ var ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    ShellExec('', ExpandConstant('{app}\{#MyAppExeName}'), '-cleanup', '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '-cleanup', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
 end;
 

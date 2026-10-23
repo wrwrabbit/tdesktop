@@ -40,13 +40,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
 #include "storage/storage_domain.h"
-#include "styles/style_boxes.h"
+#include "styles/style_api_chat_invite.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_color_indices.h"
 #include "styles/style_credits.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
-#include "styles/style_premium.h"
 
 #include "fakepasscode/settings.h"
 
@@ -664,7 +663,7 @@ void ProcessChatInviteJoinResult(
 				.maySkipConfirmation = false,
 			},
 			.source = InlineBots::WebViewSourceJoinChat{
-				.result = InlineBots::ParseWebViewResult(data.vwebview()),
+				.queryId = data.vquery_id().v,
 			},
 		});
 	});

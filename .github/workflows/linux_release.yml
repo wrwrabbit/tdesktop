@@ -1,29 +1,6 @@
 name: Linux Release.
 
 on:
-  pull_request:
-    types: [opened, reopened]
-    branches-ignore:
-      - 'compare/**'
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/linux_release.yml'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - '!Telegram/build/docker/centos_env/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
-
   workflow_dispatch:
 
 jobs:
@@ -106,6 +83,14 @@ jobs:
             echo "ARTIFACT_NAME=${ARTIFACT_PREFIX}Telegram" >> $GITHUB_ENV
           fi
 
+          if [ -n "${{ secrets.API_ID }}" ]; then
+            echo "Use secrets for API ID and API HASH."
+            API="-D TDESKTOP_API_ID=${{ secrets.API_ID }} -D TDESKTOP_API_HASH=${{ secrets.API_HASH }}"
+          else
+            echo "No secrets available (forked PR). Use default API credentials."
+            API="-D TDESKTOP_API_ID=17349 -D TDESKTOP_API_HASH=344583e45741c457fe1862106095a5eb"
+          fi
+
           docker run --rm \
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
@@ -119,8 +104,7 @@ jobs:
           -D TDESKTOP_API_TEST=OFF \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} \
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} \
+          $API \
           $DEFINE
 
       - name: Check.

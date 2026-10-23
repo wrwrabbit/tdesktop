@@ -2,7 +2,10 @@ name: Windows.
 
 on:
   push:
+    # Pushes to the canary branches run only canary.yml, see there.
     branches-ignore:
+      - public-canary
+      - private-canary
       - 'compare/**'
     paths-ignore:
       - 'docs/**'
@@ -24,25 +27,6 @@ on:
       - 'Telegram/Telegram.plist'
 
   workflow_dispatch:
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '!docs/building-win*.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/win.yml'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.sh'
-      - 'Telegram/Telegram.plist'
 
 jobs:
 
@@ -85,7 +69,7 @@ jobs:
         run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
 
       - name: Clone.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
@@ -107,18 +91,52 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
 
-      - name: Install VS 2026 Build Tools.
-        if: matrix.arch == 'arm64'
+      # Visual Studio 2026 ships ATL for its current toolset, but this job
+      # deliberately selects the v143 14.44 compatibility toolset. Install
+      # that matching ATL package so a cold dependency cache can build
+      # breakpad's dump_syms instead of relying on a cached binary.
+      - name: Visual Studio ATL component.
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri https://aka.ms/vs/18/stable/vs_buildtools.exe -OutFile vs_buildtools.exe
-          $p = Start-Process -FilePath .\vs_buildtools.exe -Wait -PassThru -ArgumentList `
-            '--quiet','--wait','--norestart','--nocache', `
-            '--add','Microsoft.VisualStudio.Workload.VCTools', `
-            '--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64', `
-            '--add','Microsoft.VisualStudio.Component.VC.ATL.ARM64'
-          Remove-Item vs_buildtools.exe -Force
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+          $vswhere = Join-Path $installer 'vswhere.exe'
+          $setup = Join-Path $installer 'setup.exe'
+          if (-not (Test-Path $vswhere) -or -not (Test-Path $setup)) {
+            throw "Visual Studio Installer is incomplete at $installer."
+          }
+
+          $toolsComponent = 'Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64'
+          $atlComponent = 'Microsoft.VisualStudio.Component.VC.14.44.17.14.ATL'
+          $path = @(& $vswhere -latest -products '*' -requires $toolsComponent -property installationPath)[0]
+          if (-not $path) {
+            throw "No Visual Studio instance provides $toolsComponent."
+          }
+
+          $toolset = Get-ChildItem (Join-Path $path 'VC\Tools\MSVC') -Directory `
+            | Where-Object { $_.Name -like '14.44.*' } `
+            | Sort-Object Name -Descending `
+            | Select-Object -First 1
+          if (-not $toolset) {
+            throw "The selected Visual Studio instance has no 14.44 toolset."
+          }
+          $header = Join-Path $toolset.FullName 'atlmfc\include\atlbase.h'
+          if (Test-Path $header) {
+            Write-Host "ATL is already installed for $($toolset.Name)."
+            exit 0
+          }
+
+          $process = Start-Process -FilePath $setup -Wait -PassThru -ArgumentList @(
+            'modify',
+            '--installPath', "`"$path`"",
+            '--add', $atlComponent,
+            '--quiet', '--norestart', '--nocache'
+          )
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "Visual Studio Installer exited with $($process.ExitCode)."
+          }
+          if (-not (Test-Path $header)) {
+            throw "$atlComponent completed without installing $header."
+          }
 
       - uses: Eden-CI/msvc-dev-cmd@1bd71f95d6f3d1b2b3395b335cc63bcdc90cf223
         name: Native Tools Command Prompt.
@@ -127,6 +145,18 @@ jobs:
           sdk: ${{ env.SDK }}
           toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
 
+      - name: Verify Visual Studio ATL component.
+        shell: pwsh
+        run: |
+          $atlInclude = Join-Path $env:VCToolsInstallDir 'atlmfc\include'
+          $header = Join-Path $atlInclude 'atlbase.h'
+          if (-not (Test-Path $header)) {
+            throw "The selected toolset has no ATL header at $header."
+          }
+          if (($env:INCLUDE -split ';') -notcontains $atlInclude) {
+            throw "The selected toolset did not add $atlInclude to INCLUDE."
+          }
+
       - name: NuGet sources.
         run: |
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
@@ -134,7 +164,7 @@ jobs:
 
       - name: ThirdParty cache.
         id: cache-third-party
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
@@ -142,7 +172,7 @@ jobs:
 
       - name: Libraries cache.
         id: cache-libs
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\*
@@ -150,12 +180,12 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
 
       - name: Qt cache.
         id: cache-qt
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
@@ -212,12 +242,18 @@ jobs:
           if [ $GITHUB_REF == 'refs/heads/nightly' ]; then
             echo "Use the open credentials."
             API="-D TDESKTOP_API_ID=611335 -D TDESKTOP_API_HASH=d524b414d21f4d37f08684c1df41ac9c"
+          elif [ -n "${{ secrets.API_ID }}" ]; then
+            echo "Use secrets for API ID and API HASH."
+            API="-D TDESKTOP_API_ID=${{ secrets.API_ID }} -D TDESKTOP_API_HASH=${{ secrets.API_HASH }}"
+          else
+            echo "No secrets available (forked PR). Use default API credentials."
+            API="-D TDESKTOP_API_ID=17349 -D TDESKTOP_API_HASH=344583e45741c457fe1862106095a5eb"
           fi
           echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
 
       - name: Free up some disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
@@ -229,12 +265,12 @@ jobs:
           %TDESKTOP_BUILD_ARCH% ^
           ${{ matrix.qt }} ^
           -D TDESKTOP_API_TEST=OFF ^
-          -D TDESKTOP_API_ID=${{ secrets.API_ID }} ^
-          -D TDESKTOP_API_HASH=${{ secrets.API_HASH }} ^
+          %TDESKTOP_BUILD_API% ^
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+          -D DESKTOP_APP_NO_PDB=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
           %TDESKTOP_BUILD_DEFINE%
           

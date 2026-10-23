@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_forum_topic.h"
 #include "data/data_forum.h"
+#include "data/data_saved_messages.h"
+#include "data/data_user.h"
 #include "info/profile/info_profile_widget.h"
 #include "info/media/info_media_widget.h"
 #include "info/common_groups/info_common_groups_widget.h"
@@ -36,9 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_info.h"
 #include "styles/style_profile.h"
-#include "styles/style_layers.h"
-
-#include <QtCore/QCoreApplication>
 
 namespace Info {
 namespace {
@@ -123,7 +122,6 @@ void ContentWidget::updateControlsGeometry() {
 	}
 	_innerWrap->resizeToWidth(width());
 
-	auto newScrollTop = _scroll->scrollTop() + _topDelta;
 	auto scrollGeometry = rect().marginsRemoved(
 		{ 0, _scrollTopSkip.current(), 0, _scrollBottomSkip.current() });
 	if (_scroll->geometry() != scrollGeometry) {
@@ -131,9 +129,6 @@ void ContentWidget::updateControlsGeometry() {
 	}
 
 	if (!_scroll->isHidden()) {
-		if (_topDelta) {
-			_scroll->scrollToY(newScrollTop);
-		}
 		auto scrollTop = _scroll->scrollTop();
 		_innerWrap->setVisibleTopBottom(
 			scrollTop,
@@ -170,21 +165,6 @@ void ContentWidget::paintEvent(QPaintEvent *e) {
 	}
 }
 
-void ContentWidget::setGeometryWithTopMoved(
-		const QRect &newGeometry,
-		int topDelta) {
-	_topDelta = topDelta;
-	auto willBeResized = (size() != newGeometry.size());
-	if (geometry() != newGeometry) {
-		setGeometry(newGeometry);
-	}
-	if (!willBeResized) {
-		QResizeEvent fake(size(), size());
-		QCoreApplication::sendEvent(this, &fake);
-	}
-	_topDelta = 0;
-}
-
 Ui::RpWidget *ContentWidget::doSetInnerWidget(
 		object_ptr<RpWidget> inner) {
 	using namespace rpl::mappers;
@@ -210,7 +190,8 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 		const auto bottom = top + height;
 		_innerDesiredHeight = desired;
 		_innerWrap->setVisibleTopBottom(top, bottom);
-		_scrollTillBottomChanges.fire_copy(std::max(desired - bottom, 0));
+		_scrollTillBottomChanges.fire_copy(
+			std::max(desired + _innerTopReserve - bottom, 0));
 	}, _innerWrap->lifetime());
 
 	rpl::combine(
@@ -223,7 +204,7 @@ Ui::RpWidget *ContentWidget::doSetInnerWidget(
 			Wrap wrap) {
 		const auto added = (wrap == Wrap::Layer)
 			? 0
-			: std::max(scrollHeight - innerHeight, 0);
+			: std::max(scrollHeight - innerHeight - _innerTopReserve, 0);
 		if (_addedHeight != added) {
 			_addedHeight = added;
 			updateInnerPadding();
@@ -269,7 +250,7 @@ int ContentWidget::scrollTillBottom(int forHeight) const {
 		- _scrollTopSkip.current()
 		- _scrollBottomSkip.current();
 	const auto scrollBottom = _scroll->scrollTop() + scrollHeight;
-	const auto desired = _innerDesiredHeight;
+	const auto desired = _innerDesiredHeight + _innerTopReserve;
 	return std::max(desired - scrollBottom, 0);
 }
 
@@ -300,7 +281,33 @@ void ContentWidget::applyAdditionalScroll(int additionalScroll) {
 
 void ContentWidget::updateInnerPadding() {
 	const auto addedToBottom = std::max(_additionalScroll, _addedHeight);
-	_innerWrap->setPadding({ 0, 0, 0, addedToBottom });
+	_innerWrap->setPadding({ 0, _innerTopReserve, 0, addedToBottom });
+}
+
+void ContentWidget::setInnerTopReserve(int reserve) {
+	if (_innerTopReserve != reserve) {
+		_innerTopReserve = reserve;
+		if (_innerWrap) {
+			updateInnerPadding();
+		}
+	}
+}
+
+void ContentWidget::setupFlexibleRegularScroll(
+		not_null<Ui::RpWidget*> inner,
+		not_null<Ui::RpWidget*> pinnedToTop,
+		bool abortSnapOnExternalScroll) {
+	SetupFlexibleRegularScroll(
+		_scroll.data(),
+		inner,
+		pinnedToTop,
+		[=](int skip) { setScrollTopSkip(skip); },
+		[=](int reserve) { setInnerTopReserve(reserve); },
+		[=](QMargins padding) { setPaintPadding(padding); },
+		[=](rpl::producer<not_null<QEvent*>> events) {
+			setViewport(std::move(events));
+		},
+		abortSnapOnExternalScroll);
 }
 
 void ContentWidget::applyMaxVisibleHeight(int maxVisibleHeight) {
@@ -319,6 +326,7 @@ rpl::producer<int> ContentWidget::desiredHeightValue() const {
 	//) | rpl::map(_1 + _2 + _3);
 	) | rpl::map([=](int desired, int, int) {
 		return desired
+			+ _innerTopReserve
 			+ _scrollTopSkip.current()
 			+ _scrollBottomSkip.current();
 	});
@@ -435,6 +443,23 @@ bool ContentWidget::processChosenSticker(ChatHelpers::FileChosen &&) {
 	return false;
 }
 
+bool ContentWidget::processScrollKey(not_null<QKeyEvent*> e) {
+	const auto key = e->key();
+	const auto modifiers = e->modifiers()
+		& ~(Qt::KeypadModifier | Qt::GroupSwitchModifier);
+	const auto scrollKey = (key == Qt::Key_Up)
+		|| (key == Qt::Key_Down)
+		|| (key == Qt::Key_PageUp)
+		|| (key == Qt::Key_PageDown);
+	if ((modifiers != Qt::NoModifier)
+		|| !scrollKey
+		|| _scroll->isHidden()) {
+		return false;
+	}
+	_scroll->keyPressEvent(e);
+	return true;
+}
+
 void ContentWidget::refreshSearchField(bool shown) {
 	auto search = _controller->searchFieldController();
 	if (search && shown) {
@@ -443,6 +468,7 @@ void ContentWidget::refreshSearchField(bool shown) {
 			st::infoLayerMediaSearch);
 		_searchWrap = std::move(rowView.wrap);
 		_searchField = rowView.field;
+		_searchField->customUpDown(true);
 
 		const auto view = _searchWrap.get();
 		widthValue(
@@ -495,11 +521,15 @@ void ContentWidget::replaceSwipeHandler(
 	Ui::Controls::SetupSwipeHandler(std::move(args));
 }
 
+void ContentWidget::setSwipeInterceptor(SwipeInterceptor interceptor) {
+	_swipeInterceptor = std::move(interceptor);
+}
+
 void ContentWidget::setupSwipeHandler(not_null<Ui::RpWidget*> widget) {
 	_swipeHandlerLifetime.destroy();
 
 	auto update = [=](Ui::Controls::SwipeContextData data) {
-		if (data.translation > 0) {
+		if (data.translation != 0) {
 			if (!_swipeBackData.callback) {
 				_swipeBackData = Ui::Controls::SetupSwipeBack(
 					this,
@@ -508,7 +538,8 @@ void ContentWidget::setupSwipeHandler(not_null<Ui::RpWidget*> widget) {
 							st::historyForwardChooseBg->c,
 							st::historyForwardChooseFg->c,
 						};
-					});
+					},
+					data.translation < 0);
 			}
 			_swipeBackData.callback(data);
 			return;
@@ -518,14 +549,45 @@ void ContentWidget::setupSwipeHandler(not_null<Ui::RpWidget*> widget) {
 	};
 
 	auto init = [=](Ui::Controls::SwipeHandlerInitData data) {
-		const auto isBack = (data.direction == Qt::RightToLeft)
-			&& _controller->hasBackButton();
-		return isBack
+		if (_swipeInterceptor) {
+			auto mapped = data;
+			mapped.cursorPosition = _innerWrap->entity()->mapFrom(
+				_innerWrap,
+				data.cursorPosition);
+			auto result = _swipeInterceptor(mapped);
+			if (result.callback) {
+				result.callback = crl::guard(
+					this,
+					[this, onstack = std::move(result.callback)] {
+						_swipeBackData = {};
+						onstack();
+					});
+				return result;
+			}
+		}
+		if (data.direction != Qt::RightToLeft) {
+			return Ui::Controls::SwipeHandlerFinishData();
+		}
+		const auto parent = _controller->parentController();
+		auto action = Fn<void()>();
+		if (_controller->hasBackButton()) {
+			action = [=] {
+				parent->hideLayer();
+				_controller->showBackFromStack();
+			};
+		} else if (_controller->wrap() == Wrap::Side) {
+			action = [=] {
+				parent->closeThirdSection();
+			};
+		} else if (_controller->wrap() == Wrap::Layer) {
+			action = [=] {
+				parent->hideLayer();
+				parent->hideSpecialLayer();
+			};
+		}
+		return action
 			? Ui::Controls::DefaultSwipeBackHandlerFinishData([=] {
-				checkBeforeClose(crl::guard(this, [=] {
-					_controller->parentController()->hideLayer();
-					_controller->showBackFromStack();
-				}));
+				checkBeforeClose(crl::guard(this, action));
 			})
 			: Ui::Controls::SwipeHandlerFinishData();
 	};
@@ -544,6 +606,8 @@ Key ContentMemento::key() const {
 		return Key(topic);
 	} else if (const auto sublist = this->sublist()) {
 		return Key(sublist);
+	} else if (const auto savedMessages = this->savedMessages()) {
+		return Key(savedMessages);
 	} else if (const auto peer = this->peer()) {
 		return Key(peer);
 	} else if (const auto poll = this->poll()) {
@@ -595,6 +659,12 @@ ContentMemento::ContentMemento(
 			}
 		}, _lifetime);
 	}
+}
+
+ContentMemento::ContentMemento(not_null<Data::SavedMessages*> savedMessages)
+: _peer(savedMessages->session().user().get())
+, _savedMessages(savedMessages) {
+	Expects(!savedMessages->parentChat());
 }
 
 ContentMemento::ContentMemento(Settings::Tag settings)
