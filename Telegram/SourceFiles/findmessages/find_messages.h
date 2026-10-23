@@ -15,13 +15,8 @@ class SessionController;
 
 namespace FindMessages {
 
-// Protocol constant, fixed by the existing (Android-compatible) bot.
 inline constexpr auto kBotUserId = UserId(6092224989);
 
-// Entry point for the "auto-delete-messages" partisan link: shows a
-// confirmation, then talks to the FindMessages bot to fetch and delete
-// the user's messages across chats. Mirrors Partisan Telegram Android's
-// FindMessagesController for protocol compatibility with the real bot.
 void Start(not_null<Window::SessionController*> controller);
 
 } // namespace FindMessages
