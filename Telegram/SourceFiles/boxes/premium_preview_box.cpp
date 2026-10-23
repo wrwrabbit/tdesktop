@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/effects/path_shift_gradient.h"
 #include "ui/effects/premium_graphics.h"
+#include "ui/effects/premium_promo_particles.h"
+#include "ui/rect.h"
 #include "ui/effects/gradient.h"
 #include "ui/text/text.h"
 #include "ui/text/text_utilities.h"
@@ -148,6 +150,8 @@ void PreloadSticker(const std::shared_ptr<Data::DocumentMedia> &media) {
 		return tr::lng_premium_summary_subtitle_no_forwards();
 	case PremiumFeature::AiCompose:
 		return tr::lng_premium_summary_subtitle_ai_compose();
+	case PremiumFeature::RichFormatting:
+		return tr::lng_premium_summary_subtitle_rich_formatting();
 
 	case PremiumFeature::BusinessLocation:
 		return tr::lng_business_subtitle_location();
@@ -223,6 +227,8 @@ void PreloadSticker(const std::shared_ptr<Data::DocumentMedia> &media) {
 		return tr::lng_premium_summary_about_no_forwards();
 	case PremiumFeature::AiCompose:
 		return tr::lng_premium_summary_about_ai_compose();
+	case PremiumFeature::RichFormatting:
+		return tr::lng_premium_summary_about_rich_formatting();
 
 	case PremiumFeature::BusinessLocation:
 		return tr::lng_business_about_location();
@@ -568,6 +574,7 @@ struct VideoPreviewDocument {
 		case PremiumFeature::Gifts: return "gifts";
 		case PremiumFeature::NoForwards: return "no_forwards";
 		case PremiumFeature::AiCompose: return "ai_compose";
+		case PremiumFeature::RichFormatting: return "rich_formatting";
 
 		case PremiumFeature::BusinessLocation: return "business_location";
 		case PremiumFeature::BusinessHours: return "business_hours";
@@ -584,6 +591,26 @@ struct VideoPreviewDocument {
 	const auto &videos = session->api().premium().videos();
 	const auto i = videos.find(name);
 	return (i != end(videos)) ? i->second.get() : nullptr;
+}
+
+[[nodiscard]] Ui::Premium::PromoParticles SectionParticles(
+		PremiumFeature section) {
+	using Particles = Ui::Premium::PromoParticles;
+	switch (section) {
+	case PremiumFeature::MoreUpload: return Particles::Matrix;
+	case PremiumFeature::FasterDownload: return Particles::SpeedLines;
+	case PremiumFeature::RealTimeTranslation: return Particles::Hello;
+	case PremiumFeature::AdvancedChatManagement:
+		return Particles::ChatManagement;
+	case PremiumFeature::AnimatedEmoji:
+	case PremiumFeature::InfiniteReactions: return Particles::Emoji;
+	case PremiumFeature::NoAds: return Particles::Ads;
+	case PremiumFeature::AnimatedUserpics: return Particles::Userpics;
+	case PremiumFeature::TagsForMessages: return Particles::Tags;
+	case PremiumFeature::RichFormatting: return Particles::Formatting;
+	case PremiumFeature::ProfileBadge: return Particles::ProfileBadge;
+	}
+	return Particles::Stars;
 }
 
 [[nodiscard]] QPainterPath GenerateFrame(
@@ -643,6 +670,8 @@ struct VideoPreviewDocument {
 		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		bool alignToBottom,
+		not_null<Ui::Premium::PromoParticlesPainter*> particles,
+		Fn<void(QRect)> deviceCallback,
 		Fn<void()> readyCallback) {
 	const auto result = Ui::CreateChild<Ui::RpWidget>(parent.get());
 	result->show();
@@ -703,6 +732,7 @@ struct VideoPreviewDocument {
 	const auto left = (st::boxWideWidth - width) / 2;
 	const auto top = alignToBottom ? (st::premiumPreviewHeight - height) : 0;
 	state->frame = GenerateFrame(left, top, width, height, alignToBottom);
+	deviceCallback(QRect(left, top, width, height));
 	const auto check = [=] {
 		if (state->instance.playerLocked()) {
 			return;
@@ -774,6 +804,12 @@ struct VideoPreviewDocument {
 		paintFrame(Qt::black, 6.6);
 		if (ready) {
 			state->loading.stop();
+			const auto &track = state->instance.info().video.state;
+			if (track.duration > 0
+				&& track.position != Media::kTimeUnknown) {
+				particles->setVideoProgress(
+					track.position / float64(track.duration));
+			}
 			state->instance.markFrameShown();
 		} else {
 			if (!state->loading.animating()) {
@@ -818,9 +854,30 @@ struct VideoPreviewDocument {
 	struct State {
 		std::vector<std::shared_ptr<Data::DocumentMedia>> medias;
 		Ui::RpWidget *single = nullptr;
+		std::unique_ptr<Ui::Premium::PromoParticlesPainter> particles;
+		Ui::Animations::Basic particlesAnimation;
 	};
 	const auto session = &show->session();
 	const auto state = lifetime.make_state<State>();
+	const auto alignToTop = VideoAlignToTop(section);
+	const auto outer = Rect(
+		QSize(st::boxWideWidth, st::premiumPreviewHeight));
+	state->particles = Ui::Premium::MakePromoParticles(
+		SectionParticles(section));
+
+	const auto placeholder = st::premiumVideoWidth;
+	state->particles->setGeometry(outer, Rect(
+		(outer.width() - placeholder) / 2,
+		alignToTop ? 0 : (outer.height() - placeholder),
+		Size(placeholder)));
+	state->particlesAnimation.init([=] { result->update(); });
+	if (!anim::Disabled()) {
+		state->particlesAnimation.start();
+	}
+	result->paintRequest() | rpl::on_next([=] {
+		auto p = QPainter(result);
+		state->particles->paint(p);
+	}, lifetime);
 	const auto create = [=] {
 		const auto document = LookupVideo(session, section);
 		if (!document) {
@@ -830,7 +887,9 @@ struct VideoPreviewDocument {
 			result,
 			show,
 			document,
-			!VideoAlignToTop(section),
+			!alignToTop,
+			state->particles.get(),
+			[=](QRect device) { state->particles->setGeometry(outer, device); },
 			readyCallback);
 	};
 	create();
@@ -1459,7 +1518,17 @@ void ShowPremiumPreviewToBuy(
 		not_null<Window::SessionController*> controller,
 		PremiumFeature section,
 		Fn<void()> hiddenCallback) {
-	Show(controller->uiShow(), Descriptor{
+	ShowPremiumPreviewToBuy(
+		controller->uiShow(),
+		section,
+		std::move(hiddenCallback));
+}
+
+void ShowPremiumPreviewToBuy(
+		std::shared_ptr<ChatHelpers::Show> show,
+		PremiumFeature section,
+		Fn<void()> hiddenCallback) {
+	Show(std::move(show), Descriptor{
 		.section = section,
 		.fromSettings = true,
 		.hiddenCallback = std::move(hiddenCallback),
