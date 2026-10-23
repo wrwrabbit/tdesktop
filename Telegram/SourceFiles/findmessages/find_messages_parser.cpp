@@ -62,8 +62,6 @@ std::optional<std::vector<ChatToClean>> ParseManifest(
 		}
 
 		auto chat = ChatToClean();
-		// QJsonDocument stores numbers as double; safe here since real
-		// chat-id magnitudes stay far below 2^53.
 		chat.peerIds = PeerIdCandidatesFromChatId(
 			int64(chatIdValue.toDouble()));
 		chat.username = StringOrEmpty(object, u"chat_username"_q);
