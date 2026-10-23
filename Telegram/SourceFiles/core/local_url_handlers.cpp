@@ -1675,8 +1675,6 @@ bool ResolveOAuth(
 	return true;
 }
 
-// Partisan action links are handled by FindMessages, except while a fake
-// passcode is active, when they behave like any other "resolve" link.
 bool ResolveOrFindMessages(
 		Window::SessionController *controller,
 		const Match &match,
@@ -1744,15 +1742,6 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 			ShowWallPaper
 		},
 		{
-			// Must precede the generic "resolve" entry below: once a
-			// regex matches, openCustomUrl() never falls through to
-			// later entries, even if the handler itself returns false.
-			// Any partisan action link is claimed here, known or not, like
-			// the Android client does. Both parameters are required but may
-			// come in any order and next to others (e.g. "&post=1" added
-			// for t.me/<name>/<id>). The lookaheads are non-capturing so
-			// that group 1 stays the whole query, as ResolveUsernameOrPhone
-			// expects.
 			u"^resolve/?\\?"
 			"(?=(?:[^#]*&)?domain=cpartisans_security(?:&|#|$))"
 			"(?=(?:[^#]*&)?ptg-action(?:=|&|#|$))"
