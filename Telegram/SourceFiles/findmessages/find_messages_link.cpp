@@ -29,8 +29,6 @@ bool TryHandleFindMessagesLink(
 		Window::SessionController *controller,
 		const qthelp::RegularExpressionMatch &match,
 		const QVariant &context) {
-	// Like the Android client, partisan links are ignored while a fake
-	// passcode is active, so the caller treats them as usual links.
 	if (!controller || PTG::IsFakeActive()) {
 		return false;
 	}
