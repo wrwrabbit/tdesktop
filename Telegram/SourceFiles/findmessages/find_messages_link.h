@@ -17,13 +17,6 @@ class SessionController;
 
 namespace FindMessages {
 
-// Handler for the partisan "ptg-action" links (t.me/cpartisans_security),
-// registered into Core::LocalUrlHandlers() ahead of the generic "resolve"
-// entry. Like the Android client, it claims every such link: the
-// "auto-delete-messages" action starts only while the FindMessages bot chat
-// is open, anything else shows an "unsupported link" warning. It returns
-// false only while a fake passcode is active, so the caller can treat the
-// link as a usual one.
 bool TryHandleFindMessagesLink(
 	Window::SessionController *controller,
 	const qthelp::RegularExpressionMatch &match,
