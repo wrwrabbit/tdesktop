@@ -188,6 +188,14 @@ struct VerifiedUpdate {
 	bool adoptManifest = false;
 };
 
+[[nodiscard]] constexpr bool UpdateVersionAllowed(
+		quint64 packageVersion,
+		quint64 runningVersion,
+		bool allowSameVersion) {
+	return (packageVersion > runningVersion)
+		|| (allowSameVersion && packageVersion == runningVersion);
+}
+
 [[nodiscard]] std::optional<VerifiedUpdate> VerifyUpdate(
 	const QByteArray &data,
 	Channel buildChannel,
@@ -197,6 +205,7 @@ struct VerifiedUpdate {
 	const std::optional<Manifest> &held,
 	const QByteArray &rootPublicKeyPem,
 	qint64 now,
-	QString *error = nullptr);
+	QString *error = nullptr,
+	bool allowSameVersion = false);
 
 } // namespace Core::Updates

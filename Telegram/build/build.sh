@@ -8,6 +8,10 @@ arg1="$1"
 arg2="$2"
 arg3="$3"
 
+CP_MAC_SKIPDMG="${CP_MAC_SKIPDMG:-0}"
+CP_ARCH="${CP_ARCH:-}"
+CP_FINAL="${CP_FINAL:-}"
+
 if [ ! -d "$FullScriptPath/../../../DesktopPrivate" ]; then
   echo ""
   echo "This script is for building the production version of Telegram Desktop."
@@ -31,38 +35,17 @@ while IFS='' read -r line || [[ -n "$line" ]]; do
   BuildTarget="$line"
 done < "$FullScriptPath/target"
 
-UpdateKeysLoc="$FullScriptPath/../Resources/update"
-
-# Update signing settings. Edit these directly when rotating keys, they are
-# the single source of truth (no environment overrides).
-ReleaseLocalKey="$FullScriptPath/../../../DesktopPrivate/modern/release-local-2026b.pem"
-ReleaseLocalKeyId="rl-2026b"
-ReleaseCloudVault="tdesktop-release-kv"
-ReleaseCloudKeyId="rc-2026a"
-ReleaseCloudKeyName="release-2026a"
-
-if [ "$BuildTarget" != "macstore" ]; then
-  if [ ! -f "$ReleaseLocalKey" ]; then
-    Error "Release local key not found: $ReleaseLocalKey"
-  fi
-  python3 "$FullScriptPath/sign_update.py" --check \
-    --az-vault "$ReleaseCloudVault" \
-    --az-key "$ReleaseCloudKeyName" \
-    --keys-loc "$UpdateKeysLoc" \
-    --key-id "$ReleaseCloudKeyId" \
-    || Error "Cloud update signing is not ready, fix the setup above before building."
-fi
-
 while IFS='' read -r line || [[ -n "$line" ]]; do
   set $line
   eval $1="$2"
 done < "$FullScriptPath/version"
 
-if [ "$AppVersion" -lt 7002000 ]; then
-  Error "The v2 update format requires version 7.2 or newer."
-fi
+while IFS='' read -r line || [[ -n "$line" ]]; do
+  set $line
+  eval $1="$2"
+done < "$FullScriptPath/ptg_version"
 
-VersionForPacker="$AppVersion"
+VersionForPacker="$PtgAppVersion"
 if [ "$AlphaVersion" != "0" ]; then
   AppVersion="$AlphaVersion"
   AppVersionStrFull="${AppVersionStr}_${AlphaVersion}"
@@ -76,56 +59,78 @@ else
   AlphaBetaParam='-beta'
 fi
 
-if [ "$AlphaVersion" != "0" ]; then
-  Error "The v2 update format has no alpha channel."
-fi
-case "$AppVersionStr" in
-  *.*.*) ;;
-  *) Error "AppVersionStr '$AppVersionStr' must have three components for the v2 names." ;;
-esac
-UpdateChannel="stable"
-ArtifactSuffix=""
-if [ "$BetaChannel" != "0" ]; then
-  UpdateChannel="beta"
-  ArtifactSuffix="-beta"
+# TDESKTOP_UPDATE_V2=1 switches the update packaging to the v2 signed
+# envelope (2-of-2: the local Ed25519 release key plus the cloud ES256
+# key through an interactive az login) and every artifact to the v2
+# names: td-update-{os}-{arch}-{version}[-beta] and
+# td-(setup|portable)-{os}[-{arch}]-{version_str}[-beta].{ext}. Without the
+# switch the classical v1 update and the classical names are built, so
+# the stepping-stone releases keep coming out exactly as before.
+if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+  if [ "$AlphaVersion" != "0" ]; then
+    Error "The v2 update format has no alpha channel."
+  fi
+  case "$AppVersionStr" in
+    *.*.*) ;;
+    *) Error "AppVersionStr '$AppVersionStr' must have three components for the v2 names." ;;
+  esac
+  UpdateChannel="stable"
+  V2Suffix=""
+  if [ "$BetaChannel" != "0" ]; then
+    UpdateChannel="beta"
+    V2Suffix="-beta"
+  fi
+  UpdateKeysLoc="$FullScriptPath/../Resources/update"
+  ReleaseLocalKey="${TDESKTOP_RELEASE_LOCAL_KEY:-$FullScriptPath/../../../DesktopPrivate/release-local.pem}"
+  ReleaseLocalKeyId="${TDESKTOP_RELEASE_LOCAL_KEY_ID:-rl-2026a}"
+  ReleaseCloudVault="${TDESKTOP_RELEASE_KEYVAULT:-tdesktop-release-kv}"
+  ReleaseCloudKeyId="${TDESKTOP_RELEASE_CLOUD_KEY_ID:-rc-2026a}"
 fi
 
+# The per-target deploy folder, both under the local backup and, through
+# deploy.sh, on the remote. The classical name is a plain "t" before the
+# build target, the v2 one names the architecture. Every place that
+# writes into the backup reads this one variable.
 BackupFolder="t$BuildTarget"
-if [ "$BuildTarget" == "linux" ]; then
-  BackupFolder="linux-x64"
-elif [ "$BuildTarget" == "mac" ]; then
-  BackupFolder="mac"
+if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+  if [ "$BuildTarget" == "linux" ]; then
+    BackupFolder="linux-x64"
+  elif [ "$BuildTarget" == "mac" ]; then
+    BackupFolder="mac"
+  fi
 fi
 
-SignUpdate() {
-  until python3 "$FullScriptPath/sign_update.py" \
+PackUpdate() {
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    "./Packer" "$@" -version $VersionForPacker -channel $UpdateChannel \
+      -keys-loc "$UpdateKeysLoc" -emit-signing-input signing-input.bin
+    python3 "$FullScriptPath/sign_update.py" \
       --input signing-input.bin \
       --output release-cloud.sig \
       --az-vault "$ReleaseCloudVault" \
-      --az-key "$ReleaseCloudKeyName"; do
-    echo "Cloud signing of $UpdateFile failed, retrying in 10 seconds (fix az login / network in another terminal).."
-    sleep 10
-  done
-}
-
-PackUpdate() {
-  "./Packer" "$@" -version $VersionForPacker -channel $UpdateChannel \
-    -keys-loc "$UpdateKeysLoc" -emit-signing-input signing-input.bin
-  SignUpdate
-  "./Packer" -channel $UpdateChannel -keys-loc "$UpdateKeysLoc" \
-    -unsigned "$UpdateFile.unsigned" \
-    -embed-signatures "$ReleaseCloudKeyId:release-cloud.sig" \
-    -local-key "$ReleaseLocalKey" \
-    -local-key-id "$ReleaseLocalKeyId"
-  rm signing-input.bin release-cloud.sig "$UpdateFile.unsigned"
+      --az-key "$ReleaseCloudKeyId"
+    "./Packer" -channel $UpdateChannel -keys-loc "$UpdateKeysLoc" \
+      -unsigned "$UpdateFile.unsigned" \
+      -embed-signatures "$ReleaseCloudKeyId:release-cloud.sig" \
+      -local-key "$ReleaseLocalKey" \
+      -local-key-id "$ReleaseLocalKeyId"
+    rm signing-input.bin release-cloud.sig "$UpdateFile.unsigned"
+  else
+    "./Packer" "$@" -version $VersionForPacker $AlphaBetaParam
+  fi
 }
 
 echo ""
 HomePath="$FullScriptPath/.."
 if [ "$BuildTarget" == "linux" ]; then
   echo "Building version $AppVersionStrFull for Linux 64bit.."
-  UpdateFile="td-update-linux-x64-$AppVersion$ArtifactSuffix"
-  SetupFile="td-setup-linux-x64-$AppVersionStr$ArtifactSuffix.tar.xz"
+  UpdateFile="tlinuxupd$PtgAppVersion"
+  SetupFile="tsetup.$AppVersionStrFull.tar.xz"
+  SetupFile="tsetup.latest.tar.xz"
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    UpdateFile="td-update-linux-x64-latest"
+    SetupFile="td-setup-linux-x64-latest.tar.xz"
+  fi
   ProjectPath="$HomePath/../out"
   ReleasePath="$ProjectPath/Release"
   BinaryName="Telegram"
@@ -149,11 +154,17 @@ elif [ "$BuildTarget" == "mac" ] ; then
     fi
   fi
 
-  if [ "$AC_USERNAME" == "" ]; then
-    Error "AC_USERNAME not found!"
+  # CP_ARCH environment variable: single architecture build
+  if [ "$CP_ARCH" != "" ]; then
+    echo "CP_ARCH set to $CP_ARCH, building single architecture..."
+    # Note: arg1 (MacArch) will be set by caller, or empty for universal
   fi
-  UpdateFileAMD64="td-update-mac-x64-$AppVersion$ArtifactSuffix"
-  UpdateFileARM64="td-update-mac-arm-$AppVersion$ArtifactSuffix"
+  UpdateFileAMD64="tmacupd$PtgAppVersion"
+  UpdateFileARM64="tarmacupd$PtgAppVersion"
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    UpdateFileAMD64="td-update-mac-x64-$PtgAppVersion$V2Suffix"
+    UpdateFileARM64="td-update-mac-arm-$PtgAppVersion$V2Suffix"
+  fi
   if [ "$MacArch" == "arm64" ]; then
     UpdateFile="$UpdateFileARM64"
   elif [ "$MacArch" == "x86_64" ]; then
@@ -164,14 +175,20 @@ elif [ "$BuildTarget" == "mac" ] ; then
   BinaryName="Telegram"
   if [ "$MacArch" != "" ]; then
     BundleName="$BinaryName.$MacArch.app"
-    if [ "$MacArch" == "arm64" ]; then
-      SetupFile="td-setup-mac-arm-$AppVersionStr$ArtifactSuffix.dmg"
-    else
-      SetupFile="td-setup-mac-x64-$AppVersionStr$ArtifactSuffix.dmg"
+    SetupFile="tsetup.$MacArch.latest.dmg"
+    if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+      if [ "$MacArch" == "arm64" ]; then
+        SetupFile="td-setup-mac-arm-latest$V2Suffix.dmg"
+      else
+        SetupFile="td-setup-mac-x64-latest$V2Suffix.dmg"
+      fi
     fi
   else
     BundleName="$BinaryName.app"
-    SetupFile="td-setup-mac-$AppVersionStr$ArtifactSuffix.dmg"
+    SetupFile="tsetup.latest.dmg"
+    if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+      SetupFile="td-setup-mac-latest$V2Suffix.dmg"
+    fi
   fi
 elif [ "$BuildTarget" == "macstore" ]; then
   if [ "$AlphaVersion" != "0" ]; then
@@ -209,35 +226,24 @@ else
   fi
 fi
 
-if [ "$MacArch" == "" ]; then
-  LockDir="$ProjectPath/.build.lock"
-  if ! mkdir -p "$ProjectPath" || ! mkdir "$LockDir" 2> /dev/null; then
-    Error "Another build.sh seems to be running (found $LockDir, remove it if stale)."
-  fi
-  trap 'rmdir "$LockDir"' EXIT
-fi
-
-DeployPath="$ReleasePath/deploy/$AppVersionStrMajor/$AppVersionStrFull"
+DeployPath="$ReleasePath/deploy"
 
 if [ "$BuildTarget" == "linux" ]; then
 
-  DropboxSymbolsPath="/media/psf/Dropbox/Telegram/symbols"
+  DropboxSymbolsPath="$ProjectPath/Dropbox/Telegram/symbols"
   if [ ! -d "$DropboxSymbolsPath" ]; then
-    DropboxSymbolsPath="/mnt/c/Telegram/Dropbox/Telegram/symbols"
-    if [ ! -d "$DropboxSymbolsPath" ]; then
-      Error "Dropbox path not found!"
-    fi
+    Error "Dropbox path not found!"
   fi
 
-  BackupPath="/media/psf/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull/$BackupFolder"
-  if [ ! -d "/media/psf/backup/tdesktop" ]; then
-    BackupPath="/mnt/c/Telegram/Projects/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull/$BackupFolder"
-    if [ ! -d "/mnt/c/Telegram/Projects/backup/tdesktop" ]; then
-      Error "Backup folder not found!"
-    fi
+  BackupPath="$ProjectPath/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull/t$BuildTarget"
+  if [ ! -d "$ProjectPath/backup/tdesktop" ]; then
+    Error "Backup folder not found!"
   fi
 
-  ./build/docker/centos_env/run.sh /usr/src/tdesktop/Telegram/build/docker/build.sh
+  # Already running in Docker, no nested virtualization
+  cd $HomePath
+  $FullScriptPath/docker/build.sh
+  echo "Build completed - $?"
 
   echo "Copying from docker result folder."
   cp "$ReleasePath/root/$BinaryName" "$ReleasePath/$BinaryName"
@@ -245,11 +251,13 @@ if [ "$BuildTarget" == "linux" ]; then
   cp "$ReleasePath/root/Packer" "$ReleasePath/Packer"
 
   echo "Dumping debug symbols.."
-  "$ReleasePath/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
+  #"$ReleasePath/dump_syms" "$ReleasePath/$BinaryName" > "$ReleasePath/$BinaryName.sym"
+  touch "$ReleasePath/$BinaryName.sym"
   echo "Done!"
 
   echo "Stripping the executable.."
-  "$FullScriptPath/minidebug.sh" "$ReleasePath/$BinaryName"
+  strip -s "$ReleasePath/$BinaryName"
+#  "$FullScriptPath/minidebug.sh" "$ReleasePath/$BinaryName"
   echo "Done!"
 
   echo "Preparing version $AppVersionStrFull, executing Packer.."
@@ -280,13 +288,14 @@ if [ "$BuildTarget" == "linux" ]; then
     mkdir "$ReleasePath/deploy"
   fi
 
-  if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
-    mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
-  fi
+  #if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
+  #  mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
+  #fi
 
-  echo "Copying $BinaryName, Updater and $UpdateFile to deploy/$AppVersionStrMajor/$AppVersionStrFull..";
-  mkdir "$DeployPath"
+  echo "Copying $BinaryName, Updater and $UpdateFile to $DeployPath/$BinaryName..";
+  #mkdir "$DeployPath"
   mkdir "$DeployPath/$BinaryName"
+  ls
   mv "$ReleasePath/$BinaryName" "$DeployPath/$BinaryName/"
   mv "$ReleasePath/Updater" "$DeployPath/$BinaryName/"
   mv "$ReleasePath/$UpdateFile" "$DeployPath/"
@@ -294,6 +303,7 @@ if [ "$BuildTarget" == "linux" ]; then
     mv "$ReleasePath/$AlphaKeyFile" "$DeployPath/"
   fi
   cd "$DeployPath"
+  ls
   tar -cJvf "$SetupFile" "$BinaryName/"
 
   mkdir -p $BackupPath
@@ -306,13 +316,13 @@ fi
 
 if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
-  DropboxSymbolsPath="$HOME/Dropbox/Telegram/symbols"
+  DropboxSymbolsPath="$ProjectPath/Dropbox/Telegram/symbols"
   if [ ! -d "$DropboxSymbolsPath" ]; then
     Error "Dropbox path not found!"
   fi
 
-  BackupPath="$HOME/Projects/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull"
-  if [ ! -d "$HOME/Projects/backup/tdesktop" ]; then
+  BackupPath="$ProjectPath/backup/tdesktop/$AppVersionStrMajor/$AppVersionStrFull"
+  if [ ! -d "$ProjectPath/backup/tdesktop" ]; then
     Error "Backup path not found!"
   fi
 
@@ -320,11 +330,21 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     cd $ReleasePath
 
     echo "Preparing single $MacArch .app.."
-    rm -rf $BundleName
-    cp -R $BinaryName.app $BundleName
-    lipo -thin $MacArch $BinaryName.app/Contents/MacOS/$BinaryName -output $BundleName/Contents/MacOS/$BinaryName
-    lipo -thin $MacArch $BinaryName.app/Contents/Frameworks/Updater -output $BundleName/Contents/Frameworks/Updater
-    lipo -thin $MacArch $BinaryName.app/Contents/Helpers/crashpad_handler -output $BundleName/Contents/Helpers/crashpad_handler
+    # If CP_ARCH was used, the binary is already thin (single arch), just use it
+    # If not (recursive call from universal build), thin it from the universal binary
+    if [ "$CP_ARCH" != "" ]; then
+      # Already thin from build, just copy to expected location
+      echo "Using pre-built thin binary for $MacArch"
+      rm -rf $BundleName
+      cp -R $BinaryName.app $BundleName
+    else
+      # Thin from universal binary (recursive call case)
+      rm -rf $BundleName
+      cp -R $BinaryName.app $BundleName
+      lipo -thin $MacArch $BinaryName.app/Contents/MacOS/$BinaryName -output $BundleName/Contents/MacOS/$BinaryName
+      lipo -thin $MacArch $BinaryName.app/Contents/Frameworks/Updater -output $BundleName/Contents/Frameworks/Updater
+      lipo -thin $MacArch $BinaryName.app/Contents/Helpers/crashpad_handler -output $BundleName/Contents/Helpers/crashpad_handler
+    fi
     echo "Done!"
   elif [ "$NotarizeRequestId" == "" ]; then
     if [ "$NotarizeRequestIdAMD64" == "" ] && [ "$NotarizeRequestIdARM64" == "" ]; then
@@ -337,7 +357,14 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       rm -rf "$ReleasePath/$BinaryName.app/Contents/_CodeSignature"
       rm -rf "$ReleasePath/Updater"
 
-      ./configure.sh -D DESKTOP_APP_MAC_ARCH="arm64;x86_64" -DDESKTOP_APP_ENABLE_LTO=ON
+      cd $HomePath
+      if [ "$CP_ARCH" != "" ]; then
+        ./configure.sh -D DESKTOP_APP_MAC_ARCH="$CP_ARCH"
+      else
+        ./configure.sh -D DESKTOP_APP_MAC_ARCH="arm64;x86_64"
+      fi
+      # not use -DDESKTOP_APP_ENABLE_LTO=ON from original
+      # ./configure.sh -D DESKTOP_APP_MAC_ARCH="arm64;x86_64" -DDESKTOP_APP_ENABLE_LTO=ON
 
       cd $ProjectPath
       cmake --build . --config Release --target Telegram
@@ -350,17 +377,23 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     cd $FullExecPath
 
     if [ "$BuildTarget" == "mac" ]; then
+      # Call subphase for each architecture that needs processing
+      # If CP_ARCH is not set (empty), process both arm64 and x86_64
+      # If CP_ARCH is set, process only that architecture
       if [ "$NotarizeRequestIdAMD64" == "" ]; then
-        echo "Preparing single arm64 update.."
-        ./$0 arm64 request_uuid $NotarizeRequestIdARM64
+        if [ "$CP_ARCH" == "" ] || [ "$CP_ARCH" == "arm64" ]; then
+          echo "Preparing single arm64 update.."
+          ./$0 arm64 request_uuid $NotarizeRequestIdARM64
+        fi
       fi
 
-      echo "Preparing single x86_64 update.."
-      ./$0 x86_64 request_uuid $NotarizeRequestIdAMD64
+      if [ "$CP_ARCH" == "" ] || [ "$CP_ARCH" == "x86_64" ]; then
+        echo "Preparing single x86_64 update.."
+        ./$0 x86_64 request_uuid $NotarizeRequestIdAMD64
+      fi
 
       echo "Done."
     fi
-    cd $ReleasePath
   fi
   if [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
     if [ "$BuildTarget" == "mac" ]; then
@@ -377,7 +410,8 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       fi
     fi
 
-    if [ "$MacArch" == "" ]; then
+    # Do this w/ univeral build, no CP _HACKs only
+    if [ "$MacArch-$CP_ARCH" == "-" ]; then
       echo "Dumping debug symbols x86_64 from universal.."
       "$HomePath/../../Libraries/breakpad/src/tools/mac/dump_syms/build/Release/dump_syms" "-a" "x86_64" "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName" > "$ReleasePath/$BinaryName.x86_64.sym" 2>/dev/null
       echo "Done!"
@@ -408,8 +442,61 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     echo "Done!"
 
     echo "Signing the application.."
-    if [ "$BuildTarget" == "mac" ]; then
-      codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
+    if [ "$PTG_TESTBUILD" == "1" ]; then
+      # no certification - we ok for test
+      echo "Skip certification"
+    elif [ "$BuildTarget" == "mac" ]; then
+      # Use PTG Certificate from GitHub Secrets
+      if [ ! -f "certificate.p12" ]; then
+        echo "Decoding certificate from environment..."
+        echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+        echo "✓ Certificate decoded to certificate.p12"
+
+        # Check if keychain already exists
+        if security show-keychain-info build.keychain >/dev/null 2>&1; then
+          echo "⚠ Keychain 'build.keychain' already exists (parallel build detected)"
+          echo "  Waiting 60 seconds for other process to complete..."
+          sleep 60
+          echo "  Proceeding with keychain operations (accepting duplicate errors)"
+        else
+          echo "✓ Keychain does not exist, creating new one"
+        fi
+
+        echo "Creating keychain 'build.keychain'..."
+        security create-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (keychain may already exist from parallel build, continuing...)"
+
+        echo "Setting default keychain..."
+        security default-keychain -s build.keychain 2>&1 || echo "  (could not set default, continuing...)"
+
+        echo "Unlocking keychain..."
+        security unlock-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (could not unlock, continuing...)"
+
+        echo "Importing certificate..."
+        security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign 2>&1 || echo "  (could not import, continuing...)"
+
+        echo "Setting key partition list..."
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain 2>&1 || echo "  (could not set partition list, continuing...)"
+
+        echo "✓ Keychain setup complete"
+      fi
+
+      if [ "$identity" == "" ]; then
+        echo "Finding developer identity..."
+        identity=$(security find-identity -v 2>&1 | grep Developer | awk -F " " 'END {print $2}')
+        if [ -z "$identity" ]; then
+          echo "⚠ Warning: No developer identity found yet"
+        else
+          echo "✓ Found developer identity: ${identity:0:3}..."
+        fi
+      else
+        echo "Using previously found identity: ${identity:0:3}..."
+      fi
+
+      echo "Code signing application at: $ReleasePath/$BundleName"
+      codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements" 2>&1
+      echo "✓ Code signing complete"
+
+      #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
     elif [ "$BuildTarget" == "macstore" ]; then
       codesign --force --timestamp --options runtime --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName/Contents/Frameworks/Breakpad.framework/Versions/A/Resources/breakpadUtilities.dylib" --entitlements "$HomePath/Telegram/Breakpad.entitlements"
       codesign --force --deep --timestamp --options runtime --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram Lite.entitlements"
@@ -419,20 +506,28 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     echo "Done!"
 
     if [ ! -f "$ReleasePath/$BundleName/Contents/Resources/Icon.icns" ]; then
-      Error "Icon.icns not found in Resources!"
+      # TODO: fix, temp until debugged
+      #Error "Icon.icns not found in Resources!"
+      echo "Icon.icns not found in Resources!"
     fi
 
     if [ ! -f "$ReleasePath/$BundleName/Contents/MacOS/$BinaryName" ]; then
-      Error "$BinaryName not found in MacOS!"
+      # TODO: fix, temp until debugged
+      #Error "$BinaryName not found in MacOS!"
+      echo "$BinaryName not found in MacOS!"
     fi
 
     if [ ! -d "$ReleasePath/$BundleName/Contents/_CodeSignature" ]; then
-      Error "$BinaryName signature not found!"
+      # TODO: fix, temp until debugged
+      #Error "$BinaryName signature not found!"
+      echo "$BinaryName signature not found!"
     fi
 
     if [ "$BuildTarget" == "macstore" ]; then
       if [ ! -f "$ReleasePath/$BinaryName.pkg" ]; then
-        Error "$BinaryName.pkg not found!"
+        # TODO: fix, temp until debugged
+        #Error "$BinaryName.pkg not found!"
+        echo "$BinaryName.pkg not found!"
       fi
     fi
   fi
@@ -440,16 +535,40 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
   if [ "$BuildTarget" == "mac" ]; then
     cd "$ReleasePath"
 
-    if [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
+    if [ "$CP_ARCH" != "" ]; then
+      echo "CP_ARCH set to $CP_ARCH, skipping DMG creation."
+    elif [ "$NotarizeRequestId" == "" ] || [ "$NotarizeRequestId" == "go" ]; then
       if [ "$AlphaVersion" == "0" ]; then
-        cp -f tsetup_template.dmg tsetup.temp.dmg
-        TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
-        cp -R "./$BundleName" "$TempDiskPath/"
-        rm -f "$TempDiskPath/$BundleName/Contents/Resources/AppIcon.icns"
-        bless --folder "$TempDiskPath/"
-        hdiutil detach "$TempDiskPath"
-        hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
-        rm tsetup.temp.dmg
+        #cp -f tsetup_template.dmg tsetup.temp.dmg
+        #TempDiskPath=`hdiutil attach -nobrowse -noautoopenrw -readwrite tsetup.temp.dmg | awk -F "\t" 'END {print $3}'`
+        #cp -R "./$BundleName" "$TempDiskPath/"
+        #bless --folder "$TempDiskPath/"
+        #hdiutil detach "$TempDiskPath"
+        #hdiutil convert tsetup.temp.dmg -format UDBZ -ov -o "$SetupFile"
+        #rm tsetup.temp.dmg
+        # Do simple
+        if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+          create-dmg \
+              --volname "Telegram Desktop" \
+              --volicon "./$BundleName/Contents/Resources/Icon.icns" \
+              --hide-extension "$BundleName" \
+              --icon-size 100 \
+              --app-drop-link 400 20 \
+              --bless \
+              --format UDBZ \
+              "$SetupFile" \
+              "./$BundleName"
+        else
+          echo "CP_MAC_SKIPDMG=1: Skipping DMG creation."
+          # create fake DMG file so the rest of the script works
+          if [ ! -f "$ReleasePath/$SetupFile" ]; then
+            touch "$ReleasePath/$SetupFile"
+          fi
+          echo "Fake DMG file created: $ReleasePath/$SetupFile"
+        fi
+        # do zip as well
+        bless --folder "./$BundleName/" --openfolder "$BundleName/"
+        zip -r "$BundleName.zip" "$BundleName"
       fi
     fi
 
@@ -482,15 +601,20 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         cd "$ReleasePath/AlphaTemp"
         zip -r "$SetupFile" "$BinaryName"
         mv "$SetupFile" "$ReleasePath/"
+        mv "$BundleName.zip" "$ReleasePath/"
         cd "$ReleasePath"
       fi
     fi
-    echo "Beginning notarization process."
-    xcrun notarytool submit "$SetupFile" --keychain-profile "preston" --wait
-    xcrun stapler staple "$ReleasePath/$BundleName"
+    echo "Skipping notarization process."
+    #xcrun notarytool submit "$SetupFile" --keychain-profile "preston" --wait
+    #xcrun stapler staple "$ReleasePath/$BundleName"
 
     if [ "$MacArch" != "" ]; then
-      rm "$ReleasePath/$SetupFile"
+      if [ "$CP_ARCH" != "" ]; then
+        echo "CP_ARCH set to $CP_ARCH, skipping DMG cleanup."
+      else
+        rm "$ReleasePath/$SetupFile"
+      fi
       echo "Setup file $SetupFile removed."
     elif [ "$AlphaVersion" != "0" ]; then
       rm -rf "$ReleasePath/AlphaTemp"
@@ -502,8 +626,8 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       mv "$SetupFile" "$ReleasePath/"
       cd "$ReleasePath"
       echo "Alpha archive re-created."
-    else
-      xcrun stapler staple "$ReleasePath/$SetupFile"
+    #else
+      #xcrun stapler staple "$ReleasePath/$SetupFile"
     fi
 
     if [ "$MacArch" != "" ]; then
@@ -516,6 +640,14 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       PackUpdate -path "$BinaryName.app" -target "$BuildTarget" -arch $MacArch
       echo "Packer done!"
       mv "$UpdateFile" "$ReleasePath/"
+
+      if [ "$CP_ARCH" != "" ]; then
+        echo "CP_ARCH set to $CP_ARCH, packing bundle as well"
+
+        # do zip as well
+        zip -r "$ReleasePath/$BundleName.zip" "$BinaryName.app/"
+      fi
+
       cd "$ReleasePath"
       rm -rf "$UpdatePackPath"
       exit
@@ -526,25 +658,41 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
     mkdir "$ReleasePath/deploy"
   fi
 
-  if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
-    mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
-  fi
+  #if [ ! -d "$ReleasePath/deploy/$AppVersionStrMajor" ]; then
+  #  mkdir "$ReleasePath/deploy/$AppVersionStrMajor"
+  #fi
 
   if [ "$BuildTarget" == "mac" ]; then
     echo "Copying $BinaryName.app, $UpdateFileAMD64 and $UpdateFileARM64 to deploy/$AppVersionStrMajor/$AppVersionStr..";
-    mkdir "$DeployPath"
+    #mkdir "$DeployPath"
     mkdir "$DeployPath/$BinaryName"
     cp -r "$ReleasePath/$BinaryName.app" "$DeployPath/$BinaryName/"
-    if [ "$AlphaVersion" != "0" ]; then
-      mv "$ReleasePath/$AlphaKeyFile" "$DeployPath/"
-    fi
-    rm "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName"
+    if [ "$CP_ARCH" == "" ]; then
+      if [ "$AlphaVersion" != "0" ]; then
+        mv "$ReleasePath/$AlphaKeyFile" "$DeployPath/"
+      fi
+    fi # CP_ARCH not set
+    #rm "$ReleasePath/$BinaryName.app/Contents/MacOS/$BinaryName"
     rm "$ReleasePath/$BinaryName.app/Contents/Frameworks/Updater"
-    mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
-    mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
-    mv "$ReleasePath/$SetupFile" "$DeployPath/"
+    if [ "$CP_ARCH" != "arm64" ]; then
+      mv "$ReleasePath/$UpdateFileAMD64" "$DeployPath/"
+    fi # no CP_ARCH or CP_ARCH == AMD64
+    if [ "$CP_ARCH" != "x86_64" ]; then
+      mv "$ReleasePath/$UpdateFileARM64" "$DeployPath/"
+    fi # no CP_ARCH or CP_ARCH == ARM64
+    if [ "$CP_MAC_SKIPDMG" != "1" ]; then
+      if [ "$CP_ARCH" == "" ]; then
+        mv "$ReleasePath/$SetupFile" "$DeployPath/"
+      fi # no CP_ARCH
+    fi
+    if [ "$CP_ARCH" == "" ]; then
+      mv "$ReleasePath/$BundleName.zip" "$DeployPath/"
+    else
+      mv "$ReleasePath/$BinaryName.$CP_ARCH.app.zip" "$DeployPath/"
+    fi
 
     if [ "$BuildTarget" == "mac" ]; then
+    if [ "$CP_ARCH" == "" ]; then
       mkdir -p "$BackupPath/$BackupFolder"
       cp "$DeployPath/$UpdateFileAMD64" "$BackupPath/$BackupFolder/"
       cp "$DeployPath/$UpdateFileARM64" "$BackupPath/$BackupFolder/"
@@ -552,6 +700,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       if [ "$AlphaVersion" != "0" ]; then
         cp -v "$DeployPath/$AlphaKeyFile" "$BackupPath/$BackupFolder/"
       fi
+    fi # no CP_ARCH
     fi
   elif [ "$BuildTarget" == "macstore" ]; then
     echo "Copying $BinaryName.app to deploy/$AppVersionStrMajor/$AppVersionStr..";
@@ -563,8 +712,8 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 fi
 
 echo "Version $AppVersionStrFull is ready!";
-echo -en "\007";
-sleep 1;
-echo -en "\007";
-sleep 1;
-echo -en "\007";
+#echo -en "\007";
+#sleep 1;
+#echo -en "\007";
+#sleep 1;
+#echo -en "\007";

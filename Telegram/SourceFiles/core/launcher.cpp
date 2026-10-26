@@ -441,7 +441,8 @@ int Launcher::exec() {
 
 	if (!UpdaterDisabled() && cRestartingUpdate()) {
 		DEBUG_LOG(("Sandbox Info: executing updater to install update."));
-		if (!launchUpdater(UpdaterLaunch::PerformUpdate)) {
+		if (!ConsumeUpdateInstallPermission()
+			|| !launchUpdater(UpdaterLaunch::PerformUpdate)) {
 			base::Platform::DeleteDirectory(cWorkingDir() + u"tupdates/temp"_q);
 		}
 	} else if (cRestarting()) {

@@ -40,6 +40,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_domain.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QSaveFile>
+#include <QtCore/QUuid>
 #include <QtCore/QJsonObject>
 #include <QtCore/QFileSystemWatcher>
 
@@ -96,15 +98,25 @@ std::weak_ptr<Updater> UpdaterInstance;
 
 bool AcceptUpstreamRelease = false;
 bool PTGAcceptSameVersion = false;
-const QString PTG_UPDATE_CHANNEL = "tdptgFeed";
+bool SameVersionPolicyExplicitlySet = false;
+const QString PTG_UPDATE_CHANNEL = "tdptgfeed2";
+
+bool UseUpstreamUpdates() {
+	return AcceptUpstreamRelease
+		|| (Core::IsAppLaunched() && PTG::IsFakeActive());
+}
+
 uint64 GetAppVersionForUpdate() {
-	if (Core::IsAppLaunched() && PTG::IsFakeActive()) {
-		return AppVersion;
-	} else if (AcceptUpstreamRelease) {
-		return AppVersion;
-	} else {
-		return PTelegramAppVersion;
-	}
+	return UseUpstreamUpdates() ? AppVersion : PTelegramAppVersion;
+}
+
+QString SameVersionTokenPath() {
+	return cWorkingDir() + u"tdata/update-same-token"_q;
+}
+
+QByteArray ReadSameVersionToken() {
+	QFile file(SameVersionTokenPath());
+	return file.open(QIODevice::ReadOnly) ? file.read(64) : QByteArray();
 }
 
 using Progress = UpdateChecker::Progress;
@@ -405,8 +417,10 @@ QString FindUpdateFile() {
 	return result;
 }
 
-void AdoptManifest(const Updates::Manifest &manifest) {
-	const auto held = HeldManifest();
+void AdoptManifest(
+		const Updates::Manifest &manifest,
+		bool upstream = false) {
+	const auto held = upstream ? std::nullopt : HeldManifest();
 	if (!held || manifest.version > held->version) {
 		LOG(("Update Info: Adopting manifest version %1."
 			).arg(manifest.version));
@@ -594,7 +608,26 @@ QString ExtractFilename(const QString &url) {
 	return true;
 }
 
-[[nodiscard]] bool WriteUpdateReadyFile(const QString &readyFilePath) {
+[[nodiscard]] bool WriteUpdateReadyFile(
+		const QString &readyFilePath,
+		quint32 version,
+		bool upstream,
+		bool allowSameVersion) {
+	const auto policy = QJsonDocument(QJsonObject{
+		{ u"domain"_q, upstream ? u"upstream"_q : u"ptg"_q },
+		{ u"version"_q, double(version) },
+		{ u"from"_q, double(upstream ? AppVersion : PTelegramAppVersion) },
+		{ u"allowSame"_q, allowSameVersion },
+		{ u"sameToken"_q, allowSameVersion
+			? QString::fromLatin1(ReadSameVersionToken())
+			: QString() },
+	}).toJson(QJsonDocument::Compact);
+	QSaveFile policyFile(QFileInfo(readyFilePath).path() + u"/tdata/update-policy"_q);
+	if (!policyFile.open(QIODevice::WriteOnly)
+		|| policyFile.write(policy) != policy.size()
+		|| !policyFile.commit()) {
+		return false;
+	}
 	QFile readyFile(readyFilePath);
 	if (readyFile.open(QIODevice::WriteOnly)) {
 		if (readyFile.write("1", 1)) {
@@ -612,7 +645,9 @@ QString ExtractFilename(const QString &url) {
 
 [[nodiscard]] bool UnpackUpdateV2(
 		const QString &filepath,
-		const QByteArray &content) {
+		const QByteArray &content,
+		bool upstream,
+		bool allowSameVersion) {
 	// The expected target follows the feed key, not the build: an x64
 	// build under Rosetta asks for armac and must accept that package.
 	const auto target = Updates::TargetFromPlatformKey(
@@ -631,18 +666,19 @@ QString ExtractFilename(const QString &url) {
 		BuildUpdateChannel,
 		AppBetaVersion || cInstallBetaVersion(),
 		*target,
-		RunningUpdateVersion(),
-		HeldManifest(),
-		Updates::RootPublicKeyPem(),
+		RunningUpdateVersion(upstream),
+		upstream ? std::nullopt : HeldManifest(),
+		Updates::RootPublicKeyPem(upstream),
 		base::unixtime::now(),
-		&error);
+		&error,
+		allowSameVersion);
 	if (!verified) {
 		LOG(("Update Error: v2 update rejected: %1").arg(error));
 		return false;
 	}
 	if (verified->adoptManifest) {
-		crl::on_main([manifest = verified->manifest] {
-			AdoptManifest(manifest);
+		crl::on_main([manifest = verified->manifest, upstream] {
+			AdoptManifest(manifest, upstream);
 		});
 	}
 
@@ -699,7 +735,13 @@ QString ExtractFilename(const QString &url) {
 		}
 	}
 
-	if (!WriteUpdateReadyFile(readyFilePath)) {
+	if (!WriteUpdateReadyFile(
+			readyFilePath,
+			canary
+				? kVersionFileCanaryMarker
+				: Updates::UpdateVersionBase(verified->envelope.version),
+			upstream,
+			allowSameVersion)) {
 		return false;
 	}
 	QFile(filepath).remove();
@@ -709,7 +751,10 @@ QString ExtractFilename(const QString &url) {
 
 #endif // !TDESKTOP_DISABLE_AUTOUPDATE
 
-bool UnpackUpdate(const QString &filepath) {
+bool UnpackUpdate(
+		const QString &filepath,
+		bool upstream,
+		bool allowSameVersion) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
 	if (filepath.isEmpty()) {
 		return true;
@@ -734,7 +779,7 @@ bool UnpackUpdate(const QString &filepath) {
 	input.close();
 
 	if (Updates::IsV2UpdateFile(compressed)) {
-		if (UnpackUpdateV2(filepath, compressed)) {
+		if (UnpackUpdateV2(filepath, compressed, upstream, allowSameVersion)) {
 			return true;
 		} else if (BuildIsCanary) {
 			return false;
@@ -776,13 +821,12 @@ bool UnpackUpdate(const QString &filepath) {
 
 	// Go through public keys and verify the binary
 	std::list<const char*> keys;
-	keys.push_back(UpdatesPTGPublicKey);
-	keys.push_back(AppBetaVersion
-		? UpdatesPublicBetaKey
-		: UpdatesPublicKey);
-	keys.push_back(AppBetaVersion
-		? UpdatesPublicKey
-		: UpdatesPublicBetaKey);
+	if (upstream) {
+		keys.push_back(UpdatesPublicKey);
+		keys.push_back(UpdatesPublicBetaKey);
+	} else {
+		keys.push_back(UpdatesPTGPublicKey);
+	}
 	bool verified = false;
 	while (!verified && !keys.empty())
 	{
@@ -841,11 +885,10 @@ bool UnpackUpdate(const QString &filepath) {
 				LOG(("Update Error: downloaded alpha version %1 is not greater, than mine %2").arg(alphaVersion).arg(cAlphaVersion()));
 				return false;
 			}
-		} else if (PTGAcceptSameVersion && (int32(version) == GetAppVersionForUpdate())) {
-			// pass
-		} else if (int32(version) <= GetAppVersionForUpdate()) {
-			FAKE_LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(version).arg(GetAppVersionForUpdate()));
-			LOG(("Update Error: downloaded version %1 is not greater, than mine %2").arg(AppVersion).arg(AppVersion));
+		} else if (!Updates::UpdateVersionAllowed(
+				version,
+				upstream ? AppVersion : PTelegramAppVersion,
+				allowSameVersion)) {
 			return false;
 		}
 
@@ -870,7 +913,7 @@ bool UnpackUpdate(const QString &filepath) {
 		}
 	}
 
-	if (!WriteUpdateReadyFile(readyFilePath)) {
+	if (!WriteUpdateReadyFile(readyFilePath, version, upstream, allowSameVersion)) {
 		return false;
 	}
 	input.remove();
@@ -1301,7 +1344,7 @@ void MtpChecker::start() {
 		return;
 	}
 	const auto updaterVersion = Platform::AutoUpdateVersion();
-	const auto feed = AcceptUpstreamRelease ?
+	const auto feed = UseUpstreamUpdates() ?
 		// upstream TG channel name -> tdhbcfeed<NUM>
 		"tdhbcfeed"
 		+ (updaterVersion > 1 ? QString::number(updaterVersion) : QString())
@@ -1605,7 +1648,7 @@ void MtpChecker::parseCanaryMetadata(
 		consider(Updates::ChannelName(Updates::Channel::Stable));
 		consider(Updates::ChannelName(Updates::Channel::Beta));
 	}
-	if (!bestVersion || bestVersion <= RunningUpdateVersion()) {
+	if (!bestVersion || bestVersion <= RunningUpdateVersion(UseUpstreamUpdates())) {
 		done(nullptr);
 		return;
 	}
@@ -2179,8 +2222,10 @@ void Updater::finalize(QString filepath) {
 	_retryTimer.cancel();
 	_activeLoader = nullptr;
 	_action = Action::Unpacking;
+	const auto upstream = UseUpstreamUpdates();
+	const auto allowSameVersion = PTGAcceptSameVersion;
 	crl::async([=] {
-		const auto ready = UnpackUpdate(filepath);
+		const auto ready = UnpackUpdate(filepath, upstream, allowSameVersion);
 		crl::on_main([=] {
 			GetUpdaterInstance()->unpackDone(ready);
 		});
@@ -2271,7 +2316,20 @@ void UpdateChecker::SetAcceptUpstreamRelease(bool value)
 
 void UpdateChecker::SetAcceptSameVersion(bool value)
 {
-	PTGAcceptSameVersion = value;
+	SameVersionPolicyExplicitlySet = true;
+	PTGAcceptSameVersion = false;
+	if (value) {
+		const auto token = QUuid::createUuid().toByteArray(QUuid::WithoutBraces);
+		QSaveFile file(SameVersionTokenPath());
+		if (file.open(QIODevice::WriteOnly)
+			&& file.write(token) == token.size()
+			&& file.commit()) {
+			PTGAcceptSameVersion = true;
+		}
+	} else if (QFile::exists(SameVersionTokenPath())
+		&& !QFile::remove(SameVersionTokenPath())) {
+		ClearAll();
+	}
 }
 
 bool UpdateChecker::percent() const {
@@ -2293,9 +2351,18 @@ bool UpdateChecker::percent() const {
 //	return QString::fromWCharArray(errMsg);
 //}
 
+bool ConsumeUpdateInstallPermission() {
+	PTGAcceptSameVersion = false;
+	return !QFile::exists(SameVersionTokenPath())
+		|| QFile::remove(SameVersionTokenPath());
+}
+
 bool checkReadyUpdate() {
 	QString readyFilePath = cWorkingDir() + u"tupdates/temp/ready"_q, readyPath = cWorkingDir() + u"tupdates/temp"_q;
 	if (!QFile(readyFilePath).exists() || cExeName().isEmpty()) {
+		if (!PTGAcceptSameVersion) {
+			QFile::remove(SameVersionTokenPath());
+		}
 		if (QDir(cWorkingDir() + u"tupdates/ready"_q).exists() || QDir(cWorkingDir() + u"tupdates/temp"_q).exists()) {
 			ClearAll();
 		}
@@ -2317,6 +2384,31 @@ bool checkReadyUpdate() {
 			ClearAll();
 			return false;
 		}
+		auto upstream = UseUpstreamUpdates();
+		auto allowSameVersion = PTGAcceptSameVersion;
+		QFile policyFile(readyPath + u"/tdata/update-policy"_q);
+		if (policyFile.exists()) {
+			if (!policyFile.open(QIODevice::ReadOnly)) {
+				ClearAll();
+				return false;
+			}
+			const auto policy = QJsonDocument::fromJson(policyFile.readAll()).object();
+			const auto domain = policy.value(u"domain"_q).toString();
+			if ((domain != u"ptg"_q && domain != u"upstream"_q)
+				|| policy.value(u"version"_q).toDouble() != versionNum) {
+				ClearAll();
+				return false;
+			}
+			upstream = (domain == u"upstream"_q);
+			const auto token = policy.value(u"sameToken"_q).toString().toLatin1();
+			allowSameVersion = policy.value(u"allowSame"_q).toBool()
+				&& !token.isEmpty()
+				&& token == ReadSameVersionToken()
+				&& (!SameVersionPolicyExplicitlySet || PTGAcceptSameVersion)
+				&& policy.value(u"from"_q).toDouble()
+					== (upstream ? AppVersion : PTelegramAppVersion);
+		}
+		const auto runningVersion = upstream ? AppVersion : PTelegramAppVersion;
 		if (versionNum == 0x7FFFFFFF) { // alpha version
 			quint64 alphaVersion = 0;
 			if (fVersion.read((char*)&alphaVersion, sizeof(quint64)) != sizeof(quint64)) {
@@ -2329,10 +2421,6 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-		} else if ((PTGAcceptSameVersion || ptgSafeTest()) 
-				    && (versionNum == GetAppVersionForUpdate())) {
-			// we can get here on start up, and PTGAcceptSameVersion may not be set
-			// but we can get here only if ptgSafeTest set in first instance
 		} else if (versionNum == kVersionFileCanaryMarker) {
 			quint64 canaryVersion = 0;
 			if (fVersion.read((char*)&canaryVersion, sizeof(quint64)) != sizeof(quint64)) {
@@ -2340,8 +2428,8 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-			if (!BuildIsCanary || canaryVersion <= RunningUpdateVersion()) {
-				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(RunningUpdateVersion()));
+			if (!BuildIsCanary || canaryVersion <= RunningUpdateVersion(UseUpstreamUpdates())) {
+				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(RunningUpdateVersion(UseUpstreamUpdates())));
 				ClearAll();
 				return false;
 			}
@@ -2349,7 +2437,10 @@ bool checkReadyUpdate() {
 			LOG(("Update Error: cant install a non-canary version %1 on a private canary").arg(versionNum));
 			ClearAll();
 			return false;
-		} else if (versionNum <= GetAppVersionForUpdate()) {
+		} else if (!Updates::UpdateVersionAllowed(
+				versionNum,
+				runningVersion,
+				allowSameVersion)) {
 			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
 			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(AppVersion));
 			ClearAll();

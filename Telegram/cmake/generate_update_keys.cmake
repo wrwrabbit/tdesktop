@@ -19,6 +19,7 @@ function(generate_update_keys target_name update_loc)
         -Droot_pem=${update_loc}/root-public.pem
         -Dmanifest=${update_loc}/manifest.min.json
         -Dmanifest_sig=${update_loc}/manifest.sig
+        -Dupstream_root_pem=${update_loc}/upstream/root-public.pem
         -Doutput=${gen_files}
         -P ${gen_script}
     COMMENT "Generating update keys header (${target_name})"
@@ -27,6 +28,7 @@ function(generate_update_keys target_name update_loc)
         ${update_loc}/root-public.pem
         ${update_loc}/manifest.min.json
         ${update_loc}/manifest.sig
+        ${update_loc}/upstream/root-public.pem
     )
     generate_target(${target_name} update_keys ${gen_files} "${gen_files}" ${gen_dst})
 endfunction()
