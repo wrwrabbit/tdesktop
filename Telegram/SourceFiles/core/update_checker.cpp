@@ -102,12 +102,19 @@ bool SameVersionPolicyExplicitlySet = false;
 const QString PTG_UPDATE_CHANNEL = "tdptgfeed2";
 
 bool UseUpstreamUpdates() {
-	return AcceptUpstreamRelease
-		|| (Core::IsAppLaunched() && PTG::IsFakeActive());
+	return AcceptUpstreamRelease;
 }
 
-uint64 GetAppVersionForUpdate() {
-	return UseUpstreamUpdates() ? AppVersion : PTelegramAppVersion;
+uint64 GetAppVersionForUpdate(bool upstream) {
+	return (upstream || (Core::IsAppLaunched() && PTG::IsFakeActive()))
+		? AppVersion
+		: PTelegramAppVersion;
+}
+
+quint64 GetRunningUpdateVersion(bool upstream) {
+	return Updates::MakeUpdateVersion(
+		quint32(GetAppVersionForUpdate(upstream)),
+		CanaryBuildCounter);
 }
 
 QString SameVersionTokenPath() {
@@ -647,6 +654,7 @@ QString ExtractFilename(const QString &url) {
 		const QString &filepath,
 		const QByteArray &content,
 		bool upstream,
+		uint64 runningVersion,
 		bool allowSameVersion) {
 	// The expected target follows the feed key, not the build: an x64
 	// build under Rosetta asks for armac and must accept that package.
@@ -666,7 +674,7 @@ QString ExtractFilename(const QString &url) {
 		BuildUpdateChannel,
 		AppBetaVersion || cInstallBetaVersion(),
 		*target,
-		RunningUpdateVersion(upstream),
+		Updates::MakeUpdateVersion(quint32(runningVersion), CanaryBuildCounter),
 		upstream ? std::nullopt : HeldManifest(),
 		Updates::RootPublicKeyPem(upstream),
 		base::unixtime::now(),
@@ -754,6 +762,7 @@ QString ExtractFilename(const QString &url) {
 bool UnpackUpdate(
 		const QString &filepath,
 		bool upstream,
+		uint64 runningVersion,
 		bool allowSameVersion) {
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
 	if (filepath.isEmpty()) {
@@ -779,7 +788,12 @@ bool UnpackUpdate(
 	input.close();
 
 	if (Updates::IsV2UpdateFile(compressed)) {
-		if (UnpackUpdateV2(filepath, compressed, upstream, allowSameVersion)) {
+		if (UnpackUpdateV2(
+				filepath,
+				compressed,
+				upstream,
+				runningVersion,
+				allowSameVersion)) {
 			return true;
 		} else if (BuildIsCanary) {
 			return false;
@@ -887,7 +901,7 @@ bool UnpackUpdate(
 			}
 		} else if (!Updates::UpdateVersionAllowed(
 				version,
-				upstream ? AppVersion : PTelegramAppVersion,
+				runningVersion,
 				allowSameVersion)) {
 			return false;
 		}
@@ -1454,7 +1468,7 @@ auto MtpChecker::parseText(const QByteArray &text) const
 auto MtpChecker::validateLatestLocation(
 		uint64 availableVersion,
 		const FileLocation &location) const -> FileLocation {
-	const auto myVersion = uint64(GetAppVersionForUpdate());
+	const auto myVersion = GetAppVersionForUpdate(UseUpstreamUpdates());
 	if (PTGAcceptSameVersion && (availableVersion == myVersion)) {
 		return location;
 	}
@@ -1648,7 +1662,7 @@ void MtpChecker::parseCanaryMetadata(
 		consider(Updates::ChannelName(Updates::Channel::Stable));
 		consider(Updates::ChannelName(Updates::Channel::Beta));
 	}
-	if (!bestVersion || bestVersion <= RunningUpdateVersion(UseUpstreamUpdates())) {
+	if (!bestVersion || bestVersion <= GetRunningUpdateVersion(UseUpstreamUpdates())) {
 		done(nullptr);
 		return;
 	}
@@ -2223,9 +2237,14 @@ void Updater::finalize(QString filepath) {
 	_activeLoader = nullptr;
 	_action = Action::Unpacking;
 	const auto upstream = UseUpstreamUpdates();
+	const auto runningVersion = GetAppVersionForUpdate(upstream);
 	const auto allowSameVersion = PTGAcceptSameVersion;
 	crl::async([=] {
-		const auto ready = UnpackUpdate(filepath, upstream, allowSameVersion);
+		const auto ready = UnpackUpdate(
+			filepath,
+			upstream,
+			runningVersion,
+			allowSameVersion);
 		crl::on_main([=] {
 			GetUpdaterInstance()->unpackDone(ready);
 		});
@@ -2408,7 +2427,7 @@ bool checkReadyUpdate() {
 				&& policy.value(u"from"_q).toDouble()
 					== (upstream ? AppVersion : PTelegramAppVersion);
 		}
-		const auto runningVersion = upstream ? AppVersion : PTelegramAppVersion;
+		const auto runningVersion = GetAppVersionForUpdate(upstream);
 		if (versionNum == 0x7FFFFFFF) { // alpha version
 			quint64 alphaVersion = 0;
 			if (fVersion.read((char*)&alphaVersion, sizeof(quint64)) != sizeof(quint64)) {
@@ -2428,8 +2447,11 @@ bool checkReadyUpdate() {
 				ClearAll();
 				return false;
 			}
-			if (!BuildIsCanary || canaryVersion <= RunningUpdateVersion(UseUpstreamUpdates())) {
-				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(RunningUpdateVersion(UseUpstreamUpdates())));
+			const auto running = Updates::MakeUpdateVersion(
+				quint32(runningVersion),
+				CanaryBuildCounter);
+			if (!BuildIsCanary || canaryVersion <= running) {
+				LOG(("Update Error: cant install canary version %1 having version %2").arg(canaryVersion).arg(running));
 				ClearAll();
 				return false;
 			}
@@ -2441,7 +2463,7 @@ bool checkReadyUpdate() {
 				versionNum,
 				runningVersion,
 				allowSameVersion)) {
-			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(GetAppVersionForUpdate()));
+			FAKE_LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(runningVersion));
 			LOG(("Update Error: cant install version %1 having version %2").arg(versionNum).arg(AppVersion));
 			ClearAll();
 			return false;
