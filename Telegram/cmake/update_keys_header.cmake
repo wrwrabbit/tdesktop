@@ -4,8 +4,8 @@
 # For license and copyright information please follow this link:
 # https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
-# Expects: -Droot_pem= -Dmanifest= -Dmanifest_sig= -Doutput=
-# Embeds the three files from Resources/update/ verbatim: the manifest
+# Expects: -Droot_pem= -Dmanifest= -Dmanifest_sig= -Dupstream_root_pem= -Doutput=
+# Embeds the public roots and signed manifest verbatim: the manifest
 # bytes are signed, so any transformation would break the signature.
 
 function(append_array name file)
@@ -23,6 +23,7 @@ set(result "// This file was generated from Telegram/Resources/update/,\n// see 
 append_array(kRootPublicKeyPem ${root_pem})
 append_array(kEmbeddedManifest ${manifest})
 append_array(kEmbeddedManifestSig ${manifest_sig})
+append_array(kUpstreamRootPublicKeyPem ${upstream_root_pem})
 set(result "${result}} // namespace Core::Updates::details\n")
 
 file(WRITE ${output} "${result}")
