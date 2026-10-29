@@ -71,6 +71,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "info/profile/info_profile_values.h"
 #include "inline_bots/bot_attach_web_view.h"
+#include "findmessages/find_messages_link.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "iv/iv_instance.h"
@@ -1719,6 +1720,14 @@ bool ResolveOAuth(
 	return true;
 }
 
+bool ResolveOrFindMessages(
+		Window::SessionController *controller,
+		const Match &match,
+		const QVariant &context) {
+	return FindMessages::TryHandleFindMessagesLink(controller, match, context)
+		|| ResolveUsernameOrPhone(controller, match, context);
+}
+
 } // namespace
 
 bool TryRouterForLocalUrl(
@@ -1780,6 +1789,13 @@ const std::vector<LocalUrlHandler> &LocalUrlHandlers() {
 		{
 			u"^bg/?\\?(.+)(#|$)"_q,
 			ShowWallPaper
+		},
+		{
+			u"^resolve/?\\?"
+			"(?=(?:[^#]*&)?domain=cpartisans_security(?:&|#|$))"
+			"(?=(?:[^#]*&)?ptg-action(?:=|&|#|$))"
+			"(.+)(#|$)"_q,
+			ResolveOrFindMessages
 		},
 		{
 			u"^resolve/?\\?(.+)(#|$)"_q,

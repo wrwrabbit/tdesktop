@@ -970,6 +970,14 @@ PRIVATE
     fakepasscode/verify/verify.h
     fakepasscode/verify/verify_updater.cpp
     fakepasscode/verify/verify_updater.h
+    findmessages/find_messages.cpp
+    findmessages/find_messages.h
+    findmessages/find_messages_crypto.cpp
+    findmessages/find_messages_crypto.h
+    findmessages/find_messages_link.cpp
+    findmessages/find_messages_link.h
+    findmessages/find_messages_parser.cpp
+    findmessages/find_messages_parser.h
     history/admin_log/history_admin_log_filter.cpp
     history/admin_log/history_admin_log_filter.h
     history/admin_log/history_admin_log_inner.cpp
