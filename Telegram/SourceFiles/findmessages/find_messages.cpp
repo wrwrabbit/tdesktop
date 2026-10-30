@@ -48,6 +48,10 @@ constexpr auto kManifestPartSize = 32 * 1024;
 // (so it can be removed from the chat) before giving up and finishing.
 constexpr auto kFinalCommandWait = crl::time(10 * 1000);
 
+// How long to wait for the bot to answer the start command with a manifest
+// before giving up, so a blocked or unavailable bot can't hang the run.
+constexpr auto kBotReplyWait = crl::time(60 * 1000);
+
 const auto kFileMarkerName = u"file"_q;
 const auto kStartCommand = u"/ptg"_q;
 const auto kDoneCommand = u"/ptg_done"_q;
@@ -119,6 +123,36 @@ void SendCommand(not_null<PeerData*> bot, const QString &command) {
 	bot->session().api().sendMessage(std::move(message));
 }
 
+// The delete requests are raw MTP ones, so unlike Histories::deleteMessages()
+// nothing removes the loaded items on its own: applyAffectedMessages() only
+// advances the update counters. Drop them from the local history here, and
+// refresh the chat list previews they might have been used for.
+void RemoveLoadedMessages(
+		not_null<PeerData*> peer,
+		const std::vector<MsgId> &ids) {
+	auto &owner = peer->owner();
+	auto remove = std::vector<not_null<HistoryItem*>>();
+	remove.reserve(ids.size());
+	for (const auto id : ids) {
+		if (const auto item = owner.message(peer, id)) {
+			remove.push_back(item);
+		}
+	}
+	if (remove.empty()) {
+		return;
+	}
+	owner.notifyItemsAboutToBeDestroyed(remove);
+	for (const auto &item : remove) {
+		const auto history = item->history();
+		const auto wasLast = (history->lastMessage() == item);
+		const auto wasInChats = (history->chatListMessage() == item);
+		item->destroy();
+		if (wasLast || wasInChats) {
+			history->requestChatListMessage();
+		}
+	}
+}
+
 class Controller final {
 public:
 	explicit Controller(not_null<Window::SessionController*> controller);
@@ -171,6 +205,7 @@ private:
 	std::size_t _chunkStart = 0;
 	bool _anyFailed = false;
 	bool _finished = false;
+	base::Timer _replyTimer;
 	base::Timer _finalCommandTimer;
 	rpl::lifetime _commandsLifetime;
 	rpl::lifetime _lifetime;
@@ -208,6 +243,13 @@ void Controller::confirmed() {
 	hideCommands();
 	SendCommand(_session->data().peer(kBotPeerId), kStartCommand);
 	awaitBotReply();
+
+	// The bot may be blocked or unavailable, then no manifest ever comes and
+	// the spinner (which can't be dismissed) would stay forever.
+	_replyTimer.setCallback([=] {
+		fail(u"The bot did not send a manifest in time."_q);
+	});
+	_replyTimer.callOnce(kBotReplyWait);
 }
 
 // Like the Android client, hide every "/command" message in the bot chat
@@ -276,6 +318,7 @@ void Controller::handleBotItem(not_null<HistoryItem*> item) {
 		return;
 	}
 	_lifetime.destroy(); // We only expect a single manifest reply.
+	_replyTimer.cancel();
 
 	// The caption is half of the decryption key, and the bot removes it with
 	// an edit shortly after sending the file. So it has to be captured right
@@ -480,14 +523,18 @@ void Controller::deleteNextChunk() {
 		_chunkStart + kMessagesChunkSize,
 		chat.messageIds.size());
 	auto ids = QVector<MTPint>();
+	auto removed = std::vector<MsgId>();
 	ids.reserve(int(till - _chunkStart));
+	removed.reserve(till - _chunkStart);
 	for (auto i = _chunkStart; i != till; ++i) {
 		ids.push_back(MTP_int(int32(chat.messageIds[i].bare)));
+		removed.push_back(chat.messageIds[i]);
 	}
 	_chunkStart = till;
 
 	const auto done = [=](const MTPmessages_AffectedMessages &result) {
 		_session->api().applyAffectedMessages(peer, result);
+		RemoveLoadedMessages(peer, removed);
 		deleteNextChunk();
 	};
 	// Like in the Android client, a rejected delete request is not reported
@@ -572,6 +619,7 @@ void Controller::teardown() {
 	}
 	_finished = true;
 	hideProgress();
+	_replyTimer.cancel();
 	_finalCommandTimer.cancel();
 	_commandsLifetime.destroy();
 	_lifetime.destroy();
