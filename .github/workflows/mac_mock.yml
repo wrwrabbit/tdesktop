@@ -1,0 +1,253 @@
+name: macOS mock build (no release secrets)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: GitHub-hosted runner image
+        type: choice
+        default: macos-26
+        options:
+          - macos-26
+          - macos-15
+          - xcode-27
+      phase:
+        description: Stop after configuration, or compile the Telegram target
+        type: choice
+        default: configure
+        options:
+          - configure
+          - build
+      upgrade_cmake:
+        description: Upgrade CMake too (otherwise retain the runner version)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# No environment, secrets, signing, notarization, packaging or deployment.
+# Dependency caches are separate from the production release caches.
+env:
+  REPO_NAME: tdesktop
+  API_ID: "1"
+  API_HASH: "00000000000000000000000000000000"
+
+jobs:
+  libraries:
+    name: Prepare mock dependencies
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    outputs:
+      cache_key: ${{ steps.cache-key.outputs.key }}
+      toolchain: ${{ steps.toolchain.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          persist-credentials: false
+          path: ${{ env.REPO_NAME }}
+
+      - name: Set up tools
+        env:
+          UPGRADE_CMAKE: ${{ inputs.upgrade_cmake }}
+        run: |
+          brew update
+          if [ "$UPGRADE_CMAKE" = "true" ]; then
+            brew unpin cmake || true
+          else
+            brew pin cmake
+          fi
+          brew upgrade || true
+          brew install automake libtool meson nasm ninja pkg-config
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Record toolchain
+        id: toolchain
+        run: |
+          mkdir -p diagnostics
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            xcrun clang --version
+            xcrun swiftc --version
+            cmake --version
+            xcrun --sdk macosx --show-sdk-path
+            plutil -convert xml1 -o - "$(xcrun --sdk macosx --show-sdk-path)/SDKSettings.plist"
+          } | tee diagnostics/toolchain.txt
+          echo "fingerprint=$(shasum -a 256 diagnostics/toolchain.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Dependency cache key
+        id: cache-key
+        env:
+          INPUT_HASH: ${{ hashFiles('tdesktop/Telegram/build/prepare/**', 'tdesktop/Telegram/build/qt_version.py') }}
+          TOOLCHAIN: ${{ steps.toolchain.outputs.fingerprint }}
+        run: echo "key=mac-mock-libs-v1-$TOOLCHAIN-$INPUT_HASH" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        id: libraries-cache
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Prepare dependencies
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          ./tdesktop/Telegram/build/prepare/mac.sh silent 2>&1 | tee diagnostics/libraries.log
+
+      - name: Prune intermediate object directories
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
+        run: find Libraries -type d -name '*.dir' -prune -exec rm -rf {} +
+
+      - uses: actions/cache/save@v4
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Collect dependency configuration logs on failure
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          root = pathlib.Path('Libraries')
+          for pattern in ('CMakeConfigureLog.yaml', 'CMakeError.log'):
+              for source in root.rglob(pattern):
+                  destination = pathlib.Path('diagnostics') / source
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, destination)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mock-macos-dependencies-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
+
+  telegram:
+    name: Mock Telegram (${{ matrix.arch }})
+    needs: libraries
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+          persist-credentials: false
+          path: ${{ env.REPO_NAME }}
+
+      - name: Set up tools
+        env:
+          UPGRADE_CMAKE: ${{ inputs.upgrade_cmake }}
+        run: |
+          brew update
+          if [ "$UPGRADE_CMAKE" = "true" ]; then
+            brew unpin cmake || true
+          else
+            brew pin cmake
+          fi
+          brew upgrade || true
+          brew install automake libtool meson nasm ninja pkg-config
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Record and compare toolchain
+        env:
+          EXPECTED_TOOLCHAIN: ${{ needs.libraries.outputs.toolchain }}
+        run: |
+          mkdir -p diagnostics
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            xcrun clang --version
+            xcrun swiftc --version
+            cmake --version
+            xcrun --sdk macosx --show-sdk-path
+            plutil -convert xml1 -o - "$(xcrun --sdk macosx --show-sdk-path)/SDKSettings.plist"
+          } | tee diagnostics/toolchain.txt
+          ACTUAL_TOOLCHAIN=$(shasum -a 256 diagnostics/toolchain.txt | awk '{print $1}')
+          if [ "$ACTUAL_TOOLCHAIN" != "$EXPECTED_TOOLCHAIN" ]; then
+            echo "::error::Runner toolchain differs from the dependency job. Retry on matching runner images."
+            exit 1
+          fi
+
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ needs.libraries.outputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Generate fake release inputs and apply existing PTG patches
+        working-directory: tdesktop/Telegram/build
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, release_patch
+          pathlib.Path('target').write_text('mac\n')
+          private = pathlib.Path('../../../DesktopPrivate')
+          private.mkdir(exist_ok=True)
+          (private / 'custom_api_id.h').write_text(
+              'const long ApiId = ' + os.environ['API_ID'] + ';\n'
+              'const char *ApiHash = "' + os.environ['API_HASH'] + '";\n')
+          (private / 'alpha_private.h').write_text('static const char *AlphaPrivateKey = "";\n')
+          (private / 'packer_private.h').write_text(
+              'const char *PrivateKey = "";\nconst char *PrivateBetaKey = "";\n')
+          raise SystemExit(release_patch.main())
+          PY
+
+      # Deliberately use the current production configuration, not the newer
+      # upstream Ninja/preserved-CLT flow. Keep the existing 10.13 target.
+      - name: Configure Telegram with fake credentials
+        working-directory: tdesktop/Telegram
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          set -o pipefail
+          ./configure.sh \
+            -D DESKTOP_APP_MAC_ARCH="$BUILD_ARCH" \
+            -D DESKTOP_APP_SPECIAL_TARGET=mac \
+            -D DESKTOP_APP_ENABLE_LTO=OFF \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$GITHUB_WORKSPACE/diagnostics/configure.log"
+
+      - name: Compile Telegram target (no packaging)
+        if: inputs.phase == 'build'
+        run: |
+          set -o pipefail
+          cmake --build tdesktop/out --config Release --target Telegram --parallel 2 \
+            --verbose 2>&1 | tee diagnostics/build.log
+
+      - name: Collect raw mock diagnostics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          out = pathlib.Path('tdesktop/out')
+          sources = [out / 'CMakeCache.txt', out / 'CMakeFiles/CMakeConfigureLog.yaml',
+                     out / 'CMakeFiles/CMakeError.log']
+          sources.extend(out.glob('CMakeFiles/*/CMake*Compiler.cmake'))
+          for source in sources:
+              if source.is_file():
+                  destination = pathlib.Path('diagnostics') / source.relative_to(out)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, destination)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mock-macos-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
