@@ -1,283 +1,253 @@
-name: Public Release - MacOS
+name: macOS mock build (no release secrets)
 
 on:
-  workflow_call:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: GitHub-hosted runner image
+        type: choice
+        default: macos-26
+        options:
+          - macos-26
+          - macos-15
+          - xcode-27
+      phase:
+        description: Stop after configuration, or compile the Telegram target
+        type: choice
+        default: configure
+        options:
+          - configure
+          - build
+      upgrade_cmake:
+        description: Upgrade CMake too (otherwise retain the runner version)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# No environment, secrets, signing, notarization, packaging or deployment.
+# Dependency caches are separate from the production release caches.
+env:
+  REPO_NAME: tdesktop
+  API_ID: "1"
+  API_HASH: "00000000000000000000000000000000"
 
 jobs:
-  build-libraries:
-    name: Libraries
-    runs-on: macos-latest
-    env:
-      REPO_NAME: ${{ github.event.repository.name }}
-
+  libraries:
+    name: Prepare mock dependencies
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    outputs:
+      cache_key: ${{ steps.cache-key.outputs.key }}
+      toolchain: ${{ steps.toolchain.outputs.fingerprint }}
     steps:
-      - name: Clone.
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
-          submodules: recursive
+          submodules: true
+          persist-credentials: false
           path: ${{ env.REPO_NAME }}
 
-      - name: First set up.
+      - name: Set up tools
+        env:
+          UPGRADE_CMAKE: ${{ inputs.upgrade_cmake }}
         run: |
-          sudo chown -R `whoami`:admin /usr/local/share
           brew update
+          if [ "$UPGRADE_CMAKE" = "true" ]; then
+            brew unpin cmake || true
+          else
+            brew pin cmake
+          fi
           brew upgrade || true
           brew install automake libtool meson nasm ninja pkg-config
-          brew install icoutils create-dmg
-          sudo mdutil -a -i off
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build Libraries.
+      - name: Record toolchain
+        id: toolchain
         run: |
-          cd $REPO_NAME
-          ./Telegram/build/prepare/mac.sh silent
+          mkdir -p diagnostics
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            xcrun clang --version
+            xcrun swiftc --version
+            cmake --version
+            xcrun --sdk macosx --show-sdk-path
+            plutil -convert xml1 -o - "$(xcrun --sdk macosx --show-sdk-path)/SDKSettings.plist"
+          } | tee diagnostics/toolchain.txt
+          echo "fingerprint=$(shasum -a 256 diagnostics/toolchain.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Free up some disk space.
-        run: |
-          cd Libraries
-          find . -iname "*.dir" -exec rm -rf {} \; || true
+      - name: Dependency cache key
+        id: cache-key
+        env:
+          INPUT_HASH: ${{ hashFiles('tdesktop/Telegram/build/prepare/**', 'tdesktop/Telegram/build/qt_version.py') }}
+          TOOLCHAIN: ${{ steps.toolchain.outputs.fingerprint }}
+        run: echo "key=mac-mock-libs-v1-$TOOLCHAIN-$INPUT_HASH" >> "$GITHUB_OUTPUT"
 
-      - name: Cache Libraries.
-        uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: libraries-cache
         with:
           path: |
-            ./Libraries
-            ./ThirdParty
-          key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
+            Libraries
+            ThirdParty
+          key: ${{ steps.cache-key.outputs.key }}
 
-  macos-build:
-    environment: Release
-    needs: build-libraries
-    name: Telegram (${{ matrix.arch }})
-    runs-on: macos-latest
-
-    strategy:
-      matrix:
-        include:
-          - arch: arm64
-          - arch: x86_64
-
-    env:
-      UPLOAD_ARTIFACT: "true"
-      ONLY_CACHE: "false"
-      ARTIFACT_NAME: "PTelegram_"
-      REPO_NAME: ${{ github.event.repository.name }}
-      CP_ARCH: ${{ matrix.arch }}
-
-    steps:
-      - name: Clone.
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-          path: ${{ env.REPO_NAME }}
-
-      - name: First set up.
+      - name: Prepare dependencies
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
         run: |
-          sudo chown -R `whoami`:admin /usr/local/share
+          set -o pipefail
+          ./tdesktop/Telegram/build/prepare/mac.sh silent 2>&1 | tee diagnostics/libraries.log
 
-          brew update
-          brew upgrade || true
-          brew install automake meson nasm ninja pkg-config
+      - name: Prune intermediate object directories
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
+        run: find Libraries -type d -name '*.dir' -prune -exec rm -rf {} +
 
-          brew install icoutils create-dmg
-
-          # Disable spotlight.
-          sudo mdutil -a -i off
-
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-
-      - name: Restore Libraries Cache.
-        uses: actions/cache@v4
+      - uses: actions/cache/save@v4
+        if: steps.libraries-cache.outputs.cache-hit != 'true'
         with:
           path: |
-            ./Libraries
-            ./ThirdParty
-          key: mac-libraries-${{ hashFiles('tdesktop/Telegram/build/prepare/prepare.py') }}
+            Libraries
+            ThirdParty
+          key: ${{ steps.cache-key.outputs.key }}
 
-      - name: Try to restore previous build from cache.
+      - name: Collect dependency configuration logs on failure
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          root = pathlib.Path('Libraries')
+          for pattern in ('CMakeConfigureLog.yaml', 'CMakeError.log'):
+              for source in root.rglob(pattern):
+                  destination = pathlib.Path('diagnostics') / source
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, destination)
+          PY
+
+      - uses: actions/upload-artifact@v4
         if: always()
-        id: cache_restore
-        uses: actions/cache@v4
         with:
-          path: ${{ env.REPO_NAME }}/out/Release/artifact
-          key: mac-${{ matrix.arch }}-${{ github.sha }}
-          restore-keys: |
-            mac-${{ matrix.arch }}-${{ github.sha }}
+          name: mock-macos-dependencies-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
 
-      - name: Telegram Desktop build (${{ matrix.arch }}).
-        if: steps.cache_restore.outputs.cache-hit != 'true'
-        env:
-          RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
-          API_ID: ${{ secrets.API_ID }}
-          API_HASH: ${{ secrets.API_HASH }}
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
-        run: |
-          cd $REPO_NAME/Telegram/build
-
-          python3 release_build.py mac
-
-      - name: Check build result.
-        if: steps.cache_restore.outputs.cache-hit != 'true'
-        run: |
-          filePath="$REPO_NAME/out/Release/deploy"
-          if test -d "$filePath"; then
-            echo "${{ matrix.arch }} build successfully done! :)"
-
-            ls $filePath
-          else
-            echo "Build error, output file does not exist."
-            exit 1
-          fi
-
-      - name: Move artifact.
-        if: steps.cache_restore.outputs.cache-hit != 'true'
-        run: |
-          cd $REPO_NAME/out/Release/deploy
-          mkdir -p ../artifact
-          mv * ../artifact || true
-
-      - name: Cache build artifacts for reuse.
-        if: steps.cache_restore.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.REPO_NAME }}/out/Release/artifact
-          key: mac-${{ matrix.arch }}-${{ github.sha }}
-
-      - uses: actions/upload-artifact@v7
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload ${{ matrix.arch }} update files.
-        with:
-          name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_tg
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
-
-      - uses: actions/upload-artifact@v7
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload ${{ matrix.arch }} app bundle.
-        with:
-          name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_app
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
-
-      - uses: actions/upload-artifact@v7
-        name: Upload ${{ matrix.arch }} symbols artifact.
-        if: false
-        with:
-          name: symbols_${{ matrix.arch }}
-          path: ${{ env.REPO_NAME }}/out/Dropbox/Telegram/symbols/*
-
-  macos-combine:
-    environment: Release
-    needs: macos-build
-    name: Telegram (Universal)
-    runs-on: macos-latest
-
-    env:
-      UPLOAD_ARTIFACT: "true"
-      ARTIFACT_NAME: "PTelegram_"
-      REPO_NAME: ${{ github.event.repository.name }}
-
+  telegram:
+    name: Mock Telegram (${{ matrix.arch }})
+    needs: libraries
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
     steps:
-      - name: Clone.
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
-          submodules: recursive
+          submodules: true
+          persist-credentials: false
           path: ${{ env.REPO_NAME }}
 
-      - name: First set up.
+      - name: Set up tools
+        env:
+          UPGRADE_CMAKE: ${{ inputs.upgrade_cmake }}
         run: |
-          sudo chown -R `whoami`:admin /usr/local/share
-
           brew update
+          if [ "$UPGRADE_CMAKE" = "true" ]; then
+            brew unpin cmake || true
+          else
+            brew pin cmake
+          fi
           brew upgrade || true
-          brew install icoutils create-dmg
-
-          # Disable spotlight.
-          sudo mdutil -a -i off
-
+          brew install automake libtool meson nasm ninja pkg-config
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Create work directory.
+      - name: Record and compare toolchain
+        env:
+          EXPECTED_TOOLCHAIN: ${{ needs.libraries.outputs.toolchain }}
         run: |
-          mkdir -p combine_work
-
-      - name: Download ARM64 artifacts.
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}arm64_app
-          path: combine_work
-
-      - name: Download x86_64 artifacts.
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}x86_64_app
-          path: combine_work
-
-      - name: Extract architecture-specific bundles.
-        run: |
-          cd combine_work
-          ls -la
-          
-          # Extract ARM64 bundle
-          unzip -q Telegram.arm64.app.zip 2>/dev/null || true
-          
-          # Rename extracted ARM64 app if needed
-          if [ -d "Telegram.app" ]; then
-            mv Telegram.app Telegram.arm64.app
-          fi
-          
-          # Extract x86_64 bundle
-          unzip -q Telegram.x86_64.app.zip 2>/dev/null || true
-          
-          # Rename extracted x86_64 app if needed
-          if [ -d "Telegram.app" ]; then
-            mv Telegram.app Telegram.x86_64.app
-          fi
-          
-          # Verify both bundles exist
-          if [ ! -d "Telegram.arm64.app" ] || [ ! -d "Telegram.x86_64.app" ]; then
-            echo "ERROR: Missing one or both architecture bundles"
-            ls -la
+          mkdir -p diagnostics
+          {
+            sw_vers
+            uname -m
+            xcodebuild -version
+            xcrun clang --version
+            xcrun swiftc --version
+            cmake --version
+            xcrun --sdk macosx --show-sdk-path
+            plutil -convert xml1 -o - "$(xcrun --sdk macosx --show-sdk-path)/SDKSettings.plist"
+          } | tee diagnostics/toolchain.txt
+          ACTUAL_TOOLCHAIN=$(shasum -a 256 diagnostics/toolchain.txt | awk '{print $1}')
+          if [ "$ACTUAL_TOOLCHAIN" != "$EXPECTED_TOOLCHAIN" ]; then
+            echo "::error::Runner toolchain differs from the dependency job. Retry on matching runner images."
             exit 1
           fi
-          
-          ls -la
 
-      - name: Combine architectures.
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            Libraries
+            ThirdParty
+          key: ${{ needs.libraries.outputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Generate fake release inputs and apply existing PTG patches
+        working-directory: tdesktop/Telegram/build
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, release_patch
+          pathlib.Path('target').write_text('mac\n')
+          private = pathlib.Path('../../../DesktopPrivate')
+          private.mkdir(exist_ok=True)
+          (private / 'custom_api_id.h').write_text(
+              'const long ApiId = ' + os.environ['API_ID'] + ';\n'
+              'const char *ApiHash = "' + os.environ['API_HASH'] + '";\n')
+          (private / 'alpha_private.h').write_text('static const char *AlphaPrivateKey = "";\n')
+          (private / 'packer_private.h').write_text(
+              'const char *PrivateKey = "";\nconst char *PrivateBetaKey = "";\n')
+          raise SystemExit(release_patch.main())
+          PY
+
+      # Deliberately use the current production configuration, not the newer
+      # upstream Ninja/preserved-CLT flow. Keep the existing 10.13 target.
+      - name: Configure Telegram with fake credentials
+        working-directory: tdesktop/Telegram
         env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
-          cd combine_work
-          ${{ github.workspace }}/${{ env.REPO_NAME }}/Telegram/build/build_mac_release.sh .
+          set -o pipefail
+          ./configure.sh \
+            -D DESKTOP_APP_MAC_ARCH="$BUILD_ARCH" \
+            -D DESKTOP_APP_SPECIAL_TARGET=mac \
+            -D DESKTOP_APP_ENABLE_LTO=OFF \
+            -D CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$GITHUB_WORKSPACE/diagnostics/configure.log"
 
-      - name: Create output directory.
+      - name: Compile Telegram target (no packaging)
+        if: inputs.phase == 'build'
         run: |
-          mkdir -p output
-          cd combine_work
-          
-          # Copy universal app zip
-          if [ -f "Telegram.app.zip" ]; then
-            cp Telegram.app.zip ../output/
-          fi
-          
-          # Copy DMG
-          if [ -f "tsetup.latest.dmg" ]; then
-            cp tsetup.latest.dmg ../output/
-          fi
-          
-          ls -la ../output
+          set -o pipefail
+          cmake --build tdesktop/out --config Release --target Telegram --parallel 2 \
+            --verbose 2>&1 | tee diagnostics/build.log
 
-      - uses: actions/upload-artifact@v7
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload universal app.
-        with:
-          name: ${{ env.ARTIFACT_NAME }}_universal_app
-          path: output/Telegram.app.zip
+      - name: Collect raw mock diagnostics
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          out = pathlib.Path('tdesktop/out')
+          sources = [out / 'CMakeCache.txt', out / 'CMakeFiles/CMakeConfigureLog.yaml',
+                     out / 'CMakeFiles/CMakeError.log']
+          sources.extend(out.glob('CMakeFiles/*/CMake*Compiler.cmake'))
+          for source in sources:
+              if source.is_file():
+                  destination = pathlib.Path('diagnostics') / source.relative_to(out)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, destination)
+          PY
 
-      - uses: actions/upload-artifact@v7
-        if: env.UPLOAD_ARTIFACT == 'true'
-        name: Upload universal DMG.
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: telegram-dmg
-          path: output/tsetup.latest.dmg
+          name: mock-macos-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
