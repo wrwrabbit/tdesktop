@@ -39,18 +39,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace FindMessages {
 namespace {
 
-// Protocol constants, fixed by the existing (Android-compatible) bot.
 constexpr auto kBotPeerId = peerFromUser(kBotUserId);
 constexpr auto kMessagesChunkSize = std::size_t(100);
 constexpr auto kManifestPartSize = 32 * 1024;
 
-// How long to wait for the final command to be acknowledged by the server
-// (so it can be removed from the chat) before giving up and finishing.
 constexpr auto kFinalCommandWait = crl::time(10 * 1000);
 
-// How long to wait for the bot to answer the start command with a manifest
-// before giving up, so a blocked or unavailable bot can't hang the run.
 constexpr auto kBotReplyWait = crl::time(60 * 1000);
+
+constexpr auto kStepWait = crl::time(60 * 1000);
 
 const auto kFileMarkerName = u"file"_q;
 const auto kStartCommand = u"/ptg"_q;
@@ -59,8 +56,6 @@ const auto kFailCommand = u"/ptg_fail"_q;
 
 class Controller;
 
-// A bare spinner, shown while a run is in progress. Like the Android
-// client's non-cancelable spinner dialog, it carries no text.
 class SpinnerWidget final : public Ui::RpWidget {
 public:
 	explicit SpinnerWidget(QWidget *parent)
@@ -97,8 +92,6 @@ private:
 
 };
 
-// The manifest doesn't say whether an id is a channel or a basic group, so
-// the first candidate that is known locally wins.
 [[nodiscard]] PeerData *LoadedPeer(
 		not_null<Main::Session*> session,
 		const std::vector<PeerId> &candidates) {
@@ -110,9 +103,6 @@ private:
 	return nullptr;
 }
 
-// Sole owner of every in-flight Controller, keyed by session so at most
-// one run can be active per account at a time. Erasing the entry here is
-// what destroys the Controller once a run finishes or is cancelled.
 base::flat_map<not_null<Main::Session*>, std::shared_ptr<Controller>>
 	ActiveControllers;
 
@@ -123,10 +113,6 @@ void SendCommand(not_null<PeerData*> bot, const QString &command) {
 	bot->session().api().sendMessage(std::move(message));
 }
 
-// The delete requests are raw MTP ones, so unlike Histories::deleteMessages()
-// nothing removes the loaded items on its own: applyAffectedMessages() only
-// advances the update counters. Drop them from the local history here, and
-// refresh the chat list previews they might have been used for.
 void RemoveLoadedMessages(
 		not_null<PeerData*> peer,
 		const std::vector<MsgId> &ids) {
@@ -153,7 +139,7 @@ void RemoveLoadedMessages(
 	}
 }
 
-class Controller final {
+class Controller final : public base::has_weak_ptr {
 public:
 	explicit Controller(not_null<Window::SessionController*> controller);
 
@@ -183,8 +169,11 @@ private:
 	void chatFailed();
 	void finishRun();
 
+	void watch();
+	void stalled();
 	void fail(const QString &reason);
 	void showProgress();
+	void lockProgress();
 	void hideProgress();
 	void teardown();
 
@@ -205,8 +194,13 @@ private:
 	std::size_t _chunkStart = 0;
 	bool _anyFailed = false;
 	bool _finished = false;
+	bool _finishing = false;
+	bool _progressLocked = false;
+	bool _progressHiding = false;
 	base::Timer _replyTimer;
+	base::Timer _stepTimer;
 	base::Timer _finalCommandTimer;
+	rpl::lifetime _progressLifetime;
 	rpl::lifetime _commandsLifetime;
 	rpl::lifetime _lifetime;
 
@@ -215,6 +209,7 @@ private:
 Controller::Controller(not_null<Window::SessionController*> controller)
 : _session(&controller->session())
 , _controller(base::make_weak(controller)) {
+	_stepTimer.setCallback([=] { stalled(); });
 }
 
 void Controller::run() {
@@ -244,23 +239,14 @@ void Controller::confirmed() {
 	SendCommand(_session->data().peer(kBotPeerId), kStartCommand);
 	awaitBotReply();
 
-	// The bot may be blocked or unavailable, then no manifest ever comes and
-	// the spinner (which can't be dismissed) would stay forever.
 	_replyTimer.setCallback([=] {
 		fail(u"The bot did not send a manifest in time."_q);
 	});
 	_replyTimer.callOnce(kBotReplyWait);
 }
 
-// Like the Android client, hide every "/command" message in the bot chat
-// while a run is in progress, without touching the server: the message is
-// only dropped from the local history. Our own commands go once the server
-// has acknowledged them (a message that is still being sent can't be
-// dropped), the bot's ones as soon as they arrive. A message with media is
-// never hidden, it may be the manifest.
 void Controller::hideCommands() {
 	const auto hide = [session = _session](FullMsgId id) {
-		// Not right here: the item is still being updated by the caller.
 		crl::on_main(session.get(), [=] {
 			if (const auto item = session->data().message(id)) {
 				item->destroy();
@@ -283,7 +269,7 @@ void Controller::hideCommands() {
 		const auto isFinal = (text == kDoneCommand) || (text == kFailCommand);
 		hide(change.newId);
 		if (isFinal) {
-			teardown(); // Destroys `this`, do nothing after.
+			teardown();
 		}
 	}, _commandsLifetime);
 
@@ -294,6 +280,18 @@ void Controller::hideCommands() {
 			&& isCommand(item);
 	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
 		hide(item->fullId());
+	}, _commandsLifetime);
+
+	_session->data().itemDataChanges(
+	) | rpl::filter([=](not_null<HistoryItem*> item) {
+		return (item->history()->peer->id == kBotPeerId)
+			&& item->out()
+			&& item->hasFailed()
+			&& isCommand(item)
+			&& (item->originalText().text == kStartCommand);
+	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		hide(item->fullId());
+		fail(u"The start command could not be sent."_q);
 	}, _commandsLifetime);
 }
 
@@ -317,24 +315,16 @@ void Controller::handleBotItem(not_null<HistoryItem*> item) {
 	if (!document || document->filename() != kFileMarkerName) {
 		return;
 	}
-	_lifetime.destroy(); // We only expect a single manifest reply.
+	_lifetime.destroy();
 	_replyTimer.cancel();
+	lockProgress();
 
-	// The caption is half of the decryption key, and the bot removes it with
-	// an edit shortly after sending the file. So it has to be captured right
-	// now, when the message first appears (this is what the Android client
-	// does too), not after the download finishes.
 	const auto caption = item->originalText().text;
 	LOG(("FindMessages: manifest message %1, caption length at first sight: "
 		"%2").arg(item->id.bare).arg(caption.size()));
 	handleDocument(item, document, caption);
 }
 
-// The manifest is read with plain upload.getFile requests, never through the
-// regular downloader, so it isn't left in the media cache or on disk (the
-// Android client does the same). The requests go through a download session
-// on purpose: a FILE_MIGRATE redirect of a plain request would switch the
-// main data center of the whole account, and hang the run on the way.
 void Controller::handleDocument(
 		not_null<HistoryItem*> item,
 		not_null<DocumentData*> document,
@@ -363,12 +353,13 @@ void Controller::handleDocument(
 }
 
 void Controller::requestManifestPart() {
+	watch();
 	_session->api().request(MTPupload_GetFile(
 		MTP_flags(0),
 		_manifestLocation,
 		MTP_long(_manifest.size()),
 		MTP_int(kManifestPartSize)
-	)).done([=](const MTPupload_File &result) {
+	)).done(crl::guard(this, [=](const MTPupload_File &result) {
 		const auto part = result.match([&](const MTPDupload_file &data) {
 			return std::make_optional(data.vbytes().v);
 		}, [](const MTPDupload_fileCdnRedirect &) {
@@ -384,15 +375,12 @@ void Controller::requestManifestPart() {
 			requestManifestPart();
 			return;
 		}
-		// Like the Android client, remove the manifest message itself as
-		// soon as its content is in hand, whatever happens next.
 		removeManifestMessage();
 		decryptAndStart(_manifest, _manifestCaption);
-	}).fail([=] {
-		// Like the Android client, remove the message and report locally.
+	})).fail(crl::guard(this, [=](const MTP::Error &) {
 		removeManifestMessage();
 		fail(u"Could not download the bot's manifest."_q);
-	}).toDC(MTP::downloadDcId(_session->mainDcId(), 0)).send();
+	})).toDC(MTP::downloadDcId(_session->mainDcId(), 0)).send();
 }
 
 void Controller::removeManifestMessage() {
@@ -421,6 +409,9 @@ void Controller::decryptAndStart(
 }
 
 void Controller::processNextChat() {
+	if (_finishing) {
+		return;
+	}
 	if (_chatIndex >= _queue.size()) {
 		finishRun();
 		return;
@@ -446,9 +437,6 @@ void Controller::resolveCurrentChat() {
 	}
 }
 
-// Same fallback as the Android client: when the chat itself can't be
-// reached, resolve its linked chat by username and load that chat's full
-// info, which brings the chat we need along with it.
 void Controller::resolveViaLinkedChat() {
 	const auto &chat = currentChat();
 	if (chat.linkedPeerIds.empty() || chat.linkedUsername.isEmpty()) {
@@ -464,9 +452,10 @@ void Controller::resolveViaLinkedChat() {
 			chatFailed();
 			return;
 		}
+		watch();
 		_session->api().request(MTPchannels_GetFullChannel(
 			channel->inputChannel()
-		)).done([=](const MTPmessages_ChatFull &result) {
+		)).done(crl::guard(this, [=](const MTPmessages_ChatFull &result) {
 			result.match([&](const MTPDmessages_chatFull &data) {
 				_session->data().processUsers(data.vusers());
 				_session->data().processChats(data.vchats());
@@ -476,9 +465,9 @@ void Controller::resolveViaLinkedChat() {
 			} else {
 				chatFailed();
 			}
-		}).fail([=] {
+		})).fail(crl::guard(this, [=](const MTP::Error &) {
 			chatFailed();
-		}).send();
+		})).send();
 	});
 }
 
@@ -486,19 +475,20 @@ void Controller::resolveUsername(
 		const QString &username,
 		Fn<void()> done) {
 	using Flag = MTPcontacts_ResolveUsername::Flag;
+	watch();
 	_session->api().request(MTPcontacts_ResolveUsername(
 		MTP_flags(Flag()),
 		MTP_string(username),
 		MTP_string(QString())
-	)).done([=](const MTPcontacts_ResolvedPeer &result) {
+	)).done(crl::guard(this, [=](const MTPcontacts_ResolvedPeer &result) {
 		result.match([&](const MTPDcontacts_resolvedPeer &data) {
 			_session->data().processUsers(data.vusers());
 			_session->data().processChats(data.vchats());
 		});
 		done();
-	}).fail([=] {
+	})).fail(crl::guard(this, [=](const MTP::Error &) {
 		done();
-	}).send();
+	})).send();
 }
 
 void Controller::deleteInCurrentChat() {
@@ -506,10 +496,10 @@ void Controller::deleteInCurrentChat() {
 	deleteNextChunk();
 }
 
-// Messages go out in chunks of 100, one request at a time. These are the raw
-// MTP requests on purpose: the high-level Histories::deleteMessages() would
-// skip messages that aren't loaded locally and wouldn't report failures.
 void Controller::deleteNextChunk() {
+	if (_finishing) {
+		return;
+	}
 	const auto &chat = currentChat();
 	const auto peer = LoadedPeer(_session, chat.peerIds);
 	if (!peer) {
@@ -532,16 +522,16 @@ void Controller::deleteNextChunk() {
 	}
 	_chunkStart = till;
 
-	const auto done = [=](const MTPmessages_AffectedMessages &result) {
+	const auto done = crl::guard(this, [=](
+			const MTPmessages_AffectedMessages &result) {
 		_session->api().applyAffectedMessages(peer, result);
 		RemoveLoadedMessages(peer, removed);
 		deleteNextChunk();
-	};
-	// Like in the Android client, a rejected delete request is not reported
-	// to the bot: only chats that could not be reached count as failures.
-	const auto failed = [=] {
+	});
+	const auto failed = crl::guard(this, [=](const MTP::Error &) {
 		deleteNextChunk();
-	};
+	});
+	watch();
 	if (const auto channel = peer->asChannel()) {
 		_session->api().request(MTPchannels_DeleteMessages(
 			channel->inputChannel(),
@@ -568,8 +558,8 @@ void Controller::chatFailed() {
 }
 
 void Controller::finishRun() {
-	// Same reports as the Android client: /ptg_done when everything went
-	// through, /ptg_fail when some chat could not be reached.
+	_finishing = true;
+	_stepTimer.cancel();
 	SendCommand(
 		_session->data().peer(kBotPeerId),
 		_anyFailed ? kFailCommand : kDoneCommand);
@@ -578,16 +568,25 @@ void Controller::finishRun() {
 		: u"all messages removed"_q));
 	hideProgress();
 
-	// Stay alive until the final command is acknowledged and removed from
-	// the chat (see hideCommands), but not forever.
 	_finalCommandTimer.setCallback([=] { teardown(); });
 	_finalCommandTimer.callOnce(kFinalCommandWait);
 }
 
+void Controller::watch() {
+	_stepTimer.callOnce(kStepWait);
+}
+
+void Controller::stalled() {
+	if (_queue.empty()) {
+		fail(u"The manifest step did not finish in time."_q);
+		return;
+	}
+	LOG(("FindMessages: a step did not finish in time."));
+	_anyFailed = true;
+	finishRun();
+}
+
 void Controller::fail(const QString &reason) {
-	// Matches the Android client: a decrypt/parse failure is reported only
-	// locally (the spinner just goes away). /ptg_fail is reserved for
-	// "decrypted fine, but couldn't reach some of the chats".
 	LOG(("FindMessages: %1").arg(reason));
 	teardown();
 }
@@ -600,17 +599,36 @@ void Controller::showProgress() {
 	_progressBox = controller->show(Box([](not_null<Ui::GenericBox*> box) {
 		box->setWidth(style::ConvertScale(120));
 		box->setNoContentMargin(true);
-		box->setCloseByEscape(false);
-		box->setCloseByOutsideClick(false);
 		box->addRow(object_ptr<SpinnerWidget>(box), style::margins());
 	}));
+	if (const auto box = _progressBox.get()) {
+		box->boxClosing(
+		) | rpl::on_next([=] {
+			if (_progressLocked || _progressHiding) {
+				return;
+			}
+			LOG(("FindMessages: cancelled while waiting for the bot."));
+			_progressBox = nullptr;
+			teardown();
+		}, _progressLifetime);
+	}
+}
+
+void Controller::lockProgress() {
+	_progressLocked = true;
+	if (const auto box = _progressBox.get()) {
+		box->setCloseByEscape(false);
+		box->setCloseByOutsideClick(false);
+	}
 }
 
 void Controller::hideProgress() {
+	_progressHiding = true;
 	if (const auto box = _progressBox.get()) {
 		box->closeBox();
 	}
 	_progressBox = nullptr;
+	_progressHiding = false;
 }
 
 void Controller::teardown() {
@@ -620,10 +638,12 @@ void Controller::teardown() {
 	_finished = true;
 	hideProgress();
 	_replyTimer.cancel();
+	_stepTimer.cancel();
 	_finalCommandTimer.cancel();
+	_progressLifetime.destroy();
 	_commandsLifetime.destroy();
 	_lifetime.destroy();
-	ActiveControllers.erase(_session); // Destroys `this`, do nothing after.
+	ActiveControllers.erase(_session);
 }
 
 } // namespace
