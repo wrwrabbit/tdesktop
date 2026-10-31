@@ -41,8 +41,6 @@ bool TryHandleFindMessagesLink(
 	if (inBotChat && params.value(u"ptg-action"_q) == kAutoDeleteAction) {
 		Start(controller);
 	} else {
-		// An action nobody is waiting for: either it's not known to this
-		// version or it came outside of the bot chat.
 		controller->show(Ui::MakeInformBox(tr::lng_ptg_unknown_link_warning()));
 	}
 	return true;
