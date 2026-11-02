@@ -4,6 +4,10 @@ on:
   workflow_call:
   workflow_dispatch:
 
+env:
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
 jobs:
   build-libraries:
     name: Libraries 
@@ -23,7 +27,6 @@ jobs:
         run: |
           sudo chown -R `whoami`:admin /usr/local/share
           brew update
-          brew upgrade || true
           brew install automake libtool meson nasm ninja pkg-config
 
           sudo mdutil -a -i off
@@ -98,7 +101,6 @@ jobs:
           sudo chown -R `whoami`:admin /usr/local/share
 
           brew update
-          brew upgrade || true
           brew install automake meson nasm ninja pkg-config
 
           brew install icoutils create-dmg
@@ -229,7 +231,6 @@ jobs:
           sudo chown -R `whoami`:admin /usr/local/share
 
           brew update
-          brew upgrade || true
           brew install icoutils create-dmg
 
           # Disable spotlight.
