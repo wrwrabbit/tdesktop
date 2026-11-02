@@ -59,13 +59,8 @@ else
   AlphaBetaParam='-beta'
 fi
 
-# TDESKTOP_UPDATE_V2=1 switches the update packaging to the v2 signed
-# envelope (2-of-2: the local Ed25519 release key plus the cloud ES256
-# key through an interactive az login) and every artifact to the v2
-# names: td-update-{os}-{arch}-{version}[-beta] and
-# td-(setup|portable)-{os}[-{arch}]-{version_str}[-beta].{ext}. Without the
-# switch the classical v1 update and the classical names are built, so
-# the stepping-stone releases keep coming out exactly as before.
+TDESKTOP_UPDATE_V2=1
+: "${TDESKTOP_UPDATE_SIGNING_CONFIG:?Set TDESKTOP_UPDATE_SIGNING_CONFIG to the production signing configuration.}"
 if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
   if [ "$AlphaVersion" != "0" ]; then
     Error "The v2 update format has no alpha channel."
@@ -81,10 +76,6 @@ if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
     V2Suffix="-beta"
   fi
   UpdateKeysLoc="$FullScriptPath/../Resources/update"
-  ReleaseLocalKey="${TDESKTOP_RELEASE_LOCAL_KEY:-$FullScriptPath/../../../DesktopPrivate/release-local.pem}"
-  ReleaseLocalKeyId="${TDESKTOP_RELEASE_LOCAL_KEY_ID:-rl-2026a}"
-  ReleaseCloudVault="${TDESKTOP_RELEASE_KEYVAULT:-tdesktop-release-kv}"
-  ReleaseCloudKeyId="${TDESKTOP_RELEASE_CLOUD_KEY_ID:-rc-2026a}"
 fi
 
 # The per-target deploy folder, both under the local backup and, through
@@ -104,19 +95,12 @@ PackUpdate() {
   if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
     "./Packer" "$@" -version $VersionForPacker -channel $UpdateChannel \
       -keys-loc "$UpdateKeysLoc" -emit-signing-input signing-input.bin
-    python3 "$FullScriptPath/sign_update.py" \
-      --input signing-input.bin \
-      --output release-cloud.sig \
-      --az-vault "$ReleaseCloudVault" \
-      --az-key "$ReleaseCloudKeyId"
-    "./Packer" -channel $UpdateChannel -keys-loc "$UpdateKeysLoc" \
-      -unsigned "$UpdateFile.unsigned" \
-      -embed-signatures "$ReleaseCloudKeyId:release-cloud.sig" \
-      -local-key "$ReleaseLocalKey" \
-      -local-key-id "$ReleaseLocalKeyId"
-    rm signing-input.bin release-cloud.sig "$UpdateFile.unsigned"
-  else
-    "./Packer" "$@" -version $VersionForPacker $AlphaBetaParam
+    python3 "$FullScriptPath/update_signing.py" \
+      --config "$TDESKTOP_UPDATE_SIGNING_CONFIG" \
+      --keys-loc "$UpdateKeysLoc" --input signing-input.bin \
+      --output release-es256.sig --packer "$(pwd)/Packer" \
+      --unsigned "$UpdateFile.unsigned" --channel "$UpdateChannel"
+    rm signing-input.bin release-es256.sig "$UpdateFile.unsigned"
   fi
 }
 
@@ -128,8 +112,8 @@ if [ "$BuildTarget" == "linux" ]; then
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
   SetupFile="tsetup.latest.tar.xz"
   if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
-    UpdateFile="td-update-linux-x64-latest"
-    SetupFile="td-setup-linux-x64-latest.tar.xz"
+    UpdateFile="td-update-linux-x64-$PtgAppVersion$V2Suffix"
+    SetupFile="td-setup-linux-x64-$PtgAppVersionStr$V2Suffix.tar.xz"
   fi
   ProjectPath="$HomePath/../out"
   ReleasePath="$ProjectPath/Release"
@@ -178,16 +162,16 @@ elif [ "$BuildTarget" == "mac" ] ; then
     SetupFile="tsetup.$MacArch.latest.dmg"
     if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
       if [ "$MacArch" == "arm64" ]; then
-        SetupFile="td-setup-mac-arm-latest$V2Suffix.dmg"
+        SetupFile="td-setup-mac-arm-$PtgAppVersionStr$V2Suffix.dmg"
       else
-        SetupFile="td-setup-mac-x64-latest$V2Suffix.dmg"
+        SetupFile="td-setup-mac-x64-$PtgAppVersionStr$V2Suffix.dmg"
       fi
     fi
   else
     BundleName="$BinaryName.app"
     SetupFile="tsetup.latest.dmg"
     if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
-      SetupFile="td-setup-mac-latest$V2Suffix.dmg"
+      SetupFile="td-setup-mac-$PtgAppVersionStr$V2Suffix.dmg"
     fi
   fi
 elif [ "$BuildTarget" == "macstore" ]; then

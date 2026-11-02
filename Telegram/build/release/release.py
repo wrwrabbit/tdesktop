@@ -32,7 +32,7 @@ GH_REPO = "cpartisans/tdesktop"
 GH_REST_URL = f"https://api.github.com/repos/%s" % (GH_REPO)
 
 TG_UPLOAD_CHANNEL = "tdptgFiles"
-TG_UPDATE_CHANNEL = "tdptgFeed"
+TG_UPDATE_CHANNEL = "tdptgfeed2"
 
 # https://github.com/settings/tokens
 GH_TOKEN = config.GH_TOKEN
@@ -102,7 +102,7 @@ def tg_list_files(client, limit):
             doc = media.document
             for attr in doc.attributes:
                 if isinstance(attr, DocumentAttributeFilename):
-                    m = re.match("(\w+?)(\d{7})", attr.file_name)
+                    m = re.fullmatch(r"(td-update-(?:linux-x64|win-x64|win-x86|mac-arm|mac-x64)-)([0-9]+)", attr.file_name)
                     if m:
                         files.append({
                             "name": attr.file_name,
@@ -260,11 +260,11 @@ def get_file_data(art_id):
 """
 
 PREFIX = {
-    "tlinuxupd": "linux", 
-    "tx64upd": "win64",
-    "tupdate": "win",
-    "tarmacupd": "armac",
-    "tmacupd": "mac"
+    "td-update-linux-x64-": "linux",
+    "td-update-win-x64-": "win64",
+    "td-update-win-x86-": "win",
+    "td-update-mac-arm-": "armac",
+    "td-update-mac-x64-": "mac",
 }
 
 def do_list(args):
@@ -275,7 +275,7 @@ def do_list(args):
     for build in builds.values():
         for art_id, files in build["artifacts"].items():
             for fn in files:
-                m = re.match("(\w+?)(\d{7})", fn)
+                m = re.fullmatch(r"(td-update-(?:linux-x64|win-x64|win-x86|mac-arm|mac-x64)-)([0-9]+)", fn)
                 if m:
                     artifacts.append({
                         "ID": art_id,
