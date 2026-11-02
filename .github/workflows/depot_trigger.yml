@@ -1,0 +1,38 @@
+name: Trigger Depot testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_ref:
+        description: 'cpartisans/tdesktop branch or tag containing depot_testing.yml'
+        type: string
+        required: true
+        default: master
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    # As in deploy_trigger: the PAT exists in wrwrabbit's protected environment.
+    # Only this dispatch job uses Release; the remote test uses no environment.
+    if: github.repository_owner == 'wrwrabbit'
+    runs-on: ubuntu-latest
+    environment: Release
+    steps:
+      - name: Trigger mock macOS build on Depot
+        uses: actions/github-script@v8
+        env:
+          TEST_REF: ${{ inputs.test_ref }}
+        with:
+          github-token: ${{ secrets.PAT_TRIGGER }}
+          script: |
+            const ref = process.env.TEST_REF.trim();
+            if (!ref) throw new Error('test_ref must not be empty');
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'cpartisans',
+              repo: 'tdesktop',
+              workflow_id: 'depot_testing.yml',
+              ref,
+            });
+            console.log(`Dispatched depot_testing.yml at ${ref}`);
