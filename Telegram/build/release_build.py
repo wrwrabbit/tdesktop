@@ -5,6 +5,9 @@ import sys
 import os
 import platform
 import base64
+import json
+import subprocess
+import tempfile
 import release_patch
 
 _THIS_DIR = os.path.dirname(__file__)
@@ -13,6 +16,33 @@ TARGET_MAP = {
     "x64_x86": "win",
     "x64": "win64"
 }
+
+def prepare_update_signing(path):
+    for secret, filename in (
+        ("UPDATE_ED25519_PRIVATE", "release-local.pem"),
+        ("UPDATE_ES256_PRIVATE", "release-es256.pem"),
+    ):
+        value = os.environ.get(secret)
+        if not value:
+            raise RuntimeError("Missing release secret: " + secret)
+        key_path = os.path.join(path, filename)
+        with open(key_path, "wb") as output:
+            output.write(base64.b64decode(value, validate=True))
+        os.chmod(key_path, 0o600)
+    config = json.loads(os.environ["UPDATE_SIGNING_CONFIG"])
+    if config.get("backend") != "openssl":
+        raise RuntimeError("Release secrets require the OpenSSL signing backend.")
+    config["local_key"] = os.path.join(path, "release-local.pem")
+    config["es256_key"] = os.path.join(path, "release-es256.pem")
+    config_path = os.path.join(path, "update-signing.json")
+    with open(config_path, "w", encoding="utf-8") as output:
+        json.dump(config, output)
+    os.chmod(config_path, 0o600)
+    subprocess.run([
+        sys.executable, os.path.join(_THIS_DIR, "update_signing.py"),
+        "--config", config_path, "--check",
+    ], check=True)
+    os.environ["TDESKTOP_UPDATE_SIGNING_CONFIG"] = config_path
 
 def main():
     if len(sys.argv) != 2:
@@ -80,23 +110,25 @@ def main():
         with open(os.path.join(private_path, "Sign.bat"), "w") as f:
             pass
 
-    # Apply patches
-    errors = release_patch.main()
-    if errors:
-        print("Patches completed with errors")
-        sys.exit(errors)
+    with tempfile.TemporaryDirectory(prefix="update-signing-", dir=private_path) as signing_path:
+        prepare_update_signing(os.path.abspath(signing_path))
+        # Apply patches
+        errors = release_patch.main()
+        if errors:
+            print("Patches completed with errors")
+            sys.exit(errors)
 
-    if platform.system() == "Windows":
-        cmd = "build.bat"
-    elif platform.system() == "Linux":
-        cmd = "bash ./build.sh -DDESKTOP_APP_DISABLE_CRASH_REPORTS=OFF "
-    else:
-        cmd = "bash ./build.sh"
-    cmd += " -DDESKTOP_APP_SPECIAL_TARGET=" + target
-    print("Call %s" % (cmd))
-    result = os.system(cmd)
-    print("Finished: %s" % (result))
-    sys.exit(result)
+        if platform.system() == "Windows":
+            cmd = "build.bat"
+        elif platform.system() == "Linux":
+            cmd = "bash ./build.sh -DDESKTOP_APP_DISABLE_CRASH_REPORTS=OFF "
+        else:
+            cmd = "bash ./build.sh"
+        cmd += " -DDESKTOP_APP_SPECIAL_TARGET=" + target
+        print("Call %s" % (cmd))
+        result = subprocess.call(cmd, shell=True)
+        print("Finished: %s" % (result))
+        sys.exit(result)
 
 if __name__ == "__main__":
     main()
