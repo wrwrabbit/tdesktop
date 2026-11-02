@@ -24,7 +24,7 @@ jobs:
     name: Libraries
 #    runs-on: windows-latest
 #    runs-on: depot-windows-latest-16
-    runs-on: ${{ github.event.inputs.runner}}
+    runs-on: ${{ inputs.runner }}
 
     strategy:
       matrix:
@@ -229,6 +229,11 @@ jobs:
 
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
+
+      - name: Add paging space for the link.
+        if: inputs.runner == 'windows-latest' && env.ONLY_CACHE == 'false'
+        shell: pwsh
+        run: '& "$env:TBUILD\$env:REPO_NAME\.github\scripts\windows-pagefile.ps1"'
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
