@@ -66,6 +66,20 @@ jobs:
       CP_ARCH: ${{ matrix.arch }}
 
     steps:
+      - name: Remove unused Xcode installations.
+        shell: bash
+        run: |
+          df -h /
+          keep=$(readlink -f /Applications/Xcode.app)
+          test -d "$keep/Contents/Developer"
+          for xcode in /Applications/Xcode_*.app; do
+            [ -e "$xcode" ] || continue
+            if [ "$(readlink -f "$xcode")" != "$keep" ]; then
+              sudo rm -rf "$xcode"
+            fi
+          done
+          df -h /
+
       - name: Clone.
         uses: actions/checkout@v6
         with:
