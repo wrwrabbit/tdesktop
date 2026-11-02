@@ -1109,6 +1109,22 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 #endif // !TDESKTOP_DISABLE_SPELLCHECK
 }
 
+void SetupSameVersionUpdate(not_null<Ui::SettingsButton*> button) {
+	button->toggledValue(
+	) | rpl::filter([](bool toggled) {
+		return (toggled != Core::UpdateChecker::GetAcceptSameVersion());
+	}) | rpl::on_next([](bool toggled) {
+		Core::UpdateChecker::SetAcceptSameVersion(toggled);
+
+		Core::UpdateChecker checker;
+		checker.stop();
+		if (toggled) {
+			cSetLastUpdateCheck(0);
+		}
+		checker.start();
+	}, button->lifetime());
+}
+
 void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	if (!HasUpdate()) {
 		return;
@@ -1186,6 +1202,20 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 				.toggled = rpl::single(cInstallBetaVersion()),
 				.keywords = { u"beta"_q, u"update"_q, u"version"_q },
 			});
+
+		if (ptgSafeTest()) {
+			const auto sameVersion = builder.addButton({
+				.id = u"advanced/install_same_version"_q,
+				.title = tr::lng_settings_install_same(),
+				.st = &st::settingsButtonNoIcon,
+				.toggled = rpl::single(
+					Core::UpdateChecker::GetAcceptSameVersion()),
+				.keywords = { u"same"_q, u"version"_q, u"update"_q },
+			});
+			if (sameVersion) {
+				SetupSameVersionUpdate(sameVersion);
+			}
+		}
 
 		check = builder.addButton({
 			.id = u"advanced/check_update"_q,
@@ -1548,19 +1578,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 				tr::lng_settings_install_same(),
 				st::settingsButtonNoIcon));
 		samever->toggleOn(rpl::single(Core::UpdateChecker::GetAcceptSameVersion()));
-		samever->toggledValue(
-		) | rpl::filter([](bool toggled) {
-			return (toggled != Core::UpdateChecker::GetAcceptSameVersion());
-		}) | rpl::on_next([=](bool toggled) {
-			Core::UpdateChecker::SetAcceptSameVersion(toggled);
-
-			Core::UpdateChecker checker;
-			checker.stop();
-			if (toggled) {
-				cSetLastUpdateCheck(0);
-			}
-			checker.start();
-		}, toggle->lifetime());
+		SetupSameVersionUpdate(samever);
 	}
 
 	const auto check = inner->add(object_ptr<Button>(

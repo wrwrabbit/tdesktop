@@ -104,10 +104,7 @@
 name: Canary.
 
 on:
-  push:
-    branches:
-      - public-canary
-      - private-canary
+  workflow_dispatch:
 
 concurrency:
   group: canary-publish

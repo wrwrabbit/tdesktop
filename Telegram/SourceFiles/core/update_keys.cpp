@@ -11,7 +11,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Core::Updates {
 
-QByteArray RootPublicKeyPem() {
+QByteArray RootPublicKeyPem(bool upstream) {
+	if (upstream) {
+		return QByteArray::fromRawData(
+			reinterpret_cast<const char*>(details::kUpstreamRootPublicKeyPem),
+			sizeof(details::kUpstreamRootPublicKeyPem));
+	}
 	return QByteArray::fromRawData(
 		reinterpret_cast<const char*>(details::kRootPublicKeyPem),
 		sizeof(details::kRootPublicKeyPem));

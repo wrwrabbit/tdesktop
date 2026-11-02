@@ -862,7 +862,8 @@ std::optional<VerifiedUpdate> VerifyUpdate(
 		const std::optional<Manifest> &held,
 		const QByteArray &rootPublicKeyPem,
 		qint64 now,
-		QString *error) {
+		QString *error,
+		bool allowSameVersion) {
 	auto envelope = ParseEnvelope(data, error);
 	if (!envelope) {
 		return std::nullopt;
@@ -914,7 +915,10 @@ std::optional<VerifiedUpdate> VerifyUpdate(
 		return std::nullopt;
 	}
 
-	if (envelope->version <= runningVersion) {
+	if (!UpdateVersionAllowed(
+			envelope->version,
+			runningVersion,
+			allowSameVersion)) {
 		SetError(error, QStringLiteral("Package version is not newer."));
 		return std::nullopt;
 	}

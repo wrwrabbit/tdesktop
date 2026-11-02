@@ -20,7 +20,7 @@ set -e
 #   ├── Telegram.arm64.app/         (original, preserved)
 #   ├── Telegram.x86_64.app/        (original, preserved)
 #   ├── Telegram.app.zip            (zipped universal app)
-#   └── tsetup.latest.dmg           (DMG package)
+#   └── td-setup-mac-<version>.dmg (DMG package)
 
 Error() {
   echo "ERROR: $1" >&2
@@ -33,6 +33,14 @@ if [ $# -ne 1 ]; then
 fi
 
 INPUT_FOLDER="$1"
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)"
+while read -r key value; do
+  if [ "$key" == "PtgAppVersionStr" ]; then
+    VERSION="${value%$'\r'}"
+  fi
+done < "$SCRIPT_PATH/ptg_version"
+[ -n "$VERSION" ] || Error "PTG version not found"
+SETUP_FILE="td-setup-mac-$VERSION.dmg"
 
 # Verify input folder exists
 if [ ! -d "$INPUT_FOLDER" ]; then
@@ -175,8 +183,8 @@ if ! command -v create-dmg &> /dev/null; then
   echo "⚠ create-dmg not found. DMG creation skipped."
   echo "   Install with: brew install create-dmg"
 else
-  if [ -f tsetup.latest.dmg ]; then
-    rm tsetup.latest.dmg
+  if [ -f "$SETUP_FILE" ]; then
+    rm "$SETUP_FILE"
   fi
   
   create-dmg \
@@ -187,9 +195,9 @@ else
     --app-drop-link 400 20 \
     --bless \
     --format UDBZ \
-    tsetup.latest.dmg \
+    "$SETUP_FILE" \
     ./Telegram.app
-  echo "✓ DMG package created: tsetup.latest.dmg"
+  echo "✓ DMG package created: $SETUP_FILE"
 fi
 
 echo ""
@@ -198,5 +206,5 @@ echo ""
 echo "Output files in: $INPUT_FOLDER"
 echo "  - Telegram.app/              (universal app bundle)"
 echo "  - Telegram.app.zip           (zipped universal app)"
-echo "  - tsetup.latest.dmg          (DMG installer)"
+echo "  - $SETUP_FILE          (DMG installer)"
 echo ""
