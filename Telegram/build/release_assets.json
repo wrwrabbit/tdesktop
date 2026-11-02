@@ -1,0 +1,8 @@
+[
+  {"platform":"win-x64","prefix":"td-portable-win-x64","extension":"zip","directory":"Windows/Telegram_x64","label":"Windows 64 bit: Portable"},
+  {"platform":"win-x64","prefix":"td-setup-win-x64","extension":"exe","directory":"WindowsSetup","label":"Windows 64 bit: Installer"},
+  {"platform":"win-x86","prefix":"td-portable-win-x86","extension":"zip","directory":"Windows/Telegram_x64_x86","label":"Windows 32 bit: Portable"},
+  {"platform":"win-x86","prefix":"td-setup-win-x86","extension":"exe","directory":"WindowsSetup","label":"Windows 32 bit: Installer"},
+  {"platform":"linux-x64","prefix":"td-setup-linux-x64","extension":"tar.xz","directory":"Linux","label":"Linux 64 bit: Binary"},
+  {"platform":"mac","prefix":"td-setup-mac","extension":"dmg","directory":"MacOS","label":"macOS 10.13+: Installer"}
+]

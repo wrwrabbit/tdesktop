@@ -6,7 +6,10 @@ on:
       - master
   pull_request:
     paths:
-      - 'Telegram/build/release.py'
+      - 'Telegram/build/release_assets.json'
+      - 'Telegram/build/upload_release_assets.js'
+      - 'Telegram/build/build.sh'
+      - 'Telegram/build/build.bat'
       - 'Telegram/build/ptg_check_labels.py'
       - '.github/workflows/deploy_finish.yml'
 
