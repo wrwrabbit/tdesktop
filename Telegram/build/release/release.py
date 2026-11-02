@@ -1,4 +1,5 @@
 import requests
+from tqdm import tqdm
 from pprint import pprint
 
 from telethon import TelegramClient, events, sync
@@ -116,7 +117,17 @@ def tg_list_files(client, limit):
 def tg_upload(client, fn, fpath):
     channel = client.get_entity(TG_UPLOAD_CHANNEL)
     print("Uploading...")
-    file = client.upload_file(fpath)
+    with tqdm(
+        total=os.path.getsize(fpath),
+        desc=fn,
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+    ) as progress:
+        file = client.upload_file(
+            fpath,
+            progress_callback=lambda sent, total: progress.update(sent - progress.n),
+        )
     file.name = fn
     print("Posting...")
     client.send_file(channel, file)
@@ -192,9 +203,20 @@ def get_available_builds(args):
                     continue
                 if not os.path.isfile(zip_fn):
                     print("Downloading artifacts for %s of %s" % (art_id, r["id"]))
-                    zip_stream = requests.get(dl_url, headers=GH_HDR)
-                    with open(zip_fn, "wb") as f:
-                        f.write(zip_stream.content)
+                    with requests.get(dl_url, headers=GH_HDR, stream=True) as zip_stream:
+                        zip_stream.raise_for_status()
+                        total = int(zip_stream.headers.get("Content-Length", 0)) or None
+                        with open(zip_fn + ".part", "wb") as f, tqdm(
+                            total=total,
+                            desc=os.path.basename(zip_fn),
+                            unit="B",
+                            unit_scale=True,
+                            unit_divisor=1024,
+                        ) as progress:
+                            for chunk in zip_stream.iter_content(chunk_size=64 * 1024):
+                                f.write(chunk)
+                                progress.update(len(chunk))
+                    os.replace(zip_fn + ".part", zip_fn)
                 if not os.path.isfile(zip_fn):
                     continue
                 with zipfile.ZipFile(zip_fn) as zip:
