@@ -268,9 +268,14 @@ void BottomInfo::paint(
 		int outerWidth,
 		bool unread,
 		bool inverted,
+		bool leftToRight,
 		const PaintContext &context) const {
 	const auto st = context.st;
 	const auto stm = context.messageStyle();
+	// RTL mirrors icons around outer width; this one leaves an icon in place.
+	const auto outer = [&](int left, const style::icon &icon) {
+		return leftToRight ? (2 * left + icon.width()) : outerWidth;
+	};
 
 	auto right = position.x() + width();
 	const auto firstLineBottom = position.y() + st::msgDateFont->height;
@@ -289,7 +294,7 @@ void BottomInfo::paint(
 		icon.paint(
 			p,
 			QPoint(right, firstLineBottom) + st::historySendStatePosition,
-			outerWidth);
+			outer(right + st::historySendStatePosition.x(), icon));
 		right -= st::historySendStateSpace;
 	}
 
@@ -311,7 +316,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historySilentTop,
-			outerWidth);
+			outer(right, icon));
 	}
 	if (_data.flags & Data::Flag::Ephemeral) {
 		const auto &icon = inverted
@@ -322,7 +327,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historyEphemeralStateTop,
-			outerWidth);
+			outer(right, icon));
 	}
 
 	if (_data.flags & Data::Flag::Pinned) {
@@ -334,7 +339,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historyPinTop,
-			outerWidth);
+			outer(right, icon));
 	}
 	if (!_views.isEmpty()) {
 		const auto viewsWidth = _views.maxWidth();
@@ -349,7 +354,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historyViewsTop,
-			outerWidth);
+			outer(right, icon));
 	}
 	if (!_replies.isEmpty()) {
 		const auto repliesWidth = _replies.maxWidth();
@@ -364,7 +369,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historyViewsTop,
-			outerWidth);
+			outer(right, icon));
 	}
 	if ((_data.flags & Data::Flag::Sending)
 		&& !(_data.flags & Data::Flag::OutLayout)) {
@@ -376,7 +381,7 @@ void BottomInfo::paint(
 			p,
 			right,
 			firstLineBottom + st::historyViewsTop,
-			outerWidth);
+			outer(right, icon));
 	}
 	if (_effect) {
 		auto left = position.x();
@@ -502,7 +507,8 @@ void BottomInfo::layoutDateText() {
 	const auto prefix = !author.isEmpty() ? u", "_q : QString();
 	const auto date = editedPrimary
 		? FormatEditedDate(_data.date, _data.editedDate)
-		: edited + ((_data.flags & Data::Flag::ForwardedDate)
+		: edited + ((_data.flags
+			& (Data::Flag::ForwardedDate | Data::Flag::FullDate))
 		? Ui::FormatDateTimeSavedFrom(_data.date)
 		: QLocale().toString(_data.date.time(), QLocale::ShortFormat));
 	const auto afterAuthor = prefix + date;
@@ -678,6 +684,8 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	}
 	if (message->context() == Context::ShortcutMessages) {
 		result.flags |= Flag::Shortcut;
+	} else if (message->context() == Context::MediaEditor) {
+		result.flags |= Flag::FullDate;
 	}
 	if (!item->isPost()
 		|| !item->hasRealFromId()
