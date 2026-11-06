@@ -2227,6 +2227,7 @@ void ApiWrap::deleteConversation(not_null<PeerData*> peer, bool revoke) {
 	const auto chat = peer->asChat();
 	// Leaving first hands a legacy group to its successor at once.
 	if (chat && !(revoke && chat->amCreator())) {
+		FAKE_CRITICAL_REQUEST(this)
 		request(MTPmessages_DeleteChatUser(
 			MTP_flags(0),
 			chat->inputChat(),

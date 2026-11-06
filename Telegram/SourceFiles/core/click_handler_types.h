@@ -79,12 +79,12 @@ class PhoneClickHandler;
 
 class HiddenUrlClickHandler : public UrlClickHandler {
 public:
-	HiddenUrlClickHandler(QString url, QString label);
+	explicit HiddenUrlClickHandler(QString url, QString label = {});
 	QString copyToClipboardText() const override;
 	QString copyToClipboardContextItemText() const override;
 	QString dragText() const override;
 
-	static void Open(QString url, QVariant context = {});
+	static void Open(QString url, QVariant context = {}, bool IsSpoof = false, QString label = QString());
 	static void OpenTranslated(tr::phrase<> phrase, QVariant context = {});
 	static void OpenTranslatedWithIv(
 		not_null<Main::Session*> session,

@@ -23,6 +23,10 @@ void ClearKey(const FileKey &key, const QString &basePath);
 [[nodiscard]] MTP::AuthKeyPtr CreateLocalKey(
 	const QByteArray &passcode,
 	const QByteArray &salt);
+MTP::AuthKeyPtr CreateLocalKey(
+	const QByteArray &passcode,
+	const QByteArray &salt,
+	bool hardwareBound);
 [[nodiscard]] MTP::AuthKeyPtr CreateLegacyLocalKey(
 	const QByteArray &passcode,
 	const QByteArray &salt);

@@ -457,9 +457,16 @@ bool CheckStreamStatus(QDataStream &stream) {
 MTP::AuthKeyPtr CreateLocalKey(
 		const QByteArray &passcode,
 		const QByteArray &salt) {
+	return CreateLocalKey(passcode, salt, PTG::IsHWLockEnabled());
+}
+
+MTP::AuthKeyPtr CreateLocalKey(
+		const QByteArray &passcode,
+		const QByteArray &salt,
+		bool hardwareBound) {
 
 	// check HW bindings
-	const QByteArray pwd = PTG::IsHWLockEnabled()
+	const QByteArray pwd = hardwareBound
 		? Platform::PTG::HWProtectPasscode(passcode) // HW Locked
 		: passcode;
 

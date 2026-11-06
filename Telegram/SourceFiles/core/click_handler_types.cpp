@@ -51,6 +51,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDateTime>
 #include <QtCore/QLocale>
 
+#include <QUrlQuery>
 #include <ada.h>
 
 namespace {
@@ -497,7 +498,7 @@ bool IsLabelImpersonateUrl(QString url, QString label) {
 
 	if (!labelObj.host().isEmpty()) {
 		// check matching for schema and domain
-		if (!labelObj.scheme().isEmpty() 
+		if (!labelObj.scheme().isEmpty()
 			&& (urlObj.scheme() != labelObj.scheme())) {
 			if ((urlObj.scheme() == "https") && (labelObj.scheme() == "http")) {
 				// accept this case, but not vice versa
@@ -520,8 +521,7 @@ bool IsLabelImpersonateUrl(QString url, QString label) {
 HiddenUrlClickHandler::HiddenUrlClickHandler(QString url, QString label)
 	: UrlClickHandler(url, false)
 	, _label(label)
-    , _isSpoof(false) {
-	_isSpoof = IsLabelImpersonateUrl(url, label);
+	, _isSpoof(!label.isEmpty() && IsLabelImpersonateUrl(url, label)) {
 }
 
 QString HiddenUrlClickHandler::copyToClipboardText() const {
@@ -582,7 +582,7 @@ void HiddenUrlClickHandler::OpenTranslatedWithIv(
 		QVariant::fromValue(my));
 }
 
-void HiddenUrlClickHandler::Open(QString url, QVariant context) {
+void HiddenUrlClickHandler::Open(QString url, QVariant context, bool IsSpoof, QString label) {
 	if (const auto external = UrlClickHandler::ExternalUrlFromInternalUrl(url);
 			!external.isEmpty()) {
 		url = external;

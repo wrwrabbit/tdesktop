@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/launcher.h"
+#include "core/location_choice_box.h"
 #include "core/update_channel.h"
 #include "core/update_checker.h"
 #include "data/data_auto_download.h"
@@ -1109,6 +1110,22 @@ void BuildSpellcheckerSection(SectionBuilder &builder) {
 
 	builder.addSkip();
 #endif // !TDESKTOP_DISABLE_SPELLCHECK
+}
+
+void SetupSameVersionUpdate(not_null<Ui::SettingsButton*> button) {
+	button->toggledValue(
+	) | rpl::filter([](bool toggled) {
+		return (toggled != Core::UpdateChecker::GetAcceptSameVersion());
+	}) | rpl::on_next([](bool toggled) {
+		Core::UpdateChecker::SetAcceptSameVersion(toggled);
+
+		Core::UpdateChecker checker;
+		checker.stop();
+		if (toggled) {
+			cSetLastUpdateCheck(0);
+		}
+		checker.start();
+	}, button->lifetime());
 }
 
 void ShowDownloadProgress(

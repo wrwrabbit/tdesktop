@@ -7,9 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <storage/details/storage_file_utilities.h>
-#include <fakepasscode/fake_passcode.h>
-
+#include "storage/details/storage_file_utilities.h"
+#include "fakepasscode/fake_passcode.h"
 #include <deque>
 
 namespace MTP {
@@ -73,6 +72,9 @@ private:
 	std::unique_ptr<PasscodeWrap> _wrap;
 	QByteArray _passcode;
 	MTP::AuthKeyPtr _key;
+	QByteArray _fakeSalt;
+	MTP::AuthKeyPtr _fakeKey;
+	bool _hardwareBound = false;
 	bool _cleansed = false;
 
 };
@@ -188,6 +190,13 @@ public:
 	[[nodiscard]] bool appLockEnabled() const;
 	[[nodiscard]] bool hasLocalPasscode() const;
 
+	[[nodiscard]] bool checkPasscode(const QByteArray &passcode) const;
+	[[nodiscard]] bool checkFakePasscode(const QByteArray &passcode, size_t fakeIndex) const;
+	[[nodiscard]] bool checkRealOrFakePasscode(const QByteArray &passcode) const;
+	[[nodiscard]] bool checkAndExecutePasscode(PasscodeDerivation derived);
+	void setPasscode(const QByteArray &passcode);
+	void finishPasscodeUnlock();
+
 	[[nodiscard]] QByteArray GetPasscodeSalt() const;
 
 	inline bool IsFakeExecutionInProgress() const { return _fakeExecutionInProgress; }
@@ -289,19 +298,48 @@ private:
 
     void ClearFakeState();
 
+	void encryptLocalKey(const QByteArray &passcode);
+	void setFakePasscode(const QByteArray &passcode);
+	[[nodiscard]] std::vector<QByteArray> fakeKeyWraps(bool legacy, bool hardwareBound) const;
+	[[nodiscard]] bool executeFakeKey(const MTP::AuthKeyPtr &key);
+
 	const not_null<Main::Domain*> _owner;
 	const QString _dataName;
 
 	MTP::AuthKeyPtr _localKey;
 	std::unique_ptr<KeyData> _keyData;
 	quint64 _verificationNonce = 0;
+	MTP::AuthKeyPtr _passcodeKey;
+	MTP::AuthKeyPtr _fakeUnlockKey;
+	QByteArray _passcodeKeySalt;
+	QByteArray _passcodeKeyEncrypted;
+
+    std::vector<QByteArray> _fakePasscodeKeysEncrypted;
+    std::deque<FakePasscode::FakePasscode> _fakePasscodes;
+    qint32 _fakePasscodeIndex = -1;
+    bool _isStartedWithFake = false;
+	bool _fakeExecutionInProgress = false;
+
+    bool _isInfinityFakeModeActivated = false;
+
+    bool _isCacheCleanedUpOnLock = false;
+
+    bool _isAdvancedLoggingEnabled = false;
+
+    bool _isErasingEnabled = false;
+
+	bool _cacheFolderPermissionRequested = false;
+
+	std::unique_ptr<FakePasscode::AutoDeleteService> _autoDelete;
+	bool _hasLocalPasscode = false;
+	rpl::event_stream<> _fakePasscodeChanged;
+	qint32 _verificationFakeIndex = -1;
+	bool _verificationInfinity = false;
+
 	int _oldVersion = 0;
 	bool _keyDataDirty = false;
 
 	rpl::event_stream<> _passcodeKeyChanged;
-    rpl::event_stream<> _fakePasscodeChanged;
-
-	std::unique_ptr<FakePasscode::AutoDeleteService> _autoDelete;
 
 };
 

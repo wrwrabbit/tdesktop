@@ -518,7 +518,10 @@ enum class ManifestAdoption {
 [[nodiscard]] bool UnpackUpdateV2(
 		const QString &filepath,
 		const QByteArray &content,
-		ManifestAdoption adoption) {
+		bool upstream,
+		uint64 runningVersion,
+		bool allowSameVersion,
+		ManifestAdoption adoption = ManifestAdoption::Queued) {
 	// The expected target follows the feed key, not the build: an x64
 	// build under Rosetta asks for armac and must accept that package.
 	const auto target = Updates::TargetFromPlatformKey(
@@ -549,10 +552,10 @@ enum class ManifestAdoption {
 	}
 	if (verified->adoptManifest) {
 		if (adoption == ManifestAdoption::Immediate) {
-			AdoptManifest(verified->manifest);
+			AdoptManifest(verified->manifest, upstream);
 		} else {
-			crl::on_main([manifest = verified->manifest] {
-				AdoptManifest(manifest);
+			crl::on_main([manifest = verified->manifest, upstream] {
+				AdoptManifest(manifest, upstream);
 			});
 		}
 	}
@@ -666,7 +669,12 @@ bool UnpackUpdate(
 		LOG(("Update Error: unsupported update format (missing v2 magic)."));
 		return false;
 	}
-	return UnpackUpdateV2(filepath, compressed, ManifestAdoption::Queued);
+	return UnpackUpdateV2(
+		filepath,
+		compressed,
+		upstream,
+		runningVersion,
+		allowSameVersion);
 #else // !TDESKTOP_DISABLE_AUTOUPDATE
 	return false;
 #endif // TDESKTOP_DISABLE_AUTOUPDATE
@@ -2179,9 +2187,13 @@ bool checkReadyUpdate() {
 				return true;
 			}
 #ifndef TDESKTOP_DISABLE_AUTOUPDATE
+			const auto upstream = UseUpstreamUpdates();
 			if (!UnpackUpdateV2(
 					package,
 					*content,
+					upstream,
+					GetAppVersionForUpdate(upstream),
+					PTGAcceptSameVersion,
 					ManifestAdoption::Immediate)
 				|| (Platform::ReadyUpdatePackagePresent(cWorkingDir())
 					&& !QFile::remove(package))) {

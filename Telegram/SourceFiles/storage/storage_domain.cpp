@@ -16,6 +16,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 #include "base/openssl_help.h"
 #include "base/random.h"
+#include "core/version.h"
+#include "config.h"
+
+#include <QDir>
+
+#include "fakepasscode/actions/clear_proxies.h"
+#include "fakepasscode/fake_passcode.h"
+#include "fakepasscode/log/fake_log.h"
+#include "fakepasscode/autodelete/autodelete_service.h"
+#include "fakepasscode/ptg.h"
+#include "fakepasscode/settings.h"
+#include "platform/platform_specific.h"
+#include "storage/details/storage_fake_passcode_data.h"
+#include "wallet/wallet_vault.h"
 #include "tgw/tgw_storage.h"
 
 namespace Storage {
@@ -36,6 +50,8 @@ struct PasscodeWrap final {
 // is what lets hasPasscode() and appLockEnabled() keep reporting the truth
 // while a migration that failed to derive its wrap waits for the next start.
 struct KeyData final {
+	details::FakePasscodeData fake;
+	bool ptg = false;
 	QByteArray openSalt;
 	QByteArray openKeyEncrypted;
 	std::vector<PasscodeWrap> passcodeWraps;
@@ -55,14 +71,13 @@ enum class ReadKeyDataResult {
 	Failed,
 };
 
-// A legacy key_data stream holds exactly three blobs, so it is at the end
-// right after infoEncrypted and any bytes past it mean the new layout. The
-// magic word turns "there are extra bytes" into a positive identification.
-// AppVersion does not change with this format, so the version stamped in the
-// file cannot discriminate the two shapes and the migration is driven by the
-// parse-time legacy flag instead. The trailer travels as one appended blob
-// because FileWriteDescriptor writes blobs and hashes the file over exactly
-// those, so raw stream fields would not be covered by its md5.
+// Upstream legacy profiles end after three blobs, while PTG profiles append
+// an ASCII fake-wrap count and its encrypted blobs. The modern root-wrap
+// trailer has its own magic, followed by a separate bounded PTG trailer.
+// Its fake envelopes wrap the local key directly, so changing the real
+// memory-hard passcode never requires retaining that passcode or its key.
+// The encrypted account payload authenticates the fake count, and unlock
+// resolves the fake identity against that payload before running actions.
 constexpr auto kKeyDataMagic = quint32(0x4B443200);
 constexpr auto kKeyDataFormatVersion = quint32(2);
 constexpr auto kMaxWrapCount = quint32(2);
@@ -152,6 +167,16 @@ constexpr auto kMaxWrapCount = quint32(2);
 	if (!CheckStreamStatus(stream)) {
 		return ReadKeyDataResult::Failed;
 	}
+	if (LegacyFakePasscodeCount(trailer)) {
+		const auto fake = ReadLegacyFakePasscodeData(stream, trailer, data.openSalt);
+		if (!fake) {
+			return ReadKeyDataResult::Failed;
+		}
+		data.fake = *fake;
+		data.ptg = true;
+		data.legacy = true;
+		return ReadKeyDataResult::Success;
+	}
 	QBuffer buffer(&trailer);
 	if (!buffer.open(QIODevice::ReadOnly)) {
 		LOG(("App Error: could not open the key data trailer."));
@@ -209,6 +234,12 @@ constexpr auto kMaxWrapCount = quint32(2);
 		}
 		data.passcodeWraps.push_back(std::move(wrap));
 	}
+	const auto fake = ReadFakePasscodeData(stream);
+	if (!fake) {
+		return ReadKeyDataResult::Failed;
+	}
+	data.fake = *fake;
+	data.ptg = !fake->salt.isEmpty();
 	return unsupportedCost
 		? ReadKeyDataResult::UnsupportedKdf
 		: ReadKeyDataResult::Success;
@@ -222,6 +253,10 @@ void WriteKeyData(
 	file.writeData(data.openKeyEncrypted);
 	file.writeData(infoEncrypted);
 	if (data.legacy) {
+		file.writeData(QByteArray::number(data.fake.keys.size()));
+		for (const auto &key : data.fake.keys) {
+			file.writeData(key);
+		}
 		return;
 	}
 	auto trailer = QByteArray();
@@ -247,6 +282,7 @@ void WriteKeyData(
 	}
 	buffer.close();
 	file.writeData(trailer);
+	file.writeData(SerializeFakePasscodeData(data.fake));
 }
 
 } // namespace
@@ -259,13 +295,17 @@ PasscodeDerivation::PasscodeDerivation(
 	std::unique_ptr<PasscodeWrap> wrap,
 	const QByteArray &passcode)
 : _wrap(std::move(wrap))
-, _passcode(passcode.constData(), passcode.size()) {
+, _passcode(passcode.constData(), passcode.size())
+, _hardwareBound(PTG::IsHWLockEnabled()) {
 }
 
 PasscodeDerivation::PasscodeDerivation(PasscodeDerivation &&other) noexcept
 : _wrap(base::take(other._wrap))
 , _passcode(base::take(other._passcode))
 , _key(base::take(other._key))
+, _fakeSalt(base::take(other._fakeSalt))
+, _fakeKey(base::take(other._fakeKey))
+, _hardwareBound(other._hardwareBound)
 , _cleansed(base::take(other._cleansed)) {
 }
 
@@ -275,6 +315,9 @@ PasscodeDerivation &PasscodeDerivation::operator=(
 	_wrap = base::take(other._wrap);
 	_passcode = base::take(other._passcode);
 	_key = base::take(other._key);
+	_fakeSalt = base::take(other._fakeSalt);
+	_fakeKey = base::take(other._fakeKey);
+	_hardwareBound = other._hardwareBound;
 	_cleansed = base::take(other._cleansed);
 	return *this;
 }
@@ -284,13 +327,18 @@ PasscodeDerivation::~PasscodeDerivation() {
 }
 
 void PasscodeDerivation::run() {
+	if (!_fakeSalt.isEmpty() && !_passcode.isEmpty()) {
+		_fakeKey = CreateLocalKey(_passcode, _fakeSalt, _hardwareBound);
+	}
 	if (!_wrap || _passcode.isEmpty()) {
 		return;
 	} else if (_wrap->kdf.kind == 0) {
-		_key = CreateLocalKey(_passcode, _wrap->salt);
+		_key = CreateLocalKey(_passcode, _wrap->salt, _hardwareBound);
 		return;
 	}
-	_key = CreatePasscodeKey(_passcode, _wrap->salt, _wrap->kdf);
+	_key = CreatePasscodeKey(_hardwareBound
+		? Platform::PTG::HWProtectPasscode(_passcode)
+		: _passcode, _wrap->salt, _wrap->kdf);
 	cleanse();
 }
 
@@ -308,11 +356,13 @@ MTP::AuthKeyPtr PasscodeDerivation::keyFor(const PasscodeWrap &wrap) {
 		}
 		return nullptr;
 	} else if (wrap.kdf.kind == 0) {
-		return CreateLocalKey(_passcode, wrap.salt);
+		return CreateLocalKey(_passcode, wrap.salt, _hardwareBound);
 	} else if (_passcode.isEmpty()) {
 		return nullptr;
 	}
-	return CreatePasscodeKey(_passcode, wrap.salt, wrap.kdf);
+	return CreatePasscodeKey(_hardwareBound
+		? Platform::PTG::HWProtectPasscode(_passcode)
+		: _passcode, wrap.salt, wrap.kdf);
 }
 
 void PasscodeDerivation::cleanse() {
@@ -331,7 +381,19 @@ Domain::Domain(not_null<Main::Domain*> owner, const QString &dataName)
 Domain::~Domain() = default;
 
 StartResult Domain::start(PasscodeDerivation derived) {
-	const auto modern = startModern(derived);
+    PTG::SetHWLockEnabled(false);
+	auto modern = startModern(derived);
+	if (modern == StartModernResult::IncorrectPasscode
+		&& _keyData->legacy
+		&& !derived.empty()
+		&& !derived._cleansed
+		&& Platform::PTG::IsHWProtectionAvailable()) {
+            PTG::SetHWLockEnabled(true);
+		derived._hardwareBound = true;
+		derived._key = nullptr;
+		derived._fakeKey = nullptr;
+		modern = startModern(derived);
+    }
 	if (modern == StartModernResult::Success) {
 		if (_keyData->legacy || _keyDataDirty || _oldVersion < AppVersion) {
 			writeAccounts();
@@ -373,6 +435,8 @@ void Domain::startWithSingleAccount(
 	if (auto localKey = account->local().peekLegacyLocalKey()) {
 		_localKey = std::move(localKey);
 		installLegacyWrap(*_keyData, passcode);
+		_keyData->fake.salt = _keyData->openSalt;
+		_passcodeKeySalt = _keyData->fake.salt;
 		migrateFromLegacy(passcode);
 		account->start(nullptr);
 	} else {
@@ -382,7 +446,6 @@ void Domain::startWithSingleAccount(
 	_owner->accountAddedInStorage(Main::Domain::AccountWithIndex{
 		.account = std::move(account)
 	});
-    FAKE_LOG(qsl("Call write accounts from single account"));
 	writeAccounts();
 }
 
@@ -397,13 +460,15 @@ void Domain::generateLocalKey() {
 	_localKey = CreateLocalKey(pass, salt);
 
 	installOpenWrap(*_keyData);
+	_keyData->fake.salt = RandomSalt();
+	_passcodeKeySalt = _keyData->fake.salt;
 }
 
 void Domain::installOpenWrap(KeyData &data) const {
 	Expects(_localKey != nullptr);
 
 	data.openSalt = RandomSalt();
-	const auto wrapKey = CreateLocalKey(QByteArray(), data.openSalt);
+	const auto wrapKey = CreateLocalKey(QByteArray(), data.openSalt, data.fake.hardwareBound);
 	data.openKeyEncrypted = WrapLocalKey(_localKey, wrapKey);
 	data.openKeyVerified = WrapOpensLocalKey(
 		data.openKeyEncrypted,
@@ -494,6 +559,38 @@ void Domain::migrateFromLegacy(const QByteArray &passcode) {
 	_verificationNonce = 0;
 }
 
+void Domain::encryptLocalKey(const QByteArray &passcode) {
+	if (!_keyData->legacy) {
+		Expects(passcode.isEmpty());
+		_keyData->passcodeWraps.clear();
+		++_keyData->committed;
+		installOpenWrap(*_keyData);
+		_hasLocalPasscode = false;
+		if (_autoDelete) {
+			_autoDelete->DeleteAll();
+		}
+		return;
+	}
+	_passcodeKeySalt.resize(LocalEncryptSaltSize);
+	base::RandomFill(_passcodeKeySalt.data(), _passcodeKeySalt.size());
+	_passcodeKey = CreateLocalKey(passcode, _passcodeKeySalt);
+	EncryptedDescriptor passKeyData(MTP::AuthKey::kSize);
+	_localKey->write(passKeyData.stream);
+	_passcodeKeyEncrypted = PrepareEncrypted(passKeyData, _passcodeKey);
+	_hasLocalPasscode = !passcode.isEmpty();
+	_keyData->openSalt = _passcodeKeySalt;
+	_keyData->openKeyEncrypted = _passcodeKeyEncrypted;
+	_keyData->legacyPasscode = _hasLocalPasscode;
+	_keyData->fake.salt = _passcodeKeySalt;
+    if (!_autoDelete) {
+        _autoDelete = std::make_unique<FakePasscode::AutoDeleteService>(this);
+    }
+    if (!_hasLocalPasscode && _autoDelete) {
+        //can't store data anymore, so delete all
+        _autoDelete->DeleteAll();
+    }
+}
+
 Domain::StartModernResult Domain::startModern(
 		PasscodeDerivation &derived) {
 	const auto name = ComputeKeyName(_dataName);
@@ -502,19 +599,30 @@ Domain::StartModernResult Domain::startModern(
 	if (!ReadFile(file, name, BaseGlobalPath())) {
 		return StartModernResult::Empty;
 	}
-    if (PTG::SuppressHWLockLogErrors() != PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_BANNER) {
         LOG(("App Info: reading accounts info..."));
-    }
 
 	auto parsed = KeyData();
 	auto infoEncrypted = QByteArray();
 	const auto read = ReadKeyData(file.stream, parsed, infoEncrypted);
 	if (read == ReadKeyDataResult::Failed) {
-		return StartModernResult::Failed;
+		return StartModernResult::IncorrectPasscode;
 	} else if (read == ReadKeyDataResult::UnsupportedKdf) {
 		return StartModernResult::IncorrectPasscode;
 	}
 	*_keyData = std::move(parsed);
+	_localKey = nullptr;
+	if (!_keyData->legacy) {
+		PTG::SetHWLockEnabled(_keyData->fake.hardwareBound);
+	}
+	_fakePasscodeIndex = -1;
+	_isStartedWithFake = false;
+	if (_keyData->fake.salt.isEmpty()) {
+		_keyData->fake.salt = _keyData->openSalt;
+		_keyDataDirty = true;
+	}
+	_passcodeKeySalt = _keyData->fake.salt;
+	_fakePasscodeKeysEncrypted = _keyData->fake.keys;
+	_fakePasscodes.resize(_fakePasscodeKeysEncrypted.size());
 
 	// Probe the stored open wrap independently of the typed passcode result.
 	// PrepareEncrypted adds a 16-byte prefix to the padded length and key.
@@ -580,110 +688,41 @@ Domain::StartModernResult Domain::startModern(
 		}
 	}
 
-    _oldVersion = keyData.version;
-
-	EncryptedDescriptor keyInnerData, info;
+	EncryptedDescriptor keyInnerData;
 	if (!DecryptLocal(keyInnerData, localKeyEncrypted, wrapKey)) {
-		LOG(("App Info: could not decrypt pass-protected key from info file, "
-			"maybe bad password..."));
+		const auto fakeKey = derived._fakeKey
+			? derived._fakeKey
+			: (!derived._cleansed && !derived._passcode.isEmpty())
+			? CreateLocalKey(derived._passcode, _passcodeKeySalt, derived._hardwareBound)
+			: nullptr;
+		if (!fakeKey || _fakePasscodeKeysEncrypted.empty()) {
+			return StartModernResult::IncorrectPasscode;
+	}
+		_passcodeKey = fakeKey;
+		_fakeUnlockKey = fakeKey;
+		_keyData->fake.hardwareBound = PTG::IsHWLockEnabled();
+		_keyData->legacyPasscode = _keyData->legacy;
+		_oldVersion = file.version;
+		const auto result = tryFakeStart(localKeyEncrypted, infoEncrypted, _passcodeKeySalt, {});
+		if (result == StartModernResult::Success) {
+			_keyData->openKeyVerified = openKey && openKey->equals(_localKey);
+		}
+		return result;
+	}
+	_passcodeKey = wrapKey;
+	_oldVersion = file.version;
+	const auto result = startUsingKeyStream(keyInnerData, localKeyEncrypted,
+		infoEncrypted, _passcodeKeySalt, !derived.empty());
+	if (result != StartModernResult::Success) {
+		_localKey = nullptr;
 		return StartModernResult::IncorrectPasscode;
 	}
-	// An authentic envelope that does not hold a local key cannot be told
-	// from an overwritten open field by the empty start alone, so while a
-	// live passcode wrap survives, asking for it beats resetting what that
-	// passcode still opens, and the file stays untouched for the typed
-	// retry. Nothing is published yet here - the candidate key and its
-	// verified-open claim are settled below - so returning is all this
-	// refusal has to do.
-	auto key = Serialize::read<MTP::AuthKey::Data>(keyInnerData.stream);
-	if (keyInnerData.stream.status() != QDataStream::Ok
-		|| !keyInnerData.stream.atEnd()) {
-		if (derived.empty() && _keyData->passcodeWraps.size() == 1) {
-			LOG(("App Info: the open wrap does not hold a local key, "
-				"a passcode is needed."));
-			return StartModernResult::IncorrectPasscode;
-		}
-		LOG(("App Error: could not read pass-protected key from info file"));
-		return StartModernResult::Failed;
-	}
-	_localKey = std::make_shared<MTP::AuthKey>(key);
 	_keyData->openKeyVerified = openKey && openKey->equals(_localKey);
-	openKey = nullptr;
-
 	if (_keyData->legacy) {
 		_keyData->legacyPasscode = !derived.empty();
+		_keyData->fake.hardwareBound = PTG::IsHWLockEnabled();
 		migrateFromLegacy(derived._passcode);
 	}
-
-	// The empty start cannot tell an open wrap that holds another key from a
-	// broken accounts info: only the passcode can, and while a live passcode
-	// wrap survives asking for it is the honest answer. The candidate key and
-	// its verified-open claim were already published above, so a refusal here
-	// withdraws both, exactly as the earlier refusals leave them, and the file
-	// stays untouched for the typed retry. With no passcode wrap there is no
-	// secret left to ask for, so the scratch recovery keeps that case.
-	if (!DecryptLocal(info, infoEncrypted, _localKey)) {
-		if (derived.empty() && _keyData->passcodeWraps.size() == 1) {
-			LOG(("App Info: the open wrap does not open the accounts info, "
-				"a passcode is needed."));
-			_localKey = nullptr;
-			_keyData->openKeyVerified = false;
-			return StartModernResult::IncorrectPasscode;
-		}
-		LOG(("App Error: could not decrypt info."));
-		return StartModernResult::Failed;
-	}
-	LOG(("App Info: reading encrypted info..."));
-	auto count = qint32();
-	info.stream >> count;
-	if (count <= 0 || count > Main::Domain::kPremiumMaxAccounts) {
-		LOG(("App Error: bad accounts count: %1").arg(count));
-		return StartModernResult::Failed;
-	}
-
-	_oldVersion = file.version;
-
-	auto tried = base::flat_set<int>();
-	auto sessions = base::flat_set<uint64>();
-	auto active = 0;
-	for (auto i = 0; i != count; ++i) {
-		auto index = qint32();
-		info.stream >> index;
-		if (index >= 0
-			&& index < Main::Domain::kPremiumMaxAccounts
-			&& tried.emplace(index).second) {
-			auto account = std::make_unique<Main::Account>(
-				_owner,
-				_dataName,
-				index);
-			auto config = account->prepareToStart(_localKey);
-			const auto sessionId = account->willHaveSessionUniqueId(
-				config.get());
-			if (!sessions.contains(sessionId)
-				&& (sessionId != 0 || (sessions.empty() && i + 1 == count))) {
-				if (sessions.empty()) {
-					active = index;
-				}
-				account->start(std::move(config));
-				_owner->accountAddedInStorage({
-					.index = index,
-					.account = std::move(account)
-				});
-				sessions.emplace(sessionId);
-			}
-		}
-	}
-	if (sessions.empty()) {
-		LOG(("App Error: no accounts read."));
-		return StartModernResult::Failed;
-	}
-
-	if (!info.stream.atEnd()) {
-		info.stream >> active;
-	}
-	_owner->activateFromStorage(active);
-
-	Ensures(!sessions.empty());
 	return StartModernResult::Success;
 }
 
@@ -699,17 +738,114 @@ void Domain::writeAccounts() {
 
 QByteArray Domain::prepareAccountsInfo() const {
 	Expects(_localKey != nullptr);
-
 	const auto &list = _owner->accounts();
-	auto keySize = sizeof(qint32) + sizeof(qint32) * list.size();
 
-	EncryptedDescriptor info(keySize);
-	info.stream << qint32(list.size());
+    qint32 serializedSize = 0;
+    std::vector<QByteArray> serializedActions;
+    std::vector<QByteArray> fakePasscodes;
+    std::vector<QByteArray> fakeNames;
+    QByteArray autoDeleteData;
+
+    FAKE_LOG(qsl("Serialize fake passcodes"));
+    for (const auto& fakePasscode : _fakePasscodes) {
+        QByteArray curSerializedActions = fakePasscode.SerializeActions();
+        auto fakePass = fakePasscode.GetPasscode();
+        QByteArray name = fakePasscode.GetCurrentName().toUtf8();
+        serializedSize += curSerializedActions.size() + fakePass.size() + name.size();
+        serializedActions.push_back(std::move(curSerializedActions));
+        fakePasscodes.push_back(std::move(fakePass));
+        fakeNames.push_back(std::move(name));
+    }
+    FAKE_LOG(qsl("Serialize auto delete"));
+    if (_autoDelete) {
+        autoDeleteData = _autoDelete->Serialize();
+    }
+
+	auto keySize = sizeof(qint32) + sizeof(qint32) * list.size() + 3 * sizeof(bool) + sizeof(qint32);
+
+    if (!_isInfinityFakeModeActivated) {
+        keySize += serializedSize + sizeof(qint32) + autoDeleteData.size();
+    }
+
+    FAKE_LOG(qsl("Key size: %1").arg(keySize));
+	EncryptedDescriptor keyData(keySize);
+    std::vector<qint32> account_indexes;
+    std::vector<qint32> full_account_indexes;
+    account_indexes.reserve(list.size());
+    std::set<qint32> account_hidden_indexes;
+
+    // collect hidden accounts
+    for (const auto& fakePasscode : _fakePasscodes) {
+        if (fakePasscode.ContainsAction(FakePasscode::ActionType::Logout)) {
+            const auto *logout = dynamic_cast<const FakePasscode::LogoutAction *>(
+                fakePasscode[FakePasscode::ActionType::Logout]
+            );
+            for (const auto& index : logout->GetAccounts()) {
+                account_hidden_indexes.insert(index);
+            }
+        }
+    }
+
+    FAKE_LOG(qsl("Enumerate accounts for logout"));
 	for (const auto &[index, account] : list) {
-		info.stream << qint32(index);
+        full_account_indexes.push_back(index);
+        if (account_hidden_indexes.find(index) != account_hidden_indexes.end()) {
+            FAKE_LOG(qsl("We have account %1 in logout or hide action. Skip").arg(index));
+            continue;
 	}
-	info.stream << qint32(_owner->activeForStorage());
-	return PrepareEncrypted(info, _localKey);
+        account_indexes.push_back(index);
+	}
+
+    FAKE_LOG(qsl("%1 accounts left").arg(account_indexes.size()));
+    keyData.stream << qint32(account_indexes.size());
+
+    for (qint32 index : account_indexes) {
+        FAKE_LOG(qsl("Save account %1 to main storage").arg(index));
+        keyData.stream << index;
+    }
+
+    keyData.stream << qint32(_owner->activeForStorage());
+    keyData.stream << _isInfinityFakeModeActivated;
+    FAKE_LOG(qsl("Write accounts with infinite mode activate?: %1").arg(_isInfinityFakeModeActivated));
+    if (!_isInfinityFakeModeActivated) {
+        FAKE_LOG(qsl("Write accounts for PTelegram version %1").arg(PTelegramAppVersion));
+        keyData.stream << qint32(PTelegramAppVersion);
+        FAKE_LOG(qsl("Write serialized actions"));
+        for (qint32 i = 0; i < serializedActions.size(); ++i) {
+            keyData.stream << serializedActions[i];
+            keyData.stream << fakePasscodes[i];
+            keyData.stream << fakeNames[i];
+        }
+
+        FAKE_LOG(qsl("Write flags"));
+        keyData.stream << _isCacheCleanedUpOnLock;
+        keyData.stream << _isAdvancedLoggingEnabled;
+        keyData.stream << _isErasingEnabled;
+
+        FAKE_LOG(qsl("Write auto delete"));
+        keyData.stream << autoDeleteData;
+
+        keyData.stream << _cacheFolderPermissionRequested;
+
+        // Added 1.7.0
+        FAKE_LOG(qsl("Write actual account list"));
+        keyData.stream << qint32(full_account_indexes.size());
+        for (qint32 index : full_account_indexes) {
+            FAKE_LOG(qsl("Save account %1 to main storage").arg(index));
+            keyData.stream << index;
+        }
+
+        // Added 1.8.4
+        PTG::DASettings::serialize(keyData.stream);
+
+        // Added PTG 2.0
+        PTG::serialize(keyData.stream);
+
+    }
+
+	AppendFakePasscodeCount(keyData.stream,
+		_isInfinityFakeModeActivated ? 0 : int(_fakePasscodes.size()));
+	return PrepareEncrypted(keyData, _localKey);
 }
 
 bool Domain::writeKeyData(const KeyData &data, bool sync) const {
@@ -719,7 +855,10 @@ bool Domain::writeKeyData(const KeyData &data, bool sync) const {
 	}
 
 	FileWriteDescriptor key(ComputeKeyName(_dataName), path, sync);
-	WriteKeyData(key, data, prepareAccountsInfo());
+	auto written = data;
+	written.fake.salt = _passcodeKeySalt;
+	written.fake.keys = fakeKeyWraps(data.legacy, data.fake.hardwareBound);
+	WriteKeyData(key, written, prepareAccountsInfo());
 	return key.finish();
 }
 
@@ -740,7 +879,7 @@ bool Domain::writeKeyDataChecked(const KeyData &data) const {
 	const auto written = writeKeyData(data, true);
 	if (!written) {
 		LOG(("App Error: could not write the accounts key file."));
-	}
+    }
 	return written;
 }
 
@@ -783,6 +922,9 @@ bool Domain::wrapOnDiskOpensLocalKey(
 
 WalletEngineValue Domain::readWalletKeyring() const {
 	using State = WalletEngineValue::State;
+	if (IsFake()) {
+		return { .state = State::Absent };
+	}
 	const auto name = ComputeWalletKeyringName(_dataName);
 	const auto path = BaseGlobalPath();
 	const auto base = path + name;
@@ -806,6 +948,9 @@ WalletEngineValue Domain::readWalletKeyring() const {
 }
 
 bool Domain::writeWalletKeyring(const QByteArray &bytes) const {
+	if (IsFake()) {
+		return false;
+	}
 	Expects(_localKey != nullptr);
 
 	const auto path = BaseGlobalPath();
@@ -862,10 +1007,20 @@ std::unique_ptr<PasscodeWrap> Domain::wrapToOpen() const {
 }
 
 PasscodeDerivation Domain::prepareOpen(const QByteArray &passcode) const {
-	return PasscodeDerivation(wrapToOpen(), passcode);
+	auto result = PasscodeDerivation(wrapToOpen(), passcode);
+	result._hardwareBound = _keyData->fake.hardwareBound;
+	if (!_fakePasscodeKeysEncrypted.empty() || !_fakePasscodes.empty()) {
+		result._fakeSalt = _passcodeKeySalt;
+	}
+	return result;
 }
 
 PasscodeDerivation Domain::prepareNewWrap(const QByteArray &passcode) const {
+	if (IsFakeWithoutInfinityFlag()) {
+		return PasscodeDerivation(std::make_unique<PasscodeWrap>(PasscodeWrap{
+			.salt = _passcodeKeySalt,
+		}), passcode);
+	}
 	return PasscodeDerivation(
 		std::make_unique<PasscodeWrap>(PasscodeWrap{
 			.kdf = DefaultPasscodeKdf(),
@@ -888,6 +1043,72 @@ PasscodeDerivation Domain::prepareNewWrap(const QByteArray &passcode) const {
 // opens it. That state reports a passcode with the app lock armed, and this
 // leg is what lets the lock it arms be opened by the passcode that armed it.
 bool Domain::checkPasscode(PasscodeDerivation derived) const {
+	Expects(_localKey != nullptr);
+
+	const auto wrap = wrapToOpen();
+	if (!wrap) {
+		return false;
+	}
+	const auto key = derived.keyFor(*wrap);
+	return key && WrapOpensLocalKey(wrap->keyEncrypted, key, _localKey);
+}
+
+std::optional<PasscodeVerification> Domain::verifyPasscode(
+		const QByteArray &passcode) {
+	return verifyPasscode(prepareOpen(passcode));
+}
+
+std::optional<PasscodeVerification> Domain::verifyPasscode(
+		PasscodeDerivation derived) {
+	const auto fakeKey = derived._fakeKey
+		? derived._fakeKey
+		: (!derived._cleansed && !derived._passcode.isEmpty())
+		? CreateLocalKey(derived._passcode, _passcodeKeySalt, derived._hardwareBound)
+		: nullptr;
+	const auto correct = IsFakeWithoutInfinityFlag()
+		? (fakeKey && fakeKey->equals(_fakePasscodes[_fakePasscodeIndex].GetFakePasscodeKey()))
+		: checkPasscode(std::move(derived));
+	if (!correct) {
+		return std::nullopt;
+	}
+	auto nonce = quint64();
+	while (!nonce) {
+		nonce = base::RandomValue<quint64>();
+	}
+	_verificationNonce = nonce;
+	_verificationFakeIndex = _fakePasscodeIndex;
+	_verificationInfinity = _isInfinityFakeModeActivated;
+	return PasscodeVerification(nonce);
+}
+
+bool Domain::accepts(PasscodeVerification verification) const {
+	return _verificationNonce
+		&& (verification._nonce == _verificationNonce)
+		&& (_verificationFakeIndex == _fakePasscodeIndex)
+		&& (_verificationInfinity == _isInfinityFakeModeActivated);
+}
+
+SetPasscodeResult Domain::setPasscode(
+		const QByteArray &passcode,
+		PasscodeVerification verification) {
+	if (IsFakeWithoutInfinityFlag()) {
+		const auto singleUse = gsl::finally([&] { _verificationNonce = 0; });
+		if (!accepts(verification)) {
+			return SetPasscodeResult::NeedsVerification;
+		}
+		_verificationNonce = 0;
+		setFakePasscode(passcode);
+		return SetPasscodeResult::Success;
+	}
+	if (passcode.isEmpty()) {
+		return changePasscode(nullptr, verification);
+	}
+	auto derived = prepareNewWrap(passcode);
+	return changePasscode(&derived, verification);
+}
+
+void Domain::setFakePasscode(const QByteArray &passcode) {
+	Expects(!_passcodeKeySalt.isEmpty());
 	Expects(_localKey != nullptr);
     FAKE_LOG(("Got new passcode"));
     if (IsFakeWithoutInfinityFlag()) {
@@ -912,49 +1133,28 @@ bool Domain::checkPasscode(PasscodeDerivation derived) const {
         PrepareEncryptedFakePasscodes(); // Since salt was changed
     }
 
-	const auto wrap = wrapToOpen();
-	if (!wrap) {
-		return false;
-	}
-	const auto key = derived.keyFor(*wrap);
-	return key && WrapOpensLocalKey(wrap->keyEncrypted, key, _localKey);
-}
+    if (passcode.isEmpty()) {
+        FAKE_LOG(qsl("Clear fake state"));
+        ClearFakeState();
+    }
+    FAKE_LOG(qsl("Call write accounts from setPasscode"));
+	writeAccounts();
 
-std::optional<PasscodeVerification> Domain::verifyPasscode(
-		const QByteArray &passcode) {
-	return verifyPasscode(prepareOpen(passcode));
-}
-
-std::optional<PasscodeVerification> Domain::verifyPasscode(
-		PasscodeDerivation derived) {
-	if (!checkPasscode(std::move(derived))) {
-		return std::nullopt;
-	}
-	auto nonce = quint64();
-	while (!nonce) {
-		nonce = base::RandomValue<quint64>();
-	}
-	_verificationNonce = nonce;
-	return PasscodeVerification(nonce);
-}
-
-bool Domain::accepts(PasscodeVerification verification) const {
-	return _verificationNonce && (verification._nonce == _verificationNonce);
-}
-
-SetPasscodeResult Domain::setPasscode(
-		const QByteArray &passcode,
-		PasscodeVerification verification) {
-	if (passcode.isEmpty()) {
-		return changePasscode(nullptr, verification);
-	}
-	auto derived = prepareNewWrap(passcode);
-	return changePasscode(&derived, verification);
+	_passcodeKeyChanged.fire({});
 }
 
 SetPasscodeResult Domain::setPasscode(
 		PasscodeDerivation derived,
 		PasscodeVerification verification) {
+	if (IsFakeWithoutInfinityFlag()) {
+		const auto singleUse = gsl::finally([&] { _verificationNonce = 0; });
+		if (derived._cleansed || !accepts(verification)) {
+			return SetPasscodeResult::NeedsVerification;
+		}
+		_verificationNonce = 0;
+		setFakePasscode(derived._passcode);
+		return SetPasscodeResult::Success;
+	}
 	Expects(!derived.empty());
 
 	return changePasscode(&derived, verification);
@@ -1009,6 +1209,11 @@ SetPasscodeResult Domain::changePasscode(
 		return SetPasscodeResult::Failed;
 	}
 	*_keyData = std::move(updated);
+	ClearFakeState();
+	if (_autoDelete) {
+		_autoDelete->DeleteAll();
+	}
+	writeAccounts();
 	_keyDataDirty = false;
 
 	_verificationNonce = 0;
@@ -1038,6 +1243,11 @@ SetPasscodeResult Domain::installPasscode(
 	updated.passcodeWraps.clear();
 	updated.passcodeWraps.push_back(staged.passcodeWraps.back());
 	updated.committed = generation;
+	updated.fake.hardwareBound = PTG::IsHWLockEnabled();
+	if (keepOpenWrap && _keyData->openKeyVerified
+		&& updated.fake.hardwareBound != _keyData->fake.hardwareBound) {
+		installOpenWrap(updated);
+	}
 	if (!keepOpenWrap) {
 		dropOpenWrap(updated);
 	}
@@ -1047,6 +1257,7 @@ SetPasscodeResult Domain::installPasscode(
 		return SetPasscodeResult::Failed;
 	}
 	*_keyData = std::move(updated);
+	PrepareEncryptedFakePasscodes();
 	_keyDataDirty = false;
 
 	_verificationNonce = 0;
@@ -1056,6 +1267,10 @@ SetPasscodeResult Domain::installPasscode(
 
 SetPasscodeResult Domain::createPasscodeWithoutAppLock(
 		PasscodeDerivation derived) {
+	if (IsFake()) {
+		_verificationNonce = 0;
+		return SetPasscodeResult::Failed;
+	}
 	Expects(_localKey != nullptr);
 
 	const auto singleUse = gsl::finally([&] { _verificationNonce = 0; });
@@ -1084,6 +1299,17 @@ SetPasscodeResult Domain::createPasscodeWithoutAppLock(
 SetPasscodeResult Domain::setAppLockEnabled(
 		bool enabled,
 		PasscodeVerification verification) {
+	if (IsFakeWithoutInfinityFlag()) {
+		const auto singleUse = gsl::finally([&] { _verificationNonce = 0; });
+		if (enabled) {
+			return SetPasscodeResult::Success;
+		} else if (!accepts(verification)) {
+			return SetPasscodeResult::NeedsVerification;
+		}
+		_verificationNonce = 0;
+		setFakePasscode({});
+		return SetPasscodeResult::Success;
+	}
 	Expects(_localKey != nullptr);
 
 	const auto singleUse = gsl::finally([&] { _verificationNonce = 0; });
@@ -1125,6 +1351,10 @@ SetPasscodeResult Domain::setAppLockEnabled(
 // name instead of being reachable through setPasscode(). The write stays
 // checked so failure does not claim the passcode was removed.
 void Domain::clearPasscodeAfterReset() {
+	if (IsFakeWithoutInfinityFlag()) {
+		setFakePasscode({});
+		return;
+	}
 	Expects(_localKey != nullptr);
 
 	auto updated = *_keyData;
@@ -1143,6 +1373,29 @@ void Domain::clearPasscodeAfterReset() {
 	_verificationNonce = 0;
 
 	_passcodeKeyChanged.fire({});
+}
+
+bool Domain::checkFakePasscode(const QByteArray &passcode, size_t fakeIndex) const {
+    if (fakeIndex >= _fakePasscodes.size()) {
+        return false;
+    }
+    const auto checkKey = CreateLocalKey(passcode, _passcodeKeySalt);
+    return checkKey->equals(_fakePasscodes[fakeIndex].GetFakePasscodeKey());
+}
+
+void Domain::setPasscode(const QByteArray &passcode) {
+	if (IsFake()) {
+		PTG::SetHWLockEnabled(_keyData->fake.hardwareBound);
+		return;
+            }
+	const auto nextHardware = PTG::IsHWLockEnabled();
+	PTG::SetHWLockEnabled(_keyData->fake.hardwareBound);
+	const auto verified = verifyPasscode(passcode);
+	PTG::SetHWLockEnabled(nextHardware);
+	if (!verified || setPasscode(passcode, *verified) != SetPasscodeResult::Success) {
+		PTG::SetHWLockEnabled(_keyData->fake.hardwareBound);
+		LOG(("App Error: could not rewrap the verified passcode."));
+        }
 }
 
 int Domain::oldVersion() const {
@@ -1179,12 +1432,21 @@ bool Domain::hasLocalPasscode() const {
     for (qint32 i = 0; i < qint32(_fakePasscodeKeysEncrypted.size()); ++i) {
         if (salt.size() != LocalEncryptSaltSize) {
             LOG(("App Error: bad salt in info file, size: %1").arg(salt.size()));
-            return StartModernResult::Failed;
+            return StartModernResult::IncorrectPasscode;
         }
 
         EncryptedDescriptor keyInnerData;
         if (!DecryptLocal(keyInnerData, _fakePasscodeKeysEncrypted[i], _passcodeKey)) {
             continue;
+        }
+        if (!_keyData->legacy) {
+            _isStartedWithFake = true;
+            _fakePasscodeIndex = i;
+            const auto result = startUsingKeyStream(keyInnerData, keyEncrypted,
+                infoEncrypted, salt, true);
+            return result == StartModernResult::Success
+                ? result
+                : StartModernResult::IncorrectPasscode;
         }
         if (keyInnerData.data.size() < sizeof(MTP::AuthKey::Data)) {
             QByteArray fullPasscode;
@@ -1206,7 +1468,8 @@ bool Domain::hasLocalPasscode() const {
         if (!DecryptLocal(realKeyInnerData, keyEncrypted, _passcodeKey)) {
             return StartModernResult::IncorrectPasscode;
         }
-        return startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, true);
+        const auto result = startUsingKeyStream(realKeyInnerData, keyEncrypted, infoEncrypted, salt, true);
+        return result == StartModernResult::Success ? result : StartModernResult::IncorrectPasscode;
     } else {
         if (PTG::SuppressHWLockLogErrors() != PTG::SuppressHWLockLogErrorsLevel::SUPPRESS_ERRORS_ONLY) {
             LOG(("App Info: could not decrypt pass-protected key from info file, "
@@ -1236,7 +1499,12 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
 
     if (!DecryptLocal(info, infoEncrypted, _localKey)) {
         LOG(("App Error: could not decrypt info."));
-        return StartModernResult::Failed;
+        return StartModernResult::IncorrectPasscode;
+    }
+    if (!_keyData->legacy && (_keyData->ptg || HasFakePasscodeCount(info.data))
+        && !ValidateFakePasscodeCount(info.data, int(_fakePasscodes.size()))) {
+        LOG(("App Error: PTG fake-passcode metadata does not match encrypted info."));
+        return StartModernResult::IncorrectPasscode;
     }
     LOG(("App Info: reading encrypted info..."));
     auto count = qint32();
@@ -1350,6 +1618,20 @@ Domain::StartModernResult Domain::startUsingKeyStream(EncryptedDescriptor& keyIn
         }
     }
 
+    if (_isStartedWithFake) {
+        auto matched = false;
+        for (auto i = size_t(); i != _fakePasscodes.size(); ++i) {
+            if (_fakeUnlockKey && _fakeUnlockKey->equals(_fakePasscodes[i].GetFakePasscodeKey())) {
+                _fakePasscodeIndex = int(i);
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            return StartModernResult::IncorrectPasscode;
+        }
+    }
+
     // Actually load accounts
     auto tried = base::flat_set<int>();
     auto sessions = base::flat_set<qint32>();
@@ -1423,15 +1705,23 @@ const std::deque<FakePasscode::FakePasscode> &Domain::GetFakePasscodes() const {
 }
 
 void Domain::EncryptFakePasscodes() {
-    _fakePasscodeKeysEncrypted.resize(_fakePasscodes.size());
-    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
-        EncryptedDescriptor passKeyData(MTP::AuthKey::kSize);
-        _passcodeKey->write(passKeyData.stream);
+	_fakePasscodeKeysEncrypted = fakeKeyWraps(_keyData->legacy, _keyData->fake.hardwareBound);
+}
 
-        _fakePasscodeKeysEncrypted[i] = PrepareEncrypted(passKeyData, 
-            _fakePasscodes[i].GetFakePasscodeKey());
-        FAKE_LOG(qsl("Fake passcode %1 encrypted").arg(i));
-    }
+std::vector<QByteArray> Domain::fakeKeyWraps(bool legacy, bool hardwareBound) const {
+	auto result = std::vector<QByteArray>();
+	if (_isInfinityFakeModeActivated) {
+		return result;
+	}
+	const auto &key = legacy ? _passcodeKey : _localKey;
+	Expects(key != nullptr);
+	for (const auto &fake : _fakePasscodes) {
+		EncryptedDescriptor inner(MTP::AuthKey::kSize);
+		key->write(inner.stream);
+		result.push_back(PrepareEncrypted(inner, CreateLocalKey(fake.GetPasscode(),
+			_passcodeKeySalt, hardwareBound)));
+	}
+	return result;
 }
 
 size_t Domain::AddFakePasscode(QByteArray passcode, QString name) {
@@ -1448,6 +1738,7 @@ size_t Domain::AddFakePasscode(QByteArray passcode, QString name) {
 }
 
 void Domain::SetFakePasscode(QByteArray passcode, QString name, size_t fakeIndex) {
+	_verificationNonce = 0;
     FAKE_LOG(("Setup passcode with name"));
     _fakePasscodes[fakeIndex].SetPasscode(std::move(passcode));
     _fakePasscodes[fakeIndex].SetName(std::move(name));
@@ -1466,6 +1757,7 @@ void Domain::SetFakePasscodeName(QString newName, size_t fakeIndex) {
 }
 
 void Domain::RemoveFakePasscode(size_t index) {
+	_verificationNonce = 0;
     FAKE_LOG(qsl("Remove passcode %1").arg(index));
     _fakePasscodes.erase(_fakePasscodes.begin() + index);
     _fakePasscodeKeysEncrypted.erase(_fakePasscodeKeysEncrypted.begin() + index);
@@ -1488,8 +1780,7 @@ bool Domain::CheckFakePasscodeExists(const QByteArray& passcode) const {
         }
     }
 
-    const auto derriveKey = CreateLocalKey(passcode, _passcodeKeySalt);
-    return derriveKey->equals(_passcodeKey);
+	return checkPasscode(passcode);
 }
 
 FakePasscode::Action* Domain::AddAction(size_t index, FakePasscode::ActionType type) {
@@ -1513,6 +1804,8 @@ bool Domain::ContainsAction(size_t index, FakePasscode::ActionType type) const {
 
 void Domain::ExecuteIfFake() {
     if (IsFakeWithoutInfinityFlag()) {
+        _owner->walletKeyring().clear();
+        _owner->walletKeyring().setUnusable(true);
         FAKE_LOG(qsl("Execute fake passcode %1").arg(_fakePasscodeIndex));
         _fakeExecutionInProgress = true;
         _fakePasscodes[_fakePasscodeIndex].Execute();
@@ -1522,21 +1815,43 @@ void Domain::ExecuteIfFake() {
     }
 }
 
-bool Domain::CheckAndExecuteIfFake(const QByteArray& passcode) {
-    for (size_t i = 0; i < _fakePasscodes.size(); ++i) {
-        if (_fakePasscodes[i].CheckPasscode(passcode)) {
-            if (i == _fakePasscodeIndex && !_isStartedWithFake) {
-                return true;
-            } else if (_fakePasscodeIndex != -1 && i != _fakePasscodeIndex) {
-                continue;
-            }
-            _fakePasscodeIndex = i;
-            ExecuteIfFake();
-            _isStartedWithFake = false;
-            return true;
-        }
-    }
-    return false;
+bool Domain::CheckAndExecuteIfFake(const QByteArray &passcode) {
+	return executeFakeKey(CreateLocalKey(passcode, _passcodeKeySalt));
+}
+
+bool Domain::checkAndExecutePasscode(PasscodeDerivation derived) {
+	const auto fakeKey = derived._fakeKey;
+	const auto correct = checkPasscode(std::move(derived));
+	if (fakeKey && executeFakeKey(fakeKey)) {
+		return true;
+	} else if (correct) {
+		SetFakePasscodeIndex(-1);
+	}
+	return correct;
+}
+
+bool Domain::executeFakeKey(const MTP::AuthKeyPtr &key) {
+	for (auto i = size_t(); i != _fakePasscodes.size(); ++i) {
+		if (!key->equals(_fakePasscodes[i].GetFakePasscodeKey())) {
+			continue;
+		} else if (i == _fakePasscodeIndex && !_isStartedWithFake) {
+			return true;
+		} else if (_fakePasscodeIndex != -1 && i != _fakePasscodeIndex) {
+			continue;
+		}
+		_fakePasscodeIndex = i;
+		ExecuteIfFake();
+		_isStartedWithFake = false;
+		return true;
+	}
+	return false;
+}
+
+void Domain::finishPasscodeUnlock() {
+	if (IsFakeWithoutInfinityFlag() && _isStartedWithFake) {
+		ExecuteIfFake();
+		_isStartedWithFake = false;
+	}
 }
 
 bool Domain::IsFake() const {
@@ -1552,7 +1867,12 @@ bool Domain::IsFakeInfinityFlag() const {
 }
 
 void Domain::SetFakePasscodeIndex(qint32 index) {
+    _verificationNonce = 0;
     _fakePasscodeIndex = index;
+    if (_owner->started()) {
+        _owner->walletKeyring().clear();
+        _owner->walletKeyring().setUnusable(IsFake());
+    }
 }
 
 bool Domain::checkRealOrFakePasscode(const QByteArray &passcode) const {
@@ -1663,6 +1983,12 @@ FakePasscode::AutoDeleteService *Domain::GetAutoDelete() const {
 void Domain::cacheFolderPermissionRequested(bool val) {
     _cacheFolderPermissionRequested = val;
     writeAccounts();
+}
+
+bool Domain::checkPasscode(const QByteArray &passcode) const {
+	auto derived = prepareOpen(passcode);
+	derived.run();
+	return checkPasscode(std::move(derived));
 }
 
 } // namespace Storage

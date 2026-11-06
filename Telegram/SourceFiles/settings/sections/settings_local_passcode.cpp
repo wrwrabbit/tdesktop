@@ -48,6 +48,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtWidgets/QApplication>
 
+#include <algorithm>
+
 namespace Settings {
 namespace {
 
@@ -764,6 +766,15 @@ void LocalPasscodeEnter::setupContent() {
 				reenterPasscode->selectAll();
 				error->show();
 				error->setText(tr::lng_passcode_differ(tr::now));
+			} else if (!controller()->session().domain().local().IsFake()
+					&& std::any_of(
+						controller()->session().domain().local().GetFakePasscodes().begin(),
+						controller()->session().domain().local().GetFakePasscodes().end(),
+						[&](const auto &fake) { return fake.CheckPasscode(newText.toUtf8()); })) {
+				newPasscode->setFocus();
+				newPasscode->selectAll();
+				error->show();
+				error->setText(tr::lng_passcode_exists(tr::now));
 			} else {
 				setDeriving(true);
 				if (isCreate) {

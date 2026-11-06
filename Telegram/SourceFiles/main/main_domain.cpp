@@ -156,7 +156,11 @@ bool Domain::tryPasscode(
 				: cold
 				? (startWith(std::move(derived))
 					== Storage::StartResult::Success)
-				: _local->checkPasscode(std::move(derived));
+				: _local->checkAndExecutePasscode(std::move(derived));
+			if (correct) {
+				_local->finishPasscodeUnlock();
+				onAppUnlocked();
+			}
 			done(correct);
 		}));
 	return true;
