@@ -2051,14 +2051,14 @@ release:
 tlottieRevision = '92df98dc20'
 walletEngineRevision = 'e59e0d89d7ee90c388bf36e3334c5b276f396697'
 stage('tlottie', """
-version: 2
+version: 3
     git clone https://github.com/dkaraush/tlottie.git
     cd tlottie
     git checkout """ + tlottieRevision + """
 """)
 
 stage('wallet-engine', """
-version: 2
+version: 3
 depends:patches/wallet-engine.patch
 win:
     SET "GIT_LFS_SKIP_SMUDGE=1"
@@ -2087,7 +2087,7 @@ win_mac:
 # flushes a cache whose generated source the CI prune had already deleted.
 # The wallet-engine patch rewrites those sources, so it is a dependency here.
 stage('tdesktop_rust', """
-version: 2.""" + tlottieRevision + '.' + walletEngineRevision + """
+version: 3.""" + tlottieRevision + '.' + walletEngineRevision + """
 depends:patches/wallet-engine.patch
 win:
     SET "RUSTUP_HOME=%THIRDPARTY_DIR%\\rust\\rustup"
