@@ -153,12 +153,6 @@ QRect ListSection::findItemRect(
 	return QRect(left, top, _itemWidth, item->height());
 }
 
-ListFoundItem ListSection::completeResult(
-		not_null<BaseLayout*> item,
-		bool exact) const {
-	return { item, findItemRect(item), exact };
-}
-
 ListFoundItem ListSection::findItemByPoint(QPoint point) const {
 	Expects(!_items.empty());
 
@@ -176,9 +170,8 @@ ListFoundItem ListSection::findItemByPoint(QPoint point) const {
 	auto item = *itemIt;
 	auto rect = findItemRect(item);
 	if (point.y() >= rect.top()) {
-		auto shift = floorclamp(
-			point.x(),
-			(_itemWidth + st::infoMediaSkip),
+		auto shift = std::clamp(
+			point.x() / (_itemWidth + st::infoMediaSkip),
 			0,
 			_itemsInRow);
 		while (shift-- && itemIt != _items.end()) {

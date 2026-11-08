@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "statistics/view/stack_linear_chart_common.h"
 #include "storage/storage_account.h"
 #include "storage/cache/storage_cache_database.h"
+#include "tgw/tgw_storage.h"
 #include "ui/text/format_values.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
@@ -886,8 +887,8 @@ void LocalStorage::Chart::paintEvent(QPaintEvent *e) {
 			center.x() - segmentMid,
 			center.y() - segmentMid,
 			Size(segmentMid * 2.));
-		const auto startAngle = qRound(-from * 16.);
-		const auto spanAngle = -qRound((to - from) * 16.);
+		const auto startAngle = int(base::SafeRound(-from * 16.));
+		const auto spanAngle = -int(base::SafeRound((to - from) * 16.));
 		p.drawArc(rect, startAngle, spanAngle);
 
 		const auto innerRadius = segmentOuter - segmentThickness;
@@ -1765,6 +1766,7 @@ void LocalStorage::startClearing() {
 		_db->clear();
 		_dbBig->clear();
 		Ui::Emoji::ClearIrrelevantCache();
+		Tgw::EraseStorage(&_session->account());
 		return;
 	}
 	for (auto i = 0; i != kChartPartsCount; ++i) {

@@ -12,8 +12,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "lang/lang_keys.h"
 #include "base/qthelp_url.h"
+#include "storage/localimageloader.h"
 #include "storage/storage_account.h"
+#include "storage/storage_media_prepare.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/chat/attach/attach_prepare.h"
 #include "apiwrap.h"
 #include "ui/widgets/chat_filters_tabs_strip.h"
 #include "ui/widgets/checkbox.h"
@@ -59,6 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "styles/style_boxes.h"
 #include "styles/style_calls.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
@@ -372,6 +376,7 @@ void ShareBox::prepare() {
 			_descriptor.session,
 			[this](FilterId id) {
 				_inner->applyChatFilter(id);
+				searchByUsername(true);
 				scrollToY(0);
 			},
 			Window::GifPauseReason::Layer,
@@ -896,6 +901,20 @@ ShareBox::Inner::Inner(
 			update.oldFirstLetters);
 	}, lifetime());
 
+	_descriptor.session->data().dialogsRowReplacements(
+	) | rpl::on_next([=](Data::Session::DialogsRowReplacement r) {
+		for (auto i = begin(_filtered); i != end(_filtered);) {
+			if (*i != r.old) {
+				++i;
+			} else if (r.now) {
+				*i = r.now;
+				++i;
+			} else {
+				i = _filtered.erase(i);
+			}
+		}
+	}, lifetime());
+
 	_descriptor.session->downloaderTaskFinished(
 	) | rpl::on_next([=] {
 		update();
@@ -1029,7 +1048,12 @@ void ShareBox::Inner::repaintChatAtIndex(int index) {
 
 	auto row = index / _columnCount;
 	auto column = index % _columnCount;
-	update(style::rtlrect(_rowsLeft + qFloor(column * _rowWidthReal), row * _rowHeight, _rowWidth, _rowHeight, width()));
+	update(style::rtlrect(
+		_rowsLeft + int(std::floor(column * _rowWidthReal)),
+		row * _rowHeight,
+		_rowWidth,
+		_rowHeight,
+		width()));
 }
 
 ShareBox::Inner::Chat *ShareBox::Inner::getChatAtIndex(int index) {
@@ -1202,7 +1226,8 @@ void ShareBox::Inner::paintChat(
 		Painter &p,
 		not_null<Chat*> chat,
 		int index) {
-	auto x = _rowsLeft + qFloor((index % _columnCount) * _rowWidthReal);
+	auto x = _rowsLeft
+		+ int(std::floor((index % _columnCount) * _rowWidthReal));
 	auto y = _rowsTop + (index / _columnCount) * _rowHeight;
 
 	auto outerWidth = width();
@@ -1339,14 +1364,16 @@ void ShareBox::Inner::mouseMoveEvent(QMouseEvent *e) {
 void ShareBox::Inner::updateUpon(const QPoint &pos) {
 	auto x = pos.x(), y = pos.y();
 	auto row = (y - _rowsTop) / _rowHeight;
-	auto column = qFloor((x - _rowsLeft) / _rowWidthReal);
+	auto column = int(std::floor((x - _rowsLeft) / _rowWidthReal));
 
 	if (column < 0 || column >= _columnCount) {
 		_upon = -1;
 		return;
 	}
 
-	auto left = _rowsLeft + qFloor(column * _rowWidthReal) + st::shareColumnSkip / 2;
+	auto left = _rowsLeft
+		+ int(std::floor(column * _rowWidthReal))
+		+ st::shareColumnSkip / 2;
 	auto top = _rowsTop + row * _rowHeight + st::sharePhotoTop;
 	auto xupon = (x >= left) && (x < left + (_rowWidth - st::shareColumnSkip));
 	auto yupon = (y >= top) && (y < top + _st.item.checkbox.imageRadius * 2 + st::shareNameTop + _st.item.nameStyle.font->height * 2);
@@ -1371,8 +1398,8 @@ void ShareBox::Inner::selectActive() {
 void ShareBox::Inner::resizeEvent(QResizeEvent *e) {
 	_columnSkip = (width() - _columnCount * _st.item.checkbox.imageRadius * 2) / float64(_columnCount + 1);
 	_rowWidthReal = _st.item.checkbox.imageRadius * 2 + _columnSkip;
-	_rowsLeft = qFloor(_columnSkip / 2);
-	_rowWidth = qFloor(_rowWidthReal);
+	_rowsLeft = int(std::floor(_columnSkip / 2));
+	_rowWidth = int(std::floor(_rowWidthReal));
 	update();
 }
 
@@ -1668,6 +1695,17 @@ void ShareBox::Inner::applyChatFilter(FilterId id) {
 		};
 		const auto &data = _descriptor.session->data();
 		addList(data.chatsFilters().chatsList(id)->indexed());
+	}
+	if (!_filter.isEmpty()) {
+		// Rows in _filtered may belong to the just destroyed list.
+		_filtered = _chatsIndexed->filtered(
+			_filter.split(' ', Qt::SkipEmptyParts));
+
+		// Global results are deduplicated against the list, refill them.
+		_byUsernameFiltered.clear();
+		d_byUsernameFiltered.clear();
+		setActive(-1);
+		refresh();
 	}
 	update();
 }
@@ -2298,6 +2336,87 @@ void FastShareLink(
 		}),
 		Ui::LayerOption::KeepOther,
 		anim::type::normal);
+}
+
+base::weak_qptr<Ui::BoxContent> FastShareImage(
+		std::shared_ptr<Main::SessionShow> show,
+		QImage image,
+		const QString &caption) {
+	const auto box = std::make_shared<base::weak_qptr<Ui::BoxContent>>();
+	const auto sending = std::make_shared<bool>();
+	const auto countMessages = [](const TextWithTags &comment) {
+		return comment.empty() ? 1 : 2;
+	};
+	auto submitCallback = [=](
+			std::vector<not_null<::Data::Thread*>> &&result,
+			Fn<bool()> checkPaid,
+			TextWithTags &&comment,
+			Api::SendOptions options,
+			::Data::ForwardOptions) {
+		if (*sending || result.empty()) {
+			return;
+		}
+
+		const auto error = GetErrorForSending(
+			result,
+			{ .text = &comment, .messagesCount = countMessages(comment) });
+		if (error.error) {
+			if (const auto weak = *box) {
+				weak->getDelegate()->show(
+					MakeSendErrorBox(error, result.size() > 1));
+			}
+			return;
+		} else if (!checkPaid()) {
+			return;
+		}
+
+		*sending = true;
+		auto &api = show->session().api();
+		for (const auto &thread : result) {
+			auto action = Api::SendAction(thread, options);
+			action.clearDraft = false;
+			if (!comment.empty()) {
+				auto message = Api::MessageToSend(action);
+				message.textWithTags = comment;
+				api.sendMessage(std::move(message));
+			}
+			auto list = Storage::PrepareMediaFromImage(
+				QImage(image),
+				QByteArray(),
+				st::sendMediaPreviewSize);
+			auto &file = list.files.front();
+			file.caption = TextWithTags{ caption };
+			file.sendLargePhotos = true;
+			api.sendFiles(
+				std::move(list),
+				SendMediaType::Photo,
+				nullptr,
+				std::move(action));
+		}
+		if (*box) {
+			(*box)->closeBox();
+		}
+		show->showToast(tr::lng_share_done(tr::now));
+	};
+	auto filterCallback = [](not_null<::Data::Thread*> thread) {
+		if (const auto user = thread->peer()->asUser()) {
+			if (user->canSendIgnoreMoneyRestrictions()) {
+				return true;
+			}
+		}
+		return ::Data::CanSend(thread, ChatRestriction::SendPhotos);
+	};
+	*box = show->show(
+		Box<ShareBox>(ShareBox::Descriptor{
+			.session = &show->session(),
+			.countMessagesCallback = countMessages,
+			.submitCallback = std::move(submitCallback),
+			.filterCallback = std::move(filterCallback),
+			.moneyRestrictionError = ShareMessageMoneyRestrictionError(),
+		}),
+		Ui::LayerOption::KeepOther,
+		anim::type::normal);
+	return *box;
 }
 
 auto ShareMessageMoneyRestrictionError()

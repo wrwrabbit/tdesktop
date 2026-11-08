@@ -751,6 +751,43 @@ void ActivateInlineButton(QStringView data, ClickContext context) {
 	Api::ActivateRichPageBotButton(my, record);
 }
 
+class InlineButtonClickHandler final : public ClickHandler {
+public:
+	explicit InlineButtonClickHandler(QString data);
+
+	void onClick(ClickContext context) const override;
+
+	QString tooltip() const override;
+
+private:
+	const QString _data;
+
+};
+
+InlineButtonClickHandler::InlineButtonClickHandler(QString data)
+: _data(std::move(data)) {
+}
+
+void InlineButtonClickHandler::onClick(ClickContext context) const {
+	ActivateInlineButton(_data, std::move(context));
+}
+
+QString InlineButtonClickHandler::tooltip() const {
+	return InlineButtonTooltip(_data);
+}
+
+[[nodiscard]] Ui::Text::CustomEmojiLinkTexts InlineButtonLinkTexts(
+		QStringView data) {
+	const auto url = InlineButtonUrl(data);
+	return {
+		.tooltip = InlineButtonTooltip(data),
+		.copyText = url,
+		.copyContextItemText = (url.isEmpty()
+			? QString()
+			: tr::lng_context_copy_link(tr::now)),
+	};
+}
+
 [[nodiscard]] QString InlineButtonPlainEmojiPrefix() {
 	return u"iv-markdown:inline-button-emoji:"_q;
 }
@@ -1319,10 +1356,8 @@ ClickHandlerPtr CreatePreparedLinkHandler(PreparedLink link) {
 	// ActivateClickHandler arm the inline pill already uses. That is why this
 	// one kind gets no arm in the three prepared-link routers.
 	if (link.kind == PreparedLinkKind::RichPageButton) {
-		return std::make_shared<LambdaClickHandler>(
-			[data = std::move(link.target)](ClickContext context) {
-				ActivateInlineButton(data, std::move(context));
-			});
+		return std::make_shared<InlineButtonClickHandler>(
+			std::move(link.target));
 	}
 	return std::make_shared<PreparedLinkClickHandler>(std::move(link));
 }
@@ -2316,6 +2351,18 @@ bool TextHasInlineButton(const TextWithEntities &text) {
 	});
 }
 
+QString InlineButtonTooltip(QStringView data) {
+	const auto button = ActionableInlineButtonDataFor(data);
+	return button
+		? RichButtonTooltip(button->type, button->data, QString())
+		: QString();
+}
+
+QString InlineButtonUrl(QStringView data) {
+	const auto button = ActionableInlineButtonDataFor(data);
+	return button ? RichButtonUrl(button->type, button->data) : QString();
+}
+
 void SetTextLeaf(
 		Ui::Text::String *leaf,
 		const style::TextStyle &textStyle,
@@ -2331,7 +2378,8 @@ void SetTextLeaf(
 		Fn<void()> repaint,
 		Fn<void(QRect)> repaintRect,
 		Fn<bool(const ClickContext&)> spoilerLinkFilter,
-		bool richButtonLabel) {
+		bool richButtonLabel,
+		bool keepLeadingSpaces) {
 	*leaf = Ui::Text::String(TextMinResizeWidth(minResizeWidth));
 	auto context = mediaRuntime
 		? mediaRuntime->textContext()
@@ -2414,10 +2462,14 @@ void SetTextLeaf(
 	const auto resolved = richButtonLabel
 		? ResolveRichButtonLabelDates(text, context.formattedDateFactory)
 		: TextWithEntities();
+	auto options = rtl ? kIvMarkedTextOptionsRtl : kIvMarkedTextOptions;
+	if (keepLeadingSpaces) {
+		options.flags |= TextParseKeepLeadingSpaces;
+	}
 	leaf->setMarkedText(
 		textStyle,
 		richButtonLabel ? resolved : text,
-		rtl ? kIvMarkedTextOptionsRtl : kIvMarkedTextOptions,
+		options,
 		context);
 	SetTextLeafSpoilerLinkFilter(leaf, std::move(spoilerLinkFilter));
 	if (inlineButtonPaintState
@@ -2428,7 +2480,8 @@ void SetTextLeaf(
 		})) {
 		leaf->setCustomEmojiClickHandler(
 			InlineButtonActionable,
-			ActivateInlineButton);
+			ActivateInlineButton,
+			InlineButtonLinkTexts);
 	}
 }
 

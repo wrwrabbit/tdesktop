@@ -15,7 +15,7 @@ namespace Core::Updates {
 // its detached root signature, embedded at build time from the files in
 // Telegram/Resources/update/ through a generated header.
 
-[[nodiscard]] QByteArray RootPublicKeyPem();
+[[nodiscard]] QByteArray RootPublicKeyPem(bool upstream = false);
 [[nodiscard]] QByteArray EmbeddedManifest();
 [[nodiscard]] QByteArray EmbeddedManifestSignature();
 

@@ -97,10 +97,6 @@ public:
 
 	virtual ~AbstractWriter() = default;
 
-	Stats produceTestExample(
-		const QString &path,
-		const Environment &environment);
-
 };
 
 std::unique_ptr<AbstractWriter> CreateWriter(Format format);

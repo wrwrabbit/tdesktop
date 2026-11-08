@@ -45,6 +45,7 @@ namespace {
 using TextState = HistoryView::TextState;
 
 constexpr auto kMaxInlineArea = 1280 * 720;
+constexpr auto kMaxInlineFrameSide = 4096;
 
 using ::Media::ValidFrameSize;
 
@@ -61,6 +62,11 @@ using ::Media::ValidFrameSize;
 		}
 	}
 	return { w, h };
+}
+
+[[nodiscard]] QSize BoundFrameSize(int w, int h) {
+	const auto side = kMaxInlineFrameSide / style::DevicePixelRatio();
+	return HistoryView::DownscaledSize({ w, h }, { side, side });
 }
 
 [[nodiscard]] bool CanPlayInline(not_null<DocumentData*> document) {
@@ -135,8 +141,9 @@ void Gif::initDimensions() {
 	if (w <= 0 || h <= 0) {
 		_maxw = 0;
 	} else {
-		w = w * st::inlineMediaHeight / h;
-		_maxw = qMax(w, int32(st::inlineResultsMinWidth));
+		const auto bounded = BoundFrameSize(w, h);
+		w = bounded.width() * st::inlineMediaHeight / bounded.height();
+		_maxw = std::max(w, int32(st::inlineResultsMinWidth));
 	}
 	_minh = st::inlineMediaHeight + st::inlineResultsSkip;
 }
@@ -183,6 +190,7 @@ void Gif::paint(Painter &p, const QRect &clip, const PaintContext *context) cons
 	if (loaded
 		&& !_gif
 		&& !_gif.isBad()
+		&& !_inlineOverCap
 		&& CanPlayInline(document)) {
 		auto that = const_cast<Gif*>(this);
 		that->_gif = preview.makeAnimation([=](
@@ -326,6 +334,9 @@ QSize Gif::countFrameSize() const {
 	if (framew <= 0 || frameh <= 0) {
 		return { _width, height };
 	}
+	const auto bounded = BoundFrameSize(framew, frameh);
+	framew = bounded.width();
+	frameh = bounded.height();
 	if (framew * height > frameh * _width) {
 		if (framew < st::maxStickerSize || frameh > height) {
 			if (frameh > height || (framew * height / frameh) <= st::maxStickerSize) {
@@ -347,7 +358,7 @@ QSize Gif::countFrameSize() const {
 			}
 		}
 	}
-	return QSize(framew, frameh);
+	return BoundFrameSize(framew, frameh);
 }
 
 void Gif::validateThumbnail(
@@ -444,9 +455,7 @@ void Gif::clipCallback(Media::Clip::Notification notification) {
 			} else if (_gif->ready() && !_gif->started()) {
 				const auto size = QSize(_gif->width(), _gif->height());
 				if (!ValidFrameSize(size, kMaxInlineArea)) {
-					if (!size.isEmpty()) {
-						getShownDocument()->dimensions = size;
-					}
+					_inlineOverCap = true;
 					_gif.reset();
 				} else {
 					_gif->start({
@@ -603,8 +612,8 @@ QSize Sticker::boundingBox() const {
 }
 
 QSize Sticker::getThumbSize() const {
-	const auto width = qMax(content_width(), 1);
-	const auto height = qMax(content_height(), 1);
+	const auto width = std::max(content_width(), 1);
+	const auto height = std::max(content_height(), 1);
 	return HistoryView::DownscaledSize({ width, height }, boundingBox());
 }
 
@@ -644,7 +653,7 @@ void Sticker::prepareThumbnail() const {
 	if (sticker && _dataMedia->loaded()) {
 		if (!_lottie && sticker->isLottie()) {
 			setupLottie();
-		} else if (!_webm && sticker->isWebm()) {
+		} else if (!_webm && !_webm.isBad() && sticker->isWebm()) {
 			setupWebm();
 		}
 	}
@@ -693,8 +702,9 @@ void Photo::initDimensions() {
 	if (w <= 0 || h <= 0) {
 		w = h = 1;
 	}
-	w = w * st::inlineMediaHeight / h;
-	_maxw = qMax(w, int32(st::inlineResultsMinWidth));
+	const auto bounded = BoundFrameSize(w, h);
+	w = bounded.width() * st::inlineMediaHeight / bounded.height();
+	_maxw = std::max(w, int32(st::inlineResultsMinWidth));
 	_minh = st::inlineMediaHeight + st::inlineResultsSkip;
 }
 
@@ -751,6 +761,9 @@ QSize Photo::countFrameSize() const {
 	if (framew <= 0 || frameh <= 0) {
 		return { _width, height };
 	}
+	const auto bounded = BoundFrameSize(framew, frameh);
+	framew = bounded.width();
+	frameh = bounded.height();
 	if (framew * height > frameh * _width) {
 		if (framew < st::maxStickerSize || frameh > height) {
 			if (frameh > height || (framew * height / frameh) <= st::maxStickerSize) {
@@ -772,7 +785,7 @@ QSize Photo::countFrameSize() const {
 			}
 		}
 	}
-	return QSize(framew, frameh);
+	return BoundFrameSize(framew, frameh);
 }
 
 void Photo::validateThumbnail(
@@ -843,7 +856,9 @@ void Video::initDimensions() {
 		title = tr::lng_media_video(tr::now);
 	}
 	_title.setText(st::semiboldTextStyle, title, titleOpts);
-	int32 titleHeight = qMin(_title.countHeight(textWidth), 2 * st::semiboldFont->height);
+	int32 titleHeight = std::min(
+		_title.countHeight(textWidth),
+		2 * st::semiboldFont->height);
 
 	int32 descriptionLines = withThumb ? (titleHeight > st::semiboldFont->height ? 1 : 2) : 3;
 
@@ -885,7 +900,9 @@ void Video::paint(Painter &p, const QRect &clip, const PaintContext *context) co
 
 	p.setPen(st::inlineTitleFg);
 	_title.drawLeftElided(p, left, st::inlineRowMargin, _width - left, _width, 2);
-	int32 titleHeight = qMin(_title.countHeight(_width - left), st::semiboldFont->height * 2);
+	int32 titleHeight = std::min(
+		_title.countHeight(_width - left),
+		st::semiboldFont->height * 2);
 
 	p.setPen(st::inlineDescriptionFg);
 	int32 descriptionLines = withThumb ? (titleHeight > st::semiboldFont->height ? 1 : 2) : 3;
@@ -942,8 +959,8 @@ void Video::prepareThumbnail(QSize size) const {
 	if (_thumb.size() != size * style::DevicePixelRatio()) {
 		const auto width = size.width();
 		const auto height = size.height();
-		auto w = qMax(style::ConvertScale(thumb->width()), 1);
-		auto h = qMax(style::ConvertScale(thumb->height()), 1);
+		auto w = std::max(style::ConvertScale(thumb->width()), 1);
+		auto h = std::max(style::ConvertScale(thumb->height()), 1);
 		if (w * height > h * width) {
 			if (height < h) {
 				w = w * height / h;
@@ -1286,8 +1303,8 @@ void Contact::prepareThumbnail(int width, int height) const {
 		return;
 	}
 	const auto scaled = ScaleDown(
-		qMax(style::ConvertScale(thumb->width()), 1),
-		qMax(style::ConvertScale(thumb->height()), 1),
+		std::max(style::ConvertScale(thumb->width()), 1),
+		std::max(style::ConvertScale(thumb->height()), 1),
 		width,
 		height);
 	_thumb = Image(base::duplicate(*thumb)).pixNoCache(
@@ -1316,8 +1333,9 @@ void Thumbnail::initDimensions() {
 	if (w <= 0 || h <= 0) {
 		w = h = 1;
 	}
-	w = w * st::inlineMediaHeight / h;
-	_maxw = qMax(w, int32(st::inlineResultsMinWidth));
+	const auto bounded = BoundFrameSize(w, h);
+	w = bounded.width() * st::inlineMediaHeight / bounded.height();
+	_maxw = std::max(w, int32(st::inlineResultsMinWidth));
 	_minh = st::inlineMediaHeight + st::inlineResultsSkip;
 }
 
@@ -1333,6 +1351,9 @@ QSize Thumbnail::countFrameSize() const {
 	if (w <= 0 || h <= 0) {
 		return { _width, st::inlineMediaHeight };
 	}
+	const auto bounded = BoundFrameSize(w, h);
+	w = bounded.width();
+	h = bounded.height();
 	// Aspect-fill: scale so the smaller dimension covers the cell.
 	const auto targetHeight = st::inlineMediaHeight;
 	if (w * targetHeight > h * _width) {
@@ -1342,7 +1363,7 @@ QSize Thumbnail::countFrameSize() const {
 		h = h * _width / w;
 		w = _width;
 	}
-	return { qMax(w, 1), qMax(h, 1) };
+	return BoundFrameSize(w, h);
 }
 
 void Thumbnail::validateThumbnail(
@@ -1406,8 +1427,8 @@ void Thumbnail::prepareThumbnail(QSize size, QSize frame) const {
 	} else if (const auto thumb = getResultThumb(fileOrigin())) {
 		if (_thumb.isNull()) {
 			const auto scaled = ScaleDown(
-				qMax(style::ConvertScale(thumb->width()), 1),
-				qMax(style::ConvertScale(thumb->height()), 1),
+				std::max(style::ConvertScale(thumb->width()), 1),
+				std::max(style::ConvertScale(thumb->height()), 1),
 				frame.width(),
 				frame.height());
 			_thumb = Image(base::duplicate(*thumb)).pixNoCache(
@@ -1476,14 +1497,18 @@ int Article::textLeft() const {
 }
 
 int Article::countHeight(int textWidth) const {
-	int32 titleHeight = qMin(_title.countHeight(textWidth), 2 * st::semiboldFont->height);
+	int32 titleHeight = std::min(
+		_title.countHeight(textWidth),
+		2 * st::semiboldFont->height);
 
 	int32 descriptionLines = (_withThumb || _url) ? 2 : 3;
-	int32 descriptionHeight = qMin(_description.countHeight(textWidth), descriptionLines * st::normalFont->height);
+	int32 descriptionHeight = std::min(
+		_description.countHeight(textWidth),
+		descriptionLines * st::normalFont->height);
 
 	int32 result = titleHeight + descriptionHeight;
 	if (_url) result += st::normalFont->height;
-	if (_withThumb) result = qMax(result, int32(st::inlineThumbSize));
+	if (_withThumb) result = std::max(result, int32(st::inlineThumbSize));
 	return result + st::inlineRowMargin * 2 + st::inlineRowBorder;
 }
 
@@ -1500,7 +1525,7 @@ void Article::initDimensions() {
 }
 
 int Article::resizeGetHeight(int width) {
-	_width = qMin(width, _maxw);
+	_width = std::min(width, _maxw);
 	const auto textWidth = _width - textLeft();
 	if (_url) {
 		_urlText = getResultUrl();
@@ -1545,14 +1570,18 @@ void Article::paint(Painter &p, const QRect &clip, const PaintContext *context) 
 
 	p.setPen(st::inlineTitleFg);
 	_title.drawLeftElided(p, left, st::inlineRowMargin, _width - left, _width, 2);
-	int32 titleHeight = qMin(_title.countHeight(_width - left), st::semiboldFont->height * 2);
+	int32 titleHeight = std::min(
+		_title.countHeight(_width - left),
+		st::semiboldFont->height * 2);
 
 	p.setPen(st::inlineDescriptionFg);
 	int32 descriptionLines = (_withThumb || _url) ? 2 : 3;
 	_description.drawLeftElided(p, left, st::inlineRowMargin + titleHeight, _width - left, _width, descriptionLines);
 
 	if (_url) {
-		int32 descriptionHeight = qMin(_description.countHeight(_width - left), st::normalFont->height * descriptionLines);
+		int32 descriptionHeight = std::min(
+			_description.countHeight(_width - left),
+			st::normalFont->height * descriptionLines);
 		p.drawTextLeft(left, st::inlineRowMargin + titleHeight + descriptionHeight, _width, _urlText, _urlWidth);
 	}
 
@@ -1571,11 +1600,11 @@ TextState Article::getState(
 	if (QRect(left, 0, _width - left, _height).contains(point)) {
 		if (_url) {
 			const auto textWidth = _width - textLeft();
-			const auto titleHeight = qMin(
+			const auto titleHeight = std::min(
 				_title.countHeight(textWidth),
 				st::semiboldFont->height * 2);
 			const auto descriptionLines = 2;
-			const auto descriptionHeight = qMin(
+			const auto descriptionHeight = std::min(
 				_description.countHeight(textWidth),
 				st::normalFont->height * descriptionLines);
 			const auto urlRect = style::rtlrect(
@@ -1614,8 +1643,8 @@ void Article::prepareThumbnail(int width, int height) const {
 		return;
 	}
 	const auto scaled = ScaleDown(
-		qMax(style::ConvertScale(thumb->width()), 1),
-		qMax(style::ConvertScale(thumb->height()), 1),
+		std::max(style::ConvertScale(thumb->width()), 1),
+		std::max(style::ConvertScale(thumb->height()), 1),
 		width,
 		height);
 	_thumb = Image(base::duplicate(*thumb)).pixNoCache(
@@ -1636,8 +1665,8 @@ void Article::prepareMediaThumbnail(int width, int height) const {
 			return;
 		}
 		const auto scaled = ScaleDown(
-			qMax(style::ConvertScale(image->width()), 1),
-			qMax(style::ConvertScale(image->height()), 1),
+			std::max(style::ConvertScale(image->width()), 1),
+			std::max(style::ConvertScale(image->height()), 1),
 			width,
 			height);
 		_thumb = image->pixNoCache(
@@ -1694,6 +1723,9 @@ void Game::countFrameSize() {
 			if (documentSize.isEmpty()) {
 				documentSize = QSize(st::inlineThumbSize, st::inlineThumbSize);
 			}
+			documentSize = BoundFrameSize(
+				documentSize.width(),
+				documentSize.height());
 			auto resizeByHeight1 = (documentSize.width() > documentSize.height()) && (documentSize.height() >= st::inlineThumbSize);
 			auto resizeByHeight2 = (documentSize.height() >= documentSize.width()) && (documentSize.width() < st::inlineThumbSize);
 			if (resizeByHeight1 || resizeByHeight2) {
@@ -1711,15 +1743,24 @@ void Game::countFrameSize() {
 			if (!_frameSize.height()) {
 				_frameSize.setHeight(1);
 			}
+			if (_frameSize.isValid()) {
+				_frameSize = BoundFrameSize(
+					_frameSize.width(),
+					_frameSize.height());
+			}
 		}
 	}
 }
 
 int Game::countHeight(int textWidth) const {
-	int32 titleHeight = qMin(_title.countHeight(textWidth), 2 * st::semiboldFont->height);
+	int32 titleHeight = std::min(
+		_title.countHeight(textWidth),
+		2 * st::semiboldFont->height);
 
 	int32 descriptionLines = 2;
-	int32 descriptionHeight = qMin(_description.countHeight(textWidth), descriptionLines * st::normalFont->height);
+	int32 descriptionHeight = std::min(
+		_description.countHeight(textWidth),
+		descriptionLines * st::normalFont->height);
 
 	int32 result = titleHeight + descriptionHeight;
 	accumulate_max(result, st::inlineThumbSize);
@@ -1738,7 +1779,7 @@ void Game::initDimensions() {
 }
 
 int Game::resizeGetHeight(int width) {
-	_width = qMin(width, _maxw);
+	_width = std::min(width, _maxw);
 	_height = countHeight(_width - (st::inlineThumbSize + st::inlineThumbSkip));
 	return _height;
 }
@@ -1770,7 +1811,7 @@ void Game::paint(Painter &p, const QRect &clip, const PaintContext *context) con
 		_documentMedia->automaticLoad(fileOrigin(), nullptr);
 
 		bool loaded = _documentMedia->loaded(), displayLoading = document->displayLoading();
-		if (loaded && !_gif && !_gif.isBad()) {
+		if (loaded && !_gif && !_gif.isBad() && !_inlineOverCap) {
 			auto that = const_cast<Game*>(this);
 			that->_gif = Media::Clip::MakeReader(
 				_documentMedia->owner()->location(),
@@ -1826,7 +1867,9 @@ void Game::paint(Painter &p, const QRect &clip, const PaintContext *context) con
 
 	p.setPen(st::inlineTitleFg);
 	_title.drawLeftElided(p, left, st::inlineRowMargin, _width - left, _width, 2);
-	int32 titleHeight = qMin(_title.countHeight(_width - left), st::semiboldFont->height * 2);
+	int32 titleHeight = std::min(
+		_title.countHeight(_width - left),
+		st::semiboldFont->height * 2);
 
 	p.setPen(st::inlineDescriptionFg);
 	int32 descriptionLines = 2;
@@ -1889,8 +1932,8 @@ void Game::validateThumbnail(Image *image, QSize size, bool good) const {
 	}
 	const auto width = size.width();
 	const auto height = size.height();
-	auto w = qMax(style::ConvertScale(image->width()), 1);
-	auto h = qMax(style::ConvertScale(image->height()), 1);
+	auto w = std::max(style::ConvertScale(image->width()), 1);
+	auto h = std::max(style::ConvertScale(image->height()), 1);
 	auto resizeByHeight1 = (w * height > h * width) && (h >= height);
 	auto resizeByHeight2 = (h * width >= w * height) && (w < width);
 	if (resizeByHeight1 || resizeByHeight2) {
@@ -1961,9 +2004,7 @@ void Game::clipCallback(Media::Clip::Notification notification) {
 			} else if (_gif->ready() && !_gif->started()) {
 				const auto size = QSize(_gif->width(), _gif->height());
 				if (!ValidFrameSize(size, kMaxInlineArea)) {
-					if (!size.isEmpty()) {
-						getResultDocument()->dimensions = size;
-					}
+					_inlineOverCap = true;
 					_gif.reset();
 				} else {
 					_gif->start({

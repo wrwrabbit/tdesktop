@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/kinetic_scroller.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/vertical_list.h"
@@ -444,9 +445,12 @@ void SetupExperimental(
 				Core::kOptionFractionalScalingEnabled,
 				Core::kOptionHighDpiDownscale,
 				Ui::GL::kOptionUseQtRhi,
+				Ui::GL::kOptionForceANGLE,
 				Ui::GL::kOptionEnableVulkanRhi,
 				Core::kOptionFreeType,
-				Ui::kOptionQScroller,
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
+				Ui::kOptionKineticScroller,
+#endif
 				Window::kOptionDisableTouchbar,
 				Window::kOptionNewWindowsSizeAsFirst,
 			}

@@ -611,7 +611,8 @@ void writeUpdateManifest(
 		|| f.write(signature) != signature.size()
 		|| f.write(manifest) != manifest.size()
 		|| !f.commit()) {
-		LOG(("Storage Error: Could not write the update manifest."));
+		LOG(("Storage Error: Could not write the update manifest: %1."
+			).arg(f.errorString()));
 	}
 }
 
@@ -1399,7 +1400,7 @@ void incrementRecentHashtag(RecentHashtagPack &recent, const QString &tag) {
 	for (; i != e; ++i) {
 		if (i->first == tag) {
 			++i->second;
-			if (qAbs(i->second) > 0x4000) {
+			if (i->second > 0x4000) {
 				for (auto j = recent.begin(); j != e; ++j) {
 					if (j->second > 1) {
 						j->second /= 2;
@@ -1409,22 +1410,22 @@ void incrementRecentHashtag(RecentHashtagPack &recent, const QString &tag) {
 				}
 			}
 			for (; i != recent.begin(); --i) {
-				if (qAbs((i - 1)->second) > qAbs(i->second)) {
+				if ((i - 1)->second > i->second) {
 					break;
 				}
-				qSwap(*i, *(i - 1));
+				std::swap(*i, *(i - 1));
 			}
 			break;
 		}
 	}
 	if (i == e) {
 		while (recent.size() >= 64) recent.pop_back();
-		recent.push_back(qMakePair(tag, 1));
+		recent.push_back({ tag, 1 });
 		for (i = recent.end() - 1; i != recent.begin(); --i) {
 			if ((i - 1)->second > i->second) {
 				break;
 			}
-			qSwap(*i, *(i - 1));
+			std::swap(*i, *(i - 1));
 		}
 	}
 }

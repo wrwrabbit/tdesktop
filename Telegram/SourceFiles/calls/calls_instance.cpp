@@ -102,6 +102,9 @@ DhConfig Instance::Delegate::getDhConfig() const {
 
 void Instance::Delegate::callFinished(not_null<Call*> call) {
 	crl::on_main(call, [=] {
+		if (call->ratingInPanel()) {
+			return;
+		}
 		_instance->destroyCall(call);
 	});
 }
@@ -447,6 +450,10 @@ void Instance::createCall(
 			destroyCall(raw);
 		}, raw->lifetime());
 
+		if (_currentCall && _currentCall->ratingInPanel()) {
+			_currentCall->finishRating();
+			destroyCall(_currentCall.get());
+		}
 		if (_currentCall) {
 			_currentCallPanel->replaceCall(raw);
 			std::swap(_currentCall, call);
@@ -847,7 +854,7 @@ void Instance::handleSignalingData(
 }
 
 bool Instance::inCall() const {
-	if (!_currentCall) {
+	if (!_currentCall || _currentCall->ratingInPanel()) {
 		return false;
 	}
 	const auto state = _currentCall->state();
@@ -1056,13 +1063,6 @@ std::shared_ptr<tgcalls::VideoCaptureInterface> Instance::getVideoCapture(
 	return result;
 }
 
-const ConferenceInvites &Instance::conferenceInvites(
-		CallId conferenceId) const {
-	static const auto kEmpty = ConferenceInvites();
-	const auto i = _conferenceInvites.find(conferenceId);
-	return (i != end(_conferenceInvites)) ? i->second : kEmpty;
-}
-
 void Instance::registerConferenceInvite(
 		CallId conferenceId,
 		not_null<UserData*> user,
@@ -1227,6 +1227,10 @@ void Instance::showConferenceInvite(
 			destroyCall(raw);
 		}, raw->lifetime());
 
+		if (_currentCall && _currentCall->ratingInPanel()) {
+			_currentCall->finishRating();
+			destroyCall(_currentCall.get());
+		}
 		if (_currentCall) {
 			_currentCallPanel->replaceCall(raw);
 			std::swap(_currentCall, call);

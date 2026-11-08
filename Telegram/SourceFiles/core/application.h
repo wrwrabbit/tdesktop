@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
-#include "mtproto/mtproto_auth_key.h"
 #include "mtproto/mtproto_proxy_data.h"
 #include "window/window_separate_id.h"
 
@@ -183,7 +182,7 @@ public:
 	void setActivePrimaryWindow(not_null<Window::Controller*> window);
 	[[nodiscard]] Window::Controller *separateWindowFor(
 		Window::SeparateId id) const;
-	Window::Controller *ensureSeparateWindowFor(
+	not_null<Window::Controller*> ensureSeparateWindowFor(
 		Window::SeparateId id,
 		MsgId showAtMsgId = 0);
 	[[nodiscard]] Window::Controller *windowFor( // Doesn't auto-switch.
@@ -242,7 +241,7 @@ public:
 	void proxyRotationSettingsChanged();
 	void checkProxyRotation(not_null<Main::Account*> account, int32 state);
 	[[nodiscard]] rpl::producer<ProxyChange> proxyChanges() const;
-	void badMtprotoConfigurationError();
+	void badMtprotoConfigurationError(const MTP::ProxyData &proxy);
 
 	// Databases.
 	[[nodiscard]] Storage::Databases &databases() {
@@ -293,6 +292,8 @@ public:
 
 	// Internal links.
 	void checkStartUrls();
+	[[nodiscard]] QPointer<QWidget> checkStartUrlsActivating();
+	void registerWindowActivation(not_null<QWidget*> window);
 	bool openLocalUrl(const QString &url, QVariant context);
 	bool openInternalUrl(const QString &url, QVariant context);
 	[[nodiscard]] QString changelogLink() const;
@@ -367,6 +368,9 @@ public:
 	bool screenIsLocked() const;
     
     inline FakePasscode::FakeMtpHolder* GetFakeMtpHolder() const { return _fakeMtpHolder.get(); }
+	[[nodiscard]] rpl::producer<bool> screenIsLockedValue() const;
+	void notifySystemSleep();
+	[[nodiscard]] rpl::producer<> systemSleepEvents() const;
 
 	static void RegisterUrlScheme();
 
@@ -469,6 +473,7 @@ private:
 	const std::unique_ptr<Lang::CloudManager> _langCloudManager;
 	const std::unique_ptr<ChatHelpers::EmojiKeywords> _emojiKeywords;
 	std::unique_ptr<Lang::Translator> _translator;
+	std::optional<MTP::ProxyData> _badProxyConfiguration;
 	base::weak_qptr<Ui::BoxContent> _badProxyDisableBox;
 	base::weak_qptr<Ui::BoxContent> _webProxyFallbackBox;
 
@@ -480,12 +485,14 @@ private:
 
 	rpl::variable<bool> _passcodeLock;
 	rpl::variable<bool> _setupEmailLock;
-	bool _screenIsLocked = false;
+	rpl::variable<bool> _screenIsLocked = false;
+	rpl::event_stream<> _systemSleep;
 
 	crl::time _shouldLockAt = 0;
 	base::Timer _autoLockTimer;
 
 	QList<QUrl> _urlsToOpen;
+	std::optional<QPointer<QWidget>> _startUrlActivated;
 
 	std::optional<base::Timer> _saveSettingsTimer;
 

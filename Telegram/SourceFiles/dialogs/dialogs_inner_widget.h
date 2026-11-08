@@ -97,6 +97,7 @@ struct ChosenRow {
 	PeerId sublistJumpPeerId;
 	QByteArray sponsoredRandomId;
 	bool userpicClick : 1 = false;
+	bool communityBadgeClick : 1 = false;
 	bool filteredRow : 1 = false;
 	bool newWindow : 1 = false;
 };
@@ -147,8 +148,10 @@ public:
 	void peerSearchReceived(Api::PeerSearchResult result);
 
 	[[nodiscard]] FilterId filterId() const;
+	void switchToFilter(FilterId filterId);
 
 	void clearSelection();
+	[[nodiscard]] bool hasSelection() const;
 
 	void changeOpenedFolder(Data::Folder *folder);
 	void changeOpenedForum(Data::Forum *forum);
@@ -169,6 +172,7 @@ public:
 
 	[[nodiscard]] bool isUserpicPress() const;
 	[[nodiscard]] bool isUserpicPressOnWide() const;
+	[[nodiscard]] bool isCommunityBadgePressOnNarrow() const;
 	void cancelChatPreview();
 	bool scheduleChatPreview(QPoint positionOverride);
 	bool showChatPreview();
@@ -183,7 +187,6 @@ public:
 
 	[[nodiscard]] Data::Folder *shownFolder() const;
 	[[nodiscard]] Data::Forum *shownForum() const;
-	[[nodiscard]] Data::CommunityInfo *shownCommunity() const;
 
 	[[nodiscard]] WidgetState state() const;
 	[[nodiscard]] not_null<const style::DialogRow*> st() const {
@@ -203,6 +206,8 @@ public:
 
 	void setLoadMoreCallback(Fn<void()> callback);
 	void setLoadMoreFilteredCallback(Fn<void()> callback);
+	void setSearchResultsOnly(Fn<QString(int count)> title);
+	void setDeselectOnTopUp(bool value);
 	[[nodiscard]] rpl::producer<> listBottomReached() const;
 	[[nodiscard]] auto changeSearchTabRequests() const
 		-> rpl::producer<ChatSearchTab>;
@@ -241,7 +246,7 @@ public:
 		int64 key,
 		std::optional<Ui::Controls::SwipeContextData> data);
 	[[nodiscard]] int64 calcSwipeKey(int top);
-	void prepareQuickAction(int64 key, Dialogs::Ui::QuickDialogAction);
+	bool prepareQuickAction(int64 key, Dialogs::Ui::QuickDialogAction);
 	void clearQuickActions();
 
 	Qt::FocusPolicy accessibilityFocusPolicy() override {
@@ -339,8 +344,6 @@ private:
 	void repaintCollapsedFolderRow(not_null<Data::Folder*> folder);
 	void refreshWithCollapsedRows(bool toTop = false);
 	bool needCollapsedRowsRefresh() const;
-	bool chooseCollapsedRow(Qt::KeyboardModifiers modifiers);
-	void switchToFilter(FilterId filterId);
 	bool chooseHashtag();
 	ChosenRow computeChosenRow() const;
 	bool isRowActive(not_null<Row*> row, const RowDescriptor &entry) const;
@@ -353,6 +356,7 @@ private:
 	void refreshDialogRow(RowDescriptor row);
 	bool updateEntryHeight(not_null<Entry*> entry);
 	void showSponsoredMenu(int peerSearchIndex, QPoint globalPos);
+	void closeMenuForRemovedRow();
 
 	void clearMouseSelection(bool clearSelection = false);
 	void deselectAllRows();
@@ -464,6 +468,9 @@ private:
 		QRect updateRect = QRect(),
 		UpdateRowSections sections = UpdateRowSection::All);
 	void fillSupportSearchMenu(not_null<Ui::PopupMenu*> menu);
+	void fillSearchResultMenu(
+		not_null<Ui::PopupMenu*> menu,
+		FullMsgId itemId);
 
 	void refreshShownList();
 	void rebuildCommunitySections();
@@ -608,8 +615,10 @@ private:
 	void dragPinnedFromTouch();
 	[[nodiscard]] bool hasChatTypeFilter() const;
 
+	void restoreScrollShowingCommunity(
+		not_null<Data::CommunityInfo*> community);
 	void saveChatsFilterScrollState(FilterId filterId);
-	void restoreChatsFilterScrollState(FilterId filterId);
+	bool restoreChatsFilterScrollState(FilterId filterId);
 
 	[[nodiscard]] not_null<Ui::QuickActionContext*> ensureQuickAction(
 		int64 key);
@@ -775,6 +784,7 @@ private:
 		std::unique_ptr<Ui::VideoUserpic>> _videoUserpics;
 
 	base::flat_map<FilterId, int> _chatsFilterScrollStates;
+	int _communityScrollTop = 0;
 
 	std::unordered_map<ChatsFilterTagsKey, TagCache> _chatsFilterTags;
 	bool _waitingAllChatListEntryRefreshesForTags = false;
@@ -784,6 +794,8 @@ private:
 
 	Fn<void()> _loadMoreCallback;
 	Fn<void()> _loadMoreFilteredCallback;
+	Fn<QString(int count)> _searchResultsOnlyTitle;
+	bool _deselectOnTopUp = false;
 	rpl::event_stream<> _listBottomReached;
 	rpl::event_stream<ChosenRow> _chosenRow;
 	rpl::event_stream<> _updated;

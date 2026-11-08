@@ -16,9 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_photo.h"
 #include "data/data_photo_media.h"
 #include "data/data_session.h"
-#include "history/view/media/history_view_sticker_player.h"
 #include "info/bot/starref/info_bot_starref_common.h"
-#include "info/userpic/info_userpic_emoji_builder_preview.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "ui/effects/premium_graphics.h"
@@ -346,7 +344,7 @@ PaintRoundImageCallback GenerateCreditsPaintEntryCallback(
 
 	rpl::single(rpl::empty_value()) | rpl::then(
 		photo->session().downloaderTaskFinished()
-	) | rpl::on_next([=] {
+	) | rpl::on_next([=, state = state.get()] {
 		using Size = Data::PhotoSize;
 		if (const auto large = state->view->image(Size::Large)) {
 			state->imagePtr = large;
@@ -396,7 +394,7 @@ PaintRoundImageCallback GenerateCreditsPaintEntryCallback(
 
 	rpl::single(rpl::empty_value()) | rpl::then(
 		video->session().downloaderTaskFinished()
-	) | rpl::on_next([=] {
+	) | rpl::on_next([=, state = state.get()] {
 		if (const auto thumbnail = state->view->thumbnail()) {
 			state->imagePtr = thumbnail;
 		}
@@ -514,32 +512,6 @@ PaintRoundImageCallback GeneratePaidMediaPaintCallback(
 		GeneratePaidPhotoPaintCallback(photo, update),
 		GeneratePaidPhotoPaintCallback(second, update),
 		totalCount);
-}
-
-PaintRoundImageCallback GenerateGiftStickerUserpicCallback(
-		not_null<Main::Session*> session,
-		uint64 stickerId,
-		Fn<void()> update) {
-	struct State {
-		std::optional<UserpicBuilder::PreviewPainter> painter;
-		int size = 0;
-	};
-	const auto state = std::make_shared<State>();
-	//const auto document = session->data().document(stickerId);
-	return [=](Painter &p, int x, int y, int outerWidth, int size) {
-		if (state->size != size || !state->painter) {
-			state->size = size;
-			state->painter.emplace(size * M_SQRT2);
-			state->painter->setDocument(
-				session->data().document(stickerId),
-				update);
-		}
-		const auto skip = int(base::SafeRound((size * (M_SQRT2 - 1.)) / 2.));
-		auto hq = PainterHighQualityEnabler(p);
-		p.translate(x - skip, y - skip);
-		state->painter->paintForeground(p);
-		p.translate(skip - x, skip - y);
-	};
 }
 
 Fn<PaintRoundImageCallback(Fn<void()>)> PaintPreviewCallback(

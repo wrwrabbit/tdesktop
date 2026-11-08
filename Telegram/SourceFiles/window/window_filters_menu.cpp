@@ -258,7 +258,9 @@ void FiltersMenu::scrollToButton(not_null<Ui::RpWidget*> widget) {
 	const auto scrollTo = scrollTop + (isBottomEdge ? localBottom : localTop);
 
 	auto scroll = [=] {
-		_scroll.scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
+		const auto animated
+			= int(base::SafeRound(_scrollToAnimation.value(scrollTo)));
+		_scroll.scrollToY(animated);
 	};
 
 	_scrollToAnimation.start(
@@ -538,16 +540,6 @@ const style::SideBarButton &FiltersMenu::buttonStyle() const {
 	return st::windowFiltersButton;
 }
 
-base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareAll() {
-	return prepareButton(
-		_container,
-		0,
-		{},
-		Ui::FilterIcon::All,
-		false,
-		true);
-}
-
 base::unique_qptr<Ui::SideBarButton> FiltersMenu::prepareButton(
 		not_null<Ui::VerticalLayout*> container,
 		FilterId id,
@@ -765,6 +757,7 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 		};
 		MarkAsReadMenu::AddChatListAction(
 			_session,
+			MarkAsReadMenu::ChatListKind::Folder,
 			std::move(filteredChats),
 			addAction);
 
@@ -777,22 +770,16 @@ void FiltersMenu::showMenu(QPoint position, FilterId id) {
 			.isAttention = true,
 		});
 	} else {
-		auto customUnreadState = [=] {
-			const auto session = &_session->session();
-			return Data::MainListMapUnreadState(
-				session,
-				session->data().chatsList()->unreadState());
-		};
-		MarkAsReadMenu::AddChatListAction(
-			_session,
-			[=] { return _session->session().data().chatsList(); },
-			addAction,
-			std::move(customUnreadState));
-
 		addAction(
 			tr::lng_filters_setup_menu(tr::now),
 			crl::guard(&_outer, [=] { openFiltersSettings(); }),
 			&st::menuIconEdit);
+
+		MarkAsReadMenu::AddChatListAction(
+			_session,
+			MarkAsReadMenu::ChatListKind::AllChats,
+			[=] { return _session->session().data().chatsList(); },
+			addAction);
 	}
 	if (_popupMenu->empty()) {
 		_popupMenu = nullptr;

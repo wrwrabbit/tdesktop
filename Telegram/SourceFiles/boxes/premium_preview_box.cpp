@@ -939,7 +939,7 @@ struct VideoPreviewDocument {
 	const auto stops = Ui::Premium::ButtonGradientStops();
 	auto result = object_ptr<Ui::FixedHeightWidget>(parent.get(), height);
 	const auto raw = result.data();
-	const auto count = order.size();
+	const auto count = int(order.size());
 	for (auto i = 0; i != count; ++i) {
 		const auto section = order[i];
 		const auto button = Ui::CreateChild<Ui::AbstractButton>(raw);
@@ -1326,6 +1326,15 @@ void Show(
 	}
 }
 
+void RemoveExpiredPreloads() {
+	auto &list = Preloads();
+	list.erase(
+		ranges::remove_if(list, [](const Preload &preload) {
+			return preload.show.expired();
+		}),
+		end(list));
+}
+
 void Show(std::shared_ptr<ChatHelpers::Show> show, QImage back) {
 	auto &list = Preloads();
 	for (auto i = begin(list); i != end(list);) {
@@ -1479,6 +1488,8 @@ void Show(
 		crl::on_main([=] {
 			if (auto strong = weak.lock()) {
 				Show(std::move(strong), result);
+			} else {
+				RemoveExpiredPreloads();
 			}
 		});
 	});
@@ -1681,6 +1692,9 @@ void DoubledLimitsPreviewBox(
 			premium,
 		});
 	}
+	entries.erase(ranges::remove_if(entries, [](const auto &entry) {
+		return (entry.leftNumber >= entry.rightNumber);
+	}), end(entries));
 	Ui::Premium::ShowListBox(
 		box,
 		st::defaultPremiumLimits,

@@ -65,9 +65,10 @@ inline constexpr auto CanaryPrivateChannelId
 inline constexpr auto CanaryMetadataMessageId
 	= int(TDESKTOP_CANARY_METADATA_MSG_ID);
 
-[[nodiscard]] inline constexpr quint64 RunningUpdateVersion() {
+[[nodiscard]] inline constexpr quint64 RunningUpdateVersion(
+		bool upstream = false) {
 	return Updates::MakeUpdateVersion(
-		quint32(AppVersion),
+		quint32(upstream ? AppVersion : PTelegramAppVersion),
 		CanaryBuildCounter);
 }
 

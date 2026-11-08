@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "storage/localstorage.h"
 #include "export/export_settings.h"
+#include "wallet/wallet_unlock.h"
+#include "wallet/wallet_vault.h"
 #include "window/notifications_manager.h"
 #include "window/window_controller.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
@@ -98,18 +100,35 @@ Domain::Domain(const QString &dataName)
 	}, _lifetime);
 }
 
-Domain::~Domain() = default;
+Domain::~Domain() {
+	if (_walletKeyring) {
+		_walletKeyring->clear();
+	}
+}
+
+Wallet::VaultRuntime &Domain::walletKeyring() {
+	if (!_walletKeyring) {
+		_walletKeyring = std::make_shared<Wallet::VaultRuntime>(*this);
+	}
+	return *_walletKeyring;
+}
 
 bool Domain::started() const {
 	return !_accounts.empty();
 }
 
 Storage::StartResult Domain::start(const QByteArray &passcode) {
+	return startWith(_local->prepareOpen(passcode));
+}
+
+Storage::StartResult Domain::startWith(
+		Storage::PasscodeDerivation derived) {
 	Expects(!started());
 
-	const auto result = _local->start(passcode);
+	const auto result = _local->start(std::move(derived));
 	if (result == Storage::StartResult::Success) {
 		activateAfterStarting();
+		Wallet::DropUnusedPasscode();
 		crl::on_main(&Core::App(), [=] { suggestExportIfNeeded(); });
 	} else {
 		Assert(!started());
@@ -117,7 +136,40 @@ Storage::StartResult Domain::start(const QByteArray &passcode) {
 	return result;
 }
 
+bool Domain::tryPasscode(
+		const QByteArray &passcode,
+		Fn<void(bool correct)> done) {
+	if (_passcodeDeriving) {
+		return false;
+	}
+	_passcodeDeriving = true;
+	const auto cold = !started();
+	Storage::DeriveOnWorker(
+		_local->prepareOpen(passcode),
+		crl::guard(this, [=](Storage::PasscodeDerivation &&derived) {
+			_passcodeDeriving = false;
+			if (Core::Quitting()) {
+				return;
+			}
+			const auto correct = (cold == started())
+				? false
+				: cold
+				? (startWith(std::move(derived))
+					== Storage::StartResult::Success)
+				: _local->checkAndExecutePasscode(std::move(derived));
+			if (correct) {
+				_local->finishPasscodeUnlock();
+				onAppUnlocked();
+			}
+			done(correct);
+		}));
+	return true;
+}
+
 void Domain::finish() {
+	if (_walletKeyring) {
+		_walletKeyring->clear();
+	}
 	_accountToActivate = -1;
 	_active.reset(nullptr);
 	base::take(_accounts);
@@ -164,6 +216,9 @@ int Domain::activeForStorage() const {
 }
 
 void Domain::resetWithForgottenPasscode() {
+	if (_walletKeyring) {
+		_walletKeyring->clear();
+	}
 	if (_accounts.empty()) {
 		_local->startFromScratch();
 		activateAfterStarting();
@@ -172,6 +227,13 @@ void Domain::resetWithForgottenPasscode() {
 			account->logOut();
 		}
 	}
+}
+
+bool Domain::finishPasscodeClearAfterReset() {
+	if (!passcodeRemovalAuthorized()) {
+		return false;
+	}
+	return clearPasscodeAfterLastLogout();
 }
 
 void Domain::activateAfterStarting() {
@@ -478,13 +540,44 @@ bool Domain::removePasscodeIfEmpty() {
 	if (Core::App().passcodeLocked()) {
 		Core::App().unlockPasscode();
 	}
-	if (!_local->hasLocalPasscode()) {
+	if (!_local->hasPasscode()) {
+		return false;
+	} else if (!clearPasscodeAfterLastLogout()) {
+		reportFailedPasscodeClear();
 		return false;
 	}
-	_local->setPasscode(QByteArray());
+	return true;
+}
+
+bool Domain::passcodeRemovalAuthorized() const {
+	return (_accounts.size() == 1)
+		&& !_active.current()->sessionExists()
+		&& _local->hasPasscode();
+}
+
+bool Domain::clearPasscodeAfterLastLogout() {
+	Expects(passcodeRemovalAuthorized());
+
+	_local->clearPasscodeAfterReset();
+	if (_local->hasPasscode()) {
+		return false;
+	}
 	Core::App().settings().setSystemUnlockEnabled(false);
 	Core::App().saveSettingsDelayed();
 	return true;
+}
+
+void Domain::reportFailedPasscodeClear() {
+	crl::on_main(this, [=] {
+		if (!passcodeRemovalAuthorized()) {
+			return;
+		}
+		if (const auto window = Core::App().activePrimaryWindow()) {
+			window->showPasscodeClearFailed(crl::guard(this, [=] {
+				return finishPasscodeClearAfterReset();
+			}));
+		}
+	});
 }
 
 void Domain::removeRedundantAccounts() {
@@ -517,6 +610,13 @@ void Domain::removeRedundantAccounts() {
 	if (!removePasscodeIfEmpty() && _accounts.size() != was) {
 		scheduleWriteAccounts();
 		_accountsChanges.fire({});
+	}
+	// Session teardown already removed the logged-out account's live keyring
+	// membership, including when its window keeps the account in the list.
+	// The last-logout case retains its checked clear and retry route, and
+	// passcodeRemovalAuthorized() stays true until that clear has landed.
+	if (!passcodeRemovalAuthorized()) {
+		Wallet::DropUnusedPasscode();
 	}
 }
 

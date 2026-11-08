@@ -153,6 +153,9 @@ public:
 	[[nodiscard]] virtual rpl::producer<QString> subtitle() {
 		return nullptr;
 	}
+	[[nodiscard]] virtual rpl::producer<QString> titleBadge() {
+		return nullptr;
+	}
 	[[nodiscard]] virtual auto titleStories()
 		-> rpl::producer<Dialogs::Stories::Content>;
 
@@ -219,7 +222,7 @@ protected:
 	void scrollTo(const Ui::ScrollToRequest &request);
 	[[nodiscard]] rpl::producer<int> scrollTopValue() const;
 	[[nodiscard]] int innerTopReserve() const {
-		return _innerTopReserve;
+		return _innerTopReserve.current();
 	}
 
 	void setPaintPadding(const style::margins &padding);
@@ -228,6 +231,7 @@ protected:
 
 private:
 	Ui::RpWidget *doSetInnerWidget(object_ptr<Ui::RpWidget> inner);
+	void applyScrollTopRestore();
 	Ui::RpWidget *doSetupFlexibleInnerWidget(
 		object_ptr<Ui::RpWidget> inner,
 		FlexibleScrollData &flexibleScroll,
@@ -251,10 +255,12 @@ private:
 	base::unique_qptr<Ui::RpWidget> _searchWrap = nullptr;
 	QPointer<Ui::InputField> _searchField;
 	int _innerDesiredHeight = 0;
-	int _innerTopReserve = 0;
+	rpl::variable<int> _innerTopReserve = 0;
 	int _additionalScroll = 0;
 	int _addedHeight = 0;
 	int _maxVisibleHeight = 0;
+	std::optional<int> _scrollTopRestore;
+	bool _applyingScrollTopRestore = false;
 	bool _isStackBottom = false;
 
 	// To paint round edges from content.

@@ -295,18 +295,17 @@ Fn<void()> TabsHost::openInWindowFor(const MediaTabDescriptor &tab) const {
 	if (!tab.sharedMediaType) {
 		return nullptr;
 	}
-	const auto peer = _context.sublist
-		? _context.sublist->sublistPeer()
-		: _context.peer;
-	const auto separateId = Media::SeparateId(
+	const auto peer = _context.peer;
+	const auto topicRootId = _context.topic
+		? _context.topic->rootId()
+		: MsgId();
+	const auto type = *tab.sharedMediaType;
+	return Media::SeparateOpenCallback(
+		_context.controller,
 		peer,
-		_context.topic ? _context.topic->rootId() : MsgId(),
-		*tab.sharedMediaType);
-	if (!separateId) {
-		return nullptr;
-	}
-	const auto window = _context.controller->parentController();
-	return [=] { window->showInNewWindow(separateId); };
+		topicRootId,
+		_context.sublist,
+		type);
 }
 
 void TabsHost::showTabMenu(const QString &id) {
@@ -487,6 +486,35 @@ void TabsHost::ensureActiveVisible() {
 	}
 }
 
+std::unique_ptr<TabsState> TabsHost::saveState() {
+	auto result = std::make_unique<TabsState>();
+	result->activeId = _activeId;
+	result->scrollTops = _tabScrollTops;
+	if (!_activeId.isEmpty() && _visibleTop >= 0) {
+		result->scrollTops[_activeId] = _visibleTop;
+	}
+	for (auto &[id, content] : _contents) {
+		if (auto state = content->saveState()) {
+			result->contents.emplace(id, std::move(state));
+		}
+	}
+	for (auto &[id, state] : base::take(_pendingStates)) {
+		result->contents.emplace(id, std::move(state));
+	}
+	return result;
+}
+
+void TabsHost::restoreState(std::unique_ptr<TabsState> state) {
+	if (!state) {
+		return;
+	}
+	_tabScrollTops = std::move(state->scrollTops);
+	_pendingStates = std::move(state->contents);
+	if (!state->activeId.isEmpty()) {
+		restoreActiveTab(state->activeId);
+	}
+}
+
 void TabsHost::restoreActiveTab(const QString &id) {
 	const auto it = ranges::find(_tabs, id, &MediaTabDescriptor::id);
 	if (it == end(_tabs)) {
@@ -580,6 +608,12 @@ void TabsHost::activateTab(const QString &id, bool animated) {
 			});
 		};
 		cached = it->factory(std::move(context));
+		const auto pending = _pendingStates.find(id);
+		if (pending != end(_pendingStates)) {
+			auto state = std::move(pending->second);
+			_pendingStates.erase(pending);
+			cached->restoreState(std::move(state));
+		}
 	}
 	const auto previousId = _activeId;
 	const auto previousIndex = previousId.isEmpty()
@@ -740,10 +774,6 @@ void TabsHost::pushViewportToActive() {
 	active->setVisibleRegion(
 		_visibleTop - _stripHeight,
 		_visibleBottom - _stripHeight);
-}
-
-rpl::producer<MediaTabContent*> TabsHost::activeTabValue() const {
-	return _activeTab.value();
 }
 
 rpl::producer<Ui::ScrollToRequest> TabsHost::scrollToRequests() const {

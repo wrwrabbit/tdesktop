@@ -97,7 +97,9 @@ void Widget::moveBottom(int bottom) {
 
 void Widget::updateContentHeight() {
 	auto addedHeight = innerPadding().top() + innerPadding().bottom();
-	auto wantedContentHeight = qRound(st::emojiPanHeightRatio * _bottom) - addedHeight;
+	const auto wanted
+		= int(base::SafeRound(st::emojiPanHeightRatio * _bottom));
+	auto wantedContentHeight = wanted - addedHeight;
 	auto contentHeight = std::clamp(
 		wantedContentHeight,
 		st::inlineResultsMinHeight,
@@ -179,10 +181,6 @@ void Widget::paintContent(QPainter &p) {
 	auto sidesHeight = horizontal.height();
 	p.fillRect(myrtlrect(inner.x() + inner.width() - st::emojiScroll.width, sidesTop, st::emojiScroll.width, sidesHeight), st::emojiPanBg);
 	p.fillRect(myrtlrect(inner.x(), sidesTop, st::roundRadiusSmall, sidesHeight), st::emojiPanBg);
-}
-
-void Widget::moveByBottom() {
-	updateContentHeight();
 }
 
 void Widget::hideFast() {

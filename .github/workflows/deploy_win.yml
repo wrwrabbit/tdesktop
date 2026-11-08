@@ -24,7 +24,7 @@ jobs:
     name: Libraries
 #    runs-on: windows-latest
 #    runs-on: depot-windows-latest-16
-    runs-on: ${{ github.event.inputs.runner}}
+    runs-on: ${{ inputs.runner }}
 
     strategy:
       matrix:
@@ -230,10 +230,25 @@ jobs:
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
           echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
 
+      - name: Select OpenSSL for update signing.
+        if: env.ONLY_CACHE == 'false'
+        shell: bash
+        run: |
+          openssl version
+          cygpath -w "$(dirname "$(command -v openssl)")" >> "$GITHUB_PATH"
+
+      - name: Add paging space for the link.
+        if: inputs.runner == 'windows-latest' && env.ONLY_CACHE == 'false'
+        shell: pwsh
+        run: '& "$env:TBUILD\$env:REPO_NAME\.github\scripts\windows-pagefile.ps1"'
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          UPDATE_ED25519_PRIVATE: ${{ secrets.UPDATE_ED25519_PRIVATE }}
+          UPDATE_ES256_PRIVATE: ${{ secrets.UPDATE_ES256_PRIVATE }}
+          UPDATE_SIGNING_CONFIG: ${{ secrets.UPDATE_SIGNING_CONFIG }}
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
         run: |
@@ -246,30 +261,33 @@ jobs:
         run: |
           mkdir artifact
           mkdir symbols
-          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tportable*.zip artifact\ /E/C
-          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\tsetup*.exe artifact\ /E/C
-          xcopy %TBUILD%\%REPO_NAME%\out\Release\deploy\t*upd* artifact\ /E/C
+          copy /Y %TBUILD%\%REPO_NAME%\out\Release\deploy\td-portable-win-*.zip artifact\ || exit /b 1
+          copy /Y %TBUILD%\%REPO_NAME%\out\Release\deploy\td-setup-win-*.exe artifact\ || exit /b 1
+          copy /Y %TBUILD%\%REPO_NAME%\out\Release\deploy\td-update-win-* artifact\ || exit /b 1
           xcopy %TBUILD%\Dropbox\Telegram\symbols\* symbols\ /E/S/C
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: artifact\tportable*
+          path: artifact\td-portable-win-*.zip
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         name: Upload installer artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}_setup
-          path: artifact\tsetup*
+          path: artifact\td-setup-win-*.exe
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: ${{ env.ARTIFACT_NAME }}_tg
-          path: artifact\t*upd*
+          path: artifact\td-update-win-*
+          if-no-files-found: error
           
       - uses: actions/upload-artifact@v7
         name: Upload symbols artifact.

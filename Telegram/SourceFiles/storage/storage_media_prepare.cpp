@@ -11,6 +11,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "editor/photo_editor_common.h"
 #include "editor/scene/scene.h"
 #include "editor/scene/scene_item_sticker.h"
+#include "ffmpeg/ffmpeg_bytes_io_wrap.h"
+#include "ffmpeg/ffmpeg_utility.h"
+#include "media/audio/media_audio.h"
 #include "platform/platform_file_utilities.h"
 #include "lang/lang_keys.h"
 #include "storage/localimageloader.h"
@@ -58,6 +61,76 @@ QSize PrepareShownDimensions(const QImage &preview, int sideLimit) {
 		: result;
 }
 
+[[nodiscard]] Editor::AudioTrack AudioTrackFromSong(
+		const QString &path,
+		const QByteArray &content,
+		PreparedFileInformation::Song &&song) {
+	if (song.duration <= 0) {
+		return {};
+	}
+	if (!Ui::ValidateThumbDimensions(
+			song.cover.width(),
+			song.cover.height())) {
+		song.cover = QImage();
+	}
+	return {
+		.path = path,
+		.content = content,
+		.title = std::move(song.title),
+		.performer = std::move(song.performer),
+		.cover = std::move(song.cover),
+		.duration = song.duration,
+	};
+}
+
+[[nodiscard]] bool IsAudioFile(const QString &path, const QString &mime) {
+	return mime.startsWith(u"audio/"_q)
+		|| (!path.isEmpty()
+			&& (Core::DetectNameType(path) == Core::NameType::Audio));
+}
+
+[[nodiscard]] bool AudioStreamDecodable(
+		const QString &path,
+		const QByteArray &content) {
+	using namespace FFmpeg;
+	auto bytesWrap = ReadBytesWrap{
+		.size = int64(content.size()),
+		.data = reinterpret_cast<const uchar*>(content.constData()),
+	};
+	auto fileWrap = ReadFileWrap();
+	auto input = FormatPointer();
+	if (!content.isEmpty()) {
+		input = MakeFormatPointer(
+			&bytesWrap,
+			&ReadBytesWrap::Read,
+			nullptr,
+			&ReadBytesWrap::Seek);
+	} else {
+		fileWrap.file.setFileName(path);
+		if (!fileWrap.file.open(QIODevice::ReadOnly)) {
+			return false;
+		}
+		input = MakeFormatPointer(
+			&fileWrap,
+			&ReadFileWrap::Read,
+			nullptr,
+			&ReadFileWrap::Seek);
+	}
+	if (!input
+		|| AvErrorWrap(avformat_find_stream_info(input.get(), nullptr))) {
+		return false;
+	}
+	auto decoder = (const AVCodec*)nullptr;
+	const auto index = av_find_best_stream(
+		input.get(),
+		AVMEDIA_TYPE_AUDIO,
+		-1,
+		-1,
+		&decoder,
+		0);
+	return (index >= 0) && (decoder != nullptr);
+}
+
 void PrepareDetailsInParallel(PreparedList &result, int previewWidth) {
 	Expects(result.files.size() <= Ui::MaxAlbumItems());
 
@@ -77,7 +150,10 @@ void PrepareDetailsInParallel(PreparedList &result, int previewWidth) {
 
 } // namespace
 
-bool ValidatePhotoEditorMediaDragData(not_null<const QMimeData*> data) {
+bool ValidatePhotoEditorMediaDragData(
+		not_null<const QMimeData*> data,
+		bool composeAnimated,
+		bool composeSound) {
 	const auto urls = Core::ReadMimeUrls(data);
 	if (urls.size() > 1) {
 		return false;
@@ -90,13 +166,83 @@ bool ValidatePhotoEditorMediaDragData(not_null<const QMimeData*> data) {
 		if (url.isLocalFile()) {
 			using namespace Core;
 			const auto file = Platform::File::UrlToLocal(url);
-			const auto info = QFileInfo(file);
-			return FileIsImage(file, MimeTypeForFile(info).name())
-				&& QImageReader(file).canRead();
+			const auto mime = MimeTypeForFile(QFileInfo(file)).name();
+			return (composeAnimated && FileLoadTask::IsVideoFile(file, mime))
+				|| (composeSound && IsAudioFile(file, mime))
+				|| (FileIsImage(file, mime) && QImageReader(file).canRead());
 		}
 	}
 
 	return false;
+}
+
+PhotoEditorMedia ReadPhotoEditorMedia(
+		const QString &path,
+		const QByteArray &content) {
+	if (path.isEmpty() && content.size() > Images::kReadBytesLimit) {
+		return {};
+	}
+	const auto mime = path.isEmpty()
+		? Core::MimeTypeForData(content).name()
+		: Core::MimeTypeForFile(QFileInfo(path)).name();
+	if (IsAudioFile(path, mime)) {
+		return { .audio = ReadPhotoEditorAudio(path, content) };
+	}
+	const auto information = FileLoadTask::ReadMediaInformation(
+		path,
+		content,
+		mime);
+	if (const auto image = std::get_if<Image>(&information->media)) {
+		return { .image = std::move(image->data) };
+	}
+	using Video = PreparedFileInformation::Video;
+	if (const auto video = std::get_if<Video>(&information->media)) {
+		if (!path.isEmpty()
+			&& QFileInfo(path).size() > Images::kReadBytesLimit) {
+			return {};
+		}
+		return {
+			.image = std::move(video->thumbnail),
+			.videoPath = path,
+			.videoContent = content,
+			.videoDuration = video->duration,
+			.videoHasAudio = (video->hasAudio
+				&& AudioStreamDecodable(path, content)),
+		};
+	}
+	using Song = PreparedFileInformation::Song;
+	if (const auto song = std::get_if<Song>(&information->media)) {
+		return {
+			.audio = AudioTrackFromSong(path, content, std::move(*song)),
+		};
+	}
+	return {};
+}
+
+void ReadPhotoEditorMediaAsync(
+		const QString &path,
+		const QByteArray &content,
+		Fn<void(PhotoEditorMedia&&)> done) {
+	crl::async([=] {
+		auto media = ReadPhotoEditorMedia(path, content);
+		crl::on_main([=, media = std::move(media)]() mutable {
+			done(std::move(media));
+		});
+	});
+}
+
+Editor::AudioTrack ReadPhotoEditorAudio(
+		const QString &path,
+		const QByteArray &content) {
+	if (path.isEmpty() && content.isEmpty()) {
+		return {};
+	}
+	using Song = PreparedFileInformation::Song;
+	auto information = Media::Player::PrepareForSending(path, content);
+	const auto song = std::get_if<Song>(&information.media);
+	return song
+		? AudioTrackFromSong(path, content, std::move(*song))
+		: Editor::AudioTrack();
 }
 
 bool ValidateEditMediaDragData(
@@ -145,7 +291,9 @@ MimeDataState ComputeMimeDataState(const QMimeData *data) {
 
 		const auto info = QFileInfo(file);
 		if (info.isDir()) {
-			return MimeDataState::None;
+			return (urls.size() == 1)
+				? MimeDataState::Folder
+				: MimeDataState::None;
 		}
 
 		using namespace Core;
@@ -177,6 +325,8 @@ MimeDataState ComputeMimeDataState(const QMimeData *data) {
 		? MimeDataState::PhotoFiles
 		: allAreMedia
 		? MimeDataState::MediaFiles
+		: (urls.size() > 1)
+		? MimeDataState::FilesArchive
 		: MimeDataState::Files;
 }
 
@@ -472,18 +622,21 @@ bool ApplyModifications(PreparedList &list, bool composeAnimated) {
 		file.path = QString();
 		file.content = QByteArray();
 		const auto &scene = image->modifications.paint;
-		if (composeAnimated && scene && scene->hasAnimatedItems()) {
+		if (composeAnimated && scene && scene->hasAnimatedResult()) {
 			auto job = Editor::ComposeAnimatedJob(
 				image->data,
 				image->modifications);
-			const auto animated = ranges::any_of(
-				job.overlay,
-				[](const Media::Encode::Layer &layer) {
-					const auto entity
-						= std::get_if<Media::Encode::AnimatedEntity>(
-							&layer);
-					return entity && !entity->bytes.isEmpty();
-				});
+			const auto still = std::get_if<Media::Encode::StillSource>(
+				&job.source);
+			const auto animated = (still && !still->music.empty())
+				|| ranges::any_of(
+					job.overlay,
+					[](const Media::Encode::Layer &layer) {
+						const auto entity
+							= std::get_if<Media::Encode::AnimatedEntity>(
+								&layer);
+						return entity && !entity->bytes.isEmpty();
+					});
 			if (animated) {
 				file.animationJob = std::make_shared<Media::Encode::Job>(
 					std::move(job));

@@ -21,13 +21,16 @@ namespace Ui {
 
 class VideoUserpicPlayer final {
 public:
-	VideoUserpicPlayer();
+	explicit VideoUserpicPlayer(Fn<void()> repaint);
 	~VideoUserpicPlayer();
 
 	void setup(not_null<PeerData*> peer, not_null<PhotoData*> photo);
 	void clear();
 
-	[[nodiscard]] QImage frame(QSize size, not_null<PeerData*> peer);
+	[[nodiscard]] QImage frame(
+		QSize size,
+		not_null<PeerData*> peer,
+		bool paused);
 	[[nodiscard]] bool ready() const;
 
 private:
@@ -39,6 +42,7 @@ private:
 	void handleError(::Media::Streaming::Error &&error);
 	void streamingReady(::Media::Streaming::Information &&info);
 
+	Fn<void()> _repaint;
 	std::unique_ptr<::Media::Streaming::Instance> _streamed;
 	PhotoData *_streamedPhoto = nullptr;
 	QImage _ellipseMask;

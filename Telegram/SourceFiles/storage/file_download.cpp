@@ -162,16 +162,16 @@ void FileLoader::finishWithBytes(const QByteArray &data) {
 	session->notifyDownloaderTaskFinished();
 }
 
-QImage FileLoader::imageData(int progressiveSizeLimit) const {
+QImage FileLoader::imageData() const {
 	if (_imageData.isNull() && _locationType == UnknownFileLocation) {
-		readImage(progressiveSizeLimit);
+		readImage();
 	}
 	return _imageData;
 }
 
-void FileLoader::readImage(int progressiveSizeLimit) const {
-	const auto buffer = progressiveSizeLimit
-		? QByteArray::fromRawData(_data.data(), progressiveSizeLimit)
+void FileLoader::readImage() const {
+	const auto buffer = (_loadSize > 0 && _loadSize < _data.size())
+		? QByteArray::fromRawData(_data.data(), _loadSize)
 		: _data;
 	auto read = Images::Read({ .content = buffer });
 	if (!read.image.isNull()) {
@@ -440,6 +440,10 @@ QByteArray FileLoader::readLoadedPartBack(int64 offset, int size) {
 bool FileLoader::finalizeResult() {
 	Expects(!_finished);
 
+	if (_skippedBytes != 0) {
+		cancel(FailureReason::OtherFailure);
+		return false;
+	}
 	if (!_filename.isEmpty() && (_toCache == LoadToCacheAsWell)) {
 		if (!_fileIsOpen) {
 			_fileIsOpen = _file.open(QIODevice::WriteOnly);

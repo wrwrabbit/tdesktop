@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "overview/overview_checkbox.h"
 #include "overview/overview_layout_delegate.h"
+#include "apiwrap.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
 #include "core/ui_integration.h" // TextContext
@@ -87,10 +88,17 @@ using ::Media::ValidFrameSize;
 	return ValidFrameSize(document->dimensions, kMaxInlineArea);
 }
 
-[[nodiscard]] ClickHandlerPtr MakeUrlHandler(const QString &url) {
-	return UrlClickHandler::IsSuspicious(url)
-		? std::make_shared<HiddenUrlClickHandler>(url, url)
-		: std::make_shared<UrlClickHandler>(url, false);
+[[nodiscard]] ClickHandlerPtr MakeUrlHandler(
+		const QString &url,
+		EntityType type) {
+	return Ui::Integration::Instance().createLinkHandler(
+		EntityLinkData{
+			.text = url,
+			.data = url,
+			.type = type,
+			.shown = EntityLinkShown::Partial,
+		},
+		Ui::Text::MarkedContext());
 }
 
 void OpenPreferringIv(
@@ -433,14 +441,16 @@ ClickHandlerPtr Photo::makeOpenPhotoHandler() {
 
 void Photo::initDimensions() {
 	_maxw = 2 * st::overviewPhotoMinSize;
-	_minh = _story ? qRound(_maxw * kStoryRatio) : _maxw;
+	_minh = _story ? int(base::SafeRound(_maxw * kStoryRatio)) : _maxw;
 }
 
 int32 Photo::resizeGetHeight(int32 width) {
-	width = qMin(width, _maxw);
+	width = std::min(width, _maxw);
 	if (_width != width) {
 		_width = width;
-		_height = _story ? qRound(_width * kStoryRatio) : _width;
+		_height = _story
+			? int(base::SafeRound(_width * kStoryRatio))
+			: _width;
 	}
 	return _height;
 }
@@ -693,14 +703,16 @@ Video::~Video() = default;
 
 void Video::initDimensions() {
 	_maxw = 2 * st::overviewPhotoMinSize;
-	_minh = _story ? qRound(_maxw * kStoryRatio) : _maxw;
+	_minh = _story ? int(base::SafeRound(_maxw * kStoryRatio)) : _maxw;
 }
 
 int32 Video::resizeGetHeight(int32 width) {
-	width = qMin(width, _maxw);
+	width = std::min(width, _maxw);
 	if (_width != width) {
 		_width = width;
-		_height = _story ? qRound(_width * kStoryRatio) : _width;
+		_height = _story
+			? int(base::SafeRound(_width * kStoryRatio))
+			: _width;
 	}
 	return _height;
 }
@@ -940,6 +952,7 @@ void Video::itemDataChanged() {
 
 void Video::clearHeavyPart() {
 	_dataMedia = nullptr;
+	_videoCoverMedia = nullptr;
 }
 
 float64 Video::dataProgress() const {
@@ -2025,6 +2038,8 @@ Link::Link(
 
 	auto textWithEntities = parent->originalText();
 	QString mainUrl;
+	_page = media ? media->webpage() : nullptr;
+	auto pageShown = false;
 
 	auto text = textWithEntities.text;
 	const auto &entities = textWithEntities.entities;
@@ -2037,18 +2052,29 @@ Link::Link(
 		const auto customUrl = entity.data();
 		const auto entityText = text.mid(entity.offset(), entity.length());
 		const auto url = customUrl.isEmpty() ? entityText : customUrl;
+		const auto linkType = (type != EntityType::CustomUrl)
+			? type
+			: customUrl.isEmpty()
+			? EntityType::Url
+			: EntityType::CustomUrl;
 		if (_links.empty()) {
 			mainUrl = url;
 		}
-		_links.push_back(LinkEntry(url, entityText));
+		if (_page && !pageShown && type == EntityType::Url) {
+			pageShown = UrlMatchesWebPage(_page, url);
+		}
+		_links.push_back(LinkEntry(url, entityText, linkType));
 	}
 	if (_links.empty()) {
 		if (const auto media = parent->media()) {
 			if (const auto webpage = media->webpage()) {
 				if (!webpage->displayUrl.isEmpty()
 					&& !webpage->url.isEmpty()) {
-					_links.push_back(
-						LinkEntry(webpage->displayUrl, webpage->url));
+					_links.push_back(LinkEntry(
+						webpage->displayUrl,
+						webpage->url,
+						EntityType::Url));
+					pageShown = true;
 				}
 			}
 		}
@@ -2076,8 +2102,14 @@ Link::Link(
 		}
 	}
 
-	const auto createHandler = MakeUrlHandler;
-	_page = media ? media->webpage() : nullptr;
+	const auto mainType = _page
+		? (pageShown ? EntityType::Url : EntityType::CustomUrl)
+		: _links.empty()
+		? EntityType::Url
+		: _links.front().type;
+	const auto createHandler = [=](const QString &url) {
+		return MakeUrlHandler(url, mainType);
+	};
 	if (_page) {
 		mainUrl = _page->url;
 		if (_page->document) {
@@ -2144,8 +2176,8 @@ Link::Link(
 			th = st::linksPhotoSize;
 		}
 	}
-	_pixw = qMax(tw, 1);
-	_pixh = qMax(th, 1);
+	_pixw = std::max(tw, 1);
+	_pixh = std::max(th, 1);
 
 	if (_page) {
 		_title = _page->title;
@@ -2169,21 +2201,32 @@ Link::Link(
 	}
 	_titlew = st::semiboldFont->width(_title);
 
-	setupLinks(textWithEntities, mainUrl);
+	setupLinks(textWithEntities, mainUrl, mainType);
+
+	if (parent->hideLinks()) {
+		const auto peer = parent->history()->peer->migrateToOrMe();
+		if (!peer->barSettings()) {
+			peer->session().api().requestPeerSettings(peer);
+		}
+	}
 }
 
 void Link::setupLinks(
 		const TextWithEntities &text,
-		const QString &mainUrl) {
+		const QString &mainUrl,
+		EntityType mainType) {
 	const auto page = _page;
 	const auto ivCapable = [=](const QString &url) {
 		return Iv::PreferForUri(url)
 			|| (page && page->iv && UrlMatchesWebPage(page, url));
 	};
-	const auto makeHandler = [&](const QString &url, bool iv) {
-		return iv
+	const auto makeHandler = [&](
+			const QString &url,
+			bool iv,
+			EntityType type) {
+		return (iv && type == EntityType::Url)
 			? ClickHandlerPtr(std::make_shared<IvLink>(page, text, url))
-			: MakeUrlHandler(url);
+			: MakeUrlHandler(url, type);
 	};
 	static const auto kLinkOptions = TextParseOptions{
 		0,
@@ -2192,8 +2235,10 @@ void Link::setupLinks(
 		Qt::LayoutDirectionAuto,
 	};
 	for (auto &link : _links) {
-		const auto iv = ivCapable(link.url);
-		link.handler = makeHandler(link.url, iv);
+		const auto iv = (link.type == EntityType::CustomUrl)
+			? Iv::PreferForUri(link.url)
+			: (link.type == EntityType::Url) && ivCapable(link.url);
+		link.handler = makeHandler(link.url, iv, link.type);
 		auto markup = iv
 			? Ui::Text::IconEmoji(&st::overviewLinkIvIcon)
 			: TextWithEntities();
@@ -2213,10 +2258,13 @@ void Link::setupLinks(
 		? mainUrl
 		: (page ? page->url : QString());
 	if (!titleUrl.isEmpty()) {
-		_titlel = makeHandler(titleUrl, ivCapable(titleUrl));
+		_titlel = makeHandler(titleUrl, ivCapable(titleUrl), mainType);
 	}
 
-	if (!mainUrl.isEmpty() && ivCapable(mainUrl)) {
+	const auto mainIv = !mainUrl.isEmpty() && ivCapable(mainUrl);
+	if (mainIv && mainType != EntityType::Url) {
+		_photol = MakeUrlHandler(mainUrl, mainType);
+	} else if (mainIv) {
 		const auto previous = _photol;
 		_photol = std::make_shared<LambdaClickHandler>([=](
 				ClickContext context) {
@@ -2242,16 +2290,26 @@ void Link::initDimensions() {
 		_minh += st::semiboldFont->height;
 	}
 	if (!_text.isEmpty()) {
-		_minh += qMin(3 * st::normalFont->height, _text.countHeight(_maxw - st::linksPhotoSize - st::linksPhotoPadding));
+		_minh += std::min(
+			3 * st::normalFont->height,
+			_text.countHeight(_maxw
+				- st::linksPhotoSize
+				- st::linksPhotoPadding));
 	}
 	_minh += _links.size() * st::normalFont->height;
-	_minh = qMax(_minh, int32(st::linksPhotoSize)) + st::linksMargin.top() + st::linksMargin.bottom() + st::linksBorder;
+	_minh = std::max(_minh, int32(st::linksPhotoSize))
+		+ st::linksMargin.top()
+		+ st::linksMargin.bottom()
+		+ st::linksBorder;
 }
 
 int32 Link::resizeGetHeight(int32 width) {
-	_width = qMin(width, _maxw);
+	_width = std::min(width, _maxw);
 	int32 w = _width - st::linksPhotoSize - st::linksPhotoPadding;
 	for (const auto &link : _links) {
+		if (link.type == EntityType::CustomUrl) {
+			continue;
+		}
 		if (const auto handler = std::dynamic_pointer_cast<TextClickHandler>(
 				link.handler)) {
 			handler->setFullDisplayed(w >= link.text.maxWidth());
@@ -2263,10 +2321,17 @@ int32 Link::resizeGetHeight(int32 width) {
 		_height += st::semiboldFont->height;
 	}
 	if (!_text.isEmpty()) {
-		_height += qMin(3 * st::normalFont->height, _text.countHeight(_width - st::linksPhotoSize - st::linksPhotoPadding));
+		_height += std::min(
+			3 * st::normalFont->height,
+			_text.countHeight(_width
+				- st::linksPhotoSize
+				- st::linksPhotoPadding));
 	}
 	_height += _links.size() * st::normalFont->height;
-	_height = qMax(_height, int32(st::linksPhotoSize)) + st::linksMargin.top() + st::linksMargin.bottom() + st::linksBorder;
+	_height = std::max(_height, int32(st::linksPhotoSize))
+		+ st::linksMargin.top()
+		+ st::linksMargin.bottom()
+		+ st::linksBorder;
 	return _height;
 }
 
@@ -2294,14 +2359,19 @@ void Link::paint(Painter &p, const QRect &clip, TextSelection selection, const P
 	p.setPen(st::linksTextFg);
 	p.setFont(st::semiboldFont);
 	if (!_title.isEmpty()) {
-		if (clip.intersects(style::rtlrect(left, top, qMin(w, _titlew), st::semiboldFont->height, _width))) {
+		if (clip.intersects(style::rtlrect(
+				left,
+				top,
+				std::min(w, _titlew),
+				st::semiboldFont->height,
+				_width))) {
 			p.drawTextLeft(left, top, _width, (w < _titlew) ? st::semiboldFont->elided(_title, w) : _title);
 		}
 		top += st::semiboldFont->height;
 	}
 	p.setFont(st::msgFont);
 	if (!_text.isEmpty()) {
-		int32 h = qMin(st::normalFont->height * 3, _text.countHeight(w));
+		int32 h = std::min(st::normalFont->height * 3, _text.countHeight(w));
 		if (clip.intersects(style::rtlrect(left, top, w, h, _width))) {
 			_text.drawLeftElided(p, left, top, w, _width, 3);
 		}
@@ -2311,7 +2381,12 @@ void Link::paint(Painter &p, const QRect &clip, TextSelection selection, const P
 	p.setPen(st::windowActiveTextFg);
 	for (const auto &link : _links) {
 		const auto width = link.text.maxWidth();
-		if (clip.intersects(style::rtlrect(left, top, qMin(w, width), st::normalFont->height, _width))) {
+		if (clip.intersects(style::rtlrect(
+				left,
+				top,
+				std::min(w, width),
+				st::normalFont->height,
+				_width))) {
 			link.text.drawLeftElided(p, left, top, w, _width);
 		}
 		top += st::normalFont->height;
@@ -2452,26 +2527,40 @@ TextState Link::getState(
 		QPoint point,
 		StateRequest request) const {
 	int32 left = st::linksPhotoSize + st::linksPhotoPadding, top = st::linksMargin.top() + st::linksBorder, w = _width - left;
+	const auto linksHidden = parent()->hideLinks();
 	if (style::rtlrect(0, top, st::linksPhotoSize, st::linksPhotoSize, _width).contains(point)) {
-		return { parent(), _photol };
+		return { parent(), linksHidden ? nullptr : _photol };
 	}
 
 	if (!_title.isEmpty() && _text.isEmpty() && _links.size() == 1) {
 		top += (st::linksPhotoSize - st::semiboldFont->height - st::normalFont->height) / 2;
 	}
 	if (!_title.isEmpty()) {
-		if (style::rtlrect(left, top, qMin(w, _titlew), st::semiboldFont->height, _width).contains(point)) {
-			return { parent(), _titlel };
+		if (style::rtlrect(
+				left,
+				top,
+				std::min(w, _titlew),
+				st::semiboldFont->height,
+				_width).contains(point)) {
+			return { parent(), linksHidden ? nullptr : _titlel };
 		}
 		top += st::webPageTitleFont->height;
 	}
 	if (!_text.isEmpty()) {
-		top += qMin(st::normalFont->height * 3, _text.countHeight(w));
+		top += std::min(st::normalFont->height * 3, _text.countHeight(w));
 	}
 	for (const auto &link : _links) {
 		const auto width = link.text.maxWidth();
-		if (style::rtlrect(left, top, qMin(w, width), st::normalFont->height, _width).contains(point)) {
-			return { parent(), link.handler };
+		if (style::rtlrect(
+				left,
+				top,
+				std::min(w, width),
+				st::normalFont->height,
+				_width).contains(point)) {
+			// The chat keeps e-mails of such messages clickable.
+			const auto hidden = linksHidden
+				&& (link.type != EntityType::Email);
+			return { parent(), hidden ? nullptr : link.handler };
 		}
 		top += st::normalFont->height;
 	}
@@ -2482,9 +2571,13 @@ const style::RoundCheckbox &Link::checkboxStyle() const {
 	return st::overviewSmallCheck;
 }
 
-Link::LinkEntry::LinkEntry(const QString &url, const QString &display)
+Link::LinkEntry::LinkEntry(
+	const QString &url,
+	const QString &display,
+	EntityType type)
 : url(url)
-, display(display) {
+, display(display)
+, type(type) {
 }
 
 // Copied from inline_bot_layout_internal.
@@ -2534,7 +2627,7 @@ void Gif::initDimensions() {
 		_maxw = 0;
 	} else {
 		w = w * st::inlineMediaHeight / h;
-		_maxw = qMax(w, int32(st::inlineResultsMinWidth));
+		_maxw = std::max(w, int32(st::inlineResultsMinWidth));
 	}
 	_minh = st::inlineMediaHeight + st::inlineResultsSkip;
 }
@@ -2592,9 +2685,7 @@ void Gif::clipCallback(Media::Clip::Notification notification) {
 			} else if (_gif->ready() && !_gif->started()) {
 				const auto size = QSize(_gif->width(), _gif->height());
 				if (!ValidFrameSize(size, kMaxInlineArea)) {
-					if (!size.isEmpty()) {
-						_data->dimensions = size;
-					}
+					_inlineOverCap = true;
 					_gif.reset();
 				} else {
 					_gif->start({
@@ -2684,6 +2775,7 @@ void Gif::paint(
 	if (loaded
 		&& !_gif
 		&& !_gif.isBad()
+		&& !_inlineOverCap
 		&& CanPlayInline(document)) {
 		auto that = const_cast<Gif*>(this);
 		that->_gif = preview.makeAnimation([=](

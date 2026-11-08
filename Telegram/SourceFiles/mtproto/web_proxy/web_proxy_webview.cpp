@@ -20,7 +20,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
-#include <QtCore/QUrlQuery>
 #include <crl/crl_time.h>
 
 namespace MTP::WebProxy {
@@ -56,11 +55,7 @@ static_assert(kMaxMessageBytes >= kMaxFrameMessageBytes);
 [[nodiscard]] QString BridgeUrl(
 		const ProxyData &proxy,
 		const QString &nonce) {
-	auto result = QUrl(u"https://"_q + proxy.host);
-	result.setPath(u"/"_q);
-	auto query = QUrlQuery();
-	query.addQueryItem(u"bridge"_q, WebProxyBridgeCapability(proxy));
-	result.setQuery(query);
+	auto result = QUrl(WebProxyBridgeUrl(proxy));
 	result.setFragment(u"android="_q + nonce);
 	return result.toString(QUrl::FullyEncoded);
 }
@@ -177,7 +172,7 @@ WebviewCarrier::WebviewCarrier(
 	_window->setMessageHandler([=](Webview::Message message) {
 		handleMessage(std::move(message.text), std::move(message.sourceUrl));
 	});
-	_window->setNavigationStartHandler([=](QString url, bool newWindow) {
+	_window->setNavigationPolicyHandler([=](QString url, bool newWindow) {
 		return !newWindow && validNavigation(url);
 	});
 	_window->setNavigationDoneHandler([=](bool success) {
@@ -211,7 +206,7 @@ void WebviewCarrier::close() {
 	_callbacks = Callbacks();
 	if (_window && _window->valid()) {
 		_window->setMessageHandler(Fn<void(Webview::Message)>());
-		_window->setNavigationStartHandler([](QString, bool) {
+		_window->setNavigationPolicyHandler([](QString, bool) {
 			return false;
 		});
 		_window->setNavigationDoneHandler(nullptr);
@@ -400,7 +395,7 @@ bool WebviewCarrier::validSource(const std::string &sourceUrl) const {
 		|| url.host(QUrl::EncodeUnicode) != _proxy.host
 		|| url.port(443) != 443
 		|| !url.userInfo().isEmpty()
-		|| url.path() != u"/"_q
+		|| url.path() != WebProxyBridgePath(_proxy)
 		|| (!url.query().isEmpty()
 			&& url.query(QUrl::FullyEncoded)
 				!= expected.query(QUrl::FullyEncoded))) {

@@ -66,6 +66,20 @@ jobs:
       CP_ARCH: ${{ matrix.arch }}
 
     steps:
+      - name: Remove unused Xcode installations.
+        shell: bash
+        run: |
+          df -h /
+          keep=$(readlink -f /Applications/Xcode.app)
+          test -d "$keep/Contents/Developer"
+          for xcode in /Applications/Xcode_*.app; do
+            [ -e "$xcode" ] || continue
+            if [ "$(readlink -f "$xcode")" != "$keep" ]; then
+              sudo rm -rf "$xcode"
+            fi
+          done
+          df -h /
+
       - name: Clone.
         uses: actions/checkout@v6
         with:
@@ -105,10 +119,19 @@ jobs:
           restore-keys: |
             mac-${{ matrix.arch }}-${{ github.sha }}
 
+      - name: Select OpenSSL 3 for update signing.
+        if: steps.cache_restore.outputs.cache-hit != 'true'
+        run: |
+          brew install openssl@3
+          echo "$(brew --prefix openssl@3)/bin" >> "$GITHUB_PATH"
+
       - name: Telegram Desktop build (${{ matrix.arch }}).
         if: steps.cache_restore.outputs.cache-hit != 'true'
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          UPDATE_ED25519_PRIVATE: ${{ secrets.UPDATE_ED25519_PRIVATE }}
+          UPDATE_ES256_PRIVATE: ${{ secrets.UPDATE_ES256_PRIVATE }}
+          UPDATE_SIGNING_CONFIG: ${{ secrets.UPDATE_SIGNING_CONFIG }}
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -150,7 +173,8 @@ jobs:
         name: Upload ${{ matrix.arch }} update files.
         with:
           name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_tg
-          path: ${{ env.REPO_NAME }}/out/Release/artifact/t*macupd*
+          path: ${{ env.REPO_NAME }}/out/Release/artifact/td-update-mac-*
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
@@ -158,6 +182,7 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}${{ matrix.arch }}_app
           path: ${{ env.REPO_NAME }}/out/Release/artifact/*.zip
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         name: Upload ${{ matrix.arch }} symbols artifact.
@@ -261,10 +286,7 @@ jobs:
             cp Telegram.app.zip ../output/
           fi
           
-          # Copy DMG
-          if [ -f "tsetup.latest.dmg" ]; then
-            cp tsetup.latest.dmg ../output/
-          fi
+          cp td-setup-mac-*.dmg ../output/
           
           ls -la ../output
 
@@ -280,4 +302,5 @@ jobs:
         name: Upload universal DMG.
         with:
           name: telegram-dmg
-          path: output/tsetup.latest.dmg
+          path: output/td-setup-mac-*.dmg
+          if-no-files-found: error

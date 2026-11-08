@@ -37,6 +37,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_options.h"
 #include "ui/painter.h"
 #include "ui/unread_badge.h"
+#include "ui/unread_counter_format.h"
+#include "ui/controls/button_context_menu.h"
 #include "ui/ui_utility.h"
 #include "window/window_adaptive.h"
 #include "window/window_session_controller.h"
@@ -217,8 +219,9 @@ TopBarWidget::TopBarWidget(
 		| UpdateFlag::Rights
 		| UpdateFlag::EmojiStatus
 		| UpdateFlag::Name
+		| UpdateFlag::BarSettings
 	) | rpl::on_next([=](const Data::PeerUpdate &update) {
-		if ((update.flags & UpdateFlag::Name)
+		if ((update.flags & (UpdateFlag::Name | UpdateFlag::BarSettings))
 			&& (update.peer == titleNamePeer())) {
 			TopBarWidget::update();
 		}
@@ -372,16 +375,29 @@ bool TopBarWidget::createMenu(
 			: st::defaultPopupMenu);
 	_menu->setDestroyedCallback([
 			weak = base::make_weak(this),
-			weakButton = base::make_weak(button),
 			menu = _menu.get()] {
 		if (weak && weak->_menu == menu) {
-			if (weakButton) {
-				weakButton->setForceRippled(false);
-			}
+			weak->unrippleMenuButton();
 		}
 	});
+	_menuButton = button;
 	button->setForceRippled(true);
+	Ui::KeepHoveredWhileShown(button, _menu.get());
 	return true;
+}
+
+void TopBarWidget::unrippleMenuButton() {
+	if (const auto button = _menuButton.get()) {
+		button->setForceRippled(false);
+		Ui::SendSynteticMouseEvent(button, QEvent::MouseMove, Qt::NoButton);
+	}
+}
+
+void TopBarWidget::closeMenu() {
+	if (_menu) {
+		_menu = nullptr;
+		unrippleMenuButton();
+	}
 }
 
 void TopBarWidget::showPeerMenu() {
@@ -392,7 +408,17 @@ void TopBarWidget::showPeerMenu() {
 	const auto addAction = Ui::Menu::CreateAddActionCallback(_menu);
 	Window::FillDialogsEntryMenu(_controller, _activeChat, addAction);
 	if (_menu->empty()) {
-		_menu = nullptr;
+		closeMenu();
+	} else if (_narrowRatio > 0.) {
+		_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopLeft);
+		_menu->popup(Ui::PopupMenu::ConstrainToParentScreen(
+			_menu,
+			mapToGlobal(
+				QPoint(
+					-st::topBarMenuPosition.x()
+						- Ui::BoxShadow::ExtendFor(
+							_menu->st().shadow).left(),
+					st::topBarMenuPosition.y()))));
 	} else {
 		_menu->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 		_menu->popup(Ui::PopupMenu::ConstrainToParentScreen(
@@ -937,6 +963,13 @@ void TopBarWidget::setActiveChat(
 				update();
 			}, _activeChatLifetime);
 
+			session().changes().topicUpdates(
+				topic,
+				Data::TopicUpdate::Flag::Title
+			) | rpl::on_next([=] {
+				update();
+			}, _activeChatLifetime);
+
 			// _menuToggle visibility depends on "View topic info",
 			// "View topic info" visibility depends on activeChatCurrent.
 			_controller->activeChatChanges(
@@ -947,9 +980,7 @@ void TopBarWidget::setActiveChat(
 	}
 	updateUnreadBadge();
 	refreshInfoButton();
-	if (_menu) {
-		_menu = nullptr;
-	}
+	closeMenu();
 	updateOnlineDisplay();
 	updateControlsVisibility();
 	refreshUnreadBadge();
@@ -1139,8 +1170,10 @@ void TopBarWidget::updateControlsGeometry() {
 		+ _clear->width();
 	buttonsWidth += buttonsLeft + st::topBarActionSkip * 3;
 
-	auto widthLeft = qMin(width() - buttonsWidth, -2 * st::defaultActiveButton.width);
-	auto buttonFullWidth = qMin(-(widthLeft / 2), 0);
+	auto widthLeft = std::min(
+		width() - buttonsWidth,
+		-2 * st::defaultActiveButton.width);
+	auto buttonFullWidth = std::min(-(widthLeft / 2), 0);
 	_forward->setFullWidth(buttonFullWidth);
 	_sendNow->setFullWidth(buttonFullWidth);
 	_delete->setFullWidth(buttonFullWidth);
@@ -1250,7 +1283,19 @@ void TopBarWidget::updateControlsGeometry() {
 	}
 
 	_rightTaken = 0;
-	_menuToggle->moveToRight(_rightTaken, otherButtonsTop);
+	if (rootChatsListBar() && _activeChat.key.folder()) {
+		const auto &toggle = st::topBarMenuToggle;
+		const auto narrowLeft = (_narrowWidth - toggle.icon.width()) / 2
+			- toggle.iconPosition.x();
+		_menuToggle->moveToLeft(
+			anim::interpolate(
+				width() - _menuToggle->width(),
+				narrowLeft,
+				_narrowRatio),
+			otherButtonsTop);
+	} else {
+		_menuToggle->moveToRight(_rightTaken, otherButtonsTop);
+	}
 	if (_menuToggle->isHidden()) {
 		_rightTaken += (_menuToggle->width() - _search->width());
 	} else {
@@ -1305,10 +1350,13 @@ void TopBarWidget::updateControlsVisibility() {
 
 
 	const auto isOneColumn = _controller->adaptive().isOneColumn();
+
+	// MainWidget is already gone while the window clears its widgets.
+	const auto main = _controller->widget()->sessionContent();
 	const auto backVisible = !rootChatsListBar()
 		&& (isOneColumn
 			|| (_activeChat.section == Section::ChatsList)
-			|| !_controller->content()->stackIsEmpty());
+			|| (main && !main->stackIsEmpty()));
 	_back->setVisible(backVisible && !_chooseForReportReason);
 	_cancelChoose->setVisible(_chooseForReportReason.has_value());
 	updateInfoButtonVisibility();
@@ -1376,7 +1424,8 @@ void TopBarWidget::updateControlsVisibility() {
 	}
 	_menuToggle->setVisible(hasMenu
 		&& !_chooseForReportReason
-		&& (_narrowRatio < 1.));
+		&& (_narrowRatio < 1.
+			|| (rootChatsListBar() && _activeChat.key.folder())));
 	_infoToggle->setVisible(hasInfo
 		&& !isOneColumn
 		&& _controller->canShowThirdSection()
@@ -1800,14 +1849,9 @@ void TopBarWidget::updateUnreadBadge() {
 	const auto key = _activeChat.key;
 	const auto muted = session().data().unreadBadgeMutedIgnoreOne(key);
 	const auto counter = session().data().unreadBadgeIgnoreOne(key);
-	const auto text = [&] {
-		if (!counter) {
-			return QString();
-		}
-		return (counter > 999)
-			? u"..%1"_q.arg(counter % 100, 2, 10, QChar('0'))
-			: QString::number(counter);
-	}();
+	const auto text = counter
+		? FormatUnreadCounterShort(counter)
+		: QString();
 	_unreadBadge->setText(text, !muted);
 }
 

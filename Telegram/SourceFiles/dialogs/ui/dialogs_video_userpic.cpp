@@ -56,7 +56,7 @@ void VideoUserpic::paintLeft(
 				_peer->userpicPhotoOrigin());
 		}
 	}
-	if (!_video) {
+	if (!_video && !_video.isBad()) {
 		if (!_videoPhotoMedia) {
 			const auto photo = _peer->owner().photo(photoId);
 			if (!photo->isNull()) {
@@ -123,7 +123,7 @@ void VideoUserpic::clipCallback(Media::Clip::Notification notification) {
 	case Notification::Reinit: {
 		if (_video->state() == State::Error) {
 			_video.setBad();
-		} else if (startReady()) {
+		} else if (!startReady()) {
 			_repaint();
 		}
 	} break;

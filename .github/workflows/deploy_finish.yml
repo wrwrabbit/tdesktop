@@ -56,6 +56,8 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+
       - id: parsing_step
         name: Determine version
         run: |
@@ -210,18 +212,6 @@ jobs:
           repo: wrwrabbit/tdesktop
           path: Snap
 
-      - name: Check version consistency
-        # disabled: no version suffix in downloaded artifact filenames
-        if: false
-        run: |
-          echo "Found versions:"
-          find -name "t*" | grep -Po "\d{7}$" | sort -u
-          UNIQUE=$(find -name "t*" | grep -Po "\d{7}$" | sort -u | wc -l)
-          if [ "$UNIQUE" != "1" ]; then
-            echo More than one version downloaded
-            exit 1
-          fi
-
       - name: Resolve or Create Release
         id: resolve_release
         uses: actions/github-script@v8
@@ -257,84 +247,22 @@ jobs:
             core.setOutput('tag_name', release.tag_name);
             core.setOutput('release_name', release.name);
 
-      - name: Upload Windows x64 Files
-        uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseWindows_x64 == 'true'
+      - name: Upload versioned assets and latest aliases
+        uses: actions/github-script@v8
         with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('fs').promises;
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tportable-x64.latest.zip',
-              label: 'Windows 64 bit: Portable',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('Windows/Telegram_x64/tportable-x64.latest.zip')
-            });
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tsetup-x64.latest.exe',
-              label: 'Windows 64 bit: Installer',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('WindowsSetup/tsetup-x64.latest.exe')
-            });
-
-      - name: Upload Windows x86 Files
-        uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseWindows_x86 == 'true'
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-          script: |
-            const fs = require('fs').promises;
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tportable.latest.zip',
-              label: 'Windows 32 bit: Portable',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('Windows/Telegram_x64_x86/tportable.latest.zip')
-            });
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tsetup.latest.exe',
-              label: 'Windows 32 bit: Installer',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('WindowsSetup/tsetup.latest.exe')
-            });
-
-      - name: Upload Linux Files
-        uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseLinux == 'true'
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-          script: |
-            const fs = require('fs').promises;
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tsetup.latest.tar.xz',
-              label: 'Linux 64 bit: Binary',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('Linux/tsetup.latest.tar.xz')
-            });
-
-      - name: Upload MacOS Files
-        uses: "actions/github-script@v8"
-        if: github.event.inputs.releaseMacOS == 'true' || github.event.inputs.releaseMacOSDepot == 'true'
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-          script: |
-            const fs = require('fs').promises;
-            await github.rest.repos.uploadReleaseAsset({
-              name: 'tsetup.latest.dmg',
-              label: 'macOS 10.13+: Installer',
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: ${{ steps.resolve_release.outputs.release_id }},
-              data: await fs.readFile('MacOS/tsetup.latest.dmg')
+            const platforms = [];
+            if (${{ inputs.releaseWindows_x64 }}) platforms.push('win-x64');
+            if (${{ inputs.releaseWindows_x86 }}) platforms.push('win-x86');
+            if (${{ inputs.releaseLinux }}) platforms.push('linux-x64');
+            if (${{ inputs.releaseMacOS || inputs.releaseMacOSDepot }}) platforms.push('mac');
+            const upload = require('./Telegram/build/upload_release_assets.js');
+            await upload({
+              github, context,
+              releaseId: Number('${{ steps.resolve_release.outputs.release_id }}'),
+              version: process.env.VERSION,
+              platforms,
             });
 
       - name: Upload Snap Files

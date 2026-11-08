@@ -401,10 +401,14 @@ Fn<void(
 		};
 		if (const auto chat = peer->asChatNotMigrated()) {
 			const auto saveChatAdmin = [&](bool isAdmin) {
-				SaveChatAdmin(show, chat, user, isAdmin, done, onFail);
-				if (rank) {
-					SaveMemberRank(show, chat, user, *rank, [] {}, [] {});
-				}
+				// Sent together, the server can reject or undo either change.
+				SaveChatAdmin(show, chat, user, isAdmin, [=] {
+					if (rank) {
+						SaveMemberRank(show, chat, user, *rank, done, done);
+					} else {
+						done();
+					}
+				}, onFail);
 			};
 			if (strippedNewRights.flags
 				== chat->defaultAdminRights(user).flags) {
@@ -822,16 +826,17 @@ void ParticipantsAdditionalData::applyBannedLocally(
 	} else {
 		const auto kicked = rights.flags & ChatRestriction::ViewMessages;
 		const auto alreadyRestrictedBy = restrictedBy(participant);
-		applyParticipant(Api::ChatParticipant(
-			kicked
-				? Api::ChatParticipant::Type::Banned
-				: Api::ChatParticipant::Type::Restricted,
-			participant->id,
-			alreadyRestrictedBy
-				? peerToUser(alreadyRestrictedBy->id)
-				: participant->session().userId(),
-			std::move(rights),
-			ChatAdminRightsInfo()));
+		applyParticipant(
+			Api::ChatParticipant(
+				kicked
+					? Api::ChatParticipant::Type::Banned
+					: Api::ChatParticipant::Type::Restricted,
+				participant->id,
+				alreadyRestrictedBy
+					? peerToUser(alreadyRestrictedBy->id)
+					: participant->session().userId(),
+				std::move(rights),
+				ChatAdminRightsInfo()));
 	}
 }
 
@@ -1373,6 +1378,9 @@ auto ParticipantsBoxController::saveState() const
 	my->offset = _offset;
 	my->allLoaded = _allLoaded;
 	my->wasLoading = (_loadRequestId != 0);
+	my->groupByRole = _groupByRole.current();
+	my->adminsPreloaded = _adminsPreloaded;
+	my->wasPreloadingAdmins = (_adminsRequestId != 0);
 	if (const auto search = searchController()) {
 		my->searchState = search->saveState();
 	}
@@ -1433,11 +1441,16 @@ void ParticipantsBoxController::restoreState(
 		_additional = std::move(my->additional);
 		_offset = my->offset;
 		_allLoaded = my->allLoaded;
+		_adminsPreloaded = my->adminsPreloaded;
+		_groupByRole = my->groupByRole;
 		if (const auto search = searchController()) {
 			search->restoreState(std::move(my->searchState));
 		}
 		if (my->wasLoading) {
 			loadMoreRows();
+		}
+		if (my->wasPreloadingAdmins) {
+			preloadAdmins();
 		}
 		const auto was = _fullCountValue.current();
 		PeerListController::restoreState(std::move(state));
