@@ -966,6 +966,9 @@ void Filler::addDirectMessages() {
 }
 
 void Filler::addImportChat() {
+	if (PTG::IsFakeActive()) {
+		return;
+	}
 	const auto peer = _peer;
 	const auto navigation = _controller;
 	_addAction(
