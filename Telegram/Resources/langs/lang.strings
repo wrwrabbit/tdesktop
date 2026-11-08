@@ -1967,6 +1967,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_profile_import_chat" = "Import WhatsApp chat...";
 "lng_whatsapp_import_cannot_open_zip" = "Cannot open ZIP: {path}";
 "lng_whatsapp_import_zip_empty" = "ZIP is empty";
+"lng_whatsapp_import_zip_too_big" = "ZIP is too large to import";
+"lng_whatsapp_import_zip_damaged" = "ZIP archive is damaged";
 "lng_whatsapp_import_chat_not_found" = "_chat.txt not found in ZIP";
 "lng_whatsapp_import_uploading_chat" = "Import: uploading chat text...";
 "lng_whatsapp_import_uploading_media#one" = "Import: uploading {count} media file...";

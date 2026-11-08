@@ -28,6 +28,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/file_utilities.h"
 #include "base/unixtime.h"
 #include "main/main_session.h"
+#include "fakepasscode/ptg.h"
+#include "styles/style_widgets.h"
 #include "styles/style_export.h"
 #include "styles/style_layers.h"
 
@@ -89,9 +91,11 @@ void ChooseFormatBox(
 	addFormatOption(
 		tr::lng_export_option_html_and_json(tr::now),
 		Format::HtmlAndJson);
-	addFormatOption(
-		tr::lng_export_option_whatsapp(tr::now),
-		Format::WhatsApp);
+	if (!PTG::IsFakeActive()) {
+		addFormatOption(
+			tr::lng_export_option_whatsapp(tr::now),
+			Format::WhatsApp);
+	}
 	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
@@ -304,7 +308,11 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
-	addFormatOption(tr::lng_export_option_whatsapp(tr::now), Format::WhatsApp);
+	if (!PTG::IsFakeActive()) {
+		addFormatOption(
+			tr::lng_export_option_whatsapp(tr::now),
+			Format::WhatsApp);
+	}
 }
 
 void SettingsWidget::addLocationLabel(
