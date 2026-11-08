@@ -30,6 +30,21 @@ constexpr auto kSwipeSlow = 0.2;
 constexpr auto kMsgBareIdSwipeBack = std::numeric_limits<int64>::max() - 77;
 constexpr auto kSwipedBackSpeedRatio = 0.35;
 
+// Logarithmic damping of the swipe translation past the action threshold,
+// the same curve ElasticScroll historically used for its overscroll.
+constexpr auto kOverswipeLogA = 16.;
+constexpr auto kOverswipeLogB = 10.;
+
+[[nodiscard]] float64 DampedOverswipe(float64 translation) {
+	if (!translation) {
+		return 0.;
+	}
+	const auto scale = style::Scale() / 100.;
+	const auto value = std::abs(translation) / scale;
+	const auto result = kOverswipeLogA * log(1. + value / kOverswipeLogB);
+	return (translation > 0 ? 1. : -1.) * result * scale;
+}
+
 float64 InterpolationRatio(float64 from, float64 to, float64 result) {
 	return (result - from) / (to - from);
 };
@@ -67,12 +82,15 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 	const auto scroll = std::move(args.scroll);
 	const auto update = std::move(args.update);
 	const auto skipWheelEvent = std::move(args.skipWheelEvent);
+	const auto handoff = std::move(args.handoff);
 
 	struct UpdateArgs {
 		QPoint globalCursor;
 		QPointF position;
 		QPointF delta;
 		bool touch = false;
+		bool inverted = false;
+		bool handoff = false;
 	};
 	struct State {
 		base::unique_qptr<QObject> filter;
@@ -92,6 +110,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		bool started = false;
 		bool reached = false;
 		bool touch = false;
+		bool inverted = false;
 
 		rpl::lifetime lifetime;
 	};
@@ -119,15 +138,20 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		ratio = std::max(ratio, 0.);
 		state->data.ratio = ratio;
 		const auto overscrollRatio = std::max(ratio - 1., 0.);
-		const auto translation = int(
-			base::SafeRound(-std::min(ratio, 1.) * state->threshold)
-		) + Ui::OverscrollFromAccumulated(int(
-			base::SafeRound(-overscrollRatio * state->threshold)
-		));
+		const auto thresholdShift = -std::min(ratio, 1.) * state->threshold;
+		const auto overswipeShift = -overscrollRatio * state->threshold;
+		const auto damped = DampedOverswipe(base::SafeRound(overswipeShift));
+		const auto translation = int(base::SafeRound(thresholdShift))
+			+ int(base::SafeRound(damped));
+		const auto exactTranslation = thresholdShift
+			+ DampedOverswipe(overswipeShift);
 		state->data.msgBareId = state->finishByTopData.msgBareId;
 		state->data.translation = translation
 			* state->directionInt;
+		state->data.exactTranslation = exactTranslation
+			* state->directionInt;
 		state->data.cursorTop = state->cursorPosition.y();
+		state->data.inverted = state->inverted;
 		update(state->data);
 	};
 	const auto setOrientation = [=](std::optional<Qt::Orientation> o) {
@@ -145,7 +169,9 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 			scroll->disableScroll(isHorizontal);
 		});
 	};
-	const auto processEnd = [=](std::optional<QPointF> delta = {}) {
+	const auto processEnd = [=](
+			std::optional<QPointF> delta = {},
+			bool complete = true) {
 		if (state->orientation == Qt::Horizontal) {
 			const auto rawRatio = delta.value_or(state->delta).x()
 				/ state->threshold
@@ -156,7 +182,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 					: rawRatio,
 				0.,
 				kMaxRatio);
-			if ((ratio >= 1) && state->finishByTopData.callback) {
+			if (complete && (ratio >= 1) && state->finishByTopData.callback) {
 				Ui::PostponeCall(
 					widget,
 					state->finishByTopData.callback);
@@ -175,11 +201,27 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		state->startAt = {};
 		state->delta = {};
 	};
+	const auto handedOff = [=] {
+		return handoff.owned && handoff.owned();
+	};
+	const auto loseHandoffSwipe = [=] {
+		if (state->orientation == Qt::Horizontal) {
+			processEnd(std::nullopt, false);
+			handoff.lost();
+		}
+	};
+	const auto interrupt = [=] {
+		if (handedOff()) {
+			loseHandoffSwipe();
+		} else {
+			processEnd();
+		}
+	};
 	v::match(scroll, [](v::null_t) {
 	}, [&](const auto &scroll) {
 		scroll->scrolls() | rpl::on_next([=] {
 			if (state->orientation != Qt::Vertical) {
-				processEnd();
+				interrupt();
 			}
 		}, state->lifetime);
 	});
@@ -188,6 +230,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		update(state->data);
 	};
 	const auto updateWith = [=, generateFinish = args.init](UpdateArgs args) {
+		state->inverted = args.inverted;
 		const auto fillFinishByTop = [&] {
 			if (!args.delta.x()) {
 				return;
@@ -210,6 +253,21 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				setOrientation(Qt::Vertical);
 			}
 		};
+		if (args.handoff) {
+			if (!state->started) {
+				return;
+			} else if (!state->direction) {
+				fillFinishByTop();
+			}
+			if (state->direction
+				&& !state->orientation
+				&& !state->dontStart) {
+				setOrientation(Qt::Horizontal);
+			}
+			if (state->orientation != Qt::Horizontal) {
+				return;
+			}
+		}
 		if (!state->started || state->touch != args.touch) {
 			state->started = true;
 			state->data.reachRatio = 0.;
@@ -277,6 +335,28 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 			}
 		}
 	};
+	const auto handoffTouch = [=](not_null<QTouchEvent*> t, bool cancel) {
+		const auto &touches = t->touchPoints();
+		const auto end = (t->type() == QEvent::TouchEnd);
+		const auto swipe = handoff.swipe(t);
+		const auto horizontal = (state->orientation == Qt::Horizontal);
+		const auto delta = touches.empty()
+			? std::optional<QPointF>()
+			: (state->startAt - touches[0].pos());
+		if (swipe && delta && (end || !cancel)) {
+			updateWith({
+				.delta = *delta,
+				.touch = true,
+				.inverted = true,
+				.handoff = true,
+			});
+		}
+		if (end || (t->type() == QEvent::TouchCancel)) {
+			processEnd(delta, end && swipe);
+		} else if (horizontal && (cancel || !swipe)) {
+			loseHandoffSwipe();
+		}
+	};
 	const auto filter = [=](not_null<QEvent*> e) {
 		if (!widget->testAttribute(Qt::WA_AcceptTouchEvents)) {
 			[[maybe_unused]] int a = 0;
@@ -285,7 +365,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 		switch (type) {
 		case QEvent::Leave: {
 			if (state->orientation == Qt::Horizontal) {
-				processEnd();
+				interrupt();
 			}
 		} break;
 		case QEvent::MouseMove: {
@@ -293,7 +373,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				const auto m = static_cast<QMouseEvent*>(e.get());
 				if (std::abs(m->pos().y() - state->cursorPosition.y())
 					> QApplication::startDragDistance()) {
-					processEnd();
+					interrupt();
 				}
 			}
 		} break;
@@ -308,7 +388,12 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				break;
 			} else if (type == QEvent::TouchBegin) {
 				// Reset state in case we lost some TouchEnd.
-				processEnd();
+				if (handedOff()) {
+					handoff.lost();
+					processEnd(std::nullopt, false);
+				} else {
+					processEnd();
+				}
 			}
 			const auto &touches = t->touchPoints();
 			const auto released = [&](int index) {
@@ -321,7 +406,9 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				|| (touches.size() != (touchscreen ? 1 : 2))
 				|| (type == QEvent::TouchEnd)
 				|| (type == QEvent::TouchCancel);
-			if (cancel) {
+			if (type != QEvent::TouchBegin && handedOff()) {
+				handoffTouch(t, cancel);
+			} else if (cancel) {
 				processEnd(touches.empty()
 					? std::optional<QPointF>()
 					: (state->startAt - touches[0].pos()));
@@ -333,6 +420,7 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 					.position = touches[0].pos(),
 					.delta = state->startAt - touches[0].pos(),
 					.touch = true,
+					.inverted = true,
 				};
 				updateWith(args);
 			}
@@ -341,6 +429,10 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 				: base::EventFilterResult::Cancel;
 		} break;
 		case QEvent::Wheel: {
+			if (handedOff()) {
+				loseHandoffSwipe();
+				break;
+			}
 			const auto w = static_cast<QWheelEvent*>(e.get());
 			if (skipWheelEvent && skipWheelEvent(w)) {
 				processEnd();
@@ -359,13 +451,12 @@ void SetupSwipeHandler(SwipeHandlerArgs &&args) {
 			if (cancel) {
 				processEnd();
 			} else {
-				const auto invert = (w->inverted() ? -1 : 1);
-				const auto delta = Ui::ScrollDeltaF(w) * invert;
 				updateWith({
 					.globalCursor = w->globalPosition().toPoint(),
 					.position = QPointF(),
-					.delta = state->delta + delta * kSwipeSlow,
+					.delta = state->delta - Ui::ScrollDeltaF(w) * kSwipeSlow,
 					.touch = false,
+					.inverted = w->inverted(),
 				});
 			}
 		} break;
@@ -381,7 +472,8 @@ SwipeBackResult SetupSwipeBack(
 		not_null<Ui::RpWidget*> widget,
 		Fn<std::pair<QColor, QColor>()> colors,
 		bool mirrored,
-		bool iconMirrored) {
+		bool iconMirrored,
+		Fn<int()> centerY) {
 	struct State {
 		base::unique_qptr<Ui::RpWidget> back;
 		SwipeContextData data;
@@ -493,20 +585,23 @@ SwipeBackResult SetupSwipeBack(
 				raw->show();
 				raw->raise();
 			}
+			const auto top = centerY
+				? (centerY() - state->back->height() / 2)
+				: ((widget->height() - state->back->height()) / 2);
 			if (!mirrored) {
 				state->back->moveToLeft(
 					anim::interpolate(
 						-st::swipeBackSize * kMaxOuterOffset,
 						maxOffset - st::swipeBackSize,
 						ratio),
-					(widget->height() - state->back->height()) / 2);
+					top);
 			} else {
 				state->back->moveToLeft(
 					anim::interpolate(
 						widget->width() + st::swipeBackSize * kMaxOuterOffset,
 						widget->width() - maxOffset,
 						ratio),
-					(widget->height() - state->back->height()) / 2);
+					top);
 			}
 			state->back->update();
 		} else if (state->back) {

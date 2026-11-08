@@ -13,6 +13,7 @@ struct GeoPointLocation;
 #include "data/data_location.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
+#include "lang/lang_keys.h"
 #include "ui/basic_click_handlers.h"
 #include "history/history_location_manager.h"
 
@@ -124,22 +125,23 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	return result;
 }
 
-[[nodiscard]] bool AddNativeIvPreparedLink(
+void AddNativeIvPreparedLink(
 		TextWithEntities *text,
 		std::vector<PreparedLink> *links,
 		int from,
 		int length,
+		bool replaced,
 		QString target,
 		uint64 webpageId = 0) {
 	if (!length || target.isEmpty()) {
-		return true;
+		return;
 	}
 	const auto index = links->size() + 1;
 	if (index > std::numeric_limits<uint16>::max()) {
-		return true;
+		return;
 	}
 	auto prepared = PreparedLink();
-	if (webpageId) {
+	if (webpageId && !replaced) {
 		prepared.index = uint16(index);
 		prepared.kind = PreparedLinkKind::InstantViewPage;
 		prepared.webpageId = webpageId;
@@ -149,9 +151,12 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 	}
 	if (prepared.kind == PreparedLinkKind::RejectedRelative
 		|| prepared.kind == PreparedLinkKind::LocalFile) {
-		return true;
+		return;
 	}
-	FinalizePreparedUrlLink(&prepared, QStringView(text->text).mid(from, length));
+	// A label partly drawn replaced never shows its target.
+	FinalizePreparedUrlLink(
+		&prepared,
+		replaced ? QStringView() : QStringView(text->text).mid(from, length));
 	if (prepared.kind == PreparedLinkKind::InstantViewPage) {
 		text->entities.push_back(EntityInText(
 			EntityType::Colorized,
@@ -165,7 +170,28 @@ void SortPreparedIvRichText(PreparedIvRichText *text) {
 		length,
 		InternalLinkData(uint16(index))));
 	links->push_back(std::move(prepared));
-	return true;
+}
+
+void AddNativeIvRichPageButtonLink(
+		TextWithEntities *text,
+		std::vector<PreparedLink> *links,
+		int from,
+		int length,
+		QString data) {
+	const auto index = links->size() + 1;
+	if (index > std::numeric_limits<uint16>::max()) {
+		return;
+	}
+	text->entities.push_back(EntityInText(
+		EntityType::CustomUrl,
+		from,
+		length,
+		InternalLinkData(uint16(index))));
+	links->push_back(PreparedLink{
+		.index = uint16(index),
+		.kind = PreparedLinkKind::RichPageButton,
+		.target = std::move(data),
+	});
 }
 
 void AddNativeIvBlockAnchor(
@@ -198,6 +224,7 @@ void AddNativeIvBlockAnchor(
 	case EntityType::Email:
 	case EntityType::Phone:
 	case EntityType::BankCard:
+	case EntityType::TonAddress:
 	case EntityType::CustomUrl:
 	case EntityType::MentionName:
 	case EntityType::FormattedDate:
@@ -222,7 +249,7 @@ void RememberCanonicalInlineFormula(
 	if (!formula) {
 		return;
 	}
-	(void)state->rememberFormula(
+	state->rememberFormula(
 		MathKind::Inline,
 		formula->trimmedTex,
 		context.textSize,
@@ -230,38 +257,142 @@ void RememberCanonicalInlineFormula(
 		context.renderHeightCap);
 }
 
+[[nodiscard]] std::optional<TextWithEntities> WithDisabledInlineButtons(
+		const TextWithEntities &text) {
+	using Type = HistoryMessageMarkupButton::Type;
+	auto result = std::optional<TextWithEntities>();
+	for (auto i = 0, count = int(text.entities.size()); i != count; ++i) {
+		const auto &entity = text.entities[i];
+		if (entity.type() != EntityType::CustomEmoji) {
+			continue;
+		}
+		auto parsed = ParseInlineTextObjectEntity(entity.data());
+		const auto button = parsed
+			? std::get_if<InlineTextObjectButtonData>(&parsed->data)
+			: nullptr;
+		if (!button || button->type == Type::Disabled) {
+			continue;
+		}
+		*button = InlineTextObjectButtonData{
+			.label = std::move(button->label),
+			.type = Type::Disabled,
+			.color = button->color,
+			.link = button->link,
+		};
+		if (!result) {
+			result = text;
+		}
+		result->entities[i] = EntityInText(
+			EntityType::CustomEmoji,
+			entity.offset(),
+			entity.length(),
+			SerializeInlineTextObjectEntity(*parsed));
+	}
+	return result;
+}
+
 void AppendCanonicalNativeIvRichText(
 		const Iv::RichPage::RichText &text,
 		PreparedIvRichText *result,
 		NativeIvPrepareState *state,
 		NativeIvRichTextContext context) {
+	auto disabled = std::optional<TextWithEntities>();
+	if (state->disableButtons) {
+		disabled = WithDisabledInlineButtons(text.text);
+		state->buttonsDisabled |= disabled.has_value();
+	}
+	const auto &canonical = disabled ? *disabled : text.text;
+	// A link-styled inline button stops being an object here: its normalized
+	// label becomes real characters of this text and, when it is actionable,
+	// one ordinary rich-page link over exactly those characters. The label's
+	// dates are resolved at the same time, because a surviving FormattedDate
+	// entity would be given its own internal index by the block parser, would
+	// win over the enclosing link index, and would become a second click
+	// target inside the link.
+	auto spliced = std::optional<TextWithEntities>();
+	auto buttons = std::vector<InlineLinkButtonSpan>();
+	if (!state->editMode && TextHasInlineLinkButton(canonical)) {
+		const auto &runtime = state->result.mediaRuntime;
+		const auto quotable = IsQuotableNativeContent(state->result);
+		auto replacements = std::vector<PreparedTextReplacement>();
+		auto labelDates = std::vector<PreparedTextReplacement>();
+		spliced = canonical;
+		buttons = ExpandInlineLinkButtons(
+			&*spliced,
+			RichButtonLabelDates::Resolve,
+			runtime
+				? runtime->textContext().formattedDateFactory
+				: Ui::Text::FormattedDateFactory(),
+			quotable ? &replacements : nullptr,
+			quotable ? &labelDates : nullptr);
+		if (!replacements.empty()) {
+			state->result.linkSplices.push_back({
+				.source = &text.text,
+				.replacements = std::move(replacements),
+				.labelDates = std::move(labelDates),
+			});
+		}
+	}
+	const auto &source = spliced ? *spliced : canonical;
 	const auto shift = result->text.text.size();
-	result->text.text.append(text.text.text);
+	result->text.text.append(source.text);
 	result->text.entities.reserve(
-		result->text.entities.size() + text.text.entities.size());
-	for (const auto &entity : text.text.entities) {
-		if (context.dropClickHandlers
-			&& DropNativeIvClickHandlerEntity(entity.type())) {
+		result->text.entities.size() + source.entities.size());
+	// A date draws replaced only where a factory renders it.
+	const auto dateFactory = state->result.mediaRuntime
+		&& state->result.mediaRuntime->textContext().formattedDateFactory;
+	auto replacedRanges = ReplacedTextRanges();
+	for (const auto &entity : source.entities) {
+		if (!EntityReplacesText(entity)
+			|| (entity.type() == EntityType::FormattedDate && !dateFactory)
+			|| !entity.validForText(int(source.text.size()))) {
 			continue;
 		}
+		replacedRanges.add(
+			entity.offset(),
+			entity.offset() + entity.length());
+	}
+	replacedRanges.prepare();
+	auto linkRanges = std::vector<std::pair<int, int>>();
+	for (const auto &entity : source.entities) {
+		const auto takesLink = DropNativeIvClickHandlerEntity(entity.type());
+		if (context.dropClickHandlers && takesLink) {
+			continue;
+		} else if (EntityReplacesText(entity)
+			&& !entity.validForText(int(source.text.size()))) {
+			continue;
+		}
+		const auto offset = entity.offset();
+		const auto length = (offset < 0
+			|| entity.length() <= 0
+			|| offset >= source.text.size())
+			? 0
+			: std::min(entity.length(), int(source.text.size()) - offset);
+		const auto collect = takesLink && length && !buttons.empty();
 		if (entity.type() == EntityType::CustomUrl) {
-			if (entity.offset() < 0
-				|| entity.length() <= 0
-				|| entity.offset() >= text.text.text.size()) {
+			if (!length) {
 				continue;
 			}
-			const auto length = std::min(
-				entity.length(),
-				int(text.text.text.size()) - entity.offset());
+			const auto replaced = replacedRanges.overlaps(
+				offset,
+				offset + length);
 			const auto decoded = Iv::DecodeRichPageLinkUrl(entity.data());
-			(void)AddNativeIvPreparedLink(
+			const auto count = result->links.size();
+			AddNativeIvPreparedLink(
 				&result->text,
 				&result->links,
-				shift + entity.offset(),
+				shift + offset,
 				length,
+				replaced,
 				decoded ? decoded->url : entity.data(),
 				decoded ? decoded->webpageId : 0);
+			if (collect && result->links.size() > count) {
+				linkRanges.push_back({ offset, offset + length });
+			}
 			continue;
+		}
+		if (collect) {
+			linkRanges.push_back({ offset, offset + length });
 		}
 		RememberCanonicalInlineFormula(entity, state, context);
 		result->text.entities.push_back(EntityInText(
@@ -269,6 +400,32 @@ void AppendCanonicalNativeIvRichText(
 			entity.offset() + shift,
 			entity.length(),
 			entity.data()));
+	}
+	if (context.dropClickHandlers) {
+		return;
+	}
+	// A button span nested inside one of this text's own links keeps no link
+	// of its own: a block carries a single link index, so the inner link would
+	// close the enclosing one and everything after it would stop being a link
+	// at all. A range is recorded only for an entity that reaches the text
+	// engine with a link index of its own — a CustomUrl only when it was
+	// really registered above — so a span skipped here stays clickable
+	// through the enclosing link, exactly as the replaced object character.
+	for (auto &button : buttons) {
+		const auto till = button.offset + button.length;
+		const auto nested = ranges::any_of(linkRanges, [&](
+				std::pair<int, int> range) {
+			return (button.offset < range.second) && (range.first < till);
+		});
+		if (nested) {
+			continue;
+		}
+		AddNativeIvRichPageButtonLink(
+			&result->text,
+			&result->links,
+			shift + button.offset,
+			button.length,
+			std::move(button.data));
 	}
 }
 
@@ -353,7 +510,19 @@ void ApplyEmptyMediaCaptionPlaceholder(
 	if (!state->editMode || !block->text.text.isEmpty()) {
 		return;
 	}
-	block->editPlaceholderText = u"Caption"_q;
+	block->editPlaceholderText = tr::lng_photo_caption(tr::now);
+}
+
+[[nodiscard]] TableAlignment NativeIvButtonRowAlignment(
+		Iv::RichPage::ButtonAlignment alignment) {
+	using Alignment = Iv::RichPage::ButtonAlignment;
+	switch (alignment) {
+	case Alignment::Stretch: return TableAlignment::None;
+	case Alignment::Left: return TableAlignment::Left;
+	case Alignment::Center: return TableAlignment::Center;
+	case Alignment::Right: return TableAlignment::Right;
+	}
+	Unexpected("Alignment in NativeIvButtonRowAlignment.");
 }
 
 } // namespace
@@ -451,6 +620,7 @@ bool PrepareNativeIvPhotoBlock(
 	block.photo.caption = block.text;
 	block.photo.spoiler = data.spoiler;
 	block.photo.viewerOpen = true;
+	block.photo.editMode = state->editMode;
 	result->push_back(std::move(block));
 	return true;
 }
@@ -493,18 +663,21 @@ bool PrepareNativeIvVideoBlock(
 	block.video.media.height = CanonicalHeight(data);
 	block.video.media.spoiler = data.spoiler;
 	block.video.caption = block.text;
+	block.video.editMode = state->editMode;
 	result->push_back(std::move(block));
 	return true;
 }
 
-bool PrepareNativeIvAudioBlock(
+bool PrepareNativeIvDocumentBlock(
 		const Iv::RichPage::Block &data,
 		std::vector<PreparedBlock> *result,
 		NativeIvPrepareState *state) {
 	if (!CanonicalDocumentId(data)) {
 		return state->editMode
 			? PrepareNativeIvCanonicalPlaceholderBlock(
-				u"Audio"_q,
+				((data.kind == Iv::RichPage::BlockKind::Audio)
+					? u"Audio"_q
+					: u"File"_q),
 				data.caption,
 				data.anchorId,
 				result,
@@ -518,7 +691,7 @@ bool PrepareNativeIvAudioBlock(
 	}
 	SortPreparedIvRichText(&caption);
 	auto block = PreparedBlock();
-	block.kind = PreparedBlockKind::Audio;
+	block.kind = PreparedBlockKind::Document;
 	block.text = std::move(caption.text);
 	block.links = std::move(caption.links);
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
@@ -526,12 +699,12 @@ bool PrepareNativeIvAudioBlock(
 	block.supplementary = true;
 	block.forceTextSegment = state->editMode;
 	ApplyEmptyMediaCaptionPlaceholder(&block, state);
-	block.audio.id = GeneratePreparedMediaBlockId(state);
-	block.audio.documentId = CanonicalDocumentId(data);
-	block.audio.title = data.audioTitle;
-	block.audio.performer = data.audioPerformer;
-	block.audio.fileName = data.audioFileName;
-	block.audio.duration = data.audioDuration;
+	block.document.id = GeneratePreparedMediaBlockId(state);
+	block.document.documentId = CanonicalDocumentId(data);
+	block.document.title = data.audioTitle;
+	block.document.performer = data.audioPerformer;
+	block.document.fileName = data.fileName;
+	block.document.duration = data.audioDuration;
 	result->push_back(std::move(block));
 	return true;
 }
@@ -542,7 +715,12 @@ bool PrepareNativeIvMapBlock(
 		NativeIvPrepareState *state) {
 	const auto width = (data.width > 0) ? data.width : kDefaultMapWidth;
 	const auto height = (data.height > 0) ? data.height : kDefaultMapHeight;
-	if (data.zoom <= 0 || (!data.accessHash && !state->editMode)) {
+	const auto point = Data::LocationPoint::FromCoordinates(
+		data.latitude,
+		data.longitude);
+	if (!point
+		|| data.zoom <= 0
+		|| (!data.accessHash && !state->editMode)) {
 		return state->editMode
 			? PrepareNativeIvCanonicalPlaceholderBlock(
 				u"Map"_q,
@@ -574,10 +752,7 @@ bool PrepareNativeIvMapBlock(
 	block.map.width = width;
 	block.map.height = height;
 	block.map.zoom = data.zoom;
-	block.map.url = LocationClickHandler::Url(Data::LocationPoint(
-		data.latitude,
-		data.longitude,
-		Data::LocationPoint::NoAccessHash));
+	block.map.url = LocationClickHandler::Url(*point);
 	result->push_back(std::move(block));
 	return true;
 }
@@ -639,7 +814,41 @@ bool PrepareNativeIvGroupedMediaBlock(
 	block.anchorId = data.anchorId.isEmpty() ? std::move(anchorId) : data.anchorId;
 	block.anchorIds = std::move(preparedCaption.anchorIds);
 	block.supplementary = true;
+	block.forceTextSegment = state->editMode;
+	ApplyEmptyMediaCaptionPlaceholder(&block, state);
 	block.groupedMedia.caption = block.text;
+	block.groupedMedia.editMode = state->editMode;
+	result->push_back(std::move(block));
+	return true;
+}
+
+bool PrepareNativeIvButtonRowBlock(
+		const Iv::RichPage::Block &data,
+		std::vector<PreparedBlock> *result,
+		NativeIvPrepareState *state) {
+	if (data.buttons.empty()) {
+		return true;
+	}
+	auto block = PreparedBlock();
+	block.kind = PreparedBlockKind::ButtonRow;
+	block.flowAlignment = NativeIvButtonRowAlignment(data.buttonAlignment);
+	block.buttonRow.id = GeneratePreparedMediaBlockId(state);
+	block.buttonRow.buttons.reserve(data.buttons.size());
+	using Type = HistoryMessageMarkupButton::Type;
+	for (const auto &button : data.buttons) {
+		auto prepared = button.button;
+		if (state->disableButtons && prepared.type != Type::Disabled) {
+			prepared = HistoryMessageMarkupButton(
+				Type::Disabled,
+				prepared.text,
+				prepared.visual);
+			state->buttonsDisabled = true;
+		}
+		block.buttonRow.buttons.push_back({
+			.text = NormalizeRichButtonLabel(button.text.text),
+			.button = std::move(prepared),
+		});
+	}
 	result->push_back(std::move(block));
 	return true;
 }

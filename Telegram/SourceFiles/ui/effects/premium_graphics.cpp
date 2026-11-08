@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_premium.h"
+#include "styles/style_premium_limits.h"
 #include "styles/style_settings.h"
 #include "styles/style_window.h"
 
@@ -631,7 +632,7 @@ void AddAccountsRow(
 
 	container->sizeValue(
 	) | rpl::on_next([=](const QSize &size) {
-		const auto count = state->accounts.size();
+		const auto count = int(state->accounts.size());
 		const auto columnWidth = size.width() / count;
 		for (auto i = 0; i < count; i++) {
 			auto &account = state->accounts[i];
@@ -671,10 +672,6 @@ QGradientStops ButtonGradientStops() {
 		{ 0.6, st::premiumButtonBg2->c },
 		{ 1., st::premiumButtonBg3->c },
 	};
-}
-
-QGradientStops LockGradientStops() {
-	return ButtonGradientStops();
 }
 
 QGradientStops FullHeightGradientStops() {

@@ -56,7 +56,10 @@ public:
 
 	QRect innerGeometry() const override;
 
-	bool consumeHorizontalScroll(QPoint position, int delta) override;
+	bool consumeHorizontalScroll(
+		QPoint position,
+		int delta,
+		Qt::ScrollPhase phase) override;
 
 	void animateReaction(Ui::ReactionFlyAnimationArgs &&args) override;
 
@@ -69,6 +72,7 @@ private:
 };
 
 int WideChatWidth();
+[[nodiscard]] bool ServiceAllowsSwipeReply(not_null<const HistoryItem*> item);
 
 class ServiceMessagePainter {
 public:

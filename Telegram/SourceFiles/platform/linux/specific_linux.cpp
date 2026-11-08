@@ -11,20 +11,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/linux/base_linux_dbus_utilities.h"
+#include "base/platform/linux/base_linux_xcb_utilities.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
 #include "base/platform/linux/base_linux_app_launch_context.h"
+#include "base/platform/base_platform_process.h"
 #include "lang/lang_keys.h"
 #include "core/launcher.h"
 #include "core/sandbox.h"
 #include "core/application.h"
 #include "core/update_checker.h"
+#include "core/version.h"
 #include "data/data_location.h"
 #include "window/window_controller.h"
 #include "webview/platform/linux/webview_linux_webkitgtk.h"
-
-#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
-#include "base/platform/linux/base_linux_xcb_utilities.h"
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QSystemTrayIcon>
@@ -41,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <xdpopenuri/xdpopenuri.hpp>
 #include <xdprequest/xdprequest.hpp>
 
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -712,6 +712,31 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 #endif // !Q_OS_LINUX || Qt < 6.2.0
 }
 
+// WHY: abstract sockets have no file permissions, and another user can
+// bind a predictable socket path first, so both endpoints must verify
+// their peer before exchanging single-instance records.
+bool LocalSocketPeerAllowed(qintptr descriptor) {
+#ifdef Q_OS_LINUX
+	auto credentials = ucred();
+	auto size = socklen_t(sizeof(credentials));
+	return (descriptor >= 0)
+		&& !getsockopt(
+			int(descriptor),
+			SOL_SOCKET,
+			SO_PEERCRED,
+			&credentials,
+			&size)
+		&& (size == sizeof(credentials))
+		&& (credentials.uid == geteuid());
+#else // Q_OS_LINUX
+	auto uid = uid_t();
+	auto gid = gid_t();
+	return (descriptor >= 0)
+		&& !getpeereid(int(descriptor), &uid, &gid)
+		&& (uid == geteuid());
+#endif // !Q_OS_LINUX
+}
+
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 std::optional<bool> IsDarkMode() {
 	auto result = base::Platform::XDP::ReadSetting(
@@ -767,13 +792,11 @@ bool TrayIconSupported() {
 }
 
 bool SkipTaskbarSupported() {
-#ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	if (IsX11()) {
 		return base::Platform::XCB::IsSupportedByWM(
 			base::Platform::XCB::Connection(),
 			"_NET_WM_STATE_SKIP_TASKBAR");
 	}
-#endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 	return false;
 }
@@ -948,12 +971,28 @@ QImage DefaultApplicationIcon() {
 	return Window::Logo();
 }
 
+void ActivateThisProcess() {
+	const auto window = Core::IsAppLaunched()
+		? Core::App().activeWindow()
+		: nullptr;
+	if (window) {
+		base::Platform::ActivateThisProcessWindow(
+			window->widget()->winId());
+	}
+}
+
 QString ApplicationIconName() {
 	static const auto Result = KSandbox::isSnap()
 		? u"snap.%1."_q.arg(qEnvironmentVariable("SNAP_INSTANCE_NAME"))
 		: QGuiApplication::desktopFileName().remove(
 		u"._"_q + Core::Launcher::Instance().instanceHash());
 	return Result;
+}
+
+QString LocalizedCurrencyName(
+		const QString &currency,
+		const QString &languageId) {
+	return QString();
 }
 
 void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail) {
@@ -992,43 +1031,49 @@ void psSendToMenu(bool send, bool silent) {
 }
 
 bool linuxMoveFile(const char *from, const char *to) {
-	FILE *ffrom = fopen(from, "rb"), *fto = fopen(to, "wb");
+	auto ffrom = std::unique_ptr<FILE, int(*)(FILE*)>(
+		fopen(from, "rb"),
+		fclose);
 	if (!ffrom) {
-		if (fto) fclose(fto);
 		return false;
 	}
+	auto fto = std::unique_ptr<FILE, int(*)(FILE*)>(
+		fopen(to, "wb"),
+		fclose);
 	if (!fto) {
-		fclose(ffrom);
 		return false;
 	}
 	static const int BufSize = 65536;
 	char buf[BufSize];
-	while (size_t size = fread(buf, 1, BufSize, ffrom)) {
-		fwrite(buf, 1, size, fto);
+	while (const auto size = fread(buf, 1, BufSize, ffrom.get())) {
+		if (fwrite(buf, 1, size, fto.get()) != size) {
+			return false;
+		}
+	}
+	if (ferror(ffrom.get())
+		|| ferror(fto.get())
+		|| fflush(fto.get()) != 0) {
+		return false;
 	}
 
-	struct stat fst; // from http://stackoverflow.com/questions/5486774/keeping-fileowner-and-permissions-after-copying-file-in-c
-	//let's say this wont fail since you already worked OK on that fp
-	if (fstat(fileno(ffrom), &fst) != 0) {
-		fclose(ffrom);
-		fclose(fto);
+	struct stat fst = {}; // from http://stackoverflow.com/questions/5486774/keeping-fileowner-and-permissions-after-copying-file-in-c
+	if (fstat(fileno(ffrom.get()), &fst) != 0) {
 		return false;
 	}
 	//update to the same uid/gid
-	if (fchown(fileno(fto), fst.st_uid, fst.st_gid) != 0) {
-		fclose(ffrom);
-		fclose(fto);
+	if (fchown(fileno(fto.get()), fst.st_uid, fst.st_gid) != 0) {
 		return false;
 	}
 	//update the permissions
-	if (fchmod(fileno(fto), fst.st_mode) != 0) {
-		fclose(ffrom);
-		fclose(fto);
+	if (fchmod(fileno(fto.get()), fst.st_mode) != 0) {
 		return false;
 	}
 
-	fclose(ffrom);
-	fclose(fto);
+	const auto fromClosed = (fclose(ffrom.release()) == 0);
+	const auto toClosed = (fclose(fto.release()) == 0);
+	if (!fromClosed || !toClosed) {
+		return false;
+	}
 
 	if (unlink(from)) {
 		return false;

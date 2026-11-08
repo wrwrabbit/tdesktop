@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "boxes/share_box.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/file_utilities.h"
 #include "core/shortcuts.h"
 #include "core/click_handler_types.h"
@@ -26,14 +27,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "iv/iv_cached_media.h"
 #include "iv/iv_controller.h"
 #include "iv/iv_data.h"
+#include "iv/iv_rich_message_html_export.h"
 #include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
-#include "main/main_session.h"
 #include "main/session/session_show.h"
+#include "main/main_session.h"
 #include "media/view/media_view_open_common.h"
 #include "storage/storage_account.h"
 #include "ui/toast/toast.h"
 #include "ui/basic_click_handlers.h"
+#include "webview/webview_dialog.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_session_controller_link_info.h"
@@ -172,14 +175,15 @@ struct LocalMarkdownTarget {
 		return false;
 	}
 	auto article = Markdown::MarkdownArticle(st::defaultMarkdown);
+	article.setTextRepaintCallbacks([] {}, [](QRect) {});
 	article.setContent(content);
 	const auto width = article.maxWidth();
-	static_cast<void>(article.resizeGetHeight(width));
+	article.resizeGetHeight(width);
 	auto top = article.anchorTop(anchorId);
 	if (top < 0) {
 		const auto expansion = article.expandDetailsToAnchor(anchorId);
 		if (expansion.changed) {
-			static_cast<void>(article.resizeGetHeight(width));
+			article.resizeGetHeight(width);
 		}
 		top = article.anchorTop(anchorId);
 	}
@@ -429,7 +433,7 @@ void Shown::prepare(not_null<Data*> data, const QString &hash) {
 	const auto id = data->id();
 	const auto page = _session->data().webpage(data->pageId());
 
-	if (_markdownRuntimeUrl != id) {
+	if (_markdownRuntimeUrl != page->url) {
 		_markdownMediaRuntime = nullptr;
 		_markdownRuntimeUrl = QString();
 	}
@@ -568,46 +572,7 @@ bool Shown::activateMarkdownMedia(
 		const Markdown::MediaActivation &activation,
 		Qt::MouseButton button,
 		const QVariant &clickHandlerContext) const {
-	if (button != Qt::LeftButton && button != Qt::MiddleButton) {
-		return false;
-	}
-	switch (activation.kind) {
-	case Markdown::MediaActivationKind::None:
-		return false;
-	case Markdown::MediaActivationKind::ExternalUrl:
-		if (activation.url.isEmpty()) {
-			return false;
-		}
-		HiddenUrlClickHandler::Open(activation.url, clickHandlerContext);
-		return true;
-	case Markdown::MediaActivationKind::Embed:
-		return false;
-	case Markdown::MediaActivationKind::Photo:
-		if (!activation.photo) {
-			return false;
-		}
-		activation.photo->open(button);
-		return true;
-	case Markdown::MediaActivationKind::Document:
-		if (!activation.document) {
-			return false;
-		}
-		activation.document->open(button);
-		return true;
-	case Markdown::MediaActivationKind::OpenChannel:
-		if (!activation.channel) {
-			return false;
-		}
-		activation.channel->open(button);
-		return true;
-	case Markdown::MediaActivationKind::JoinChannel:
-		if (!activation.channel) {
-			return false;
-		}
-		activation.channel->join(button);
-		return true;
-	}
-	return false;
+	return ActivateRichMessageMedia(activation, button, clickHandlerContext);
 }
 
 bool Shown::showing(
@@ -635,14 +600,14 @@ void Shown::moveTo(not_null<Data*> data, QString hash) {
 void Shown::update(not_null<Data*> data) {
 	const auto richPage = data->richPage();
 	const auto id = data->id();
+	const auto page = _session->data().webpage(data->pageId());
 
-	if (_markdownRuntimeUrl != id) {
+	if (_markdownRuntimeUrl != page->url) {
 		_markdownMediaRuntime = nullptr;
 		_markdownRuntimeUrl = QString();
 	}
 	_id = id;
 
-	const auto page = _session->data().webpage(data->pageId());
 	auto prepared = Markdown::TryPrepareNativeInstantView({
 		.richPage = richPage,
 		.mediaRuntime = createMediaRuntime(page),
@@ -774,7 +739,7 @@ void Instance::showOpenedPage(
 		const auto tonsite = lower.startsWith("tonsite://");
 		switch (event.type) {
 		case Type::Close:
-			_shown = nullptr;
+			destroyLater(base::take(_shown));
 			break;
 		case Type::Quit:
 			Shortcuts::Launch(Shortcuts::Command::Quit);
@@ -788,7 +753,7 @@ void Instance::showOpenedPage(
 		case Type::OpenLinkExternal:
 			if (urlChecked) {
 				File::OpenUrl(event.url);
-				closeAll();
+				closeLegacyWindows();
 			} else if (tonsite) {
 				showTonSite(event.url);
 			}
@@ -865,10 +830,11 @@ void Instance::showOpenedPage(
 				}
 			}
 			requested.lastRequestedAt = crl::now();
-			session->api().request(MTPmessages_GetWebPage(
+			const auto requestId = session->api().request(MTPmessages_GetWebPage(
 				MTP_string(url),
 				MTP_int(requested.hash)
-			)).done([=](const MTPmessages_WebPage &result) {
+			)).done([=](const MTPmessages_WebPage &result, mtpRequestId id) {
+				finishInPageRequest(session, id);
 				const auto processed = processReceivedPage(
 					session,
 					requestKey,
@@ -892,9 +858,11 @@ void Instance::showOpenedPage(
 				} else {
 					UrlClickHandler::Open(event.url);
 				}
-			}).fail([=] {
+			}).fail([=](const MTP::Error &error, mtpRequestId id) {
+				finishInPageRequest(session, id);
 				UrlClickHandler::Open(event.url);
 			}).send();
+			_inPageRequested[session].emplace(requestId);
 		} break;
 		case Type::Report:
 			if (const auto controller = _shownSession->tryResolveWindow()) {
@@ -953,28 +921,44 @@ void Instance::trackSession(not_null<Main::Session*> session) {
 			closeMarkdownsForItem(session, item->fullId());
 		}
 	}, session->lifetime());
+	session->data().itemViewRefreshRequest(
+	) | rpl::on_next([=](not_null<const HistoryItem*> item) {
+		refreshRichMessageButtons(session, item->fullId());
+	}, session->lifetime());
+	session->windowAdded(
+	) | rpl::on_next([=] {
+		crl::on_main(session, [=] {
+			refreshPendingRichMessageButtons(session);
+		});
+	}, session->lifetime());
 	session->lifetime().add([=] {
 		closeSessionDataViews(session);
 		_tracking.remove(session);
 		_joining.remove(session);
 		_fullRequested.remove(session);
-		if (const auto i = _richMessageRequested.find(session)
-			; i != end(_richMessageRequested)) {
-			for (const auto &[itemId, requested] : i->second) {
-				if (requested.requestId) {
-					session->api().request(requested.requestId).cancel();
-				}
-			}
-			_richMessageRequested.erase(i);
-		}
+		cancelRichMessageRequests(session);
+		cancelInPageRequests(session);
 		_ivCache.remove(session);
 		if (_ivRequestSession == session) {
-			session->api().request(_ivRequestId).cancel();
-			_ivRequestSession = nullptr;
-			_ivRequestUri = QString();
-			_ivRequestId = 0;
+			cancelIvRequest();
 		}
 	});
+}
+
+QString Instance::activeMarkdownKey() const {
+	for (const auto &[key, controller] : _markdowns) {
+		if (controller->active()) {
+			return key;
+		}
+	}
+	return QString();
+}
+
+void Instance::takeMarkdown(const QString &key) {
+	_markdownBindings.remove(key);
+	if (auto taken = _markdowns.take(key)) {
+		destroyLater(std::move(*taken));
+	}
 }
 
 void Instance::bindMarkdown(
@@ -1001,8 +985,7 @@ void Instance::closeMarkdownsForItem(
 		}
 	}
 	for (const auto &key : keys) {
-		_markdownBindings.remove(key);
-		_markdowns.take(key);
+		takeMarkdown(key);
 	}
 }
 
@@ -1014,19 +997,71 @@ void Instance::closeMarkdownsForSession(not_null<Main::Session*> session) {
 		}
 	}
 	for (const auto &key : keys) {
-		_markdownBindings.remove(key);
-		_markdowns.take(key);
+		takeMarkdown(key);
 	}
 }
 
 void Instance::closeSessionDataViews(not_null<Main::Session*> session) {
 	closeMarkdownsForSession(session);
+	for (auto i = _htmlExports.begin(); i != _htmlExports.end();) {
+		if ((*i)->session() == session) {
+			i = _htmlExports.erase(i);
+		} else {
+			++i;
+		}
+	}
 	if (_shownSession == session) {
 		_shownSession = nullptr;
 	}
 	if (_shown && _shown->showingFrom(session)) {
-		_shown = nullptr;
+		destroyLater(base::take(_shown));
 	}
+}
+
+void Instance::cancelRichMessageRequests(not_null<Main::Session*> session) {
+	const auto i = _richMessageRequested.find(session);
+	if (i == end(_richMessageRequested)) {
+		return;
+	}
+	for (const auto &[itemId, requested] : i->second) {
+		if (requested.requestId) {
+			session->api().request(requested.requestId).cancel();
+		}
+	}
+	_richMessageRequested.erase(i);
+}
+
+void Instance::finishInPageRequest(
+		not_null<Main::Session*> session,
+		mtpRequestId requestId) {
+	const auto i = _inPageRequested.find(session);
+	if (i == end(_inPageRequested)) {
+		return;
+	}
+	i->second.remove(requestId);
+	if (i->second.empty()) {
+		_inPageRequested.erase(i);
+	}
+}
+
+void Instance::cancelInPageRequests(not_null<Main::Session*> session) {
+	const auto i = _inPageRequested.find(session);
+	if (i == end(_inPageRequested)) {
+		return;
+	}
+	for (const auto requestId : i->second) {
+		session->api().request(requestId).cancel();
+	}
+	_inPageRequested.erase(i);
+}
+
+void Instance::cancelIvRequest() {
+	const auto session = base::take(_ivRequestSession);
+	if (!session) {
+		return;
+	}
+	session->api().request(base::take(_ivRequestId)).cancel();
+	_ivRequestUri = QString();
 }
 
 void Instance::openWithIvPreferred(
@@ -1062,7 +1097,7 @@ void Instance::openWithIvPreferred(
 	trackSession(session);
 	const auto hash = (parts.size() > 1) ? parts[1] : u""_q;
 	const auto url = parts[0];
-	auto &cache = _ivCache[session];
+	const auto &cache = _ivCache[session];
 	if (const auto i = cache.find(url); i != end(cache)) {
 		const auto page = i->second;
 		if (page && page->iv) {
@@ -1078,15 +1113,12 @@ void Instance::openWithIvPreferred(
 		return;
 	} else if (_ivRequestSession == session.get() && _ivRequestUri == uri) {
 		return;
-	} else if (_ivRequestId) {
-		_ivRequestSession->api().request(_ivRequestId).cancel();
 	}
+	cancelIvRequest();
 	const auto finish = [=](WebPageData *page) {
 		Expects(_ivRequestSession == session);
 
-		_ivRequestId = 0;
-		_ivRequestUri = QString();
-		_ivRequestSession = nullptr;
+		cancelIvRequest();
 		_ivCache[session][url] = page;
 		if (page && page->iv) {
 			this->showOpenedPage(session, page->iv.get(), hash, false);
@@ -1131,7 +1163,7 @@ void Instance::showTonSite(
 		const auto tonsite = lower.startsWith("tonsite://");
 		switch (event.type) {
 		case Type::Close:
-			_tonSite = nullptr;
+			destroyLater(base::take(_tonSite));
 			break;
 		case Type::Quit:
 			Shortcuts::Launch(Shortcuts::Command::Quit);
@@ -1139,7 +1171,7 @@ void Instance::showTonSite(
 		case Type::OpenLinkExternal:
 			if (urlChecked) {
 				File::OpenUrl(event.url);
-				closeAll();
+				closeLegacyWindows();
 			} else if (tonsite) {
 				showTonSite(event.url);
 			}
@@ -1174,7 +1206,7 @@ bool Instance::MatchesRichMessageGeneration(
 }
 
 void Instance::resolveRichMessage(
-		not_null<Window::SessionController*> controller,
+		not_null<Main::Session*> session,
 		not_null<HistoryItem*> item,
 		RichMessageResolved done) {
 	if (const auto page = item->fullRichPage()) {
@@ -1186,7 +1218,6 @@ void Instance::resolveRichMessage(
 		done(richPage);
 		return;
 	}
-	const auto session = &controller->session();
 	const auto itemId = item->fullId();
 	const auto generation = CaptureRichMessageGeneration(item);
 	trackSession(session);
@@ -1235,13 +1266,109 @@ void Instance::resolveRichMessage(
 	}).send();
 }
 
+void Instance::exportRichMessageHtml(
+		not_null<Window::SessionController*> controller,
+		FullMsgId itemId) {
+	if (Core::App().settings().askDownloadPath()) {
+		const auto weak = base::make_weak(controller);
+		const auto initialPath = [] {
+			const auto path = Core::App().settings().downloadPath();
+			if (!path.isEmpty() && path != FileDialog::Tmp()) {
+				return path.left(path.size()
+					- (path.endsWith(QChar('/')) ? 1 : 0));
+			}
+			return QString();
+		}();
+		FileDialog::GetFolder(
+			controller->window().widget().get(),
+			tr::lng_download_path_choose(tr::now),
+			initialPath,
+			[=](QString &&result) {
+				const auto strong = weak.get();
+				if (!strong || result.isEmpty()) {
+					return;
+				}
+				Core::App().iv().exportRichMessageHtml(
+					strong,
+					itemId,
+					(result.endsWith(QChar('/'))
+						? result
+						: (result + QChar('/'))));
+			});
+		return;
+	}
+	const auto session = &controller->session();
+	const auto configured = Core::App().settings().downloadPath();
+	exportRichMessageHtml(
+		controller,
+		itemId,
+		(configured.isEmpty()
+			? File::DefaultDownloadPath(session)
+			: (configured == FileDialog::Tmp())
+			? session->local().tempDirectory()
+			: configured));
+}
+
+void Instance::exportRichMessageHtml(
+		not_null<Window::SessionController*> controller,
+		FullMsgId itemId,
+		const QString &basePath) {
+	const auto session = &controller->session();
+	const auto item = session->data().message(itemId);
+	if (basePath.isEmpty() || !item) {
+		return;
+	}
+	eraseSettledHtmlExports();
+	for (const auto &existing : _htmlExports) {
+		if (existing->exporting(itemId)) {
+			return;
+		}
+	}
+	const auto weak = base::make_weak(controller);
+	trackSession(session);
+	resolveRichMessage(session, item, [=](
+			std::shared_ptr<const RichPage> page) {
+		const auto item = session->data().message(itemId);
+		if (!page && item) {
+			const auto full = item->fullRichPage();
+			page = full ? full : item->richPage();
+		}
+		if (!item || !page) {
+			if (const auto strong = weak.get()) {
+				strong->showToast(tr::lng_export_html_failed(tr::now));
+			}
+			return;
+		}
+		auto task = std::make_unique<RichMessageHtmlExport>(
+			item,
+			std::move(page),
+			basePath,
+			weak,
+			[this] { eraseSettledHtmlExports(); });
+		const auto raw = task.get();
+		_htmlExports.push_back(std::move(task));
+		raw->start();
+	});
+}
+
+void Instance::eraseSettledHtmlExports() {
+	for (auto i = _htmlExports.begin(); i != _htmlExports.end();) {
+		if ((*i)->settled()) {
+			i = _htmlExports.erase(i);
+		} else {
+			++i;
+		}
+	}
+}
+
 void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
 		QString initialFragment) {
 	const auto weak = base::make_weak(controller);
 	const auto itemId = item->fullId();
-	resolveRichMessage(controller, item, [=](std::shared_ptr<const RichPage> page) {
+	resolveRichMessage(&controller->session(), item, [=](
+			std::shared_ptr<const RichPage> page) {
 		const auto strong = weak.get();
 		const auto current = strong
 			? strong->session().data().message(itemId)
@@ -1264,13 +1391,18 @@ void Instance::showRichMessage(
 		not_null<Window::SessionController*> controller,
 		not_null<HistoryItem*> item,
 		std::shared_ptr<const RichPage> richPage,
-		QString initialFragment) {
-	if (Platform::IsMac()) {
-		Core::App().hideMediaView();
-	}
+		QString initialFragment,
+		bool refresh) {
 	const auto session = &controller->session();
 	const auto itemId = item->fullId();
 	const auto key = RichMessageKey(itemId);
+	if (refresh) {
+		if (!_markdowns.contains(key)) {
+			return;
+		}
+	} else if (Platform::IsMac()) {
+		Core::App().hideMediaView();
+	}
 	const auto title = item->history()->peer->name();
 	auto clickHandlerContext = ClickHandlerContext();
 	clickHandlerContext.sessionWindow = controller;
@@ -1285,12 +1417,18 @@ void Instance::showRichMessage(
 		[=](QString context) {
 			JoinRichMessageChannel(session, context);
 		});
+	const auto richLimits = ResolveRichMessageLimits(session);
 	auto prepared = Markdown::TryPrepareNativeInstantView({
 		.richPage = richPage,
 		.mediaRuntime = std::move(mediaRuntime),
+		.tableRenderLimits = Markdown::PrepareTableRenderLimitsForRichMessage(
+			richLimits),
+		.disableButtons = item->hideLinks(),
 	});
 	if (!prepared.supported()) {
-		Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		if (!refresh) {
+			Ui::Toast::Show(tr::lng_iv_not_supported(tr::now));
+		}
 		return;
 	}
 	if (!initialFragment.isEmpty()
@@ -1335,8 +1473,7 @@ void Instance::showRichMessage(
 			using Type = Markdown::Event::Type;
 			switch (event.type) {
 			case Type::Close:
-				_markdownBindings.remove(key);
-				_markdowns.take(key);
+				takeMarkdown(key);
 				break;
 			case Type::Quit:
 				Shortcuts::Launch(Shortcuts::Command::Quit);
@@ -1352,6 +1489,11 @@ void Instance::showRichMessage(
 			}
 		}, controller->lifetime());
 		i = _markdowns.emplace(key, std::move(controller)).first;
+	} else if (refresh) {
+		i->second->update(
+			std::move(prepared.content),
+			title,
+			std::move(options));
 	} else {
 		i->second->show(
 			std::move(prepared.content),
@@ -1359,7 +1501,62 @@ void Instance::showRichMessage(
 			std::move(options));
 	}
 	bindMarkdown(key, session, itemId);
-	i->second->activate();
+	if (prepared.buttonsDisabled) {
+		item->setHasHiddenLinks(true);
+		auto &binding = _markdownBindings[key];
+		binding.window = controller;
+		binding.disabledButtonsPage = std::move(richPage);
+	}
+	if (!refresh) {
+		i->second->activate();
+	}
+}
+
+void Instance::refreshRichMessageButtons(
+		not_null<Main::Session*> session,
+		FullMsgId itemId) {
+	if (_markdownBindings.empty()) {
+		return;
+	}
+	const auto i = _markdownBindings.find(RichMessageKey(itemId));
+	if (i == end(_markdownBindings)
+		|| i->second.session != session.get()
+		|| !i->second.disabledButtonsPage) {
+		return;
+	}
+	const auto item = session->data().message(itemId);
+	auto window = i->second.window.get();
+	if (!window) {
+		for (const auto &live : session->windows()) {
+			if (!window || live->isPrimary()) {
+				window = live;
+			}
+		}
+	}
+	if (!item || !window || item->hideLinks()) {
+		return;
+	}
+	const auto page = i->second.disabledButtonsPage;
+	showRichMessage(
+		not_null{ window },
+		not_null{ item },
+		page,
+		QString(),
+		true);
+}
+
+void Instance::refreshPendingRichMessageButtons(
+		not_null<Main::Session*> session) {
+	auto pending = std::vector<FullMsgId>();
+	for (const auto &[key, binding] : _markdownBindings) {
+		if (binding.session == session.get()
+			&& binding.disabledButtonsPage) {
+			pending.push_back(binding.itemId);
+		}
+	}
+	for (const auto &itemId : pending) {
+		refreshRichMessageButtons(session, itemId);
+	}
 }
 
 bool Instance::showMarkdown(
@@ -1389,8 +1586,7 @@ bool Instance::showMarkdown(
 				using Type = Markdown::Event::Type;
 				switch (event.type) {
 				case Type::Close:
-					_markdownBindings.remove(target.key);
-					_markdowns.take(target.key);
+					takeMarkdown(target.key);
 					break;
 				case Type::Quit:
 					Shortcuts::Launch(Shortcuts::Command::Quit);
@@ -1580,7 +1776,7 @@ void Instance::processOpenChannel(const QString &context) {
 		if (channel->isLoaded()) {
 			if (const auto controller = _shownSession->tryResolveWindow(channel)) {
 				controller->showPeerHistory(channel);
-				_shown = nullptr;
+				destroyLater(base::take(_shown));
 			}
 		} else if (const auto username = ResolveNativeIvChannelUsername(
 				channel->username(),
@@ -1589,7 +1785,7 @@ void Instance::processOpenChannel(const QString &context) {
 				controller->showPeerByLink({
 					.usernameOrId = username,
 				});
-				_shown = nullptr;
+				destroyLater(base::take(_shown));
 			}
 		}
 	}
@@ -1619,24 +1815,28 @@ void Instance::processJoinChannel(const QString &context) {
 }
 
 bool Instance::hasActiveWindow(not_null<Main::Session*> session) const {
-	return _shown && _shown->activeFor(session);
+	if (_shown && _shown->activeFor(session)) {
+		return true;
+	}
+	const auto i = _markdownBindings.find(activeMarkdownKey());
+	return (i != end(_markdownBindings))
+		&& (i->second.session == session.get());
 }
 
 bool Instance::closeActive() {
 	if (_shown && _shown->active()) {
-		_shown = nullptr;
+		destroyLater(base::take(_shown));
 		return true;
 	} else if (_tonSite && _tonSite->active()) {
-		_tonSite = nullptr;
+		destroyLater(base::take(_tonSite));
 		return true;
 	}
-	for (auto &[key, controller] : _markdowns) {
-		if (controller->active()) {
-			_markdowns.take(key);
-			return true;
-		}
+	const auto key = activeMarkdownKey();
+	if (key.isEmpty()) {
+		return false;
 	}
-	return false;
+	takeMarkdown(key);
+	return true;
 }
 
 bool Instance::minimizeActive() {
@@ -1647,12 +1847,56 @@ bool Instance::minimizeActive() {
 		_tonSite->minimize();
 		return true;
 	}
-	return false;
+	const auto i = _markdowns.find(activeMarkdownKey());
+	if (i == end(_markdowns)) {
+		return false;
+	}
+	i->second->minimize();
+	return true;
+}
+
+void Instance::closeLegacyWindows() {
+	destroyLater(base::take(_shown));
+	destroyLater(base::take(_tonSite));
 }
 
 void Instance::closeAll() {
-	_shown = nullptr;
-	_tonSite = nullptr;
+	while (!_richMessageRequested.empty()) {
+		cancelRichMessageRequests(_richMessageRequested.front().first);
+	}
+	while (!_inPageRequested.empty()) {
+		cancelInPageRequests(_inPageRequested.front().first);
+	}
+	cancelIvRequest();
+	closeLegacyWindows();
+	_markdownBindings.clear();
+	for (auto &[_, controller] : base::take(_markdowns)) {
+		destroyLater(std::move(controller));
+	}
+}
+
+void Instance::destroyLater(std::shared_ptr<void> object) {
+	if (!object) {
+		return;
+	} else if (!Webview::InsideBlockingPopup()) {
+		// Destroyed right here, `object` goes out of scope.
+		return;
+	}
+
+	// A blocking popup may have been opened from inside a webview callback,
+	// so the frames of that callback, and the closures owning them, are
+	// still on the stack below the popup. Destroy the object only from a
+	// clean stack, after the popup is finished.
+	_closing.push_back(std::move(object));
+	if (_closing.size() > 1) {
+		return;
+	}
+	const auto weak = base::make_weak(this);
+	Webview::RunWhenBlockingPopupFinished([=] {
+		if (const auto strong = weak.get()) {
+			base::take(strong->_closing);
+		}
+	});
 }
 
 bool PreferForUri(const QString &uri) {

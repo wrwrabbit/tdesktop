@@ -32,17 +32,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_account.h"
 #include "storage/storage_facade.h"
 #include "data/components/credits.h"
+#include "data/components/ephemeral_messages.h"
 #include "data/components/factchecks.h"
 #include "data/components/gift_auctions.h"
 #include "data/components/location_pickers.h"
 #include "data/components/passkeys.h"
 #include "data/components/promo_suggestions.h"
 #include "data/components/recent_inline_bots.h"
+#include "data/components/recent_money_recipients.h"
 #include "data/components/recent_peers.h"
 #include "data/components/recent_shared_media_gifts.h"
 #include "data/components/scheduled_messages.h"
 #include "data/components/sponsored_messages.h"
 #include "data/components/top_peers.h"
+#include "data/components/welcome_messages.h"
 #include "settings/settings_faq_suggestions.h"
 #include "settings/settings_privacy_security_helpers.h"
 #include "settings/settings_recent_searches.h"
@@ -51,6 +54,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_download_manager.h"
 #include "data/stickers/data_stickers.h"
+#include "wallet/wallet_panel.h"
+#include "wallet/wallet_session.h"
 #include "window/window_session_controller.h"
 #include "window/window_controller.h"
 #include "window/window_lock_widgets.h"
@@ -59,6 +64,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_helper.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
+#include "tgw/tgw_storage.h"
 #include "ui/text/text_utilities.h"
 #include "ui/layers/generic_box.h"
 #include "styles/style_layers.h"
@@ -119,9 +125,12 @@ Session::Session(
 , _sendAsPeers(std::make_unique<SendAsPeers>(this))
 , _attachWebView(std::make_unique<InlineBots::AttachWebView>(this))
 , _recentPeers(std::make_unique<Data::RecentPeers>(this))
+, _recentMoneyRecipients(std::make_unique<Data::RecentMoneyRecipients>(this))
 , _recentSharedGifts(std::make_unique<Data::RecentSharedMediaGifts>(this))
 , _giftAuctions(std::make_unique<Data::GiftAuctions>(this))
 , _scheduledMessages(std::make_unique<Data::ScheduledMessages>(this))
+, _welcomeMessages(std::make_unique<Data::WelcomeMessages>(this))
+, _ephemeralMessages(std::make_unique<Data::EphemeralMessages>(this))
 , _sponsoredMessages(std::make_unique<Data::SponsoredMessages>(this))
 , _topPeers(std::make_unique<Data::TopPeers>(this, Data::TopPeerType::Chat))
 , _topBotApps(
@@ -133,6 +142,7 @@ Session::Session(
 , _factchecks(std::make_unique<Data::Factchecks>(this))
 , _locationPickers(std::make_unique<Data::LocationPickers>())
 , _credits(std::make_unique<Data::Credits>(this))
+, _wallet(std::make_unique<Wallet::Session>(this))
 , _promoSuggestions(std::make_unique<Data::PromoSuggestions>(this, [=] {
 	using State = Data::SetupEmailState;
 	if (_promoSuggestions->setupEmailState() == State::Setup
@@ -143,16 +153,22 @@ Session::Session(
 			// base::call_delayed(5000, [=] {
 				Core::App().lockBySetupEmail();
 			});
+			const auto weak = base::make_weak(this);
 			const auto unlockLifetime = std::make_shared<rpl::lifetime>();
 			_promoSuggestions->setupEmailStateValue(
 			) | rpl::filter([](Data::SetupEmailState s) {
 				return s == Data::SetupEmailState::None;
-			}) | rpl::take(1) | rpl::on_next(crl::guard(this, [=] {
+			}) | rpl::take(1) | rpl::on_next_done([=] {
+				unlockLifetime->destroy();
+				if (!weak) {
+					return;
+				}
 				Core::App().unlockSetupEmail();
 				_settings->setSetupEmailState(State::None);
 				saveSettingsDelayed(200);
+			}, [=] {
 				unlockLifetime->destroy();
-			}), *unlockLifetime);
+			}, *unlockLifetime);
 		} else {
 			_settings->setSetupEmailState(
 				_promoSuggestions->setupEmailState());
@@ -264,6 +280,7 @@ Session::Session(
 	_api->requestNotifySettings(MTP_inputNotifyBroadcasts());
 
 	Core::App().downloadManager().trackSession(this);
+	Tgw::StartStorage(this);
 
 	appConfig().value(
 	) | rpl::on_next([=] {
@@ -285,12 +302,23 @@ void Session::appConfigRefreshed() {
 		u"premium_purchase_blocked"_q,
 		true);
 #endif // OS_MAC_STORE
+
+	_messagePrimaryEditedDate = config.get<bool>(
+		u"message_primary_edited_date"_q,
+		false);
 }
 
 void Session::setTmpPassword(const QByteArray &password, TimeId validUntil) {
 	if (_tmpPassword.isEmpty() || validUntil > _tmpPasswordValidUntil) {
 		_tmpPassword = password;
 		_tmpPasswordValidUntil = validUntil;
+	}
+}
+
+void Session::dropTmpPassword(const QByteArray &password) {
+	if (_tmpPassword == password) {
+		_tmpPassword = QByteArray();
+		_tmpPasswordValidUntil = 0;
 	}
 }
 
@@ -303,12 +331,14 @@ QByteArray Session::validTmpPassword() const {
 
 // Can be called only right before ~Session.
 void Session::finishLogout() {
+	Wallet::CloseWallet(this);
 	unlockTerms();
 	data().clear();
 	data().clearLocalStorage();
 }
 
 Session::~Session() {
+	Wallet::CloseWallet(this);
 	unlockTerms();
 	data().clear();
 	ClickHandler::clearActive();
@@ -529,6 +559,7 @@ void Session::addWindow(not_null<Window::SessionController*> controller) {
 	) | rpl::map([=](Dialogs::Key chat) {
 		return chat.peer();
 	}) | rpl::distinct_until_changed());
+	_windowAdded.fire({});
 }
 
 bool Session::uploadsInProgress() const {
@@ -586,6 +617,10 @@ void Session::uploadsStop() {
 auto Session::windows() const
 -> const base::flat_set<not_null<Window::SessionController*>> & {
 	return _windows;
+}
+
+rpl::producer<> Session::windowAdded() const {
+	return _windowAdded.events();
 }
 
 Window::SessionController *Session::tryResolveWindow(

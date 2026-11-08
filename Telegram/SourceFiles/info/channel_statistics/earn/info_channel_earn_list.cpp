@@ -16,7 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unixtime.h"
 #include "boxes/gift_premium_box.h"
 #include "boxes/peers/edit_peer_color_box.h" // AddLevelBadge.
-#include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
 #include "core/ui_integration.h" // TextContext.
 #include "data/components/credits.h"
@@ -25,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_web_page.h"
 #include "data/data_user.h"
-#include "data/stickers/data_custom_emoji.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "history/view/controls/history_view_webpage_processor.h"
 #include "info/bot/starref/info_bot_starref_join_widget.h"
@@ -56,6 +54,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "ui/rect.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/peer_bubble.h"
@@ -67,10 +66,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_layers.h"
+#include "styles/style_premium.h"
 #include "styles/style_settings.h"
 #include "styles/style_statistics.h"
-#include "styles/style_credits.h"
-#include "styles/style_window.h" // mainMenuToggleFourStrokes.
 
 #include <QtWidgets/QApplication>
 
@@ -88,7 +86,11 @@ void ShowMenu(not_null<Ui::GenericBox*> box, const QString &text) {
 	const auto menu = Ui::CreateChild<Ui::PopupMenu>(box.get());
 	menu->addAction(tr::lng_context_copy_link(tr::now), [=] {
 		TextUtilities::SetClipboardText(TextForMimeData::Simple(text));
-		box->uiShow()->showToast(tr::lng_background_link_copied(tr::now));
+		box->uiShow()->showToast({
+			.text = { tr::lng_background_link_copied(tr::now) },
+			.iconLottie = u"toast/voip_invite"_q,
+			.iconLottieSize = st::toastLottieIconSize,
+		});
 	});
 	menu->popup(QCursor::pos());
 }
@@ -169,25 +171,13 @@ void AddRecipient(not_null<Ui::GenericBox*> box, const TextWithEntities &t) {
 	}, container->lifetime());
 	container->setClickedCallback([=] {
 		QGuiApplication::clipboard()->setText(t.text);
-		box->showToast(tr::lng_text_copied(tr::now));
+		box->showToast({
+			.text = { tr::lng_text_copied(tr::now) },
+			.iconLottie = u"toast/copy"_q,
+			.iconLottieSize = st::toastLottieIconSize,
+		});
 	});
 }
-
-#if 0
-[[nodiscard]] TextWithEntities EmojiCurrency(
-		not_null<Main::Session*> session) {
-	auto emoji = TextWithEntities{
-		.text = (QString(QChar(0xD83D)) + QChar(0xDC8E)),
-	};
-	if (const auto e = Ui::Emoji::Find(emoji.text)) {
-		const auto sticker = session->emojiStickersPack().stickerForEmoji(e);
-		if (sticker.document) {
-			emoji = Data::SingleCustomEmoji(sticker.document);
-		}
-	}
-	return emoji;
-}
-#endif
 
 [[nodiscard]] QString FormatDate(const QDateTime &date) {
 	return tr::lng_group_call_starts_short_date(
@@ -433,7 +423,7 @@ void InnerWidget::fill() {
 				auto emojiHelper = Ui::Text::CustomEmojiHelper();
 				const auto bigCurrencyIcon = emojiHelper.paletteDependent({
 					.factory = [=] {
-						return Ui::Earn::IconCurrencyColored(
+						return Ui::Earn::IconCurrencyTwoTone(
 							st::boxTitle.style.font,
 							st::currencyFg->c);
 					}, .margin = st::channelEarnCurrencyLearnMargins });
@@ -1411,7 +1401,7 @@ void InnerWidget::fill() {
 			phrase());
 
 		button->toggleOn(rpl::single(
-			data.switchedOff
+			_state.currencyEarn.switchedOff
 		) | rpl::then(toggled->events()));
 		button->setToggleLocked(isLocked);
 
@@ -1504,7 +1494,7 @@ void AddEmojiToMajor(
 		auto helper = Ui::Text::CustomEmojiHelper();
 		auto icon = helper.paletteDependent({
 			.factory = [=] {
-				return Ui::Earn::IconCurrencyColored(
+				return Ui::Earn::IconCurrencyTwoTone(
 					st.style.font,
 					!isIn
 					? st::currencyFg->c

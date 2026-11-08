@@ -24,6 +24,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
 #include "fakepasscode/log/fake_log.h"
 FakePasscodeBox::FakePasscodeBox(
         QWidget*,
@@ -155,22 +156,22 @@ void FakePasscodeBox::paintEvent(QPaintEvent *e) {
     Painter p(this);
 
     int32 w = st::boxWidth - st::boxPadding.left() * 1.5;
-    int32 abouty = (_passwordHint->isHidden() ? ((_reenterPasscode->isHidden() ? (_oldPasscode->y()) : _reenterPasscode->y()) + st::passcodeSkip) : _passwordHint->y()) + _oldPasscode->height() + st::passcodeLittleSkip + st::passcodeAboutSkip;
+    int32 abouty = (_passwordHint->isHidden() ? ((_reenterPasscode->isHidden() ? (_oldPasscode->y()) : _reenterPasscode->y()) + st::boxLittleSkip) : _passwordHint->y()) + _oldPasscode->height() + st::boxLittleSkip + st::aboutSkip;
     p.setPen(st::boxTextFg);
     _about.drawLeft(p, st::boxPadding.left(), abouty, w, width());
 
     if (!_hintText.isEmpty() && _oldError.isEmpty()) {
-        _hintText.drawLeftElided(p, st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height() + ((st::passcodeTextLine - st::normalFont->height) / 2), w, width(), 1, style::al_topleft);
+        _hintText.drawLeftElided(p, st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height() + ((st::boxTextStyle.lineHeight - st::normalFont->height) / 2), w, width(), 1, style::al_topleft);
     }
 
     if (!_oldError.isEmpty()) {
         p.setPen(st::boxTextFgError);
-        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::passcodeTextLine), _oldError, style::al_left);
+        p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::boxTextStyle.lineHeight), _oldError, style::al_left);
     }
 
     if (!_newError.isEmpty()) {
         p.setPen(st::boxTextFgError);
-        p.drawText(QRect(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height(), w, st::passcodeTextLine), _newError, style::al_left);
+        p.drawText(QRect(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height(), w, st::boxTextStyle.lineHeight), _newError, style::al_left);
     }
 }
 
@@ -180,15 +181,15 @@ void FakePasscodeBox::resizeEvent(QResizeEvent *e) {
     const auto has = currentlyHave();
     int32 w = st::boxWidth - st::boxPadding.left() - st::boxPadding.right();
     _oldPasscode->resize(w, _oldPasscode->height());
-    _oldPasscode->moveToLeft(st::boxPadding.left(), st::passcodePadding.top());
+    _oldPasscode->moveToLeft(st::boxPadding.left(), st::boxPadding.top());
     _newPasscode->resize(w, _newPasscode->height());
-    _newPasscode->moveToLeft(st::boxPadding.left(), _oldPasscode->y() + ((_turningOff || has) ? (_oldPasscode->height() + st::passcodeTextLine) : 0));
+    _newPasscode->moveToLeft(st::boxPadding.left(), _oldPasscode->y() + ((_turningOff || has) ? (_oldPasscode->height() + st::boxTextStyle.lineHeight) : 0));
     _reenterPasscode->resize(w, _reenterPasscode->height());
-    _reenterPasscode->moveToLeft(st::boxPadding.left(), _newPasscode->y() + _newPasscode->height() + st::passcodeLittleSkip);
+    _reenterPasscode->moveToLeft(st::boxPadding.left(), _newPasscode->y() + _newPasscode->height() + st::boxLittleSkip);
     _passwordName->resize(w, _passwordName->height());
-    _passwordName->moveToLeft(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height() + st::passcodeSkip);
+    _passwordName->moveToLeft(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height() + st::boxMediumSkip);
     _passwordHint->resize(w, _passwordHint->height());
-    _passwordHint->moveToLeft(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height() + st::passcodeSkip);
+    _passwordHint->moveToLeft(st::boxPadding.left(), _reenterPasscode->y() + _reenterPasscode->height() + st::boxMediumSkip);
 }
 
 void FakePasscodeBox::setInnerFocus() {

@@ -73,10 +73,14 @@ Widget::Widget(
 	QWidget *parent,
 	not_null<Window::Controller*> controller,
 	not_null<Main::Account*> account,
-	EnterPoint point)
+	EnterPoint point,
+	Main::Account *accountBeforeIntro)
 : RpWidget(parent)
 , _account(account)
-, _data(details::Data{ .controller = controller })
+, _data(details::Data{
+	.controller = controller,
+	.accountBeforeIntro = base::make_weak(accountBeforeIntro),
+})
 , _nextStyle(&st::introNextButton)
 , _back(this, object_ptr<Ui::IconButton>(this, st::introBackButton))
 , _settings(
@@ -182,11 +186,6 @@ rpl::producer<> Widget::showSettingsRequested() const {
 
 not_null<Media::Player::FloatDelegate*> Widget::floatPlayerDelegate() {
 	return static_cast<Media::Player::FloatDelegate*>(this);
-}
-
-auto Widget::floatPlayerSectionDelegate()
--> not_null<Media::Player::FloatSectionDelegate*> {
-	return static_cast<Media::Player::FloatSectionDelegate*>(this);
 }
 
 not_null<Ui::RpWidget*> Widget::floatPlayerWidget() {
@@ -472,6 +471,9 @@ void Widget::appendStep(Step *step) {
 		} else {
 			moveToStep(step, action, animate);
 		}
+	});
+	step->setStepBelowCallback([=]() -> Step* {
+		return (_stepHistory.size() > 1) ? getStep(1) : nullptr;
 	});
 	step->setShowResetCallback([=] {
 		showResetButton();
@@ -885,8 +887,12 @@ void Widget::keyPressEvent(QKeyEvent *e) {
 }
 
 void Widget::backRequested() {
+	const auto back = getData()->accountBeforeIntro.get();
 	if (_stepHistory.size() > 1) {
 		historyMove(StackAction::Back, Animate::Back);
+	} else if (back && back->sessionExists()) {
+		Core::App().setActivePrimaryWindow(getData()->controller);
+		back->domain().activate(back);
 	} else if (const auto parent
 		= Core::App().domain().maybeLastOrSomeAuthedAccount()) {
 		Core::App().domain().activate(parent);

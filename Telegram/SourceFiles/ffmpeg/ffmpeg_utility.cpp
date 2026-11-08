@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ffmpeg/ffmpeg_utility.h"
 
 #include "base/algorithm.h"
+#include "base/options.h"
 #include "logs.h"
 
 #if !defined Q_OS_WIN && !defined Q_OS_MAC
@@ -16,12 +17,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif // !Q_OS_WIN && !Q_OS_MAC
 
 #include <QImage>
+#include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <new>
 
-#ifdef LIB_FFMPEG_USE_QT_PRIVATE_API
+#if !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API && defined QT_STATIC
 #include <private/qdrawhelper_p.h>
-#endif // LIB_FFMPEG_USE_QT_PRIVATE_API
+#endif // !DESKTOP_APP_DISABLE_PRIVATE_QT_API && QT_STATIC
 
 extern "C" {
 #include <libavutil/opt.h>
@@ -41,8 +44,6 @@ void _libdrm_so_tramp_resolve_all(void) __attribute__((weak));
 namespace FFmpeg {
 namespace {
 
-// See https://github.com/telegramdesktop/tdesktop/issues/7225
-constexpr auto kAlignImageBy = 64;
 constexpr auto kImageFormat = QImage::Format_ARGB32_Premultiplied;
 constexpr auto kMaxScaleByAspectRatio = 16;
 constexpr auto kAvioBlockSize = 4096;
@@ -52,9 +53,31 @@ constexpr auto kMaxPixelsFixedPadding = 64 * 1024;
 constexpr auto kTimeUnknown = std::numeric_limits<crl::time>::min();
 constexpr auto kDurationMax = crl::time(std::numeric_limits<int>::max());
 
+base::options::toggle OptionFFmpegMultiThread({
+	.id = kOptionFFmpegMultiThread,
+	.name = "Multi-thread video decoding",
+	.description = "Allow FFmpeg to use a thread pool for decoding,"
+		" typically a thread per CPU thread.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionFFmpegThreadCount({
+	.id = kOptionFFmpegThreadCount,
+	.name = "Video decoding thread count",
+	.description = "Override FFmpeg's thread pool thread count.",
+});
+
 using GetFormatMethod = enum AVPixelFormat(*)(
 	struct AVCodecContext *s,
 	const enum AVPixelFormat *fmt);
+
+[[nodiscard]] int NormalizeRotation(int rotation) {
+	auto result = rotation % 360;
+	if (result < 0) {
+		result += 360;
+	}
+	return (result == 90 || result == 180 || result == 270) ? result : 0;
+}
 
 struct HwAccelDescriptor {
 	GetFormatMethod getFormat = nullptr;
@@ -69,29 +92,30 @@ struct AlignedFrameStorageLayout {
 };
 
 void AlignedImageBufferCleanupHandler(void *data) {
-	const auto buffer = static_cast<uchar*>(data);
-	delete[] buffer;
+	// Paired with the ::malloc() in CreateFrameStorage().
+	::free(data);
 }
 
 [[nodiscard]] bool ComputeAlignedFrameStorageLayout(
 		QSize size,
+		int minBytesPerLine,
 		AlignedFrameStorageLayout *out) {
 	const auto width = size.width();
 	const auto height = size.height();
-	if (width <= 0 || height <= 0) {
+	if (width <= 0 || height <= 0 || minBytesPerLine < 0) {
 		return false;
 	}
-	const auto widthAlign = kAlignImageBy / kPixelBytesSize;
-	const auto widthRemainder = width % widthAlign;
-	const auto widthPadding = widthRemainder
-		? (widthAlign - widthRemainder)
-		: 0;
-	const auto alignedWidth = int64_t(width) + widthPadding;
-	const auto bytesPerLine = int64_t(alignedWidth) * kPixelBytesSize;
+	const auto requested = std::max(
+		int64_t(width) * kPixelBytesSize,
+		int64_t(minBytesPerLine));
+	const auto remainder = requested % kAlignImageBy;
+	const auto bytesPerLine = remainder
+		? (requested + kAlignImageBy - remainder)
+		: requested;
 	if (bytesPerLine > kMaxFrameStorageBytes) {
 		return false;
 	}
-	const auto totalBytes = int64_t(bytesPerLine) * height + kAlignImageBy;
+	const auto totalBytes = bytesPerLine * height + kAlignImageBy;
 	if (totalBytes > kMaxFrameStorageBytes) {
 		return false;
 	}
@@ -118,28 +142,28 @@ void UnPremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 	[[maybe_unused]] const auto udst = reinterpret_cast<uint*>(dst);
 	const auto usrc = reinterpret_cast<const uint*>(src);
 
-#ifndef LIB_FFMPEG_USE_QT_PRIVATE_API
+#if defined DESKTOP_APP_DISABLE_PRIVATE_QT_API || !defined QT_STATIC
 	for (auto i = 0; i != intsCount; ++i) {
 		udst[i] = qUnpremultiply(usrc[i]);
 	}
-#else // !LIB_FFMPEG_USE_QT_PRIVATE_API
+#else // DESKTOP_APP_DISABLE_PRIVATE_QT_API || !QT_STATIC
 	static const auto layout = &qPixelLayouts[QImage::Format_ARGB32];
 	layout->storeFromARGB32PM(dst, usrc, 0, intsCount, nullptr, nullptr);
-#endif // LIB_FFMPEG_USE_QT_PRIVATE_API
+#endif // !DESKTOP_APP_DISABLE_PRIVATE_QT_API && QT_STATIC
 }
 
 void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 	const auto udst = reinterpret_cast<uint*>(dst);
 	[[maybe_unused]] const auto usrc = reinterpret_cast<const uint*>(src);
 
-#ifndef LIB_FFMPEG_USE_QT_PRIVATE_API
+#if defined DESKTOP_APP_DISABLE_PRIVATE_QT_API || !defined QT_STATIC
 	for (auto i = 0; i != intsCount; ++i) {
 		udst[i] = qPremultiply(usrc[i]);
 	}
-#else // !LIB_FFMPEG_USE_QT_PRIVATE_API
+#else // DESKTOP_APP_DISABLE_PRIVATE_QT_API || !QT_STATIC
 	static const auto layout = &qPixelLayouts[QImage::Format_ARGB32];
 	layout->fetchToARGB32PM(udst, src, 0, intsCount, nullptr, nullptr);
-#endif // LIB_FFMPEG_USE_QT_PRIVATE_API
+#endif // !DESKTOP_APP_DISABLE_PRIVATE_QT_API && QT_STATIC
 }
 
 #if !defined Q_OS_WIN && !defined Q_OS_MAC
@@ -251,6 +275,14 @@ void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 		} else if (type != AV_HWDEVICE_TYPE_NONE && !InitHw(context, type)) {
 			continue;
 		}
+#ifdef Q_OS_WIN
+		if (format == AV_PIX_FMT_DXVA2_VLD
+			&& (context->pix_fmt == AV_PIX_FMT_D3D11
+				|| context->pix_fmt == AV_PIX_FMT_D3D11VA_VLD)) {
+			// DXVA2 init locks as D3D11 by the pix_fmt left from a re-init.
+			context->pix_fmt = AV_PIX_FMT_NONE;
+		}
+#endif // Q_OS_WIN
 		return format;
 	}
 	enum AVPixelFormat result = AV_PIX_FMT_NONE;
@@ -274,6 +306,9 @@ enum AVPixelFormat GetFormatImplementation(
 }
 
 } // namespace
+
+const char kOptionFFmpegMultiThread[] = "ffmpeg-multithread";
+const char kOptionFFmpegThreadCount[] = "ffmpeg-thread-count";
 
 IOPointer MakeIOPointer(
 		void *opaque,
@@ -312,6 +347,14 @@ void IODeleter::operator()(AVIOContext *value) {
 	}
 }
 
+void RestrictToCustomIO(AVFormatContext *format) {
+	// We always read the media through custom IO callbacks, so ffmpeg must
+	// never resolve a protocol on its own. An empty whitelist makes demuxers
+	// like dash / hls refuse to open the external segment URLs they may
+	// reference, closing an IP-leak / local-file-read vector.
+	av_opt_set(format, "protocol_whitelist", "", 0);
+}
+
 FormatPointer MakeFormatPointer(
 		void *opaque,
 		int(*read)(void *opaque, uint8_t *buffer, int bufferSize),
@@ -320,7 +363,8 @@ FormatPointer MakeFormatPointer(
 #else
 		int(*write)(void *opaque, uint8_t *buffer, int bufferSize),
 #endif
-		int64_t(*seek)(void *opaque, int64_t offset, int whence)) {
+		int64_t(*seek)(void *opaque, int64_t offset, int whence),
+		FormatSettings settings) {
 	auto io = MakeIOPointer(opaque, read, write, seek);
 	if (!io) {
 		return {};
@@ -333,10 +377,14 @@ FormatPointer MakeFormatPointer(
 	}
 	result->pb = io.get();
 	result->flags |= AVFMT_FLAG_CUSTOM_IO;
+	RestrictToCustomIO(result);
 
 	auto options = (AVDictionary*)nullptr;
 	const auto guard = gsl::finally([&] { av_dict_free(&options); });
 	av_dict_set(&options, "usetoc", "1", 0);
+	if (settings.ignoreEditList) {
+		av_dict_set(&options, "ignore_editlist", "1", 0);
+	}
 
 	const auto error = AvErrorWrap(avformat_open_input(
 		&result,
@@ -446,7 +494,13 @@ CodecPointer MakeCodecPointer(CodecDescriptor descriptor) {
 		context->max_pixels = MaxPixelsForAreaLimit(
 			descriptor.videoMaxArea);
 	}
-	av_opt_set(context, "threads", "auto", 0);
+	if (OptionFFmpegMultiThread.value()) {
+		av_opt_set_int(
+			context,
+			"threads",
+			OptionFFmpegThreadCount.value(),
+			0);
+	}
 	av_opt_set_int(context, "refcounted_frames", 1, 0);
 
 	const auto codec = FindDecoder(context);
@@ -698,14 +752,29 @@ int ReadRotationFromMetadata(not_null<AVStream*> stream) {
 		stream->codecpar->coded_side_data,
 		stream->codecpar->nb_coded_side_data,
 		AV_PKT_DATA_DISPLAYMATRIX);
-	auto theta = 0;
 	if (displaymatrix) {
 		const auto matrix = (int32_t*)displaymatrix->data;
-		theta = -round(av_display_rotation_get(matrix));
+		const auto angle = av_display_rotation_get(matrix);
+		if (std::isfinite(angle)) {
+			if (const auto result = NormalizeRotation(
+					-base::SafeRound(angle))) {
+				return result;
+			}
+		}
 	}
-	theta -= 360 * floor(theta / 360 + 0.9 / 360);
-	const auto result = int(base::SafeRound(theta));
-	return (result == 90 || result == 180 || result == 270) ? result : 0;
+	const auto rotateTag = av_dict_get(
+		stream->metadata,
+		"rotate",
+		nullptr,
+		0);
+	if (rotateTag && *rotateTag->value) {
+		auto ok = false;
+		const auto rotation = QString::fromUtf8(rotateTag->value).toInt(&ok);
+		if (ok) {
+			return NormalizeRotation(rotation);
+		}
+	}
+	return 0;
 }
 
 AVRational ValidateAspectRatio(AVRational aspect) {
@@ -715,7 +784,9 @@ AVRational ValidateAspectRatio(AVRational aspect) {
 QSize CorrectByAspect(QSize size, AVRational aspect) {
 	Expects(IsValidAspectRatio(aspect));
 
-	return QSize(size.width() * av_q2d(aspect), size.height());
+	return QSize(
+		std::max(int(size.width() * av_q2d(aspect)), 1),
+		size.height());
 }
 
 bool RotationSwapWidthHeight(int rotation) {
@@ -726,21 +797,39 @@ QSize TransposeSizeByRotation(QSize size, int rotation) {
 	return RotationSwapWidthHeight(rotation) ? size.transposed() : size;
 }
 
-bool GoodStorageForFrame(const QImage &storage, QSize size) {
-	return !storage.isNull()
-		&& (storage.format() == kImageFormat)
-		&& (storage.size() == size)
-		&& storage.isDetached()
-		&& IsAlignedImage(storage);
+bool GoodStorageForFrame(
+		const QImage &storage,
+		QSize size,
+		int minBytesPerLine) {
+	if (storage.isNull()
+		|| (storage.format() != kImageFormat)
+		|| (storage.size() != size)
+		|| !storage.isDetached()
+		|| !IsAlignedImage(storage)) {
+		return false;
+	} else if (minBytesPerLine <= 0) {
+		return true;
+	}
+	const auto bytesPerLine = storage.bytesPerLine();
+	if (bytesPerLine < minBytesPerLine
+		|| bytesPerLine > kMaxFrameStorageBytes) {
+		return false;
+	}
+	return int64_t(bytesPerLine) * size.height() + kAlignImageBy
+		<= kMaxFrameStorageBytes;
 }
 
 // Create a QImage of desired size where all the data is properly aligned.
-QImage CreateFrameStorage(QSize size) {
+QImage CreateFrameStorage(QSize size, int minBytesPerLine) {
 	auto layout = AlignedFrameStorageLayout();
-	if (!ComputeAlignedFrameStorageLayout(size, &layout)) {
+	if (!ComputeAlignedFrameStorageLayout(size, minBytesPerLine, &layout)) {
 		return {};
 	}
-	const auto buffer = new (std::nothrow) uchar[layout.totalBytes];
+	// Not `new (std::nothrow)`: the operator new handler installed by
+	// CrashReports fires from inside operator new before the nothrow
+	// wrapper can return nullptr, so a recoverable out-of-memory here
+	// aborted the process instead of taking the null path below.
+	const auto buffer = static_cast<uchar*>(::malloc(layout.totalBytes));
 	if (!buffer) {
 		return {};
 	}

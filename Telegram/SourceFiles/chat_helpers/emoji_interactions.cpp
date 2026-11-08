@@ -57,9 +57,11 @@ EmojiInteractions::EmojiInteractions(not_null<Main::Session*> session)
 		if (update.flags & Data::MessageUpdate::Flag::Destroyed) {
 			_outgoing.remove(update.item);
 			_incoming.remove(update.item);
+			_autoplay.remove(update.item);
 		} else if (update.flags & Data::MessageUpdate::Flag::Edited) {
 			checkEdition(update.item, _outgoing);
 			checkEdition(update.item, _incoming);
+			checkEdition(update.item, _autoplay);
 		}
 	}, _lifetime);
 }
@@ -122,6 +124,43 @@ void EmojiInteractions::startOutgoing(
 	check(now);
 }
 
+void EmojiInteractions::startAutoplay(
+		not_null<const HistoryView::Element*> view) {
+	const auto item = view->data();
+	if (!item->isRegular() || !item->history()->peer->isUser()) {
+		return;
+	}
+	const auto &pack = _session->emojiStickersPack();
+	const auto emoticon = item->originalText().text;
+	const auto emoji = pack.chooseInteractionEmoji(emoticon);
+	if (!emoji) {
+		return;
+	}
+	const auto &list = pack.animationsForEmoji(emoji);
+	if (list.empty() || !item->markEmojiInteractionWatched()) {
+		return;
+	}
+	auto &animations = _autoplay[item];
+	if (!animations.empty()) {
+		return;
+	}
+	const auto index = base::RandomIndex(int(list.size()));
+	const auto document = (begin(list) + index)->second;
+	const auto media = document->createMediaView();
+	media->checkStickerLarge();
+	const auto now = crl::now();
+	animations.push_back({
+		.emoticon = emoticon,
+		.emoji = emoji,
+		.document = document,
+		.media = media,
+		.scheduledAt = now,
+		.incoming = false,
+		.index = index,
+	});
+	check(now);
+}
+
 void EmojiInteractions::startIncoming(
 		not_null<PeerData*> peer,
 		MsgId messageId,
@@ -156,7 +195,7 @@ void EmojiInteractions::startIncoming(
 		}
 		const auto listSize = int(list.size());
 		const auto index = (single.index - 1);
-		if (index < listSize) {
+		if (index >= 0 && index < listSize) {
 			const auto document = (begin(list) + index)->second;
 			const auto media = document->createMediaView();
 			media->checkStickerLarge();
@@ -196,8 +235,10 @@ void EmojiInteractions::seenOutgoing(
 
 auto EmojiInteractions::checkAnimations(crl::time now) -> CheckResult {
 	return Combine(
-		checkAnimations(now, _outgoing),
-		checkAnimations(now, _incoming));
+		Combine(
+			checkAnimations(now, _outgoing),
+			checkAnimations(now, _incoming)),
+		checkAnimations(now, _autoplay));
 }
 
 auto EmojiInteractions::checkAnimations(
@@ -339,6 +380,18 @@ auto EmojiInteractions::checkAccumulated(crl::time now) -> CheckResult {
 		}
 		++i;
 	}
+	for (auto i = begin(_autoplay); i != end(_autoplay);) {
+		auto &animations = i->second;
+		clearAccumulatedIncoming(now, animations);
+		if (animations.empty()) {
+			i = _autoplay.erase(i);
+			continue;
+		} else {
+			// Doesn't really matter when, just clear them finally.
+			nearest = std::min(nearest, now + kAccumulateDelay);
+		}
+		++i;
+	}
 	return {
 		.nextCheckAt = nearest,
 	};
@@ -458,7 +511,7 @@ EmojiInteractionsBunch EmojiInteractions::Parse(const QByteArray &json) {
 	for (const auto interaction : actions) {
 		const auto object = interaction.toObject();
 		const auto index = object.value("i").toInt();
-		if (index < 0 || index > 10) {
+		if (index < 1 || index > 10) {
 			LOG(("API Error: Bad interaction index: %1").arg(index));
 			return {};
 		}

@@ -19,7 +19,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "core/application.h"
 #include "lang/lang_keys.h"
-#include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 
@@ -105,7 +104,14 @@ void Widget::selectionAction(SelectionAction action) {
 }
 
 void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
-	const auto window = controller()->parentController();
+	AddDeleteAllAction(this, controller(), addAction);
+}
+
+void AddDeleteAllAction(
+		not_null<QWidget*> widget,
+		not_null<Controller*> controller,
+		const Ui::Menu::MenuCallback &addAction) {
+	const auto window = controller->parentController();
 	const auto deleteAll = [=] {
 		auto &manager = Core::App().downloadManager();
 		const auto phrase = tr::lng_downloads_delete_sure_all(tr::now);
@@ -113,7 +119,7 @@ void Widget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 			? QString()
 			: tr::lng_downloads_delete_in_cloud(tr::now);
 		const auto deleteSure = [=, &manager](Fn<void()> close) {
-			Ui::PostponeCall(this, close);
+			Ui::PostponeCall(widget, close);
 			manager.deleteAll();
 		};
 		window->show(Ui::MakeConfirmBox({

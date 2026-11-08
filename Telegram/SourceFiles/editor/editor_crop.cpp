@@ -10,7 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/userpic_view.h"
 #include "styles/style_editor.h"
 #include "styles/style_basic.h"
-#include "styles/style_dialogs.h"
 
 namespace Editor {
 namespace {
@@ -27,6 +26,7 @@ constexpr auto kEAll = Qt::TopEdge
 	| Qt::LeftEdge
 	| Qt::BottomEdge
 	| Qt::RightEdge;
+constexpr auto kMaxCanvasRatio = 2.;
 
 std::tuple<int, int, int, int> RectEdges(const QRectF &r) {
 	return { r.left(), r.top(), r.left() + r.width(), r.top() + r.height() };
@@ -59,6 +59,28 @@ QSizeF FlipSizeByRotation(const QSizeF &size, int angle) {
 		size.height());
 }
 
+bool AdjustCropToInner(QRectF &crop, const QRectF &inner) {
+	if (inner.isEmpty()) {
+		return false;
+	}
+	const auto was = crop;
+	crop.setWidth(std::min(crop.width(), inner.width()));
+	crop.setHeight(std::min(crop.height(), inner.height()));
+	if (crop.left() < inner.left()) {
+		crop.moveLeft(inner.left());
+	}
+	if (crop.top() < inner.top()) {
+		crop.moveTop(inner.top());
+	}
+	if (crop.right() > inner.right()) {
+		crop.moveRight(inner.right());
+	}
+	if (crop.bottom() > inner.bottom()) {
+		crop.moveBottom(inner.bottom());
+	}
+	return (crop != was);
+}
+
 } // namespace
 
 Crop::Crop(
@@ -71,7 +93,6 @@ Crop::Crop(
 , _pointSizeH(_pointSize / 2.)
 , _innerMargins(QMarginsF(_pointSizeH, _pointSizeH, _pointSizeH, _pointSizeH)
 	.toMargins())
-, _offset(_innerMargins.left(), _innerMargins.top())
 , _edgePointMargins(_pointSizeH, _pointSizeH, -_pointSizeH, -_pointSizeH)
 , _imageSize(imageSize)
 , _data(std::move(data))
@@ -104,6 +125,7 @@ Crop::Crop(
 
 void Crop::applyTransform(
 		const QRect &geometry,
+		QPoint imagePosition,
 		int angle,
 		bool flipped,
 		const QSizeF &scaledImageSize) {
@@ -111,7 +133,9 @@ void Crop::applyTransform(
 		return;
 	}
 	setGeometry(geometry);
-	_innerRect = QRectF(_offset, FlipSizeByRotation(scaledImageSize, angle));
+	_innerRect = QRectF(
+		imagePosition,
+		FlipSizeByRotation(scaledImageSize, angle));
 	_ratio.w = scaledImageSize.width() / float64(_imageSize.width());
 	_ratio.h = scaledImageSize.height() / float64(_imageSize.height());
 	_flipped = flipped;
@@ -132,26 +156,21 @@ void Crop::applyTransform(
 		.scale(_ratio.w, _ratio.h)
 		.mapRect(_cropOriginal)
 		.translated(
-			-cropHolderRotated.x() + _offset.x(),
-			-cropHolderRotated.y() + _offset.y());
+			imagePosition.x() - cropHolderRotated.x(),
+			imagePosition.y() - cropHolderRotated.y());
 
-	// Check boundaries.
 	const auto min = float64(st::photoEditorCropMinSize);
 	if ((cropPaint.width() < min) || (cropPaint.height() < min)) {
-		cropPaint.setWidth(std::max(min, cropPaint.width()));
-		cropPaint.setHeight(std::max(min, cropPaint.height()));
-
-		const auto p = cropPaint.center().toPoint();
-		setCropPaint(std::move(cropPaint));
-
-		computeDownState(p);
-		performMove(p);
-		clearDownState();
-
-		convertCropPaintToOriginal();
-	} else {
-		setCropPaint(std::move(cropPaint));
+		const auto bounds = _innerRect.united(cropPaint);
+		cropPaint.setWidth(std::max(
+			std::min(min, bounds.width()),
+			cropPaint.width()));
+		cropPaint.setHeight(std::max(
+			std::min(min, bounds.height()),
+			cropPaint.height()));
+		AdjustCropToInner(cropPaint, bounds);
 	}
+	setCropPaint(std::move(cropPaint));
 }
 
 QPainterPath Crop::cropPath() const {
@@ -265,10 +284,13 @@ void Crop::setCropPaint(QRectF &&rect) {
 	_cropPaint = std::move(rect);
 
 	updateEdges();
+	updatePainterPath();
+}
 
-	_painterPath.clear();
-	_painterPath.addRect(_innerRect);
-	_painterPath.addPath(cropPath());
+void Crop::updatePainterPath() {
+	auto inner = QPainterPath();
+	inner.addRect(_innerRect);
+	_painterPath = inner.subtracted(cropPath());
 }
 
 void Crop::convertCropPaintToOriginal() {
@@ -286,7 +308,7 @@ void Crop::convertCropPaintToOriginal() {
 	const auto cropHolderRotated = matrix.mapRect(cropHolder);
 
 	_cropOriginal = matrix
-		.mapRect(QRectF(_cropPaint).translated(-_offset))
+		.mapRect(QRectF(_cropPaint).translated(-_innerRect.topLeft()))
 		.translated(
 			-cropHolderRotated.x(),
 			-cropHolderRotated.y());
@@ -348,7 +370,13 @@ void Crop::mousePressEvent(QMouseEvent *e) {
 	if (_data.fixedCrop && e->button() != Qt::LeftButton) {
 		return;
 	}
-	computeDownState(e->pos());
+	const auto edge = mouseState(e->pos());
+	if (edge) {
+		_dragChanges.fire(true);
+	}
+	const auto expanding = _expansionAllowed
+		&& e->modifiers().testFlag(Qt::ControlModifier);
+	computeDownState(e->pos(), edge, expanding);
 	if (_down.edge) {
 		setGridVisible(true, false);
 	}
@@ -358,25 +386,43 @@ void Crop::mouseReleaseEvent(QMouseEvent *e) {
 	if (_data.fixedCrop && e->button() != Qt::LeftButton) {
 		return;
 	}
-	const auto hadEdge = bool(_down.edge);
-	if (hadEdge) {
-		setGridVisible(false, true);
-	}
-	clearDownState();
-	convertCropPaintToOriginal();
+	finishDrag(true);
 }
 
-void Crop::computeDownState(const QPoint &p) {
-	const auto edge = mouseState(p);
-	const auto &inner = _innerRect;
+void Crop::hideEvent(QHideEvent *e) {
+	finishDrag(false);
+}
+
+void Crop::finishDrag(bool animated) {
+	if (!_down.edge) {
+		return;
+	}
+	setGridVisible(false, animated);
+	clearDownState();
+	const auto was = saveCropRect();
+	convertCropPaintToOriginal();
+	_dragChanges.fire(false);
+	if (saveCropRect() != was) {
+		_changes.fire({});
+	}
+}
+
+void Crop::computeDownState(
+		const QPoint &p,
+		Qt::Edges edge,
+		bool expanding) {
 	const auto &crop = _cropPaint;
-	const auto &[iLeft, iTop, iRight, iBottom] = RectEdges(inner);
+	const auto bounds = (expanding && (edge != kEAll))
+		? expansionBounds()
+		: _innerRect.united(crop);
+	const auto &[iLeft, iTop, iRight, iBottom] = RectEdges(bounds);
 	const auto &[cLeft, cTop, cRight, cBottom] = RectEdges(crop);
 	_down = InfoAtDown{
 		.rect = crop,
 		.edge = edge,
 		.point = (p - PointOfEdge(edge, crop)),
 		.cropRatio = (_cropOriginal.width() / _cropOriginal.height()),
+		.bounds = bounds,
 		.borders = InfoAtDown::Borders{
 			.left = iLeft - cLeft,
 			.right = iRight - cRight,
@@ -394,20 +440,30 @@ void Crop::computeDownState(const QPoint &p) {
 		auto &xSide = (hasLeft ? _down.borders.left : _down.borders.right);
 		auto &ySide = (hasTop ? _down.borders.top : _down.borders.bottom);
 
-		const auto min = std::abs(std::min(xSign * xSide, ySign * ySide));
-		const auto xIsMin = ((xSign * xSide) < (ySign * ySide));
-		xSide = xSign * min;
-		ySide = ySign * min;
-		if (!xIsMin) {
-			xSide *= _down.cropRatio;
-		} else {
-			ySide /= _down.cropRatio;
-		}
+		const auto xRoom = std::min(
+			float64(xSign * xSide),
+			ySign * ySide * _down.cropRatio);
+		xSide = int(xSign * xRoom);
+		ySide = int(ySign * xRoom / _down.cropRatio);
 	}
 }
 
 void Crop::clearDownState() {
 	_down = InfoAtDown();
+}
+
+QRectF Crop::expansionBounds() const {
+	const auto united = _innerRect.united(_cropPaint);
+	const auto maxWidth = _innerRect.width() * kMaxCanvasRatio;
+	const auto maxHeight = _innerRect.height() * kMaxCanvasRatio;
+	const auto limit = QRectF(
+		QPointF(
+			std::min(united.right() - maxWidth, united.left()),
+			std::min(united.bottom() - maxHeight, united.top())),
+		QPointF(
+			std::max(united.left() + maxWidth, united.right()),
+			std::max(united.top() + maxHeight, united.bottom())));
+	return (QRectF(rect()) - QMarginsF(_innerMargins)).intersected(limit);
 }
 
 void Crop::setGridVisible(bool visible, bool animated) {
@@ -458,8 +514,18 @@ void Crop::performCrop(const QPoint &pos) {
 		const auto minH = (_keepAspectRatio && cropRatio < 1.)
 			? (minSize / cropRatio)
 			: float64(minSize);
-		const auto xMin = xFactor * int(crop.width() - minW);
-		const auto yMin = yFactor * int(crop.height() - minH);
+		const auto xInward = std::min(
+			crop.width() - minW,
+			hasLeft
+				? (_innerRect.right() - minW - crop.left())
+				: (crop.right() - minW - _innerRect.left()));
+		const auto yInward = std::min(
+			crop.height() - minH,
+			hasTop
+				? (_innerRect.bottom() - minH - crop.top())
+				: (crop.bottom() - minH - _innerRect.top()));
+		const auto xMin = xFactor * int(std::max(xInward, 0.));
+		const auto yMin = yFactor * int(std::max(yInward, 0.));
 
 		const auto x = std::clamp(
 			diff.x(),
@@ -471,11 +537,17 @@ void Crop::performCrop(const QPoint &pos) {
 			hasTop ? yMin : borders.bottom);
 		return QPoint(x, y);
 	}();
-	setCropPaint(crop - QMargins(
+	auto result = crop - QMargins(
 		hasLeft ? diff.x() : 0,
 		hasTop ? diff.y() : 0,
 		hasRight ? -diff.x() : 0,
-		hasBottom ? -diff.y() : 0));
+		hasBottom ? -diff.y() : 0);
+	const auto &bounds = _down.bounds;
+	result.setLeft(std::max(result.left(), bounds.left()));
+	result.setTop(std::max(result.top(), bounds.top()));
+	result.setRight(std::min(result.right(), bounds.right()));
+	result.setBottom(std::min(result.bottom(), bounds.bottom()));
+	setCropPaint(std::move(result));
 }
 
 void Crop::performMove(const QPoint &pos) {
@@ -483,7 +555,9 @@ void Crop::performMove(const QPoint &pos) {
 	const auto &b = _down.borders;
 	const auto diffX = std::clamp(pos.x() - _down.point.x(), b.left, b.right);
 	const auto diffY = std::clamp(pos.y() - _down.point.y(), b.top, b.bottom);
-	setCropPaint(inner.translated(diffX, diffY));
+	auto result = inner.translated(diffX, diffY);
+	AdjustCropToInner(result, _down.bounds);
+	setCropPaint(std::move(result));
 }
 
 void Crop::mouseMoveEvent(QMouseEvent *e) {
@@ -528,8 +602,9 @@ void Crop::setAspectRatio(float64 ratio) {
 	_keepAspectRatio = !free;
 
 	if (!free) {
-		const auto maxW = _innerRect.width();
-		const auto maxH = _innerRect.height();
+		const auto bounds = _innerRect.united(_cropPaint);
+		const auto maxW = bounds.width();
+		const auto maxH = bounds.height();
 		auto newW = maxW;
 		auto newH = maxW / ratio;
 		if (newH > maxH) {
@@ -544,25 +619,21 @@ void Crop::setAspectRatio(float64 ratio) {
 			newW,
 			newH);
 
-		if (adjusted.left() < _innerRect.left()) {
-			adjusted.moveLeft(_innerRect.left());
-		}
-		if (adjusted.top() < _innerRect.top()) {
-			adjusted.moveTop(_innerRect.top());
-		}
-		if (adjusted.right() > _innerRect.right()) {
-			adjusted.moveRight(_innerRect.right());
-		}
-		if (adjusted.bottom() > _innerRect.bottom()) {
-			adjusted.moveBottom(_innerRect.bottom());
-		}
-
+		AdjustCropToInner(adjusted, bounds);
 		setCropPaint(std::move(adjusted));
+		const auto was = saveCropRect();
 		convertCropPaintToOriginal();
+		if (saveCropRect() != was) {
+			_changes.fire({});
+		}
 	} else {
 		updateEdges();
 	}
 	update();
+}
+
+void Crop::setExpansionAllowed(bool allowed) {
+	_expansionAllowed = allowed;
 }
 
 void Crop::setCornersLevel(RoundedCornersLevel level) {
@@ -570,10 +641,16 @@ void Crop::setCornersLevel(RoundedCornersLevel level) {
 		return;
 	}
 	_cornersLevel = level;
-	_painterPath.clear();
-	_painterPath.addRect(_innerRect);
-	_painterPath.addPath(cropPath());
+	updatePainterPath();
 	update();
+}
+
+QRect Crop::paintRect() const {
+	return _cropPaint.toRect();
+}
+
+QRect Crop::cropRect() const {
+	return _cropOriginal.toRect();
 }
 
 QRect Crop::saveCropRect() {

@@ -37,7 +37,7 @@ using PaintRoundImageCallback = Fn<void(
 	int outerWidth,
 	int size)>;
 
-[[nodiscard]] QImage GenerateStars(int height, int count);
+[[nodiscard]] QImage GenerateStars(int height, int count, int ratio = 0);
 
 [[nodiscard]] not_null<Ui::RpWidget*> CreateSingleStarWidget(
 	not_null<Ui::RpWidget*> parent,
@@ -67,11 +67,6 @@ PaintRoundImageCallback GeneratePaidMediaPaintCallback(
 	not_null<PhotoData*> photo,
 	PhotoData *second,
 	int totalCount,
-	Fn<void()> update);
-
-PaintRoundImageCallback GenerateGiftStickerUserpicCallback(
-	not_null<Main::Session*> session,
-	uint64 stickerId,
 	Fn<void()> update);
 
 Fn<PaintRoundImageCallback(Fn<void()>)> PaintPreviewCallback(

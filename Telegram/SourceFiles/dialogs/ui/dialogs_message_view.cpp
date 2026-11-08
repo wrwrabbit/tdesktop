@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "history/history.h"
 #include "history/history_item.h"
+#include "history/history_item_components.h"
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "main/main_session.h"
@@ -235,17 +236,22 @@ void MessageView::prepare(
 			}
 		}
 
-		if (minFrom == std::numeric_limits<uint16>::max()
-			&& !item->replyTo().quote.empty()) {
+		const auto reply = (minFrom == std::numeric_limits<uint16>::max())
+			? item->Get<HistoryMessageReply>()
+			: nullptr;
+		const auto quote = (reply && reply->messageId())
+			? reply->fields().displayQuote()
+			: TextWithEntities();
+		if (!quote.empty()) {
 			auto textQuote = TextWithEntities();
 			for (const auto &word : words) {
 				const auto selection = HistoryView::FindSearchQueryHighlight(
-					item->replyTo().quote.text,
+					quote.text,
 					word);
 				if (!selection.empty()) {
 					minFrom = 0;
 					if (textQuote.empty()) {
-						textQuote = item->replyTo().quote;
+						textQuote = quote;
 					}
 					textQuote.entities.push_back(EntityInText{
 						EntityType::Colorized,
@@ -385,6 +391,24 @@ int MessageView::countWidth() const {
 	return result + _textCache.maxWidth();
 }
 
+bool MessageView::hasAnimatedContent() const {
+	if (_textCache.hasCustomEmoji()
+		|| _textCache.hasSpoilers()
+		|| _senderCache.hasCustomEmoji()) {
+		return true;
+	}
+	for (const auto &image : _imagesCache) {
+		if (image.hasSpoiler()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void MessageView::resetLastPaintGeometry() {
+	_lastPaintGeometry = QRect();
+}
+
 void MessageView::paint(
 		Painter &p,
 		const QRect &geometry,
@@ -392,6 +416,7 @@ void MessageView::paint(
 	if (geometry.isEmpty()) {
 		return;
 	}
+	_lastPaintGeometry = geometry;
 	p.setFont(st::dialogsTextFont);
 	p.setPen(context.active
 		? st::dialogsTextFgActive

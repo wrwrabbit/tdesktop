@@ -52,6 +52,8 @@ struct Data {
 	// Required for the UserpicButton.
 	const not_null<Window::Controller*> controller;
 
+	base::weak_ptr<Main::Account> accountBeforeIntro;
+
 	QString country;
 	QString phone;
 	QByteArray phoneHash;
@@ -106,7 +108,8 @@ public:
 		QWidget *parent,
 		not_null<Window::Controller*> controller,
 		not_null<Main::Account*> account,
-		EnterPoint point);
+		EnterPoint point,
+		Main::Account *accountBeforeIntro);
 	~Widget();
 
 	void showAnimated(QPixmap oldContentCache, bool back = false);
@@ -166,8 +169,6 @@ private:
 	// FloatDelegate
 	[[nodiscard]] auto floatPlayerDelegate()
 		-> not_null<Media::Player::FloatDelegate*>;
-	[[nodiscard]] auto floatPlayerSectionDelegate()
-		-> not_null<Media::Player::FloatSectionDelegate*>;
 	not_null<Ui::RpWidget*> floatPlayerWidget() override;
 	void floatPlayerToggleGifsPaused(bool paused) override;
 	not_null<Media::Player::FloatSectionDelegate*> floatPlayerGetSection(

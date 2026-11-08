@@ -11,20 +11,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/flat_map.h"
 #include "base/qthelp_url.h"
 #include "base/unixtime.h"
-#include "base/variant.h"
 #include "data/data_document.h"
+#include "data/data_location.h"
 #include "data/data_peer.h"
 #include "data/data_photo.h"
+#include "data/data_premium_limits.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "iv/markdown/iv_markdown_prepare.h"
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
 #include "iv/markdown/iv_markdown_prepare_links.h"
+#include "iv/iv_rich_page_quote.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "ui/text/text.h"
 #include "ui/text/text_utilities.h"
+#include "styles/style_iv.h"
 
 #include <algorithm>
 #include <limits>
@@ -36,10 +40,12 @@ namespace {
 
 using Block = RichPage::Block;
 using BlockKind = RichPage::BlockKind;
+using ButtonAlignment = RichPage::ButtonAlignment;
 using GroupedMediaIntent = RichPage::GroupedMediaIntent;
-using GroupedMediaItem = RichPage::GroupedMediaItem;
 using ListItem = RichPage::ListItem;
 using ListKind = RichPage::ListKind;
+using OrderedListData = RichPage::OrderedListData;
+using OrderedListItemData = RichPage::OrderedListItemData;
 using RelatedArticle = RichPage::RelatedArticle;
 using RichText = RichPage::RichText;
 using TableAlignment = RichPage::TableAlignment;
@@ -58,9 +64,134 @@ using TaskState = RichPage::TaskState;
 	return source;
 }
 
+enum class OrderedMarkerType {
+	Decimal,
+	LowerAlpha,
+	UpperAlpha,
+	LowerRoman,
+	UpperRoman,
+};
+
+[[nodiscard]] OrderedMarkerType ResolveOrderedMarkerType(
+		const std::optional<QString> &type) {
+	if (!type.has_value()) {
+		return OrderedMarkerType::Decimal;
+	}
+	const auto &value = *type;
+	if (value.compare(u"a"_q, Qt::CaseInsensitive) == 0
+		|| value.compare(u"lower-alpha"_q, Qt::CaseInsensitive) == 0
+		|| value.compare(u"lower-latin"_q, Qt::CaseInsensitive) == 0) {
+		return OrderedMarkerType::LowerAlpha;
+	} else if (value == u"A"_q
+		|| value.compare(u"upper-alpha"_q, Qt::CaseInsensitive) == 0
+		|| value.compare(u"upper-latin"_q, Qt::CaseInsensitive) == 0) {
+		return OrderedMarkerType::UpperAlpha;
+	} else if (value == u"i"_q
+		|| value.compare(u"lower-roman"_q, Qt::CaseInsensitive) == 0) {
+		return OrderedMarkerType::LowerRoman;
+	} else if (value == u"I"_q
+		|| value.compare(u"upper-roman"_q, Qt::CaseInsensitive) == 0) {
+		return OrderedMarkerType::UpperRoman;
+	}
+	return OrderedMarkerType::Decimal;
+}
+
+[[nodiscard]] QString OrderedAlphaText(int value, bool upper) {
+	if (value <= 0) {
+		return QString::number(value);
+	}
+	auto result = QString();
+	while (value > 0) {
+		--value;
+		result.prepend(QChar((upper ? 'A' : 'a') + (value % 26)));
+		value /= 26;
+	}
+	return result;
+}
+
+[[nodiscard]] QString OrderedRomanText(int value, bool upper) {
+	if (!OrderedRomanSupported(value)) {
+		return QString::number(value);
+	}
+	struct RomanPart {
+		int value = 0;
+		const char *text = nullptr;
+	};
+	static constexpr RomanPart kParts[] = {
+		RomanPart{ 1000, "M" },
+		RomanPart{ 900, "CM" },
+		RomanPart{ 500, "D" },
+		RomanPart{ 400, "CD" },
+		RomanPart{ 100, "C" },
+		RomanPart{ 90, "XC" },
+		RomanPart{ 50, "L" },
+		RomanPart{ 40, "XL" },
+		RomanPart{ 10, "X" },
+		RomanPart{ 9, "IX" },
+		RomanPart{ 5, "V" },
+		RomanPart{ 4, "IV" },
+		RomanPart{ 1, "I" },
+	};
+	auto result = QString();
+	for (const auto &part : kParts) {
+		while (value >= part.value) {
+			result += QString::fromLatin1(part.text);
+			value -= part.value;
+		}
+	}
+	return upper ? result : result.toLower();
+}
+
+[[nodiscard]] QString OrderedMarkerBody(
+		int value,
+		const std::optional<QString> &type) {
+	switch (ResolveOrderedMarkerType(type)) {
+	case OrderedMarkerType::LowerAlpha:
+		return OrderedAlphaText(value, false);
+	case OrderedMarkerType::UpperAlpha:
+		return OrderedAlphaText(value, true);
+	case OrderedMarkerType::LowerRoman:
+		return OrderedRomanText(value, false);
+	case OrderedMarkerType::UpperRoman:
+		return OrderedRomanText(value, true);
+	case OrderedMarkerType::Decimal:
+		return QString::number(value);
+	}
+	return QString::number(value);
+}
+
+[[nodiscard]] QString OrderedRawMarkerText(const QString &raw) {
+	if (raw.isEmpty() || raw.endsWith('.') || raw.endsWith(')')) {
+		return raw;
+	}
+	return raw + u"."_q;
+}
+
+[[nodiscard]] QString OrderedMarkerText(
+		const OrderedListData &list,
+		const OrderedListItemData &item,
+		int fallbackValue) {
+	if (item.hasRawText()) {
+		return OrderedRawMarkerText(item.rawText());
+	}
+	const auto type = item.type.has_value() ? item.type : list.type;
+	const auto value = item.value.value_or(fallbackValue);
+	return OrderedMarkerBody(value, type) + u"."_q;
+}
+
+[[nodiscard]] int OrderedListSequenceStart(const Block &block) {
+	if (block.orderedList.start.has_value()) {
+		return *block.orderedList.start;
+	}
+	return block.orderedList.reversed
+		? int(block.listItems.size())
+		: 1;
+}
+
 const auto PhotoLargeLevels = u"ydxcwmbsa"_q;
 constexpr auto kDefaultMapWidth = 400;
 constexpr auto kDefaultMapHeight = 200;
+constexpr auto kMaxParsedBlockDepth = 64;
 
 [[nodiscard]] int NonZeroMapWidth(int width) {
 	return (width > 0) ? width : kDefaultMapWidth;
@@ -111,7 +242,13 @@ struct ParseContext {
 		bool isAnimation = false;
 	};
 	base::flat_map<uint64, DocumentInfo> documentInfos;
+	RichQuoteRecorder *quote = nullptr;
 	bool dropRichTextClickHandlers = false;
+	bool keepRichTextFormattedDates = false;
+	bool displayTextDiff = false;
+	bool dropInlineImages = false;
+	int blockDepth = 0;
+	int textDepth = 0;
 };
 
 struct RichMessageMetrics {
@@ -120,6 +257,7 @@ struct RichMessageMetrics {
 	int maxDepth = 0;
 	int mediaCount = 0;
 	int maxTableColumns = 0;
+	int maxRowButtons = 0;
 	int tableColumnMeasurementLimit = 0;
 };
 
@@ -129,6 +267,7 @@ using TableOccupancyGrid = std::vector<TableOccupancyRow>;
 enum class RichTextParseMode {
 	Normal,
 	DropClickHandlers,
+	DropClickHandlersKeepDates,
 };
 
 void AccumulateTextLength(
@@ -148,6 +287,7 @@ void AccumulateTextLength(
 	case BlockKind::Photo:
 	case BlockKind::Video:
 	case BlockKind::Audio:
+	case BlockKind::File:
 		return true;
 	default:
 		return false;
@@ -197,7 +337,7 @@ void AccumulateTextLength(
 		const auto &occupied = occupancy[currentRow];
 		const auto occupiedLimit = std::min(columnLimit, int(occupied.size()));
 		for (auto currentColumn = column;
-				currentColumn != occupiedLimit;
+				currentColumn < occupiedLimit;
 				++currentColumn) {
 			if (occupied[currentColumn]) {
 				return false;
@@ -344,6 +484,12 @@ void AccumulateBlockMetrics(
 	AccumulateTextLength(metrics, block.text);
 	AccumulateTextLength(metrics, block.caption);
 	AccumulateTextLength(metrics, block.formula);
+	for (const auto &button : block.buttons) {
+		AccumulateTextLength(metrics, button.text);
+	}
+	metrics->maxRowButtons = std::max(
+		metrics->maxRowButtons,
+		int(block.buttons.size()));
 	if (IsMediaKind(block.kind)) {
 		++metrics->mediaCount;
 	}
@@ -671,18 +817,96 @@ void RememberWebPageMedia(
 
 [[nodiscard]] RichText ParseCaption(
 		const MTPPageCaption &caption,
-		ParseContext *context);
+		ParseContext *context,
+		std::optional<std::size_t> quoteIndex = std::nullopt);
 
-[[nodiscard]] bool AppendRichText(
+[[nodiscard]] bool AppendInlineTextObject(
+		TextWithEntities *text,
+		const Markdown::InlineTextObjectEntity &object,
+		const QString &fallback) {
+	const auto entityData = Markdown::SerializeInlineTextObjectEntity(object);
+	if (entityData.isEmpty()) {
+		text->append(fallback);
+		return true;
+	}
+	const auto from = text->text.size();
+	text->append(QChar::ObjectReplacementCharacter);
+	return AddEntity(text, from, EntityType::CustomEmoji, entityData);
+}
+
+template <typename Append>
+[[nodiscard]] bool AppendQuoteAtom(
+		RichText *result,
+		ParseContext *context,
+		QStringView projection,
+		Append &&append) {
+	const auto from = result->text.text.size();
+	const auto appended = append();
+	if (const auto quote = context->quote) {
+		quote->appendAtom(projection, from, result->text.text.size());
+	}
+	return appended;
+}
+
+template <typename Append>
+[[nodiscard]] bool CollapseQuoteAtom(
+		RichText *result,
+		ParseContext *context,
+		Append &&append,
+		const RichQuoteRecorder::NormalizedLabel *label = nullptr) {
+	const auto quote = context->quote;
+	if (!quote) {
+		return append();
+	}
+	const auto mark = quote->mark(result->text.text.size());
+	const auto appended = append();
+	quote->collapse(mark, result->text.text.size(), label);
+	return appended;
+}
+
+[[nodiscard]] bool AppendEmptyLinkTarget(
+		RichText *result,
+		ParseContext *context,
+		qsizetype from,
+		const QString &target) {
+	if (result->text.text.size() != from) {
+		return true;
+	}
+	return AppendQuoteAtom(result, context, QStringView(), [&] {
+		result->text.append(target);
+		return true;
+	});
+}
+
+bool AppendRichText(
 		const MTPRichText &text,
 		RichText *result,
 		ParseContext *context,
 		QString *anchorId,
 		std::vector<QString> *anchorIds) {
+	const auto quote = context->quote;
+	if (quote) {
+		if (!quote->failed() && context->textDepth >= kRichQuoteMaxTextDepth) {
+			quote->fail();
+		}
+		if (quote->failed() && quote->hidden()) {
+			return false;
+		}
+		++context->textDepth;
+	}
+	const auto depthGuard = gsl::finally([&] {
+		if (quote) {
+			--context->textDepth;
+		}
+	});
 	return text.match([&](const MTPDtextEmpty &) {
 		return true;
 	}, [&](const MTPDtextPlain &data) {
+		const auto from = result->text.text.size();
 		result->text.append(qs(data.vtext()));
+		if (quote) {
+			quote->appendText(QStringView(result->text.text).mid(from), from);
+		}
 		return true;
 	}, [&](const MTPDtextConcat &data) {
 		for (const auto &part : data.vtexts().v) {
@@ -692,61 +916,57 @@ void RememberWebPageMedia(
 		}
 		return true;
 	}, [&](const MTPDtextImage &data) {
-		const auto replacementText = u"[image]"_q;
-		if (context->source == ParseSource::RichMessage
-			|| !data.vdocument_id().v
-			|| data.vw().v <= 0
-			|| data.vh().v <= 0) {
-			result->text.append(replacementText);
+		if (context->dropInlineImages) {
 			return true;
 		}
-		const auto entityData = Markdown::SerializeInlineTextObjectEntity({
-			.kind = Markdown::InlineTextObjectKind::IvImage,
-			.data = Markdown::InlineTextObjectIvImageData{
-				.documentId = uint64(data.vdocument_id().v),
-				.width = data.vw().v,
-				.height = data.vh().v,
-				.replacementText = replacementText,
-			},
+		return AppendQuoteAtom(result, context, QStringView(), [&] {
+			const auto replacementText = u"[image]"_q;
+			if (context->source == ParseSource::RichMessage
+				|| !data.vdocument_id().v
+				|| data.vw().v <= 0
+				|| data.vh().v <= 0) {
+				result->text.append(replacementText);
+				return true;
+			}
+			return AppendInlineTextObject(
+				&result->text,
+				{
+					.kind = Markdown::InlineTextObjectKind::IvImage,
+					.data = Markdown::InlineTextObjectIvImageData{
+						.documentId = uint64(data.vdocument_id().v),
+						.width = data.vw().v,
+						.height = data.vh().v,
+						.replacementText = replacementText,
+					},
+				},
+				replacementText);
 		});
-		if (entityData.isEmpty()) {
-			result->text.append(replacementText);
-			return true;
-		}
-		const auto from = result->text.text.size();
-		result->text.append(QChar::ObjectReplacementCharacter);
-		result->text.entities.push_back(EntityInText(
-			EntityType::CustomEmoji,
-			from,
-			1,
-			entityData));
-		return true;
 	}, [&](const MTPDtextMath &data) {
-		const auto source = FormulaTexFromSource(qs(data.vsource()));
-		const auto entityData = Markdown::SerializeInlineTextObjectEntity({
-			.kind = Markdown::InlineTextObjectKind::Formula,
-			.data = Markdown::InlineTextObjectFormulaData{
-				.copySource = Markdown::InlineFormulaCopySource(source),
-				.trimmedTex = source,
-			},
-		});
-		if (entityData.isEmpty()) {
-			result->text.append(source);
-			return true;
-		}
+		const auto raw = qs(data.vsource());
+		const auto source = FormulaTexFromSource(raw);
 		const auto from = result->text.text.size();
-		result->text.append(QChar::ObjectReplacementCharacter);
-		result->text.entities.push_back(EntityInText(
-			EntityType::CustomEmoji,
-			from,
-			1,
-			entityData));
-		return true;
+		const auto appended = AppendInlineTextObject(
+			&result->text,
+			{
+				.kind = Markdown::InlineTextObjectKind::Formula,
+				.data = Markdown::InlineTextObjectFormulaData{
+					.copySource = Markdown::InlineFormulaCopySource(source),
+					.trimmedTex = source,
+				},
+			},
+			source);
+		if (quote) {
+			quote->appendFormula(raw, from, result->text.text.size());
+		}
+		return appended;
 	}, [&](const MTPDtextCustomEmoji &data) {
-		result->text.append(Ui::Text::SingleCustomEmoji(
-			::Data::SerializeCustomEmojiId(uint64(data.vdocument_id().v)),
-			qs(data.valt())));
-		return true;
+		const auto alt = qs(data.valt());
+		return AppendQuoteAtom(result, context, alt, [&] {
+			result->text.append(Ui::Text::SingleCustomEmoji(
+				::Data::SerializeCustomEmojiId(uint64(data.vdocument_id().v)),
+				alt));
+			return true;
+		});
 	}, [&](const MTPDtextBold &data) {
 		const auto from = result->text.text.size();
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
@@ -773,8 +993,8 @@ void RememberWebPageMedia(
 			return false;
 		}
 		const auto target = qs(data.vurl());
-		if (result->text.text.size() == from) {
-			result->text.append(target);
+		if (!AppendEmptyLinkTarget(result, context, from, target)) {
+			return false;
 		}
 		if (context->dropRichTextClickHandlers) {
 			return true;
@@ -793,8 +1013,8 @@ void RememberWebPageMedia(
 			return false;
 		}
 		const auto email = qs(data.vemail());
-		if (result->text.text.size() == from) {
-			result->text.append(email);
+		if (!AppendEmptyLinkTarget(result, context, from, email)) {
+			return false;
 		}
 		if (context->dropRichTextClickHandlers) {
 			return true;
@@ -857,6 +1077,11 @@ void RememberWebPageMedia(
 		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
 			&& (context->dropRichTextClickHandlers
 				|| AddEntity(&result->text, from, EntityType::BankCard));
+	}, [&](const MTPDtextTonAddress &data) {
+		const auto from = result->text.text.size();
+		return AppendRichText(data.vtext(), result, context, anchorId, anchorIds)
+			&& (context->dropRichTextClickHandlers
+				|| AddEntity(&result->text, from, EntityType::TonAddress));
 	}, [&](const MTPDtextMentionName &data) {
 		const auto from = result->text.text.size();
 		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
@@ -877,10 +1102,19 @@ void RememberWebPageMedia(
 				entityData);
 	}, [&](const MTPDtextDate &data) {
 		const auto from = result->text.text.size();
-		if (!AppendRichText(data.vtext(), result, context, anchorId, anchorIds)) {
+		const auto appended = CollapseQuoteAtom(result, context, [&] {
+			return AppendRichText(
+				data.vtext(),
+				result,
+				context,
+				anchorId,
+				anchorIds);
+		});
+		if (!appended) {
 			return false;
 		}
-		if (context->dropRichTextClickHandlers) {
+		if (context->dropRichTextClickHandlers
+			&& !context->keepRichTextFormattedDates) {
 			return true;
 		}
 		auto flags = FormattedDateFlags();
@@ -913,8 +1147,8 @@ void RememberWebPageMedia(
 			return false;
 		}
 		const auto phone = qs(data.vphone());
-		if (result->text.text.size() == from) {
-			result->text.append(phone);
+		if (!AppendEmptyLinkTarget(result, context, from, phone)) {
+			return false;
 		}
 		if (context->dropRichTextClickHandlers) {
 			return true;
@@ -932,6 +1166,97 @@ void RememberWebPageMedia(
 			context,
 			anchorId,
 			anchorIds);
+	}, [&](const MTPDtextDiff &data) {
+		if (!context->displayTextDiff) {
+			return AppendRichText(
+				data.vtext(),
+				result,
+				context,
+				anchorId,
+				anchorIds);
+		}
+		const auto deleted = result->text.text.size();
+		if (!AppendRichText(
+				data.vold_text(),
+				result,
+				context,
+				anchorId,
+				anchorIds)
+			|| !AddEntity(&result->text, deleted, EntityType::StrikeOut)
+			|| !AddEntity(
+				&result->text,
+				deleted,
+				EntityType::Colorized,
+				QString(QChar(kTextDiffDeletedColorIndex)))) {
+			return false;
+		}
+		const auto inserted = result->text.text.size();
+		return AppendRichText(
+			data.vtext(),
+			result,
+			context,
+			anchorId,
+			anchorIds)
+			&& AddEntity(&result->text, inserted, EntityType::Underline)
+			&& AddEntity(
+				&result->text,
+				inserted,
+				EntityType::Colorized,
+				QString(QChar(kTextDiffInsertedColorIndex)));
+	}, [&](const MTPDtextButton &data) {
+		const auto buttonStyle = data.vstyle();
+		const auto button = ParseInlineButton(
+			data.vtype(),
+			QString(),
+			ParseRichButtonVisual(buttonStyle));
+		if (!button) {
+			return AppendRichText(
+				data.vtext(),
+				result,
+				context,
+				anchorId,
+				anchorIds);
+		}
+		auto normalized = RichQuoteRecorder::NormalizedLabel();
+		return CollapseQuoteAtom(result, context, [&] {
+			auto parsed = ParseRichText(
+				data.vtext(),
+				context,
+				RichTextParseMode::DropClickHandlersKeepDates);
+			const auto offsets = (quote && quote->keepsLabels())
+				? &normalized.offsets
+				: nullptr;
+			const auto label = Markdown::NormalizeRichButtonLabel(
+				std::move(parsed.text),
+				offsets);
+			if (label.empty()) {
+				return true;
+			} else if (offsets) {
+				normalized.text = label.text;
+			}
+			using Type = HistoryMessageMarkupButton::Type;
+			const auto disabled = (button->type == Type::Disabled);
+			const auto link = buttonStyle
+				&& buttonStyle->data().is_link()
+				&& (disabled
+					|| button->type == Type::Callback
+					|| button->type == Type::CallbackWithPassword);
+			return AppendInlineTextObject(
+				&result->text,
+				{
+					.kind = Markdown::InlineTextObjectKind::Button,
+					.data = Markdown::InlineTextObjectButtonData{
+						.label = label,
+						.data = button->data,
+						.buttonId = button->buttonId,
+						.type = button->type,
+						.color = button->visual.color,
+						.peerTypes = button->peerTypes,
+						.link = link,
+					},
+				},
+				label.text);
+		}, &normalized);
 	});
 }
 
@@ -943,43 +1268,160 @@ void RememberWebPageMedia(
 	auto anchorId = QString();
 	auto anchorIds = std::vector<QString>();
 	const auto wasDropClickHandlers = context->dropRichTextClickHandlers;
+	const auto wasKeepFormattedDates = context->keepRichTextFormattedDates;
 	context->dropRichTextClickHandlers
-		= (mode == RichTextParseMode::DropClickHandlers);
-	const auto parsed = AppendRichText(
+		= (mode != RichTextParseMode::Normal);
+	context->keepRichTextFormattedDates
+		= (mode == RichTextParseMode::DropClickHandlersKeepDates);
+	AppendRichText(
 		text,
 		&result,
 		context,
 		&anchorId,
 		&anchorIds);
 	context->dropRichTextClickHandlers = wasDropClickHandlers;
-	(void)parsed;
+	context->keepRichTextFormattedDates = wasKeepFormattedDates;
 	result.anchorId = std::move(anchorId);
 	result.anchorIds = std::move(anchorIds);
 	return result;
 }
 
+[[nodiscard]] RichText ParseQuotableText(
+		const MTPRichText &text,
+		ParseContext *context,
+		Markdown::PreparedEditLeafKind kind,
+		std::size_t index,
+		RichTextParseMode mode = RichTextParseMode::Normal) {
+	const auto node = RichQuoteScope::Node(context->quote, kind, index, text);
+	return ParseRichText(text, context, mode);
+}
+
+void RecordQuotableFormula(
+		ParseContext *context,
+		std::size_t index,
+		const QString &formula,
+		const MTPstring &source) {
+	const auto quote = context->quote;
+	if (!quote) {
+		return;
+	}
+	const auto node = RichQuoteScope::Node(
+		quote,
+		Markdown::PreparedEditLeafKind::MathFormula,
+		index,
+		MTP_textMath(source));
+	quote->appendFormula(formula, 0, formula.size());
+}
+
+[[nodiscard]] RichText ParseQuotableListItemText(
+		const MTPRichText &text,
+		ParseContext *context,
+		std::size_t index,
+		std::size_t itemIndex) {
+	const auto node = RichQuoteScope::ListItemNode(
+		context->quote,
+		index,
+		itemIndex,
+		text);
+	return ParseRichText(text, context);
+}
+
+[[nodiscard]] RichText ParseQuotableTableCellText(
+		const MTPRichText &text,
+		ParseContext *context,
+		std::size_t index,
+		std::size_t row,
+		std::size_t cell) {
+	const auto node = RichQuoteScope::TableCellNode(
+		context->quote,
+		index,
+		row,
+		cell,
+		text);
+	return ParseRichText(text, context);
+}
+
+[[nodiscard]] RichQuoteRecorder::Checkpoint QuoteCheckpoint(
+		const ParseContext *context) {
+	return context->quote
+		? context->quote->checkpoint()
+		: RichQuoteRecorder::Checkpoint();
+}
+
+// WHY: hidden grouped items are parsed only to record their quote nodes,
+// so their output is dropped as soon as it is made instead of letting an
+// untrusted container width allocate a page that is thrown away.
+[[nodiscard]] bool DiscardsOutput(const ParseContext *context) {
+	return context->quote && context->quote->hidden();
+}
+
+[[nodiscard]] bool HiddenParseFailed(const ParseContext *context) {
+	return DiscardsOutput(context) && context->quote->failed();
+}
+
+template <typename Type>
+void ReserveOutput(
+		std::vector<Type> *list,
+		std::size_t size,
+		const ParseContext *context) {
+	if (!DiscardsOutput(context)) {
+		list->reserve(size);
+	}
+}
+
+template <typename Type>
+void PushOutput(
+		std::vector<Type> *list,
+		Type value,
+		const ParseContext *context) {
+	if (!DiscardsOutput(context)) {
+		list->push_back(std::move(value));
+	}
+}
+
 [[nodiscard]] RichText ParseCaption(
 		const MTPPageCaption &caption,
-		ParseContext *context) {
+		ParseContext *context,
+		std::optional<std::size_t> quoteIndex) {
+	const auto quote = quoteIndex ? context->quote : nullptr;
+	const auto index = quoteIndex.value_or(0);
 	auto result = RichText();
 	auto anchorId = QString();
 	auto anchorIds = std::vector<QString>();
-	(void)AppendRichText(
-		caption.data().vtext(),
-		&result,
-		context,
-		&anchorId,
-		&anchorIds);
+	{
+		const auto node = RichQuoteScope::Node(
+			quote,
+			Markdown::PreparedEditLeafKind::BlockCaption,
+			index,
+			caption.data().vtext());
+		AppendRichText(
+			caption.data().vtext(),
+			&result,
+			context,
+			&anchorId,
+			&anchorIds);
+	}
+	const auto checkpoint = QuoteCheckpoint(context);
 	auto credit = RichText();
-	(void)AppendRichText(
-		caption.data().vcredit(),
-		&credit,
-		context,
-		&anchorId,
-		&anchorIds);
+	{
+		const auto node = RichQuoteScope::Node(
+			quote,
+			Markdown::PreparedEditLeafKind::BlockCaption,
+			index,
+			caption.data().vcredit());
+		AppendRichText(
+			caption.data().vcredit(),
+			&credit,
+			context,
+			&anchorId,
+			&anchorIds);
+	}
 	if (!credit.text.empty()) {
 		if (!result.text.empty()) {
 			result.text.append(QChar('\n'));
+		}
+		if (quote) {
+			quote->shiftPage(checkpoint, result.text.text.size());
 		}
 		AppendRich(&result, std::move(credit));
 	}
@@ -995,25 +1437,224 @@ void AdoptAnchor(QString *anchorId, RichText *text) {
 	}
 }
 
-void AdoptLeadingParagraphListItemText(ListItem *item) {
-	if (item->blocks.empty()
+[[nodiscard]] Block MakeDocumentBlock(
+		BlockKind kind,
+		uint64 documentId,
+		const MTPPageCaption &caption,
+		ParseContext *context,
+		std::optional<std::size_t> quoteIndex = std::nullopt) {
+	const auto info = FindDocumentInfo(*context, documentId);
+	auto parsed = MakeBlock(kind);
+	parsed.audioTitle = info.title;
+	parsed.audioPerformer = info.performer;
+	parsed.audioDuration = info.duration;
+	parsed.fileName = info.fileName;
+	parsed.documentId = documentId;
+	parsed.document = FindDocument(*context, documentId);
+	parsed.caption = ParseCaption(caption, context, quoteIndex);
+	AdoptAnchor(&parsed.anchorId, &parsed.caption);
+	return parsed;
+}
+
+[[nodiscard]] bool AdoptLeadingParagraphListItemText(ListItem *item) {
+	// List items hold either inline text or a list of blocks, never both,
+	// so adopt the paragraph text only if it is the single item block.
+	if (item->blocks.size() != 1
 		|| item->blocks.front().kind != BlockKind::Paragraph) {
-		return;
+		return false;
 	}
 	item->text = std::move(item->blocks.front().text);
 	item->anchorId = std::move(item->blocks.front().anchorId);
 	item->blocks.erase(item->blocks.begin());
+	return true;
 }
 
+void AppendBlock(
+	const MTPPageBlock &block,
+	std::vector<Block> *result,
+	ParseContext *context);
+
 void AppendBlocks(
+	const QVector<MTPPageBlock> &blocks,
+	std::vector<Block> *result,
+	ParseContext *context);
+
+void AppendListItemBlocks(
 		const QVector<MTPPageBlock> &blocks,
+		ListItem *item,
+		std::size_t index,
+		std::size_t itemIndex,
+		ParseContext *context) {
+	const auto quote = context->quote;
+	const auto checkpoint = QuoteCheckpoint(context);
+	{
+		const auto children = RichQuoteScope::ListItemChildren(
+			quote,
+			index,
+			itemIndex);
+		AppendBlocks(blocks, &item->blocks, context);
+	}
+	if (AdoptLeadingParagraphListItemText(item) && quote) {
+		quote->adoptListItemParagraph(checkpoint, index, itemIndex);
+	}
+}
+
+void AppendDiscardedBlocks(
+		const QVector<MTPPageBlock> &blocks,
+		ParseContext *context) {
+	auto scratch = std::vector<Block>();
+	for (const auto &block : blocks) {
+		if (HiddenParseFailed(context)) {
+			break;
+		}
+		AppendBlock(block, &scratch, context);
+		scratch.clear();
+	}
+}
+
+void RecordHiddenGroupedItems(
+		const QVector<MTPPageBlock> &items,
+		ParseContext *context) {
+	const auto quote = context->quote;
+	if (!quote || quote->failed() || quote->suppressed()) {
+		return;
+	}
+	const auto hidden = RichQuoteScope::Hidden(quote);
+	AppendDiscardedBlocks(items, context);
+}
+
+[[nodiscard]] Block ParseGroupedMediaBlock(
+		const QVector<MTPPageBlock> &items,
+		const MTPPageCaption &caption,
+		GroupedMediaIntent intent,
+		std::size_t index,
+		ParseContext *context) {
+	auto parsed = MakeBlock(BlockKind::GroupedMedia);
+	parsed.mediaIntent = intent;
+	parsed.mediaItems.reserve(items.size());
+	for (const auto &item : items) {
+		item.match([&](const MTPDpageBlockPhoto &row) {
+			const auto photoId = uint64(row.vphoto_id().v);
+			const auto size = FindPhotoSize(*context, photoId);
+			parsed.mediaItems.push_back({
+				.kind = BlockKind::Photo,
+				.photo = FindPhoto(*context, photoId),
+				.photoId = photoId,
+				.width = size.width(),
+				.height = size.height(),
+				.spoiler = row.is_spoiler(),
+			});
+		}, [&](const MTPDpageBlockVideo &row) {
+			const auto documentId = uint64(row.vvideo_id().v);
+			const auto info = FindDocumentInfo(*context, documentId);
+			parsed.mediaItems.push_back({
+				.kind = BlockKind::Video,
+				.document = FindDocument(*context, documentId),
+				.documentId = documentId,
+				.width = info.width,
+				.height = info.height,
+				.autoplay = row.is_autoplay(),
+				.loop = row.is_loop(),
+				.spoiler = row.is_spoiler(),
+			});
+		}, [](const auto &) {
+		});
+	}
+	parsed.caption = ParseCaption(caption, context, index);
+	AdoptAnchor(&parsed.anchorId, &parsed.caption);
+	return parsed;
+}
+
+void AppendGroupedMediaBlock(
+		const QVector<MTPPageBlock> &items,
+		const MTPPageCaption &caption,
+		GroupedMediaIntent intent,
 		std::vector<Block> *result,
-		ParseContext *context);
+		ParseContext *context) {
+	const auto index = result->size();
+	RecordHiddenGroupedItems(items, context);
+	if (DiscardsOutput(context)) {
+		result->push_back(ParseGroupedMediaBlock(
+			QVector<MTPPageBlock>(),
+			caption,
+			intent,
+			index,
+			context));
+		return;
+	}
+	const auto checkpoint = QuoteCheckpoint(context);
+	auto blocks = SplitGroupedMediaBlock(ParseGroupedMediaBlock(
+		items,
+		caption,
+		intent,
+		index,
+		context));
+	const auto quote = context->quote;
+	if (quote && blocks.size() > 1) {
+		quote->moveSplitCaption(
+			checkpoint,
+			index,
+			index + blocks.size() - 1);
+	}
+	result->insert(
+		result->end(),
+		std::make_move_iterator(blocks.begin()),
+		std::make_move_iterator(blocks.end()));
+}
+
+[[nodiscard]] bool IsQuotableBlock(const MTPPageBlock &block) {
+	switch (block.type()) {
+	case mtpc_pageBlockParagraph:
+	case mtpc_pageBlockHeading1:
+	case mtpc_pageBlockHeading2:
+	case mtpc_pageBlockHeading3:
+	case mtpc_pageBlockHeading4:
+	case mtpc_pageBlockHeading5:
+	case mtpc_pageBlockHeading6:
+	case mtpc_pageBlockFooter:
+	case mtpc_pageBlockThinking:
+	case mtpc_pageBlockPreformatted:
+	case mtpc_pageBlockMath:
+	case mtpc_pageBlockBlockquote:
+	case mtpc_pageBlockBlockquoteBlocks:
+	case mtpc_pageBlockPullquote:
+	case mtpc_pageBlockList:
+	case mtpc_pageBlockOrderedList:
+	case mtpc_pageBlockTable:
+	case mtpc_pageBlockDetails:
+	case mtpc_pageBlockPhoto:
+	case mtpc_pageBlockVideo:
+	case mtpc_pageBlockAudio:
+	case mtpc_pageBlockMap:
+	case mtpc_pageBlockCollage:
+	case mtpc_pageBlockSlideshow:
+		return true;
+	}
+	return false;
+}
 
 void AppendBlock(
 		const MTPPageBlock &block,
 		std::vector<Block> *result,
-	ParseContext *context) {
+		ParseContext *context) {
+	using LeafKind = Markdown::PreparedEditLeafKind;
+	const auto quote = context->quote;
+	if (quote
+		&& quote->hidden()
+		&& (quote->failed() || !IsQuotableBlock(block))) {
+		return;
+	}
+	const auto index = result->size();
+	if (context->blockDepth >= kMaxParsedBlockDepth) {
+		if (quote && !quote->suppressed()) {
+			quote->fail();
+		}
+		result->push_back(MakeBlock(BlockKind::Unsupported));
+		return;
+	}
+	++context->blockDepth;
+	const auto depthGuard = gsl::finally([&] { --context->blockDepth; });
+
 	block.match([&](const MTPDpageBlockUnsupported &) {
 		result->push_back(MakeBlock(BlockKind::Unsupported));
 	}, [&](const MTPDpageBlockTitle &data) {
@@ -1044,26 +1685,40 @@ void AppendBlock(
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockParagraph &data) {
 		auto parsed = MakeBlock(BlockKind::Paragraph);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockThinking &data) {
 		auto parsed = MakeBlock(BlockKind::Thinking);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockPreformatted &data) {
 		auto parsed = MakeBlock(BlockKind::Code);
 		parsed.language = qs(data.vlanguage()).trimmed();
-		parsed.text = ParseRichText(
+		parsed.text = ParseQuotableText(
 			data.vtext(),
 			context,
+			LeafKind::BlockText,
+			index,
 			RichTextParseMode::DropClickHandlers);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockFooter &data) {
 		auto parsed = MakeBlock(BlockKind::Footer);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockDivider &) {
@@ -1078,44 +1733,80 @@ void AppendBlock(
 	}, [&](const MTPDpageBlockList &data) {
 		auto parsed = MakeBlock(BlockKind::List);
 		parsed.listKind = ListKind::Bullet;
-		parsed.listItems.reserve(data.vitems().v.size());
+		ReserveOutput(&parsed.listItems, data.vitems().v.size(), context);
 		for (const auto &item : data.vitems().v) {
+			if (HiddenParseFailed(context)) {
+				break;
+			}
+			const auto itemIndex = parsed.listItems.size();
 			auto listItem = ListItem();
 			item.match([&](const MTPDpageListItemText &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				listItem.text = ParseRichText(row.vtext(), context);
+				listItem.text = ParseQuotableListItemText(
+					row.vtext(),
+					context,
+					index,
+					itemIndex);
 				AdoptAnchor(&listItem.anchorId, &listItem.text);
 			}, [&](const MTPDpageListItemBlocks &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				AppendBlocks(row.vblocks().v, &listItem.blocks, context);
-				AdoptLeadingParagraphListItemText(&listItem);
+				AppendListItemBlocks(
+					row.vblocks().v,
+					&listItem,
+					index,
+					itemIndex,
+					context);
 			});
-			parsed.listItems.push_back(std::move(listItem));
+			PushOutput(&parsed.listItems, std::move(listItem), context);
 		}
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockBlockquote &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.collapsed = data.is_collapsed();
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
-		parsed.caption = ParseRichText(data.vcaption(), context);
+		parsed.caption = ParseQuotableText(
+			data.vcaption(),
+			context,
+			LeafKind::BlockCaption,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockBlockquoteBlocks &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
-		AppendBlocks(data.vblocks().v, &parsed.blocks, context);
-		parsed.caption = ParseRichText(data.vcaption(), context);
+		{
+			const auto children = RichQuoteScope::BlockChildren(quote, index);
+			AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		}
+		parsed.caption = ParseQuotableText(
+			data.vcaption(),
+			context,
+			LeafKind::BlockCaption,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockPullquote &data) {
 		auto parsed = MakeBlock(BlockKind::Quote);
 		parsed.pullquote = true;
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
-		parsed.caption = ParseRichText(data.vcaption(), context);
+		parsed.caption = ParseQuotableText(
+			data.vcaption(),
+			context,
+			LeafKind::BlockCaption,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockPhoto &data) {
@@ -1130,7 +1821,7 @@ void AppendBlock(
 		parsed.photoId = photoId;
 		parsed.spoiler = data.is_spoiler();
 		parsed.photo = FindPhoto(*context, photoId);
-		parsed.caption = ParseCaption(data.vcaption(), context);
+		parsed.caption = ParseCaption(data.vcaption(), context, index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockVideo &data) {
@@ -1144,10 +1835,11 @@ void AppendBlock(
 		parsed.loop = data.is_loop();
 		parsed.spoiler = data.is_spoiler();
 		parsed.document = FindDocument(*context, documentId);
-		parsed.caption = ParseCaption(data.vcaption(), context);
+		parsed.caption = ParseCaption(data.vcaption(), context, index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockCover &data) {
+		const auto suppressed = RichQuoteScope::Suppressed(quote);
 		AppendBlock(data.vcover(), result, context);
 	}, [&](const MTPDpageBlockEmbed &data) {
 		auto parsed = MakeBlock(BlockKind::Embed);
@@ -1168,80 +1860,27 @@ void AppendBlock(
 		parsed.date = data.vdate().v;
 		parsed.photoId = uint64(data.vauthor_photo_id().v);
 		parsed.photo = FindPhoto(*context, parsed.photoId);
-		AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		{
+			const auto suppressed = RichQuoteScope::Suppressed(quote);
+			AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		}
 		parsed.caption = ParseCaption(data.vcaption(), context);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockCollage &data) {
-		auto parsed = MakeBlock(BlockKind::GroupedMedia);
-		parsed.mediaIntent = GroupedMediaIntent::Collage;
-		parsed.mediaItems.reserve(data.vitems().v.size());
-		for (const auto &item : data.vitems().v) {
-			item.match([&](const MTPDpageBlockPhoto &row) {
-				const auto photoId = uint64(row.vphoto_id().v);
-				const auto size = FindPhotoSize(*context, photoId);
-				parsed.mediaItems.push_back({
-					.kind = BlockKind::Photo,
-					.photo = FindPhoto(*context, photoId),
-					.photoId = photoId,
-					.width = size.width(),
-					.height = size.height(),
-					.spoiler = row.is_spoiler(),
-				});
-			}, [&](const MTPDpageBlockVideo &row) {
-				const auto documentId = uint64(row.vvideo_id().v);
-				const auto info = FindDocumentInfo(*context, documentId);
-				parsed.mediaItems.push_back({
-					.kind = BlockKind::Video,
-					.document = FindDocument(*context, documentId),
-					.documentId = documentId,
-					.width = info.width,
-					.height = info.height,
-					.autoplay = row.is_autoplay(),
-					.loop = row.is_loop(),
-					.spoiler = row.is_spoiler(),
-				});
-			}, [](const auto &) {
-			});
-		}
-		parsed.caption = ParseCaption(data.vcaption(), context);
-		AdoptAnchor(&parsed.anchorId, &parsed.caption);
-		result->push_back(std::move(parsed));
+		AppendGroupedMediaBlock(
+			data.vitems().v,
+			data.vcaption(),
+			GroupedMediaIntent::Collage,
+			result,
+			context);
 	}, [&](const MTPDpageBlockSlideshow &data) {
-		auto parsed = MakeBlock(BlockKind::GroupedMedia);
-		parsed.mediaIntent = GroupedMediaIntent::Slideshow;
-		parsed.mediaItems.reserve(data.vitems().v.size());
-		for (const auto &item : data.vitems().v) {
-			item.match([&](const MTPDpageBlockPhoto &row) {
-				const auto photoId = uint64(row.vphoto_id().v);
-				const auto size = FindPhotoSize(*context, photoId);
-				parsed.mediaItems.push_back({
-					.kind = BlockKind::Photo,
-					.photo = FindPhoto(*context, photoId),
-					.photoId = photoId,
-					.width = size.width(),
-					.height = size.height(),
-					.spoiler = row.is_spoiler(),
-				});
-			}, [&](const MTPDpageBlockVideo &row) {
-				const auto documentId = uint64(row.vvideo_id().v);
-				const auto info = FindDocumentInfo(*context, documentId);
-				parsed.mediaItems.push_back({
-					.kind = BlockKind::Video,
-					.document = FindDocument(*context, documentId),
-					.documentId = documentId,
-					.width = info.width,
-					.height = info.height,
-					.autoplay = row.is_autoplay(),
-					.loop = row.is_loop(),
-					.spoiler = row.is_spoiler(),
-				});
-			}, [](const auto &) {
-			});
-		}
-		parsed.caption = ParseCaption(data.vcaption(), context);
-		AdoptAnchor(&parsed.anchorId, &parsed.caption);
-		result->push_back(std::move(parsed));
+		AppendGroupedMediaBlock(
+			data.vitems().v,
+			data.vcaption(),
+			GroupedMediaIntent::Slideshow,
+			result,
+			context);
 	}, [&](const MTPDpageBlockChannel &data) {
 		auto parsed = MakeBlock(BlockKind::Channel);
 		parsed.peer = context->session->data().processChat(data.vchannel()).get();
@@ -1264,18 +1903,12 @@ void AppendBlock(
 		});
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockAudio &data) {
-		const auto documentId = uint64(data.vaudio_id().v);
-		const auto info = FindDocumentInfo(*context, documentId);
-		auto parsed = MakeBlock(BlockKind::Audio);
-		parsed.audioTitle = info.title;
-		parsed.audioPerformer = info.performer;
-		parsed.audioFileName = info.fileName;
-		parsed.documentId = documentId;
-		parsed.document = FindDocument(*context, documentId);
-		parsed.audioDuration = info.duration;
-		parsed.caption = ParseCaption(data.vcaption(), context);
-		AdoptAnchor(&parsed.anchorId, &parsed.caption);
-		result->push_back(std::move(parsed));
+		result->push_back(MakeDocumentBlock(
+			BlockKind::Audio,
+			uint64(data.vaudio_id().v),
+			data.vcaption(),
+			context,
+			index));
 	}, [&](const MTPDpageBlockKicker &data) {
 		auto parsed = MakeHeadingBlock(5);
 		parsed.text = ParseRichText(data.vtext(), context);
@@ -1283,50 +1916,90 @@ void AppendBlock(
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading1 &data) {
 		auto parsed = MakeHeadingBlock(1);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading2 &data) {
 		auto parsed = MakeHeadingBlock(2);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading3 &data) {
 		auto parsed = MakeHeadingBlock(3);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading4 &data) {
 		auto parsed = MakeHeadingBlock(4);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading5 &data) {
 		auto parsed = MakeHeadingBlock(5);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockHeading6 &data) {
 		auto parsed = MakeHeadingBlock(6);
-		parsed.text = ParseRichText(data.vtext(), context);
+		parsed.text = ParseQuotableText(
+			data.vtext(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockMath &data) {
 		auto parsed = MakeBlock(BlockKind::Math);
 		parsed.formula = qs(data.vsource());
+		RecordQuotableFormula(context, index, parsed.formula, data.vsource());
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockTable &data) {
 		auto parsed = MakeBlock(BlockKind::Table);
 		parsed.bordered = data.is_bordered();
 		parsed.striped = data.is_striped();
-		parsed.text = ParseRichText(data.vtitle(), context);
+		parsed.compact = data.is_compact();
+		parsed.text = ParseQuotableText(
+			data.vtitle(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
-		parsed.tableRows.reserve(data.vrows().v.size());
+		ReserveOutput(&parsed.tableRows, data.vrows().v.size(), context);
 		for (const auto &row : data.vrows().v) {
+			if (HiddenParseFailed(context)) {
+				break;
+			}
 			row.match([&](const MTPDpageTableRow &rowData) {
+				const auto rowIndex = parsed.tableRows.size();
 				auto parsedRow = TableRow();
-				parsedRow.cells.reserve(rowData.vcells().v.size());
+				ReserveOutput(
+					&parsedRow.cells,
+					rowData.vcells().v.size(),
+					context);
 				for (const auto &cell : rowData.vcells().v) {
+					if (HiddenParseFailed(context)) {
+						break;
+					}
 					cell.match([&](const MTPDpageTableCell &cellData) {
 						auto parsedCell = TableCell{
 							.colspan = cellData.vcolspan().value_or(1),
@@ -1336,60 +2009,92 @@ void AppendBlock(
 							.verticalAlignment = TableCellVerticalAlignment(cellData),
 						};
 						if (const auto text = cellData.vtext()) {
-							parsedCell.text = ParseRichText(*text, context);
+							parsedCell.text = ParseQuotableTableCellText(
+								*text,
+								context,
+								index,
+								rowIndex,
+								parsedRow.cells.size());
 							parsedCell.text.anchorId.clear();
 							parsedCell.text.anchorIds.clear();
 						}
-						parsedRow.cells.push_back(std::move(parsedCell));
+						PushOutput(
+							&parsedRow.cells,
+							std::move(parsedCell),
+							context);
 					});
 				}
-				parsed.tableRows.push_back(std::move(parsedRow));
+				PushOutput(&parsed.tableRows, std::move(parsedRow), context);
 			});
 		}
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockOrderedList &data) {
 		auto parsed = MakeBlock(BlockKind::List);
 		parsed.listKind = ListKind::Ordered;
-		parsed.listItems.reserve(data.vitems().v.size());
-		const auto step = data.is_reversed() ? -1 : 1;
-		auto nextNumber = data.vstart().value_or(
-			data.is_reversed() ? int(data.vitems().v.size()) : 1);
+		parsed.orderedList.reversed = data.is_reversed();
+		if (const auto start = data.vstart()) {
+			parsed.orderedList.start = start->v;
+		}
+		if (const auto listType = data.vtype()) {
+			parsed.orderedList.type = qs(*listType);
+		}
+		ReserveOutput(&parsed.listItems, data.vitems().v.size(), context);
 		for (const auto &item : data.vitems().v) {
+			if (HiddenParseFailed(context)) {
+				break;
+			}
+			const auto itemIndex = parsed.listItems.size();
 			auto listItem = ListItem();
-			const auto fillNumber = [&](const auto &row) {
+			const auto fillOrderedData = [&](const auto &row) {
 				if (const auto num = row.vnum()) {
-					listItem.number = qs(*num);
-				} else if (const auto value = row.vvalue()) {
-					listItem.number = QString::number(value->v);
-				} else {
-					listItem.number = QString::number(nextNumber);
+					listItem.number.num = qs(*num);
+				}
+				if (const auto value = row.vvalue()) {
+					listItem.number.value = value->v;
+				}
+				if (const auto itemType = row.vtype()) {
+					listItem.number.type = qs(*itemType);
 				}
 			};
 			item.match([&](const MTPDpageListOrderedItemText &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				fillNumber(row);
-				listItem.text = ParseRichText(row.vtext(), context);
+				fillOrderedData(row);
+				listItem.text = ParseQuotableListItemText(
+					row.vtext(),
+					context,
+					index,
+					itemIndex);
 				AdoptAnchor(&listItem.anchorId, &listItem.text);
 			}, [&](const MTPDpageListOrderedItemBlocks &row) {
 				listItem.taskState = TaskStateFromFlags(
 					row.is_checkbox(),
 					row.is_checked());
-				fillNumber(row);
-				AppendBlocks(row.vblocks().v, &listItem.blocks, context);
-				AdoptLeadingParagraphListItemText(&listItem);
+				fillOrderedData(row);
+				AppendListItemBlocks(
+					row.vblocks().v,
+					&listItem,
+					index,
+					itemIndex,
+					context);
 			});
-			parsed.listItems.push_back(std::move(listItem));
-			nextNumber += step;
+			PushOutput(&parsed.listItems, std::move(listItem), context);
 		}
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockDetails &data) {
 		auto parsed = MakeBlock(BlockKind::Details);
 		parsed.open = data.is_open();
-		parsed.text = ParseRichText(data.vtitle(), context);
+		parsed.text = ParseQuotableText(
+			data.vtitle(),
+			context,
+			LeafKind::BlockText,
+			index);
 		AdoptAnchor(&parsed.anchorId, &parsed.text);
-		AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		{
+			const auto children = RichQuoteScope::BlockChildren(quote, index);
+			AppendBlocks(data.vblocks().v, &parsed.blocks, context);
+		}
 		result->push_back(std::move(parsed));
 	}, [&](const MTPDpageBlockRelatedArticles &data) {
 		auto parsed = MakeBlock(BlockKind::RelatedArticles);
@@ -1416,16 +2121,57 @@ void AppendBlock(
 		auto parsed = MakeBlock(BlockKind::Map);
 		parsed.width = NonZeroMapWidth(data.vw().v);
 		parsed.height = NonZeroMapHeight(data.vh().v);
-		parsed.zoom = data.vzoom().v;
-		data.vgeo().match([&](const MTPDgeoPoint &row) {
-			parsed.latitude = row.vlat().v;
-			parsed.longitude = row.vlong().v;
-			parsed.accessHash = row.vaccess_hash().v;
-		}, [](const auto &) {
-		});
-		parsed.caption = ParseCaption(data.vcaption(), context);
+		if (const auto point = ::Data::LocationPoint::FromMTP(data.vgeo())) {
+			parsed.zoom = data.vzoom().v;
+			parsed.latitude = point->lat();
+			parsed.longitude = point->lon();
+			parsed.accessHash = point->accessHash();
+		}
+		parsed.caption = ParseCaption(data.vcaption(), context, index);
 		AdoptAnchor(&parsed.anchorId, &parsed.caption);
 		result->push_back(std::move(parsed));
+	}, [&](const MTPDpageBlockButtonRow &data) {
+		auto parsed = MakeBlock(BlockKind::ButtonRow);
+		parsed.buttonAlignment = data.is_align_left()
+			? ButtonAlignment::Left
+			: data.is_align_center()
+			? ButtonAlignment::Center
+			: data.is_align_right()
+			? ButtonAlignment::Right
+			: ButtonAlignment::Stretch;
+		const auto &list = data.vbuttons().v;
+		const auto count = std::min(
+			int(list.size()),
+			RichMessageLimits().maxButtons);
+		parsed.buttons.reserve(count);
+		for (auto i = 0; i != count; ++i) {
+			const auto &fields = list[i].data();
+			auto button = ParseInlineButton(
+				fields.vtype(),
+				QString(),
+				ParseRichButtonVisual(fields.vstyle()));
+			if (!button) {
+				continue;
+			}
+			auto text = ParseRichText(
+				fields.vtext(),
+				context,
+				RichTextParseMode::DropClickHandlersKeepDates);
+			button->text = text.text.text;
+			parsed.buttons.push_back({
+				.text = std::move(text),
+				.button = std::move(*button),
+			});
+		}
+		if (!parsed.buttons.empty()) {
+			result->push_back(std::move(parsed));
+		}
+	}, [&](const MTPDpageBlockDocument &data) {
+		result->push_back(MakeDocumentBlock(
+			BlockKind::File,
+			uint64(data.vdocument_id().v),
+			data.vcaption(),
+			context));
 	}, [&](const MTPDinputPageBlockMap &) {
 		result->push_back(MakeBlock(BlockKind::Unsupported));
 	});
@@ -1435,50 +2181,21 @@ void AppendBlocks(
 		const QVector<MTPPageBlock> &blocks,
 		std::vector<Block> *result,
 		ParseContext *context) {
+	if (DiscardsOutput(context)) {
+		AppendDiscardedBlocks(blocks, context);
+		return;
+	}
 	result->reserve(result->size() + blocks.size());
 	for (const auto &block : blocks) {
 		AppendBlock(block, result, context);
 	}
 }
 
-void ExpandInlineTextObjects(TextWithEntities *text) {
-	auto &entities = text->entities;
-	for (auto i = entities.begin(); i != entities.end();) {
-		if (i->type() != EntityType::CustomEmoji) {
-			++i;
-			continue;
-		}
-		const auto object = Markdown::ParseInlineTextObjectEntity(
-			i->data());
-		if (!object) {
-			++i;
-			continue;
-		}
-		const auto replacement = v::match(object->data, [](
-				const Markdown::InlineTextObjectFormulaData &data) {
-			return data.trimmedTex;
-		}, [](const Markdown::InlineTextObjectIvImageData &data) {
-			return data.replacementText;
-		});
-		const auto offset = i->offset();
-		const auto length = i->length();
-		const auto delta = int(replacement.size()) - length;
-		text->text.replace(offset, length, replacement);
-		i = entities.erase(i);
-		for (auto &entity : entities) {
-			if (entity.offset() > offset) {
-				entity.shiftRight(delta);
-			} else if (entity.offset() + entity.length() > offset) {
-				entity.shrinkFromRight(-delta);
-			}
-		}
-	}
-}
-
 void AppendSummaryLine(
 		TextWithEntities *result,
-		TextWithEntities &&line) {
-	ExpandInlineTextObjects(&line);
+		TextWithEntities &&line,
+		bool withIcons) {
+	Markdown::ExpandInlineTextObjects(&line, withIcons);
 	TextUtilities::Trim(line);
 	if (line.empty()) {
 		return;
@@ -1492,20 +2209,22 @@ void AppendSummaryLine(
 void AppendSummaryLine(
 		TextWithEntities *result,
 		const TextWithEntities &line,
+		bool withIcons,
 		const QString &prefix = QString()) {
 	auto prepared = TextWithEntities();
 	if (!prefix.isEmpty()) {
 		prepared.append(prefix);
 	}
 	prepared.append(line);
-	AppendSummaryLine(result, std::move(prepared));
+	AppendSummaryLine(result, std::move(prepared), withIcons);
 }
 
 void AppendSummaryLine(
 		TextWithEntities *result,
 		const RichText &line,
+		bool withIcons,
 		const QString &prefix = QString()) {
-	AppendSummaryLine(result, line.text, prefix);
+	AppendSummaryLine(result, line.text, withIcons, prefix);
 }
 
 [[nodiscard]] QString MediaSummaryFallback(const Block &block) {
@@ -1515,6 +2234,8 @@ void AppendSummaryLine(
 		return tr::lng_in_dlg_video(tr::now);
 	} else if (block.kind == BlockKind::Audio) {
 		return tr::lng_in_dlg_audio_file(tr::now);
+	} else if (block.kind == BlockKind::File) {
+		return tr::lng_in_dlg_file(tr::now);
 	} else if (block.kind == BlockKind::Map) {
 		return tr::lng_maps_point(tr::now);
 	} else if (block.kind == BlockKind::GroupedMedia) {
@@ -1546,36 +2267,303 @@ void AppendSummaryLine(
 	return article.author;
 }
 
-void AppendSummaryBlock(TextWithEntities *result, const Block &block);
+void AppendSummaryBlock(
+	TextWithEntities *result,
+	const Block &block,
+	bool withIcons);
 
 void AppendSummaryBlocks(
 		TextWithEntities *result,
-		const std::vector<Block> &blocks) {
+		const std::vector<Block> &blocks,
+		bool withIcons) {
 	for (const auto &block : blocks) {
-		AppendSummaryBlock(result, block);
+		AppendSummaryBlock(result, block, withIcons);
 	}
 }
 
 [[nodiscard]] TextWithEntities FlattenSummaryBlocks(
-		const std::vector<Block> &blocks) {
+		const std::vector<Block> &blocks,
+		bool withIcons) {
 	auto result = TextWithEntities();
-	AppendSummaryBlocks(&result, blocks);
+	AppendSummaryBlocks(&result, blocks, withIcons);
 	TextUtilities::Trim(result);
 	return result;
 }
 
-void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
+[[nodiscard]] bool SimpleTextEntitiesAllowed(const TextWithEntities &text) {
+	for (const auto &entity : text.entities) {
+		const auto type = entity.type();
+		if (type == EntityType::Subscript
+			|| type == EntityType::Superscript
+			|| type == EntityType::Marked) {
+			return false;
+		} else if (type == EntityType::CustomEmoji
+			&& Markdown::ParseInlineTextObjectEntity(entity.data())) {
+			// Math formulas and inline images are stored as CustomEmoji
+			// entities over an object replacement character; a normal
+			// message can't carry them, only real custom emoji entities.
+			return false;
+		}
+	}
+	return true;
+}
+
+// Drops the inline entities that a normal (non-premium) message can't carry.
+// Math formulas are expanded to plain text by ExpandInlineTextObjects (in
+// AppendSummaryLine, which always runs without icons on the simple-text
+// paths), so only Subscript/Superscript/Marked remain to strip; real custom
+// emoji are kept (they're allowed in normal messages).
+void RemovePremiumOnlyInlineEntities(TextWithEntities *text) {
+	auto &list = text->entities;
+	for (auto i = list.begin(); i != list.end();) {
+		const auto type = i->type();
+		if (type == EntityType::Subscript
+			|| type == EntityType::Superscript
+			|| type == EntityType::Marked) {
+			i = list.erase(i);
+		} else {
+			++i;
+		}
+	}
+}
+
+bool AppendSimpleBlock(
+		TextWithEntities *result,
+		TextWithEntities &&block,
+		EntityType wrap = EntityType::Invalid,
+		const QString &wrapData = QString(),
+		int emptyLinesBefore = 0) {
+	if (wrap != EntityType::Invalid) {
+		block.entities.push_back(
+			EntityInText(wrap, 0, int(block.text.size()), wrapData));
+	}
+	TextUtilities::Trim(block);
+	if (block.empty()) {
+		return false;
+	}
+	if (!result->empty()) {
+		result->append(QString(1 + emptyLinesBefore, QChar('\n')));
+	}
+	result->append(std::move(block));
+	return true;
+}
+
+// Computes the length text.text would have after TextUtilities::Trim(),
+// without copying or mutating anything. Must mirror Trim() exactly: right
+// trim by IsTrimmed(), then left trim stopping at the first monospace
+// entity offset (leading whitespace inside inline code is preserved).
+[[nodiscard]] int TrimmedLength(
+		const TextWithEntities &text,
+		EntityType wrap = EntityType::Invalid) {
+	const auto begin = text.text.constData();
+	auto end = begin + text.text.size();
+	while (end != begin && Ui::Text::IsTrimmed(*(end - 1))) {
+		--end;
+	}
+	if (end == begin) {
+		return 0;
+	}
+	const auto firstMonospaceOffset = (wrap == EntityType::Pre)
+		? 0
+		: EntityInText::FirstMonospaceOffset(
+			text.entities,
+			int(end - begin));
+	auto start = begin;
+	while ((start - begin) != firstMonospaceOffset
+		&& Ui::Text::IsTrimmed(*start)) {
+		++start;
+	}
+	return int(end - start);
+}
+
+// Sinks for SerializeAsSimpleTo(): SimpleTextBuilder builds the actual
+// serialized text, SimpleTextCounter only computes the length that text
+// would have, skipping the string building entirely, so that the check
+// is cheap enough to run on every content change.
+struct SimpleTextBuilder {
+	TextWithEntities result;
+	int emptyLines = 0;
+
+	void append(
+			const TextWithEntities &text,
+			EntityType wrap = EntityType::Invalid,
+			const QString &wrapData = QString()) {
+		appendBlock(TextWithEntities(text), wrap, wrapData);
+	}
+	void appendQuote(SimpleTextBuilder &&body, bool collapsed) {
+		appendBlock(
+			std::move(body.result),
+			EntityType::Blockquote,
+			collapsed ? u"1"_q : QString());
+	}
+	void appendEmptyLine() {
+		++emptyLines;
+	}
+	void appendBlock(
+			TextWithEntities &&block,
+			EntityType wrap = EntityType::Invalid,
+			const QString &wrapData = QString()) {
+		if (AppendSimpleBlock(
+				&result,
+				std::move(block),
+				wrap,
+				wrapData,
+				emptyLines)) {
+			emptyLines = 0;
+		}
+	}
+	[[nodiscard]] int length() const {
+		return int(result.text.size());
+	}
+};
+
+struct SimpleTextCounter {
+	int result = 0;
+	int emptyLines = 0;
+
+	void append(
+			const TextWithEntities &text,
+			EntityType wrap = EntityType::Invalid,
+			const QString & = QString()) {
+		appendLength(TrimmedLength(text, wrap));
+	}
+	void appendQuote(SimpleTextCounter &&body, bool) {
+		appendLength(body.result);
+	}
+	void appendEmptyLine() {
+		++emptyLines;
+	}
+	void appendLength(int length) {
+		if (length > 0) {
+			// The 1 is for the '\n' AppendSimpleBlock() would insert.
+			result += (result > 0 ? (1 + emptyLines) : 0) + length;
+			emptyLines = 0;
+		}
+	}
+	[[nodiscard]] int length() const {
+		return result;
+	}
+};
+
+// Empty paragraphs between text are blank lines, at the edges they're dropped.
+template <typename Accumulator>
+void AppendSimpleParagraph(Accumulator &to, const TextWithEntities &text) {
+	if (TrimmedLength(text) > 0) {
+		to.append(text);
+	} else {
+		to.appendEmptyLine();
+	}
+}
+
+template <typename Accumulator>
+[[nodiscard]] bool CollectSimpleQuote(
+		const Block &quote,
+		Accumulator &body) {
+	if (quote.pullquote
+		|| !quote.author.trimmed().isEmpty()
+		|| !quote.caption.text.text.trimmed().isEmpty()) {
+		return false;
+	}
+	if (!quote.text.text.empty()) {
+		if (!SimpleTextEntitiesAllowed(quote.text.text)) {
+			return false;
+		}
+		body.append(quote.text.text);
+	}
+	for (const auto &child : quote.blocks) {
+		if (child.kind != BlockKind::Paragraph
+			|| !SimpleTextEntitiesAllowed(child.text.text)) {
+			return false;
+		}
+		AppendSimpleParagraph(body, child.text.text);
+	}
+	return true;
+}
+
+// Single source of truth for what can be sent as a simple message, shared
+// by SerializeAsSimple() and CanSerializeAsSimple(), so that the two can't
+// drift apart: returns false when the page can't be sent as one (blocks or
+// entities a normal message can't carry, empty or over-limit text).
+template <typename Accumulator>
+[[nodiscard]] bool SerializeAsSimpleTo(
+		const RichPage &page,
+		not_null<Main::Session*> session,
+		Accumulator &to) {
+	for (const auto &block : page.blocks) {
+		switch (block.kind) {
+		case BlockKind::Paragraph:
+			if (!SimpleTextEntitiesAllowed(block.text.text)) {
+				return false;
+			}
+			AppendSimpleParagraph(to, block.text.text);
+			break;
+		case BlockKind::Code:
+			if (!block.text.text.entities.isEmpty()) {
+				return false;
+			}
+			to.append(block.text.text, EntityType::Pre, block.language);
+			break;
+		case BlockKind::Quote: {
+			auto body = Accumulator();
+			if (!CollectSimpleQuote(block, body)) {
+				return false;
+			}
+			to.appendQuote(
+				std::move(body),
+				block.collapsed && RichBlockquoteIsCollapsible(block));
+			break;
+		}
+		default:
+			return false;
+		}
+	}
+	if (!to.length()) {
+		return false;
+	}
+	const auto lengthLimit = ::Data::PremiumLimits(session)
+		.messageLengthCurrent();
+	return to.length() <= lengthLimit;
+}
+
+[[nodiscard]] bool RichBlockIsPlain(const Block &block) {
+	const auto hasEntities = [](const TextWithEntities &text) {
+		return !text.entities.isEmpty();
+	};
+	if (block.kind == BlockKind::Paragraph) {
+		return !hasEntities(block.text.text);
+	} else if (block.kind == BlockKind::Quote) {
+		if (block.pullquote
+			|| !block.author.trimmed().isEmpty()
+			|| !block.caption.text.text.trimmed().isEmpty()
+			|| hasEntities(block.text.text)) {
+			return false;
+		}
+		for (const auto &child : block.blocks) {
+			if (child.kind != BlockKind::Paragraph
+				|| hasEntities(child.text.text)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
+void AppendSummaryBlock(
+		TextWithEntities *result,
+		const Block &block,
+		bool withIcons) {
 	switch (block.kind) {
 	case BlockKind::Unsupported:
 	case BlockKind::Divider:
 	case BlockKind::Anchor:
-	case BlockKind::Thinking:
 		return;
 	case BlockKind::Heading:
 	case BlockKind::Paragraph:
 	case BlockKind::Footer:
 	case BlockKind::Code:
-		AppendSummaryLine(result, block.text);
+	case BlockKind::Thinking:
+		AppendSummaryLine(result, block.text, withIcons);
 		return;
 	case BlockKind::AuthorDate: {
 		auto line = block.text.text;
@@ -1585,58 +2573,117 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 			}
 			line.append(DateText(block.date));
 		}
-		AppendSummaryLine(result, std::move(line));
+		AppendSummaryLine(result, std::move(line), withIcons);
 		return;
 	}
+	case BlockKind::ButtonRow:
+		for (const auto &button : block.buttons) {
+			AppendSummaryLine(result, button.text, withIcons);
+		}
+		return;
 	case BlockKind::List: {
-		auto ordered = 1;
+		auto ordered = OrderedListSequenceStart(block);
+		const auto step = block.orderedList.reversed ? -1 : 1;
 		for (const auto &item : block.listItems) {
-			auto prefix = QString();
-			if (item.taskState == TaskState::Unchecked) {
-				prefix = u"[ ] "_q;
-			} else if (item.taskState == TaskState::Checked) {
-				prefix = u"[x] "_q;
-			} else if (block.listKind == ListKind::Ordered) {
-				const auto number = item.number.isEmpty()
-					? QString::number(ordered)
-					: item.number;
-				prefix = number + u". "_q;
+			const auto orderedValue = item.number.value.value_or(ordered);
+			const auto task = (item.taskState != TaskState::None);
+			auto line = tr::marked();
+			if (withIcons && task) {
+				line = Ui::Text::IconEmoji(
+					item.taskState == TaskState::Checked
+						? &st::ivSummaryTaskCheckedIcon
+						: &st::ivSummaryTaskUncheckedIcon);
 			} else {
-				prefix = u"- "_q;
+				auto prefix = QString();
+				if (item.taskState == TaskState::Unchecked) {
+					prefix = u"[ ] "_q;
+				} else if (item.taskState == TaskState::Checked) {
+					prefix = u"[x] "_q;
+				} else if (block.listKind == ListKind::Ordered) {
+					const auto marker = OrderedMarkerText(
+						block.orderedList,
+						item.number,
+						ordered);
+					prefix = marker.isEmpty()
+						? QString()
+						: (marker + u" "_q);
+				} else {
+					prefix = u"- "_q;
+				}
+				line = tr::marked(prefix);
 			}
-			if (!item.text.text.empty()) {
-				AppendSummaryLine(result, item.text, prefix);
-			} else {
-				auto nested = FlattenSummaryBlocks(item.blocks);
-				AppendSummaryLine(result, std::move(nested), prefix);
+			line.append(item.text.text.empty()
+				? FlattenSummaryBlocks(item.blocks, withIcons)
+				: item.text.text);
+			AppendSummaryLine(result, std::move(line), withIcons);
+			if (block.listKind == ListKind::Ordered) {
+				ordered = orderedValue + step;
 			}
-			++ordered;
 		}
 		return;
 	}
-	case BlockKind::Quote:
-		AppendSummaryLine(result, block.text);
-		AppendSummaryBlocks(result, block.blocks);
-		AppendSummaryLine(result, block.caption);
+	case BlockKind::Quote: {
+		if (!withIcons) {
+			AppendSummaryLine(result, block.text, withIcons);
+			AppendSummaryBlocks(result, block.blocks, withIcons);
+			AppendSummaryLine(result, block.caption, withIcons);
+			return;
+		}
+		auto inner = tr::marked();
+		AppendSummaryLine(&inner, block.text, withIcons);
+		AppendSummaryBlocks(&inner, block.blocks, withIcons);
+		AppendSummaryLine(&inner, block.caption, withIcons);
+		if (inner.empty()) {
+			return;
+		}
+		auto line = Ui::Text::IconEmoji(
+			(block.pullquote
+				? &st::ivSummaryPullquoteIcon
+				: &st::ivSummaryBlockquoteIcon),
+			(block.pullquote
+				? tr::lng_article_insert_pullquote(tr::now)
+				: tr::lng_menu_formatting_blockquote(tr::now)) + QChar(' '));
+		line.append(std::move(inner));
+		AppendSummaryLine(result, std::move(line), withIcons);
 		return;
+	}
 	case BlockKind::Photo:
 	case BlockKind::Video:
 	case BlockKind::Audio:
+	case BlockKind::File:
 	case BlockKind::GroupedMedia:
-	case BlockKind::Map:
-		if (!block.caption.text.empty()) {
-			AppendSummaryLine(result, block.caption);
-		} else {
-			AppendSummaryLine(
-				result,
-				TextWithEntities::Simple(MediaSummaryFallback(block)));
+	case BlockKind::Map: {
+		if (!withIcons) {
+			if (!block.caption.text.empty()) {
+				AppendSummaryLine(result, block.caption, withIcons);
+			} else {
+				AppendSummaryLine(
+					result,
+					TextWithEntities::Simple(MediaSummaryFallback(block)),
+					withIcons);
+			}
+			return;
 		}
+		const auto icon = (block.kind == BlockKind::Audio)
+			? &st::ivSummaryAudioIcon
+			: (block.kind == BlockKind::Map)
+			? &st::ivSummaryLocationIcon
+			: &st::ivSummaryMediaIcon;
+		auto line = Ui::Text::IconEmoji(
+			icon,
+			MediaSummaryFallback(block) + QChar(' '));
+		line.append(block.caption.text);
+		AppendSummaryLine(result, std::move(line), withIcons);
 		return;
+	}
 	case BlockKind::Embed:
 		if (!block.caption.text.empty()) {
-			AppendSummaryLine(result, block.caption);
+			AppendSummaryLine(result, block.caption, withIcons);
 		} else if (!block.url.isEmpty()) {
-			AppendSummaryLine(result, TextWithEntities::Simple(block.url));
+			AppendSummaryLine(
+				result,
+				TextWithEntities::Simple(block.url),
+				withIcons);
 		}
 		return;
 	case BlockKind::EmbedPost: {
@@ -1651,68 +2698,94 @@ void AppendSummaryBlock(TextWithEntities *result, const Block &block) {
 			line += DateText(block.date);
 		}
 		if (!line.isEmpty()) {
-			AppendSummaryLine(result, TextWithEntities::Simple(line));
+			AppendSummaryLine(
+				result,
+				TextWithEntities::Simple(line),
+				withIcons);
 		}
-		AppendSummaryBlocks(result, block.blocks);
-		AppendSummaryLine(result, block.caption);
+		AppendSummaryBlocks(result, block.blocks, withIcons);
+		AppendSummaryLine(result, block.caption, withIcons);
 		return;
 	}
 	case BlockKind::Channel:
 		if (block.peer) {
 			AppendSummaryLine(
 				result,
-				TextWithEntities::Simple(block.peer->name()));
+				TextWithEntities::Simple(block.peer->name()),
+				withIcons);
 		}
 		return;
 	case BlockKind::Math:
-		AppendSummaryLine(result, TextWithEntities::Simple(block.formula));
-		return;
-	case BlockKind::Table: {
-		AppendSummaryLine(result, block.text);
-		for (const auto &row : block.tableRows) {
-			auto line = TextWithEntities();
-			auto first = true;
-			for (const auto &cell : row.cells) {
-				auto cellText = TextUtilities::SingleLine(cell.text.text);
-				TextUtilities::Trim(cellText);
-				if (cellText.empty()) {
-					continue;
-				}
-				if (!first) {
-					line.append(u" | "_q);
-				}
-				line.append(cellText);
-				first = false;
-			}
-			AppendSummaryLine(result, std::move(line));
+		if (withIcons && !block.formula.isEmpty()) {
+			AppendSummaryLine(result, Ui::Text::IconEmoji(
+				&st::ivSummaryMathIcon,
+				block.formula), withIcons);
+		} else {
+			AppendSummaryLine(
+				result,
+				TextWithEntities::Simple(block.formula),
+				withIcons);
 		}
 		return;
-	}
+	case BlockKind::Table:
+		if (withIcons) {
+			auto line = block.text.text;
+			TextUtilities::Trim(line);
+			if (!line.empty()) {
+				line.append(QChar(' '));
+			}
+			line.append(Ui::Text::IconEmoji(
+				&st::ivSummaryTableIcon,
+				tr::lng_in_dlg_table(tr::now)));
+			AppendSummaryLine(result, std::move(line), withIcons);
+		} else if (!block.text.text.empty()) {
+			AppendSummaryLine(result, block.text, withIcons);
+		} else {
+			AppendSummaryLine(
+				result,
+				TextWithEntities::Simple(tr::lng_in_dlg_table(tr::now)),
+				withIcons);
+		}
+		return;
 	case BlockKind::Details:
-		AppendSummaryLine(result, block.text);
-		AppendSummaryBlocks(result, block.blocks);
+		AppendSummaryLine(result, block.text, withIcons);
+		AppendSummaryBlocks(result, block.blocks, withIcons);
 		return;
 	case BlockKind::RelatedArticles:
-		AppendSummaryLine(result, block.text);
+		AppendSummaryLine(result, block.text, withIcons);
 		for (const auto &article : block.relatedArticles) {
 			if (!article.title.isEmpty()) {
 				AppendSummaryLine(
 					result,
-					TextWithEntities::Simple(article.title));
+					TextWithEntities::Simple(article.title),
+					withIcons);
 			}
 			if (!article.description.isEmpty()) {
 				AppendSummaryLine(
 					result,
-					TextWithEntities::Simple(article.description));
+					TextWithEntities::Simple(article.description),
+					withIcons);
 			}
 			const auto footer = FooterText(article);
 			if (!footer.isEmpty()) {
 				AppendSummaryLine(
 					result,
-					TextWithEntities::Simple(footer));
+					TextWithEntities::Simple(footer),
+					withIcons);
 			}
 		}
 		return;
+	}
+}
+
+void AppendFlattenedBlock(SimpleTextBuilder &to, const Block &block) {
+	auto piece = TextWithEntities();
+	AppendSummaryBlock(&piece, block, false);
+	RemovePremiumOnlyInlineEntities(&piece);
+	if (!piece.empty()) {
+		to.appendBlock(std::move(piece));
+	} else if (block.kind == BlockKind::Paragraph) {
+		to.appendEmptyLine();
 	}
 }
 
@@ -1743,7 +2816,143 @@ std::shared_ptr<const RichPage> ParsePage(
 	});
 }
 
+[[nodiscard]] bool RichBlockIsFlattenSafe(const RichPage::Block &block) {
+	switch (block.kind) {
+	case BlockKind::Table:
+	case BlockKind::Math:
+	case BlockKind::Photo:
+	case BlockKind::Video:
+	case BlockKind::Audio:
+	case BlockKind::File:
+	case BlockKind::GroupedMedia:
+	case BlockKind::Map:
+	case BlockKind::ButtonRow:
+		return false;
+	default:
+		break;
+	}
+	for (const auto &item : block.mediaItems) {
+		switch (item.kind) {
+		case BlockKind::Photo:
+		case BlockKind::Video:
+		case BlockKind::Audio:
+			return false;
+		default:
+			break;
+		}
+	}
+	for (const auto &child : block.blocks) {
+		if (!RichBlockIsFlattenSafe(child)) {
+			return false;
+		}
+	}
+	for (const auto &listItem : block.listItems) {
+		for (const auto &child : listItem.blocks) {
+			if (!RichBlockIsFlattenSafe(child)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+[[nodiscard]] std::optional<bool> RichTextRtl(const RichText &text) {
+	const auto &plain = text.text.text;
+	if (plain.trimmed().isEmpty()) {
+		return std::nullopt;
+	}
+	return plain.isRightToLeft();
+}
+
+[[nodiscard]] std::optional<bool> BlocksTextRtl(
+		const std::vector<Block> &blocks) {
+	for (const auto &block : blocks) {
+		if (const auto result = RichTextRtl(block.text)) {
+			return result;
+		}
+		if (const auto result = BlocksTextRtl(block.blocks)) {
+			return result;
+		}
+		for (const auto &item : block.listItems) {
+			if (const auto result = RichTextRtl(item.text)) {
+				return result;
+			}
+			if (const auto result = BlocksTextRtl(item.blocks)) {
+				return result;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+void CollectBlocksAudio(
+	const std::vector<Block> &blocks,
+	std::vector<not_null<DocumentData*>> &result);
+
+void CollectBlockAudio(
+		const Block &block,
+		std::vector<not_null<DocumentData*>> &result) {
+	if (RichBlockIsDocumentRow(block.kind)
+		&& RichDocumentIsAudio(block.document)) {
+		const auto document = not_null{ block.document };
+		if (!ranges::contains(result, document)) {
+			result.push_back(document);
+		}
+	}
+	CollectBlocksAudio(block.blocks, result);
+	for (const auto &item : block.listItems) {
+		CollectBlocksAudio(item.blocks, result);
+	}
+}
+
+void CollectBlocksAudio(
+		const std::vector<Block> &blocks,
+		std::vector<not_null<DocumentData*>> &result) {
+	for (const auto &block : blocks) {
+		CollectBlockAudio(block, result);
+	}
+}
+
 } // namespace
+
+std::vector<RichPage::Block> SplitGroupedMediaBlock(RichPage::Block block) {
+	if (block.kind != BlockKind::GroupedMedia
+		|| block.mediaIntent != GroupedMediaIntent::Collage
+		|| block.mediaItems.size() <= RichPage::kCollageMaxItems) {
+		auto result = std::vector<Block>();
+		result.push_back(std::move(block));
+		return result;
+	}
+	auto items = std::move(block.mediaItems);
+	auto caption = std::move(block.caption);
+	auto anchorId = std::move(block.anchorId);
+	auto result = std::vector<Block>();
+	result.reserve(
+		(items.size() + RichPage::kCollageMaxItems - 1)
+		/ RichPage::kCollageMaxItems);
+	for (auto from = 0; from < int(items.size());) {
+		const auto till = std::min(
+			from + RichPage::kCollageMaxItems,
+			int(items.size()));
+		auto slice = MakeBlock(BlockKind::GroupedMedia);
+		slice.mediaIntent = GroupedMediaIntent::Collage;
+		slice.mediaItems.insert(
+			slice.mediaItems.end(),
+			std::make_move_iterator(items.begin() + from),
+			std::make_move_iterator(items.begin() + till));
+		result.push_back(std::move(slice));
+		from = till;
+	}
+	result.back().caption = std::move(caption);
+	result.back().anchorId = std::move(anchorId);
+	return result;
+}
+
+bool RichPagesEqual(
+		const RichPage &a,
+		const RichPage &b) {
+	return (a == b);
+}
 
 RichMessageLimits ResolveRichMessageLimits(not_null<Main::Session*> session) {
 	const auto &config = session->appConfig();
@@ -1780,8 +2989,58 @@ std::optional<RichMessageLimitError> ValidateRichMessage(
 		return RichMessageLimitError::Media;
 	} else if (metrics.maxTableColumns > limits.maxTableCols) {
 		return RichMessageLimitError::TableColumns;
+	} else if (metrics.maxRowButtons > limits.maxButtons) {
+		return RichMessageLimitError::Buttons;
 	}
 	return std::nullopt;
+}
+
+Main::Session *RichBlocksMediaSession(
+		const std::vector<RichPage::Block> &blocks) {
+	for (const auto &block : blocks) {
+		if (block.photo) {
+			return &block.photo->session();
+		} else if (block.document) {
+			return &block.document->session();
+		} else if (block.peer) {
+			return &block.peer->session();
+		}
+		for (const auto &item : block.mediaItems) {
+			if (item.photo) {
+				return &item.photo->session();
+			} else if (item.document) {
+				return &item.document->session();
+			}
+		}
+		for (const auto &article : block.relatedArticles) {
+			if (article.photo) {
+				return &article.photo->session();
+			}
+		}
+		if (const auto session = RichListItemsMediaSession(block.listItems)) {
+			return session;
+		} else if (const auto nested = RichBlocksMediaSession(block.blocks)) {
+			return nested;
+		}
+	}
+	return nullptr;
+}
+
+Main::Session *RichListItemsMediaSession(
+		const std::vector<RichPage::ListItem> &items) {
+	for (const auto &item : items) {
+		if (const auto session = RichBlocksMediaSession(item.blocks)) {
+			return session;
+		}
+	}
+	return nullptr;
+}
+
+int CountRichPageBlocks(const RichPage &page) {
+	auto metrics = RichMessageMetrics();
+	metrics.tableColumnMeasurementLimit = TableColumnMeasurementLimit(0);
+	AccumulateBlockMetrics(&metrics, page.blocks, 1);
+	return metrics.blockCount;
 }
 
 QString EncodeRichPageLinkUrl(
@@ -1823,9 +3082,15 @@ std::optional<RichPageLinkUrl> DecodeRichPageLinkUrl(const QString &data) {
 
 std::shared_ptr<const RichPage> ParseRichPage(
 		not_null<Main::Session*> session,
-		const MTPRichMessage &message) {
+		const MTPRichMessage &message,
+		RichParseMode mode) {
 	auto result = std::make_shared<RichPage>();
+	auto recorder = std::optional<RichQuoteRecorder>();
 	auto context = ParseContext(session, ParseSource::RichMessage);
+	context.displayTextDiff = (mode == RichParseMode::DisplayTextDiff);
+	if (mode == RichParseMode::Quotable) {
+		context.quote = &recorder.emplace();
+	}
 	const auto &data = message.data();
 	result->rtl = data.is_rtl();
 	result->part = data.is_part();
@@ -1836,6 +3101,9 @@ std::shared_ptr<const RichPage> ParseRichPage(
 		RememberDocument(&context, document);
 	}
 	AppendBlocks(data.vblocks().v, &result->blocks, &context);
+	if (recorder) {
+		result->quoteModel.set(recorder->finish(*result));
+	}
 	return result;
 }
 
@@ -1855,8 +3123,156 @@ std::shared_ptr<const RichPage> ParseRichPage(
 	return ParsePage(session, *cachedPage, &webpage);
 }
 
-TextWithEntities FlattenRichPageSummary(const RichPage &page) {
-	auto result = FlattenSummaryBlocks(page.blocks);
+std::shared_ptr<const RichQuote> ParseRichQuote(
+		not_null<Main::Session*> session,
+		const MTPVector<MTPRichText> &fragments,
+		std::optional<int> offset) {
+	auto context = ParseContext(session, ParseSource::RichMessage);
+	context.dropInlineImages = true;
+	auto text = tr::marked();
+	for (const auto &fragment : fragments.v) {
+		auto line = ParseRichText(
+			fragment,
+			&context,
+			RichTextParseMode::DropClickHandlersKeepDates).text;
+		Markdown::ExpandInlineTextObjects(&line, true);
+		if (line.empty()) {
+			continue;
+		} else if (!text.empty()) {
+			text.append(QChar('\n'));
+		}
+		text.append(std::move(line));
+	}
+	auto filtered = Ui::Text::Filtered(text, {
+		EntityType::Bold,
+		EntityType::Italic,
+		EntityType::Underline,
+		EntityType::StrikeOut,
+		EntityType::Spoiler,
+		EntityType::CustomEmoji,
+		EntityType::FormattedDate,
+	});
+	Markdown::SortEntities(&filtered);
+	return std::make_shared<RichQuote>(RichQuote{
+		.fragments = fragments,
+		.offset = offset,
+		.text = std::move(filtered),
+	});
+}
+
+std::optional<std::vector<QString>> RichQuoteFragmentTexts(
+		not_null<Main::Session*> session,
+		const QVector<MTPRichText> &fragments) {
+	constexpr auto kMaxLength = qsizetype(std::numeric_limits<int>::max());
+	if (fragments.size() > kMaxLength) {
+		return std::nullopt;
+	}
+	auto recorder = RichQuoteRecorder();
+	auto context = ParseContext(session, ParseSource::RichMessage);
+	context.quote = &recorder;
+	context.dropRichTextClickHandlers = true;
+	const auto hidden = RichQuoteScope::Hidden(&recorder);
+	auto result = std::vector<QString>();
+	result.reserve(fragments.size());
+	auto length = qsizetype();
+	for (const auto &fragment : fragments) {
+		auto text = std::optional<QString>();
+		{
+			auto page = RichText();
+			const auto node = RichQuoteScope::HiddenNode(&recorder);
+			AppendRichText(fragment, &page, &context, nullptr, nullptr);
+			text = recorder.takeNodeText();
+		}
+		const auto separator = result.empty() ? 0 : 1;
+		if (!text || text->size() > kMaxLength - length - separator) {
+			return std::nullopt;
+		}
+		length += separator + text->size();
+		result.push_back(std::move(*text));
+	}
+	return result;
+}
+
+TextWithEntities FlattenRichPageSummary(
+		const RichPage &page,
+		bool emptyFallback) {
+	auto result = tr::marked();
+	auto contributionCount = 0;
+	const Block *soleTable = nullptr;
+	for (const auto &block : page.blocks) {
+		const auto previousSize = result.text.size();
+		AppendSummaryBlock(&result, block, true);
+		if (result.text.size() == previousSize) {
+			continue;
+		}
+		++contributionCount;
+		if (block.kind == BlockKind::Table) {
+			soleTable = &block;
+		}
+	}
+	TextUtilities::Trim(result);
+	if (contributionCount == 1 && soleTable) {
+		auto title = soleTable->text.text;
+		TextUtilities::Trim(title);
+		if (title.empty()) {
+			auto line = Ui::Text::IconEmoji(&st::ivSummaryTableIcon);
+			line.append(tr::lng_in_dlg_table(tr::now));
+			result = tr::marked();
+			AppendSummaryLine(&result, std::move(line), true);
+		}
+	}
+	if (result.empty() && emptyFallback) {
+		result = TextWithEntities::Simple(tr::lng_message_empty(tr::now));
+	}
+	return result;
+}
+
+TextWithEntities FlattenRichPageSummary(
+		const std::shared_ptr<const RichPage> &page,
+		bool emptyFallback) {
+	return page
+		? FlattenRichPageSummary(*page, emptyFallback)
+		: TextWithEntities();
+}
+
+TextWithEntities FlattenRichPageToSimpleText(const RichPage &page) {
+	auto to = SimpleTextBuilder();
+	for (const auto &block : page.blocks) {
+		switch (block.kind) {
+		case BlockKind::Code: {
+			// Code blocks are allowed at the top level as a Pre entity, but
+			// their content is sent as plain text without any inline entities.
+			auto inner = block.text.text;
+			Markdown::ExpandInlineTextObjects(&inner, false);
+			inner.entities.clear();
+			to.appendBlock(std::move(inner), EntityType::Pre, block.language);
+			break;
+		}
+		case BlockKind::Quote: {
+			// Blockquotes are allowed at the top level as a Blockquote entity;
+			// the author is dropped and the inner content is flattened into a
+			// single TextWithEntities (keeping allowed inline formatting, no
+			// nested block formatting).
+			auto inner = SimpleTextBuilder();
+			AppendSummaryLine(&inner.result, block.text, false);
+			for (const auto &child : block.blocks) {
+				AppendFlattenedBlock(inner, child);
+			}
+			AppendSummaryLine(&inner.result, block.caption, false);
+			RemovePremiumOnlyInlineEntities(&inner.result);
+			to.appendQuote(std::move(inner), false);
+			break;
+		}
+		default: {
+			// Every other block (heading, list, table, math, paragraph, ...)
+			// is flattened to plain text lines, keeping the inline formatting a
+			// normal message can carry.
+			AppendFlattenedBlock(to, block);
+			break;
+		}
+		}
+	}
+	auto result = std::move(to.result);
 	TextUtilities::Trim(result);
 	if (result.empty()) {
 		result = TextWithEntities::Simple(tr::lng_message_empty(tr::now));
@@ -1864,9 +3280,154 @@ TextWithEntities FlattenRichPageSummary(const RichPage &page) {
 	return result;
 }
 
-TextWithEntities FlattenRichPageSummary(
-		const std::shared_ptr<const RichPage> &page) {
-	return page ? FlattenRichPageSummary(*page) : TextWithEntities();
+bool DetermineRichPageRtl(const RichPage &page) {
+	return BlocksTextRtl(page.blocks).value_or(false);
+}
+
+std::vector<not_null<DocumentData*>> CollectRichPageAudio(
+		const RichPage &page) {
+	auto result = std::vector<not_null<DocumentData*>>();
+	CollectBlocksAudio(page.blocks, result);
+	return result;
+}
+
+bool RichDocumentIsAudio(DocumentData *document) {
+	return document
+		&& (document->isAudioFile() || document->isVoiceMessage());
+}
+
+bool RichBlockIsDocumentRow(RichPage::BlockKind kind) {
+	return (kind == BlockKind::Audio) || (kind == BlockKind::File);
+}
+
+bool RichBlockquoteIsCollapsible(const RichPage::Block &block) {
+	return (block.kind == BlockKind::Quote)
+		&& !block.pullquote
+		&& block.blocks.empty();
+}
+
+bool OrderedRomanSupported(int value) {
+	return (value > 0) && (value <= 9999);
+}
+
+std::optional<TextWithEntities> SerializeAsSimple(
+		const RichPage &page,
+		not_null<Main::Session*> session) {
+	auto to = SimpleTextBuilder();
+	if (!SerializeAsSimpleTo(page, session, to)) {
+		return std::nullopt;
+	}
+	TextUtilities::Trim(to.result);
+	return std::move(to.result);
+}
+
+bool CanSerializeAsSimple(
+		const RichPage &page,
+		not_null<Main::Session*> session) {
+	auto to = SimpleTextCounter();
+	return SerializeAsSimpleTo(page, session, to);
+}
+
+bool RichPageUsesPremiumFormatting(const RichPage &page) {
+	for (const auto &block : page.blocks) {
+		if (!RichBlockIsPlain(block)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool RichPageIsFlattenSafe(const RichPage &page) {
+	for (const auto &block : page.blocks) {
+		if (!RichBlockIsFlattenSafe(block)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+RichPage SplitTextIntoRichPage(TextWithEntities text) {
+	auto page = RichPage();
+
+	const auto isBlockEntity = [](const EntityInText &entity) {
+		const auto type = entity.type();
+		return (type == EntityType::Pre)
+			|| (type == EntityType::Blockquote);
+	};
+	const auto stripBlockEntities = [&](TextWithEntities &part) {
+		part.entities.erase(
+			ranges::remove_if(part.entities, isBlockEntity),
+			part.entities.end());
+	};
+	const auto emitParagraph = [&](int from, int to) {
+		auto paragraph = Ui::Text::Mid(text, from, to - from);
+		stripBlockEntities(paragraph);
+		TextUtilities::Trim(paragraph);
+		if (!paragraph.empty()) {
+			page.blocks.push_back(Block{
+				.kind = BlockKind::Paragraph,
+				.text = { std::move(paragraph) },
+			});
+		}
+	};
+
+	struct Segment {
+		int offset = 0;
+		int length = 0;
+		EntityType type = EntityType::Invalid;
+		QString data;
+	};
+	auto segments = std::vector<Segment>();
+	for (const auto &entity : text.entities) {
+		if (isBlockEntity(entity)) {
+			segments.push_back({
+				entity.offset(),
+				entity.length(),
+				entity.type(),
+				entity.data(),
+			});
+		}
+	}
+	ranges::sort(segments, ranges::less(), &Segment::offset);
+
+	auto cursor = 0;
+	const auto size = int(text.text.size());
+	for (const auto &segment : segments) {
+		if (segment.offset < cursor) {
+			continue;
+		}
+		emitParagraph(cursor, segment.offset);
+		auto body = Ui::Text::Mid(text, segment.offset, segment.length);
+		TextUtilities::Trim(body);
+		stripBlockEntities(body);
+		cursor = segment.offset + segment.length;
+		if (body.empty()) {
+			continue;
+		}
+		if (segment.type == EntityType::Pre) {
+			page.blocks.push_back(Block{
+				.kind = BlockKind::Code,
+				.text = { std::move(body) },
+				.language = segment.data,
+			});
+		} else {
+			page.blocks.push_back(Block{
+				.kind = BlockKind::Quote,
+				.text = { std::move(body) },
+				.collapsed = !segment.data.isEmpty(),
+			});
+		}
+	}
+	emitParagraph(cursor, size);
+
+	return page;
+}
+
+RichPage SplitTextIntoRichPage(const TextWithTags &text) {
+	return SplitTextIntoRichPage({
+		text.text,
+		TextUtilities::ConvertTextTagsToEntities(text.tags),
+	});
 }
 
 } // namespace Iv

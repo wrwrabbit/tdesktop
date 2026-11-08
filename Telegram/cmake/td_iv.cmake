@@ -8,21 +8,64 @@ add_library(td_iv OBJECT)
 init_non_host_target(td_iv)
 add_library(tdesktop::td_iv ALIAS td_iv)
 
+add_library(td_iv_reorder_warning_off INTERFACE)
+target_compile_options(td_iv_reorder_warning_off
+INTERFACE
+    $<$<CXX_COMPILER_ID:MSVC>:/wd5038>
+    $<$<CXX_COMPILER_ID:MSVC>:/wd4265>
+    $<$<CXX_COMPILER_ID:MSVC>:/wd4005>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-reorder-ctor>
+    $<$<CXX_COMPILER_ID:GNU>:-Wno-reorder>
+)
+
+if (MSVC AND CMAKE_GENERATOR MATCHES "^Visual Studio ")
+    set_property(TARGET td_iv APPEND PROPERTY VS_PROJECT_IMPORT
+        ${CMAKE_CURRENT_LIST_DIR}/td_iv_msvc_warning_suppressions.props)
+endif()
+
 target_precompile_headers(td_iv PRIVATE ${src_loc}/iv/iv_pch.h)
 nice_target_sources(td_iv ${src_loc}
 PRIVATE
-#    iv/editor/iv_editor_box.cpp
-#    iv/editor/iv_editor_box.h
-#    iv/editor/iv_editor_clipboard.cpp
-#    iv/editor/iv_editor_clipboard.h
-#    iv/editor/iv_editor_state.cpp
-#    iv/editor/iv_editor_state.h
-#    iv/editor/iv_editor_text_entities.cpp
-#    iv/editor/iv_editor_text_entities.h
-#    iv/editor/iv_editor_widget.cpp
-#    iv/editor/iv_editor_widget.h
-#    iv/editor/iv_editor_window.cpp
-#    iv/editor/iv_editor_window.h
+    iv/editor/iv_editor_article_style.cpp
+    iv/editor/iv_editor_article_style.h
+    iv/editor/iv_editor_auto_pair.cpp
+    iv/editor/iv_editor_auto_pair.h
+    iv/editor/iv_editor_box.cpp
+    iv/editor/iv_editor_box.h
+    iv/editor/iv_editor_clipboard.cpp
+    iv/editor/iv_editor_clipboard.h
+    iv/editor/iv_editor_clipboard_import.cpp
+    iv/editor/iv_editor_clipboard_import.h
+    iv/editor/iv_editor_commands.cpp
+    iv/editor/iv_editor_commands.h
+    iv/editor/iv_editor_insert_suggestions.cpp
+    iv/editor/iv_editor_insert_suggestions.h
+    iv/editor/iv_editor_math_box.cpp
+    iv/editor/iv_editor_math_box.h
+    iv/editor/iv_editor_page_blocks.cpp
+    iv/editor/iv_editor_page_blocks.h
+    iv/editor/iv_editor_page_list.cpp
+    iv/editor/iv_editor_page_list.h
+    iv/editor/iv_editor_page_media.cpp
+    iv/editor/iv_editor_page_media.h
+    iv/editor/iv_editor_page_path.cpp
+    iv/editor/iv_editor_page_path.h
+    iv/editor/iv_editor_page_table_grid.cpp
+    iv/editor/iv_editor_page_table_grid.h
+    iv/editor/iv_editor_prepared_selection.cpp
+    iv/editor/iv_editor_prepared_selection.h
+    iv/editor/iv_editor_structure_menu.cpp
+    iv/editor/iv_editor_structure_menu.h
+    iv/editor/iv_editor_state.cpp
+    iv/editor/iv_editor_state.h
+    iv/editor/iv_editor_text_entities.cpp
+    iv/editor/iv_editor_text_entities.h
+    iv/editor/iv_editor_toolbar_pill.cpp
+    iv/editor/iv_editor_toolbar_pill.h
+    iv/editor/iv_editor_widget.cpp
+    iv/editor/iv_editor_widget.h
+    iv/editor/iv_editor_window.cpp
+    iv/editor/iv_editor_window.h
 
     iv/iv_controller.cpp
     iv/iv_controller.h
@@ -30,6 +73,10 @@ PRIVATE
     iv/iv_data.h
     iv/iv_delegate.h
     iv/iv_pch.h
+    iv/iv_search_bar.cpp
+    iv/iv_search_bar.h
+    iv/iv_search_controller.cpp
+    iv/iv_search_controller.h
     iv/iv_zoom_controls.cpp
     iv/iv_zoom_controls.h
 )
@@ -40,16 +87,24 @@ PRIVATE
     iv/markdown/iv_markdown_common.h
     iv/markdown/iv_markdown_article.cpp
     iv/markdown/iv_markdown_article.h
+    iv/markdown/iv_markdown_article_caption_hit.cpp
+    iv/markdown/iv_markdown_article_caption_hit.h
     iv/markdown/iv_markdown_article_layout_blocks.cpp
     iv/markdown/iv_markdown_article_layout_blocks.h
     iv/markdown/iv_markdown_article_layout_structure.cpp
     iv/markdown/iv_markdown_article_layout_structure.h
     iv/markdown/iv_markdown_article_paint.cpp
     iv/markdown/iv_markdown_article_paint.h
+    iv/markdown/iv_markdown_article_quote.cpp
+    iv/markdown/iv_markdown_article_quote.h
+    iv/markdown/iv_markdown_article_scroll_forwarder.cpp
+    iv/markdown/iv_markdown_article_scroll_forwarder.h
     iv/markdown/iv_markdown_article_selection.cpp
     iv/markdown/iv_markdown_article_selection.h
     iv/markdown/iv_markdown_article_text.cpp
     iv/markdown/iv_markdown_article_text.h
+    iv/markdown/iv_markdown_button_row.cpp
+    iv/markdown/iv_markdown_button_row.h
     iv/markdown/iv_markdown_controller.cpp
     iv/markdown/iv_markdown_controller.h
     iv/markdown/iv_markdown_document.cpp
@@ -94,6 +149,10 @@ PRIVATE
     iv/markdown/iv_markdown_prepare_serialize.h
     iv/markdown/iv_markdown_prepare_state.cpp
     iv/markdown/iv_markdown_prepare_state.h
+    iv/markdown/iv_markdown_slideshow_chrome.cpp
+    iv/markdown/iv_markdown_slideshow_chrome.h
+    iv/markdown/iv_markdown_theme.cpp
+    iv/markdown/iv_markdown_theme.h
     iv/markdown/iv_markdown_view.cpp
     iv/markdown/iv_markdown_view.h
     iv/markdown/iv_markdown_view_widget.cpp
@@ -104,6 +163,7 @@ target_link_libraries(td_iv
 PRIVATE
     desktop-app::external_cmark_gfm
     desktop-app::external_microtex
+    td_iv_reorder_warning_off
     desktop-app::lib_spellcheck
 )
 
@@ -123,3 +183,59 @@ PRIVATE
     tdesktop::td_lang
     tdesktop::td_ui
 )
+
+# This test composition relies on ld64 dead stripping.
+if (APPLE AND NOT DESKTOP_APP_USE_PACKAGED
+    AND TARGET Qt${QT_VERSION_MAJOR}::QOffscreenIntegrationPlugin
+    AND TARGET Qt${QT_VERSION_MAJOR}::QOffscreenIntegrationPlugin_init)
+    add_executable(td_iv_article_test)
+    init_non_host_target(td_iv_article_test "(iv)")
+
+    target_precompile_headers(td_iv_article_test PRIVATE ${src_loc}/iv/iv_pch.h)
+    nice_target_sources(td_iv_article_test ${src_loc}
+    PRIVATE
+        iv/iv_rich_page_quote.cpp
+        iv/markdown/tests/iv_markdown_article_code_tests.cpp
+        iv/markdown/tests/iv_markdown_article_range_tests.cpp
+        iv/markdown/tests/iv_markdown_article_rich_copy_tests.cpp
+        iv/markdown/tests/iv_markdown_article_segment_tests.cpp
+        iv/markdown/tests/iv_markdown_article_table_tests.cpp
+        iv/markdown/tests/iv_markdown_article_tests.cpp
+        iv/markdown/tests/iv_markdown_article_tests.h
+        iv/markdown/tests/iv_markdown_article_tests_main.cpp
+    )
+
+    if (DESKTOP_APP_RELEASE_QT)
+        get_target_property(td_iv_article_test_offscreen_archive
+            Qt${QT_VERSION_MAJOR}::QOffscreenIntegrationPlugin
+            IMPORTED_LOCATION_RELWITHDEBINFO)
+    else()
+        set(td_iv_article_test_offscreen_archive
+            $<TARGET_FILE:Qt${QT_VERSION_MAJOR}::QOffscreenIntegrationPlugin>)
+    endif()
+
+    target_link_libraries(td_iv_article_test
+    PRIVATE
+        tdesktop::td_iv
+        desktop-app::lib_spellcheck
+        desktop-app::lib_webview
+        $<TARGET_OBJECTS:Qt${QT_VERSION_MAJOR}::QOffscreenIntegrationPlugin_init>
+        ${td_iv_article_test_offscreen_archive}
+    )
+
+    target_link_options(td_iv_article_test PRIVATE -Wl,-dead_strip)
+
+    set_target_properties(td_iv_article_test PROPERTIES
+        EXCLUDE_FROM_ALL TRUE
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/td_iv_article_test
+    )
+
+    add_custom_command(TARGET td_iv_article_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:td_iv_article_test>/Contents/Resources"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_BINARY_DIR}/lib_ui.rcc"
+            "$<TARGET_FILE_DIR:td_iv_article_test>/Contents/Resources/"
+        VERBATIM
+    )
+endif()

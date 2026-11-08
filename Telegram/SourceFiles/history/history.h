@@ -28,6 +28,8 @@ struct LanguageId;
 
 namespace Data {
 struct Draft;
+struct ComposeStash;
+class CommunityInfo;
 class Forum;
 class Session;
 class Folder;
@@ -104,7 +106,6 @@ public:
 	[[nodiscard]] HistoryItem *joinedMessageInstance() const;
 	void checkLocalMessages();
 	void removeJoinedMessage();
-	void removeNewPeerMessages();
 
 	void reactionsEnabledChanged(bool enabled);
 
@@ -242,12 +243,12 @@ public:
 	void destroyUnreadBar();
 	[[nodiscard]] Element *unreadBar() const;
 	void calculateFirstUnreadMessage();
-	void unsetFirstUnreadMessage();
 	[[nodiscard]] Element *firstUnreadMessage() const;
 
 	[[nodiscard]] bool loadedAtBottom() const; // last message is in the list
 	void setNotLoadedAtBottom();
 	[[nodiscard]] bool loadedAtTop() const; // nothing was added after loading history back
+	void markLoadedAtTop();
 	[[nodiscard]] bool hasGuestChatBotMessages() const;
 	void setHasGuestChatBotMessages();
 	[[nodiscard]] bool isReadyFor(MsgId msgId); // has messages for showing history at msgId
@@ -299,15 +300,14 @@ public:
 	}
 
 	void clearLastKeyboard();
+	void setLastKeyboard(MsgId id, PeerId from);
 	void clearUnreadMentionsFor(MsgId topicRootId);
 	void clearUnreadReactionsFor(
 		MsgId topicRootId,
 		Data::SavedSublist *sublist);
 	void clearUnreadPollVotesFor(MsgId topicRootId);
 
-	[[nodiscard]] int unreadPollVotesCount() const;
 	void setUnreadPollVotesCount(int count);
-	[[nodiscard]] rpl::producer<int> unreadPollVotesCountChanges() const;
 
 	Data::Draft *draft(Data::DraftKey key) const;
 	void setDraft(Data::DraftKey key, std::unique_ptr<Data::Draft> &&draft);
@@ -400,6 +400,13 @@ public:
 		PeerId monoforumPeerId,
 		Data::ForwardDraft &&draft);
 
+	[[nodiscard]] Data::ComposeStash *composeStash(Data::DraftKey key) const;
+	void setComposeStash(
+		Data::DraftKey key,
+		std::unique_ptr<Data::ComposeStash> stash);
+	[[nodiscard]] std::unique_ptr<Data::ComposeStash> takeComposeStash(
+		Data::DraftKey key);
+
 	History *migrateSibling() const;
 	[[nodiscard]] bool useTopPromotion() const;
 	int fixedOnTopIndex() const override;
@@ -432,6 +439,9 @@ public:
 	void viewHeightAdjusted(not_null<Element*> view, int delta);
 	void forgetScrollState() {
 		scrollTopItem = nullptr;
+		listScrollTopItemId = FullMsgId();
+		listScrollTopItemDate = 0;
+		listScrollTopShift = 0;
 	}
 
 	// find the correct scrollTopItem and scrollTopOffset using given top
@@ -448,6 +458,13 @@ public:
 		not_null<Data::Folder*> folder,
 		HistoryItem *folderDialogItem = nullptr);
 	void clearFolder();
+
+	[[nodiscard]] Data::CommunityInfo *communityListInfo() const {
+		return _communityInfo;
+	}
+	void updateCommunityRegistration();
+	void communityChatsListDateChanged(TimeId wasDate);
+	[[nodiscard]] bool isLinkedCommunityMember() const;
 
 	// Interface for Data::Histories.
 	void setInboxReadTill(MsgId upTo);
@@ -485,6 +502,13 @@ public:
 	// resulting scrollTop = top(scrollTopItem) + scrollTopOffset
 	Element *scrollTopItem = nullptr;
 	int scrollTopOffset = 0;
+
+	// New chat view scroll-state persistence, mirroring the list-owned
+	// ListMemento::ScrollTopState, because the new ListWidget leaves the
+	// blocks-based scrollTopItem above empty.
+	FullMsgId listScrollTopItemId;
+	TimeId listScrollTopItemDate = 0;
+	int listScrollTopShift = 0;
 
 	bool lastKeyboardInited = false;
 	bool lastKeyboardUsed = false;
@@ -525,6 +549,9 @@ private:
 	// helper method for countScrollState(int top)
 	[[nodiscard]] Element *findScrollTopItem(int top) const;
 
+	[[nodiscard]] std::optional<int> countStillUnreadLocalFromMessages(
+		MsgId readTillId) const;
+
 	// this method just removes a block from the blocks list
 	// when the last item from this block was detached and
 	// calls the required previousItemChanged()
@@ -538,6 +565,8 @@ private:
 	not_null<HistoryItem*> addNewToBack(
 		not_null<HistoryItem*> item,
 		bool unread);
+	void applyReplyKeyboard(not_null<HistoryItem*> item);
+	void applyStreamedDraftFinish(not_null<HistoryItem*> item);
 
 	friend class Data::SponsoredMessages;
 	not_null<HistoryItem*> addNewInTheMiddle(
@@ -653,12 +682,12 @@ private:
 	bool _loadedAtBottom = true;
 
 	std::optional<Data::Folder*> _folder;
+	Data::CommunityInfo *_communityInfo = nullptr;
 
 	std::optional<MsgId> _inboxReadBefore;
 	std::optional<MsgId> _outboxReadBefore;
 	std::optional<int> _unreadCount;
 	int _unreadPollVotesCount = 0;
-	rpl::event_stream<int> _unreadPollVotesCountChanges;
 	std::optional<HistoryItem*> _lastMessage;
 	std::optional<HistoryItem*> _lastServerMessage;
 	base::flat_set<not_null<HistoryItem*>> _clientSideMessages;
@@ -688,6 +717,9 @@ private:
 	base::flat_map<Data::DraftKey, TimeId> _acceptCloudDraftsAfter;
 	base::flat_map<Data::DraftKey, int> _savingCloudDraftRequests;
 	base::flat_map<Data::DraftKey, Data::ForwardDraft> _forwardDrafts;
+	base::flat_map<
+		Data::DraftKey,
+		std::unique_ptr<Data::ComposeStash>> _composeStashes;
 
 	base::flat_map<MsgId, TimeId> _unknownDeletedMessages;
 

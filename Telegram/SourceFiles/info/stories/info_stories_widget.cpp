@@ -53,25 +53,42 @@ object_ptr<ContentWidget> Memento::createWidget(
 		QWidget *parent,
 		not_null<Controller*> controller,
 		const QRect &geometry) {
-	auto result = object_ptr<Widget>(parent, controller);
+	auto result = object_ptr<Widget>(parent, controller, _myProfile);
 	result->setInternalState(geometry, this);
 	return result;
 }
 
 Widget::Widget(
 	QWidget *parent,
-	not_null<Controller*> controller)
+	not_null<Controller*> controller,
+	bool myProfile)
 : ContentWidget(parent, controller)
 , _albumId(controller->key().storiesAlbumId())
-, _inner(
-	setupFlexibleInnerWidget(
+, _inner(UseClassicProfileScroll()
+	? setupFlexibleInnerWidget(
 		object_ptr<InnerWidget>(
 			this,
 			controller,
 			_albumId.value(),
-			controller->key().storiesAddToAlbumId()),
-		_flexibleScroll))
+			controller->key().storiesAddToAlbumId(),
+			myProfile),
+		_flexibleScroll)
+	: setInnerWidget(
+		object_ptr<InnerWidget>(
+			this,
+			controller,
+			_albumId.value(),
+			controller->key().storiesAddToAlbumId(),
+			myProfile)))
 , _pinnedToTop(_inner->createPinnedToTop(this)) {
+	const auto classic = UseClassicProfileScroll();
+	const auto flexible = _pinnedToTop
+		&& _pinnedToTop->minimumHeight()
+		&& _inner->hasFlexibleTopBar();
+	if (classic) {
+		_inner->move(0, 0);
+	}
+
 	_emptyAlbumShown = _inner->albumEmptyValue();
 	_inner->albumIdChanges() | rpl::on_next([=](int id) {
 		controller->showSection(
@@ -81,15 +98,21 @@ Widget::Widget(
 	_inner->setScrollHeightValue(scrollHeightValue());
 	_inner->scrollToRequests(
 	) | rpl::on_next([this](Ui::ScrollToRequest request) {
+		const auto reserve = innerTopReserve();
 		if (request.ymin < 0) {
 			scrollTopRestore(
-				qMin(scrollTopSave(), request.ymax));
+				std::min(scrollTopSave(), request.ymax + reserve));
 		} else {
-			scrollTo(request);
+			scrollTo({
+				request.ymin + reserve,
+				(request.ymax < 0) ? -1 : (request.ymax + reserve),
+			});
 		}
 	}, lifetime());
 
-	if (_pinnedToTop) {
+	if (!classic && flexible) {
+		setupFlexibleRegularScroll(_inner, _pinnedToTop.get());
+	} else if (_pinnedToTop) {
 		_inner->widthValue(
 		) | rpl::on_next([=](int w) {
 			_pinnedToTop->resizeToWidth(w);
@@ -102,9 +125,7 @@ Widget::Widget(
 		}, _pinnedToTop->lifetime());
 	}
 
-	if (_pinnedToTop
-		&& _pinnedToTop->minimumHeight()
-		&& _inner->hasFlexibleTopBar()) {
+	if (classic && flexible) {
 		_flexibleScrollHelper = std::make_unique<FlexibleScrollHelper>(
 			scroll(),
 			_inner,
@@ -168,6 +189,7 @@ void Widget::setInternalState(
 
 std::shared_ptr<ContentMemento> Widget::doCreateMemento() {
 	auto result = std::make_shared<Memento>(controller());
+	result->setMyProfile(_inner->myProfile());
 	saveState(result.get());
 	return result;
 }
@@ -265,6 +287,10 @@ void Widget::setupBottomButton(int wasBottomHeight) {
 	}
 }
 
+void Widget::enableBackButton() {
+	_inner->enableBackButton();
+}
+
 void Widget::showFinished() {
 	_shown = true;
 	if (const auto bottom = _pinnedToBottom.data()) {
@@ -299,6 +325,13 @@ std::shared_ptr<Info::Memento> Make(not_null<PeerData*> peer, int albumId) {
 		std::vector<std::shared_ptr<ContentMemento>>(
 			1,
 			std::make_shared<Memento>(peer, albumId, 0)));
+}
+
+std::shared_ptr<Info::Memento> MakeMyProfile(not_null<PeerData*> peer) {
+	const auto memento = std::make_shared<Memento>(peer, 0, 0);
+	memento->setMyProfile(true);
+	return std::make_shared<Info::Memento>(
+		std::vector<std::shared_ptr<ContentMemento>>(1, memento));
 }
 
 } // namespace Info::Stories

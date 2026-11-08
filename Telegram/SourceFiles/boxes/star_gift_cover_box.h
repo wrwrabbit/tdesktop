@@ -20,6 +20,21 @@ namespace Ui {
 class RpWidget;
 class VerticalLayout;
 
+struct UniqueGiftCoverMessage {
+	TextWithEntities text;
+	QString placeholder;
+	not_null<PeerData*> sender;
+	bool hidden = false;
+};
+
+struct UniqueGiftCoverAction {
+	rpl::producer<QString> text;
+	rpl::producer<const style::icon*> icon;
+	Fn<void()> callback;
+	rpl::producer<bool> faded;
+	rpl::producer<bool> shown;
+};
+
 struct UniqueGiftCoverArgs {
 	rpl::producer<QString> pretitle;
 	rpl::producer<QString> numberText;
@@ -30,11 +45,13 @@ struct UniqueGiftCoverArgs {
 	rpl::producer<CreditsAmount> resalePrice;
 	Fn<void()> resaleClick;
 	bool attributesInfo = false;
+	std::vector<UniqueGiftCoverAction> actions;
 	Fn<void(
 		std::optional<Data::UniqueGift> now,
 		std::optional<Data::UniqueGift> next,
 		float64 progress)> repaintedHook;
 	std::shared_ptr<Data::GiftUpgradeSpinner> upgradeSpinner;
+	rpl::producer<UniqueGiftCoverMessage> message;
 };
 
 struct UniqueGiftCover {
@@ -69,7 +86,6 @@ public:
 		const CraftContext &context);
 
 	[[nodiscard]] QColor backgroundColor() const;
-	[[nodiscard]] QColor foregroundColor() const;
 
 private:
 	struct BackdropView;
@@ -103,6 +119,7 @@ private:
 		GiftView &gift,
 		const PaintContext &context,
 		float64 shown);
+	void layoutContent(int width, int subtitleHeight, int messageHeight);
 
 	void paintSpinnerAnimation(QPainter &p, const PaintContext &context);
 	void paintNormalAnimation(

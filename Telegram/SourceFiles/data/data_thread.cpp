@@ -117,6 +117,10 @@ HistoryUnreadThings::ConstProxy Thread::unreadPollVotes() const {
 bool Thread::canToggleUnread(bool nowUnread) const {
 	if ((asTopic() || asForum()) && !nowUnread) {
 		return false;
+	} else if (const auto channel = asHistory() ? peer()->asChannel() : nullptr
+		; channel && channel->isCommunity() && !nowUnread) {
+		// Communities support "mark as read" but not "mark as unread".
+		return false;
 	} else if (asSublist() && owningHistory()->peer->isSelf()) {
 		return false;
 	} else if (asHistory() && peer()->amMonoforumAdmin()) {
@@ -153,13 +157,15 @@ void Thread::clearNotifications() {
 	_notifications.clear();
 }
 
-void Thread::clearIncomingNotifications() {
+void Thread::clearIncomingNotifications(
+		Fn<bool(not_null<HistoryItem*>)> filter) {
 	if (!peer()->isSelf()) {
-		const auto proj = [](ItemNotification notification) {
-			return notification.item->out();
+		const auto incoming = [&](ItemNotification notification) {
+			return !notification.item->out()
+				&& (!filter || filter(notification.item));
 		};
 		_notifications.erase(
-			ranges::remove(_notifications, false, proj),
+			ranges::remove_if(_notifications, incoming),
 			end(_notifications));
 	}
 }

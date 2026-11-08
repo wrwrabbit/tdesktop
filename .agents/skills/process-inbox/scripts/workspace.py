@@ -1,0 +1,7576 @@
+#!/usr/bin/env python3
+
+import argparse
+import contextlib
+import datetime
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import plistlib
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import xml.parsers.expat
+
+
+TAG_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*")
+TASK_ID_PATTERN = re.compile(
+	r"[0-9]{4}/[0-9]{2}/[0-9]{2}/[a-z0-9][a-z0-9-]*"
+)
+SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+VALID_STATUSES = {
+	"todo",
+	"in-progress",
+	"approved",
+	"blocked",
+	"split-required",
+}
+DEFAULT_TASK_TYPE = "implement"
+LEGACY_TASK_TYPES = {"verify", "minimal"}
+VALID_TASK_TYPES = {DEFAULT_TASK_TYPE, *LEGACY_TASK_TYPES}
+MODEL_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{0,39}")
+CONSOLIDATION_PENDING = "work/consolidation-pending.md"
+CONSOLIDATION_COMPLETE = "work/consolidation-complete.md"
+COMMIT_HASH_PATTERN = re.compile(
+	r"(?i)\b(?:commit(?:[ \t]+(?:hash|id|sha(?:-1)?))?|revision|sha(?:-1)?)\b"
+	r"(?!-[0-9])[ \t:=`\"'\\*()\[\]-]*\b[0-9a-f]{7,64}\b"
+)
+LEGACY_COMMIT_FIELDS = ("Task-Base-SHA:", "Implementation-SHA:")
+PROJECT_ARCHIVE_DIR = "archive"
+BATCHES_DIR = "batches"
+FINISHED_BATCH_STATUSES = {"approved", "superseded", "split", "retired"}
+PROJECT_LINK_PATTERN = re.compile(r"\]\(\.\./\.\./(?!\.\./)")
+ARCHIVED_PROJECT_LINK_PATTERN = re.compile(r"\]\(\.\./\.\./\.\./")
+STATE_FIELD_ORDER = [
+	"status",
+	"type",
+	"created",
+	"project",
+	"depends_on",
+	"claimed_by",
+	"claimed_at",
+	"claim_order",
+	"lease_until",
+	"phase",
+	"carried_from",
+	"model",
+	"inbox_receipt",
+]
+PORTABLE_GOLDEN = "test_TelegramForcePortable"
+PORTABLE_LIVE = "TelegramForcePortable"
+PORTABLE_REAL = "real_TelegramForcePortable"
+PORTABLE_MARKER = "testing"
+OVERLAY_PATHS_FILE = "test-overlay.paths"
+OVERLAY_PATCH_FILE = "test-overlay.patch"
+OVERLAY_SUBMODULES_FILE = "test-overlay-submodules.json"
+OVERLAY_SUBMODULES_DIR = "test-overlay-submodules"
+TEST_LOG_FILE = "test_log.txt"
+TEST_COMPLETE_MARKER = "TEST_COMPLETE"
+STALE_CRASH_DIR = "stale-crash"
+CRASHPAD_COMPLETED_DIR = "completed"
+CONSOLE_COMMAND_TIMEOUT = 2.0
+MIRROR_REMOTE = "private"
+MIRROR_BRANCH_PREFIX = "ai-"
+MIRROR_PUSH_TIMEOUT = 120.0
+WAIT_IDLE_MAX_DEFAULT = 600.0
+# Test::SaveImage's grammar: Telegram/SourceFiles/test/docs/helpers/test_capture.md
+SCREENSHOT_MARKER_PATTERN = re.compile(
+	r'"(?:[^"\\]|\\[\\"]|\\u(?:000[ABCD]|001[CDE]|0085|202[89]))*"'
+)
+SCREENSHOT_ESCAPE_PATTERN = re.compile(r"\\(u[0-9A-F]{4}|.)")
+LSAPPINFO_ASN_PATTERN = re.compile(r"ASN:0x[0-9a-fA-F]+-0x[0-9a-fA-F]+:")
+LSAPPINFO_NAME_PATTERN = re.compile(r'"(.*)"\s+ASN:')
+LAUNCH_ACTIVATION_VARIABLE = "QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM"
+MACOS_OPEN_TOOL = "/usr/bin/open"
+BUILD_LOCK_PROCESS_NAMES = {
+	"cl.exe",
+	"cmake.exe",
+	"cvtres.exe",
+	"link.exe",
+	"moc.exe",
+	"mspdbsrv.exe",
+	"msbuild.exe",
+	"ninja.exe",
+	"rc.exe",
+	"rcc.exe",
+	"uic.exe",
+}
+# mspdbsrv.exe idles on after the build it served; its CPU still counts
+HOST_LOAD_BUILD_TOOLS = BUILD_LOCK_PROCESS_NAMES - {"mspdbsrv.exe"}
+# Xcode's build services can idle on like mspdbsrv.exe, so only their CPU counts
+HOST_LOAD_MACOS_BUILD_TOOLS = {
+	"clang",
+	"cmake",
+	"ld",
+	"libtool",
+	"moc",
+	"ninja",
+	"rcc",
+	"swift-frontend",
+	"uic",
+	"xcodebuild",
+}
+HOST_LOAD_THRESHOLD_DEFAULT = 15.0
+HOST_LOAD_HOLD_DEFAULT = 5.0
+HOST_LOAD_MAX_DEFAULT = 600.0
+HOST_LOAD_INTERVAL_DEFAULT = 1.0
+HOST_LOAD_INTERVAL_MIN = 0.1
+HOST_LOAD_SNAPSHOT_SIZE = 1 << 21
+HOST_LOAD_SNAPSHOT_ATTEMPTS = 8
+HOST_LOAD_LAST_SAMPLES = 5
+HOST_LOAD_TOP = 3
+HOST_LOAD_SAMPLES_FILE = "host_load_samples.jsonl"
+
+
+class WorkspaceError(RuntimeError):
+	pass
+
+
+class RebaseConflict(WorkspaceError):
+	pass
+
+
+# Inside git_safe_termination() a termination signal is held while a git
+# command runs and raised once it has finished.
+_TERMINATION = {"git": 0, "pending": None}
+
+
+def raise_pending_termination():
+	signum = _TERMINATION["pending"]
+	if signum is not None and not _TERMINATION["git"]:
+		_TERMINATION["pending"] = None
+		if signum == signal.SIGINT:
+			raise KeyboardInterrupt
+		raise SystemExit(128 + signum)
+
+
+def run_git_process(arguments, **options):
+	_TERMINATION["git"] += 1
+	try:
+		return subprocess.run(arguments, **options)
+	finally:
+		_TERMINATION["git"] -= 1
+		raise_pending_termination()
+
+
+def enable_git_long_paths(environment):
+	# Queue evidence paths can pass Windows' 260-character limit under the
+	# longer worktree roots. Give every git child long-path support without
+	# writing it into a git config; git ignores the key elsewhere.
+	count = int(environment.get("GIT_CONFIG_COUNT") or 0)
+	for index in range(count):
+		if environment.get(f"GIT_CONFIG_KEY_{index}", "").lower() == "core.longpaths":
+			return
+	environment[f"GIT_CONFIG_KEY_{count}"] = "core.longpaths"
+	environment[f"GIT_CONFIG_VALUE_{count}"] = "true"
+	environment["GIT_CONFIG_COUNT"] = str(count + 1)
+
+
+def run_git(path, *args, check=True):
+	result = run_git_process(
+		["git", "-C", str(path), *args],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		text=True,
+	)
+	if check and result.returncode:
+		raise WorkspaceError(result.stderr.strip() or result.stdout.strip())
+	return result
+
+
+def git_root(path):
+	result = run_git(path, "rev-parse", "--show-toplevel")
+	return Path(result.stdout.strip()).resolve()
+
+
+def absolute_git_dir(path):
+	result = run_git(path, "rev-parse", "--git-common-dir")
+	value = Path(result.stdout.strip())
+	if not value.is_absolute():
+		value = Path(path) / value
+	return value.resolve()
+
+
+def source_root(value):
+	start = Path(value).expanduser().resolve() if value else Path.cwd()
+	root = git_root(start)
+	if not (root / "Telegram" / "build").is_dir():
+		raise WorkspaceError(f"Not a Telegram Desktop checkout: {root}")
+	return root
+
+
+def read_machine_tag(root):
+	path = root / "Telegram" / "build" / "ai-machine-tag"
+	if not path.is_file():
+		raise WorkspaceError(
+			f"Missing {path}. Create it with a stable lowercase machine tag."
+		)
+	value = path.read_text(encoding="utf-8").strip()
+	if not TAG_PATTERN.fullmatch(value):
+		raise WorkspaceError(
+			f"Invalid machine tag {value!r}; use lowercase letters, digits, and hyphens."
+		)
+	return value
+
+
+def repository_config(args, create=False):
+	root = source_root(args.source_root)
+	machine = read_machine_tag(root)
+	checkout = root.name
+	if not TAG_PATTERN.fullmatch(checkout):
+		raise WorkspaceError(
+			f"Invalid checkout folder {checkout!r}; use lowercase letters, digits, and hyphens."
+		)
+
+	main_value = args.ai_main or os.environ.get("AI_TDESKTOP_ROOT")
+	main = (
+		Path(main_value).expanduser().resolve()
+		if main_value
+		else (root.parent / "ai-tdesktop").resolve()
+	)
+	worktrees_value = args.worktrees_root or os.environ.get(
+		"AI_TDESKTOP_WORKTREES_ROOT"
+	)
+	worktrees = (
+		Path(worktrees_value).expanduser().resolve()
+		if worktrees_value
+		else (root.parent / "ai-tdesktop-worktrees").resolve()
+	)
+
+	if not (main / ".git").exists():
+		raise WorkspaceError(f"Missing ai-tdesktop repository: {main}")
+	if git_root(main) != main:
+		raise WorkspaceError(f"ai-tdesktop is not a worktree root: {main}")
+
+	main_branch = run_git(main, "branch", "--show-current").stdout.strip()
+	if main_branch != "master":
+		raise WorkspaceError(
+			f"The main ai-tdesktop worktree must be on master, not {main_branch!r}."
+		)
+
+	tag = f"{machine}-{checkout}"
+	if create:
+		inbox = main / "inbox"
+		(inbox / "backup").mkdir(parents=True, exist_ok=True)
+		(inbox / "inbox.md").touch(exist_ok=True)
+		worktrees.mkdir(parents=True, exist_ok=True)
+	return {
+		"source_root": str(root),
+		"machine_tag": machine,
+		"checkout_folder": checkout,
+		"checkout_tag": tag,
+		"ai_main": str(main),
+		"worktrees_root": str(worktrees),
+		"inbox": str(main / "inbox"),
+	}
+
+
+def linked_worktree(config, path, branch, create, label):
+	main = Path(config["ai_main"])
+	if create and not path.exists():
+		branch_exists = run_git(
+			main,
+			"show-ref",
+			"--verify",
+			"--quiet",
+			f"refs/heads/{branch}",
+			check=False,
+		).returncode == 0
+		arguments = ["worktree", "add"]
+		if not branch_exists:
+			arguments.extend(["-b", branch])
+		arguments.extend([str(path), branch if branch_exists else "master"])
+		run_git(main, *arguments)
+	if not path.is_dir():
+		raise WorkspaceError(f"Missing {label}: {path}")
+	if absolute_git_dir(main) != absolute_git_dir(path):
+		raise WorkspaceError(
+			f"The {label} does not belong to {main}: {path}"
+		)
+	actual_branch = run_git(path, "branch", "--show-current").stdout.strip()
+	if actual_branch != branch:
+		raise WorkspaceError(
+			f"Expected {path} on {branch}, found {actual_branch!r}."
+		)
+
+
+def worktree_config(args, create=False):
+	config = repository_config(args, create=create)
+	tag = config["checkout_tag"]
+	branch = f"slot/{tag}"
+	slot = Path(config["worktrees_root"]) / tag
+	linked_worktree(config, slot, branch, create, "checkout AI worktree")
+	return {
+		**config,
+		"slot_worktree": str(slot),
+		"slot_branch": branch,
+	}
+
+
+def inbox_worktree_config(args, create=False):
+	config = repository_config(args, create=create)
+	tag = config["checkout_tag"]
+	branch = f"inbox/{tag}"
+	worktree = Path(config["worktrees_root"]) / f"{tag}-inbox"
+	linked_worktree(config, worktree, branch, create, "inbox AI worktree")
+	return {
+		**config,
+		"inbox_worktree": str(worktree),
+		"inbox_branch": branch,
+	}
+
+
+def ensure_clean(path, label):
+	status = run_git(path, "status", "--porcelain", "--untracked-files=all").stdout
+	if status.strip():
+		raise WorkspaceError(f"{label} is not clean:\n{status.rstrip()}")
+
+
+def sync_local_slot(config):
+	sync_branch_worktree(
+		config,
+		"slot_worktree",
+		"slot_branch",
+		"ai-tdesktop slot",
+	)
+
+
+def sync_inbox_worktree(config):
+	sync_branch_worktree(
+		config,
+		"inbox_worktree",
+		"inbox_branch",
+		"ai-tdesktop inbox worktree",
+	)
+
+
+def sync_branch_worktree(config, worktree_key, branch_key, label):
+	main = Path(config["ai_main"])
+	worktree = Path(config[worktree_key])
+	branch = config[branch_key]
+	ensure_clean(main, "ai-tdesktop master")
+	ensure_clean(worktree, label)
+	counts = run_git(
+		worktree,
+		"rev-list",
+		"--left-right",
+		"--count",
+		f"master...{branch}",
+	).stdout.strip().split()
+	master_only, worktree_only = (int(value) for value in counts)
+	if worktree_only:
+		raise WorkspaceError(
+			f"{branch} has {worktree_only} unpublished commit(s)."
+		)
+	if master_only:
+		run_git(worktree, "merge", "--ff-only", "master")
+
+
+def routing_worktree_config(args, create=False):
+	config = repository_config(args, create=create)
+	tag = config["checkout_tag"]
+	branch = f"routing/{tag}"
+	worktree = Path(config["worktrees_root"]) / f"{tag}-routing"
+	linked_worktree(config, worktree, branch, create, "routing AI worktree")
+	return {
+		**config,
+		"routing_worktree": str(worktree),
+		"routing_branch": branch,
+	}
+
+
+def sync_routing_worktree(config):
+	sync_branch_worktree(
+		config,
+		"routing_worktree",
+		"routing_branch",
+		"ai-tdesktop routing worktree",
+	)
+
+
+def sync_routing_canonical(config):
+	update_main_from_origin(config)
+	sync_routing_worktree(config)
+
+
+def routing_unpublished_count(config):
+	worktree = Path(config["routing_worktree"])
+	counts = run_git(
+		worktree,
+		"rev-list",
+		"--left-right",
+		"--count",
+		f"master...{config['routing_branch']}",
+	).stdout.strip().split()
+	return int(counts[1])
+
+
+HEALTH_STATE = "code-health"
+
+
+def health_worktree_config(args, create=False):
+	config = repository_config(args, create=create)
+	tag = config["checkout_tag"]
+	branch = f"code-health/{tag}"
+	worktree = Path(config["worktrees_root"]) / f"{tag}-code-health"
+	linked_worktree(config, worktree, branch, create, "code-health AI worktree")
+	return {
+		**config,
+		"health_worktree": str(worktree),
+		"health_branch": branch,
+		"health_state": str(worktree / HEALTH_STATE),
+	}
+
+
+def health_unpublished_count(config):
+	counts = run_git(
+		Path(config["health_worktree"]),
+		"rev-list",
+		"--left-right",
+		"--count",
+		f"master...{config['health_branch']}",
+	).stdout.strip().split()
+	return int(counts[1])
+
+
+def publish_routing(config, validate=None):
+	return publish_worktree(
+		config,
+		"routing_worktree",
+		"routing_branch",
+		"ai-tdesktop routing worktree",
+		validate,
+	)
+
+
+def has_origin(path):
+	return run_git(path, "remote", "get-url", "origin", check=False).returncode == 0
+
+
+def origin_master_exists(path):
+	return run_git(
+		path,
+		"show-ref",
+		"--verify",
+		"--quiet",
+		"refs/remotes/origin/master",
+		check=False,
+	).returncode == 0
+
+
+def retryable_push_failure(message):
+	lowered = message.lower()
+	return "non-fast-forward" in lowered or "fetch first" in lowered
+
+
+def sync_canonical(config):
+	main = Path(config["ai_main"])
+	ensure_clean(main, "ai-tdesktop master")
+	ensure_clean(Path(config["slot_worktree"]), "ai-tdesktop slot")
+	if has_origin(main):
+		run_git(main, "fetch", "origin")
+		if not origin_master_exists(main):
+			raise WorkspaceError("origin/master does not exist")
+		run_git(main, "merge", "--ff-only", "origin/master")
+	sync_local_slot(config)
+
+
+def state_paths(root):
+	tasks = root / "tasks"
+	if not tasks.is_dir():
+		return []
+	return sorted(tasks.glob("*/*/*/*/state.yaml"))
+
+
+def task_id_for_state(root, path):
+	relative = path.relative_to(root)
+	parts = relative.parts
+	if len(parts) != 6 or parts[0] != "tasks" or parts[-1] != "state.yaml":
+		raise WorkspaceError(f"Invalid task state path: {path}")
+	value = "/".join(parts[1:5])
+	if not TASK_ID_PATTERN.fullmatch(value):
+		raise WorkspaceError(f"Invalid task identifier: {value}")
+	return value
+
+
+def state_path(root, task_id):
+	if not TASK_ID_PATTERN.fullmatch(task_id):
+		raise WorkspaceError(f"Invalid task identifier: {task_id!r}")
+	path = root / "tasks" / task_id / "state.yaml"
+	if not path.is_file():
+		raise WorkspaceError(f"Task does not exist: {task_id}")
+	return path
+
+
+def parse_scalar(value):
+	value = value.strip()
+	if value == "null":
+		return None
+	if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+		return value[1:-1]
+	return value
+
+
+def parse_dependencies(value):
+	value = value.strip()
+	if value == "[]":
+		return []
+	if not value.startswith("[") or not value.endswith("]"):
+		raise WorkspaceError(f"depends_on must be an inline YAML list, found {value!r}")
+	return [
+		str(parse_scalar(part))
+		for part in value[1:-1].split(",")
+		if part.strip()
+	]
+
+
+def load_state(root, path):
+	values = {}
+	for line in path.read_text(encoding="utf-8-sig").splitlines():
+		if not line or line[0].isspace() or ":" not in line:
+			continue
+		key, value = line.split(":", 1)
+		values[key] = value.strip()
+	for required in ("status", "created", "project", "depends_on", "claimed_by"):
+		if required not in values:
+			raise WorkspaceError(f"Missing {required} in {path}")
+	status = str(parse_scalar(values["status"]))
+	if status not in VALID_STATUSES:
+		raise WorkspaceError(f"Invalid status {status!r} in {path}")
+	kind = parse_scalar(values.get("type", DEFAULT_TASK_TYPE))
+	kind = DEFAULT_TASK_TYPE if kind is None else str(kind)
+	if kind not in VALID_TASK_TYPES:
+		raise WorkspaceError(f"Invalid task type {kind!r} in {path}")
+	if kind in LEGACY_TASK_TYPES and status != "approved":
+		raise WorkspaceError(
+			f"Only type 'implement' is valid for unfinished work in {path}; "
+			f"{kind!r} is accepted only for approved history"
+		)
+	project = parse_scalar(values["project"])
+	if project is not None and not TAG_PATTERN.fullmatch(str(project)):
+		raise WorkspaceError(f"Invalid project slug {project!r} in {path}")
+	order = parse_scalar(values.get("claim_order", "null"))
+	if order is not None:
+		try:
+			order = int(order)
+		except ValueError as error:
+			raise WorkspaceError(f"Invalid claim_order in {path}: {order!r}") from error
+	model = parse_scalar(values.get("model", "null"))
+	if model is not None and not MODEL_PATTERN.fullmatch(str(model)):
+		raise WorkspaceError(f"Invalid model name {model!r} in {path}")
+	carried_from = parse_scalar(values.get("carried_from", "null"))
+	if (
+		carried_from is not None
+		and not TASK_ID_PATTERN.fullmatch(str(carried_from))
+	):
+		raise WorkspaceError(f"Invalid carried_from in {path}: {carried_from!r}")
+	task_id = task_id_for_state(root, path)
+	task_file = path.with_name("task.md")
+	title = task_id.rsplit("/", 1)[-1]
+	if task_file.is_file():
+		for line in task_file.read_text(encoding="utf-8-sig").splitlines():
+			if line.startswith("# "):
+				title = line[2:].strip()
+				break
+	return {
+		"id": task_id,
+		"title": title,
+		"status": status,
+		"type": kind,
+		"created": str(parse_scalar(values["created"])),
+		"project": project,
+		"depends_on": parse_dependencies(values["depends_on"]),
+		"claimed_by": parse_scalar(values["claimed_by"]),
+		"claimed_at": parse_scalar(values.get("claimed_at", "null")),
+		"claim_order": order,
+		"lease_until": parse_scalar(values.get("lease_until", "null")),
+		"phase": parse_scalar(values.get("phase", "null")),
+		"carried_from": carried_from,
+		"model": model,
+		"inbox_receipt": parse_scalar(values.get("inbox_receipt", "null")),
+		"state_path": str(path),
+	}
+
+
+def load_states(root):
+	return {
+		state["id"]: state
+		for state in (load_state(root, path) for path in state_paths(root))
+	}
+
+
+def format_scalar(value):
+	if value is None:
+		return "null"
+	return str(value)
+
+
+def update_state(path, changes):
+	data = path.read_bytes()
+	if data.startswith(b"\xef\xbb\xbf"):
+		raise WorkspaceError(f"Refusing to preserve a UTF-8 BOM in {path}")
+	newline = "\r\n" if b"\r\n" in data else "\n"
+	lines = data.decode("utf-8").splitlines()
+	positions = {}
+	for index, line in enumerate(lines):
+		if line and not line[0].isspace() and ":" in line:
+			positions[line.split(":", 1)[0]] = index
+	for key, value in changes.items():
+		line = f"{key}: {format_scalar(value)}"
+		if key in positions:
+			lines[positions[key]] = line
+			continue
+		if key not in STATE_FIELD_ORDER:
+			raise WorkspaceError(f"Unknown task state field: {key}")
+		order = STATE_FIELD_ORDER.index(key)
+		insert_at = len(lines)
+		for later in STATE_FIELD_ORDER[order + 1:]:
+			if later in positions:
+				insert_at = positions[later]
+				break
+		lines.insert(insert_at, line)
+		positions = {
+			name: index + (1 if index >= insert_at else 0)
+			for name, index in positions.items()
+		}
+		positions[key] = insert_at
+	path.write_bytes((newline.join(lines) + newline).encode("utf-8"))
+
+
+def task_ready(task, states, retired=()):
+	# A retired dependency will never be delivered, so it no longer holds work back.
+	return all(
+		dependency in retired
+		or (dependency in states and states[dependency]["status"] == "approved")
+		for dependency in task["depends_on"]
+	)
+
+
+def queue_sort_key(task):
+	return (
+		task["claimed_at"] or "9999",
+		task["claim_order"] if task["claim_order"] is not None else 1_000_000,
+		task["created"],
+		task["id"],
+	)
+
+
+def changed_paths(path):
+	result = set()
+	for arguments in (
+		("diff", "--name-only"),
+		("diff", "--cached", "--name-only"),
+		("ls-files", "--others", "--exclude-standard"),
+	):
+		for value in os.fsdecode(run_git_binary(path, *arguments, "-z")).split("\0"):
+			if value:
+				result.add(value)
+	return sorted(result)
+
+
+def is_linked_worktree(source, path):
+	if not path.endswith("/"):
+		return False
+	candidate = Path(source).resolve() / path
+	marker = candidate / ".git"
+	if (
+		not candidate.is_dir()
+		or candidate.resolve() != candidate
+		or not marker.is_file()
+		or marker.is_symlink()
+	):
+		return False
+	try:
+		git_dir = run_git_binary(
+			candidate, "rev-parse", "--path-format=absolute", "--git-dir"
+		)
+		common_dir = run_git_binary(
+			candidate, "rev-parse", "--path-format=absolute", "--git-common-dir"
+		)
+		if git_dir == common_dir:
+			return False
+		entries = os.fsdecode(run_git_binary(
+			candidate, "worktree", "list", "--porcelain", "-z"
+		)).split("\0")
+	except WorkspaceError:
+		return False
+	return any(
+		entry.startswith("worktree ")
+		and Path(entry[len("worktree "):]) == candidate
+		for entry in entries
+	)
+
+
+def indexed_gitlinks(source):
+	result = {}
+	for entry in literal_paths(source, "ls-files", "--stage"):
+		metadata, path = entry.split("\t", 1)
+		mode, revision, stage = metadata.split()
+		if mode == "160000" and stage == "0":
+			result[path] = revision
+	return result
+
+
+def source_changed_paths(source):
+	source = Path(source).resolve()
+	tracked = set()
+	for arguments in (("diff",), ("diff", "--cached")):
+		tracked.update(literal_paths(
+			source, *arguments, "--name-only", "--ignore-submodules=dirty"
+		))
+	dirty = tracked | {
+		path for path in literal_paths(
+			source, "ls-files", "--others", "--exclude-standard"
+		)
+		if not is_linked_worktree(source, path)
+	}
+	for path in indexed_gitlinks(source):
+		module = source / path
+		if module.resolve() != module or is_linked_worktree(source, path + "/"):
+			dirty.add(path)
+		elif (module / ".git").exists() and source_changed_paths(module):
+			dirty.add(path)
+	return sorted(dirty)
+
+
+def source_local_changes(source):
+	source = Path(source).resolve()
+	gitlinks = indexed_gitlinks(source)
+	dirty = set(source_changed_paths(source)) - gitlinks.keys()
+	dirty.update(literal_paths(
+		source, "diff", "--cached", "--name-only", "--ignore-submodules=none"
+	))
+	for path in gitlinks:
+		module = Path(source) / path
+		if module.resolve() != module or is_linked_worktree(source, path + "/"):
+			dirty.add(path)
+		elif (module / ".git").exists():
+			dirty.update(
+				f"{path}/{value}" for value in source_local_changes(module)
+			)
+	return sorted(dirty)
+
+
+def mismatched_submodules(source):
+	return [
+		line.strip() for line in run_git(
+			source, "submodule", "status", "--recursive"
+		).stdout.splitlines()
+		if line and line[0] in "+-U"
+	]
+
+
+def ensure_source_clean(source):
+	dirty = source_changed_paths(source)
+	mismatched = mismatched_submodules(source)
+	if dirty or mismatched:
+		raise WorkspaceError(
+			"Telegram source checkout is not clean:\n"
+			+ "\n".join(dirty + mismatched)
+		)
+
+
+def registered_nested_worktrees(source):
+	source = Path(source).resolve()
+	result = [
+		path.rstrip("/") for path in literal_paths(
+			source, "ls-files", "--others"
+		)
+		if is_linked_worktree(source, path)
+	]
+	for path in indexed_gitlinks(source):
+		module = source / path
+		if module.resolve() != module:
+			raise WorkspaceError("Submodule path is a symlink: " + str(module))
+		if is_linked_worktree(source, path + "/"):
+			result.append(path)
+		elif (module / ".git").exists():
+			result.extend(
+				f"{path}/{value}" for value in registered_nested_worktrees(module)
+			)
+	return result
+
+
+def protect_worktrees_from_submodule_target(module, revision):
+	worktrees = registered_nested_worktrees(module)
+	if not worktrees:
+		return
+	if run_git(module, "cat-file", "-e", revision + "^{commit}", check=False).returncode:
+		run_git(module, "fetch")
+	for entry in literal_paths(module, "ls-tree", "-r", revision):
+		metadata, path = entry.split("\t", 1)
+		mode = metadata.split()[0]
+		for worktree in worktrees:
+			if (
+				path == worktree
+				or path.startswith(worktree + "/")
+				or (mode != "160000" and worktree.startswith(path + "/"))
+			):
+				raise WorkspaceError(
+					"Submodule target overlaps a registered linked worktree: "
+					+ str(Path(module) / worktree)
+				)
+
+
+def update_source_submodules(source):
+	for path, revision in indexed_gitlinks(source).items():
+		module = Path(source) / path
+		if module.resolve() != module or is_linked_worktree(source, path + "/"):
+			raise WorkspaceError("Submodule checkout is owned by another path: " + str(module))
+		if (module / ".git").exists() and resolved_ref(module, "HEAD") != revision:
+			protect_worktrees_from_submodule_target(module, revision)
+		run_git(
+			source, "--literal-pathspecs", "-c", "submodule.recurse=false",
+			"submodule", "update", "--init", "--checkout", "--", path,
+		)
+		update_source_submodules(module)
+
+
+def prepare_source(source):
+	source = Path(source).resolve()
+	dirty = source_local_changes(source)
+	if dirty:
+		raise WorkspaceError(
+			"Source preparation preserves local changes; resolve these paths "
+			"before updating submodules:\n" + "\n".join(dirty)
+		)
+	update = bool(mismatched_submodules(source))
+	if update:
+		update_source_submodules(source)
+	ensure_source_clean(source)
+	return update
+
+
+def update_project_branch(args, source):
+	branch = current_branch(source)
+	if branch is None or MIRROR_REMOTE not in run_git(source, "remote").stdout.split():
+		return False
+	main = Path(repository_config(args)["ai_main"])
+	if branch not in live_project_slugs(main):
+		return False
+	tracking = f"refs/remotes/{MIRROR_REMOTE}/{branch}"
+	known = [resolved_ref(source, tracking)]
+	fetch_remote(source, MIRROR_REMOTE)
+	tip = remote_branch_tip(source, MIRROR_REMOTE, branch)
+	if tip is None or tip == resolved_ref(source, "HEAD"):
+		return False
+	if is_ancestor(source, tip):
+		raise WorkspaceError(
+			f"Branch {branch} has commits {MIRROR_REMOTE}/{branch} lacks; "
+			"publish or save them before starting another task"
+		)
+	if run_git(source, "rev-list", "--merges", f"{tip}..HEAD").stdout.strip():
+		raise WorkspaceError(
+			f"Branch {branch} has local merge commits; project branches stay linear"
+		)
+	known += run_git(
+		source, "reflog", "show", "--format=%H", tracking, check=False,
+	).stdout.split()
+	published = any(
+		value is not None and is_ancestor(source, "HEAD", value) for value in known
+	)
+	unpublished = not published and [
+		line for line in run_git(source, "cherry", tip, "HEAD").stdout.splitlines()
+		if line.startswith("+")
+	]
+	if unpublished:
+		raise WorkspaceError(
+			f"Branch {branch} has commits {MIRROR_REMOTE}/{branch} lacks; "
+			"sync or save them before starting another task"
+		)
+	protect_worktrees_from_submodule_target(source, tip)
+	run_git(source, "reset", "--quiet", "--hard", tip)
+	update_source_submodules(source)
+	return True
+
+
+def command_source_prepare(args):
+	source = source_root(args.source_root)
+	updated = prepare_source(source)
+	project_updated = update_project_branch(args, source)
+	print(json.dumps({
+		"source_root": str(source),
+		"source_clean": True,
+		"submodules_updated": updated,
+		"project_branch_updated": project_updated,
+	}, indent=2, sort_keys=True))
+
+
+def path_is_stageable(root, path):
+	return (
+		os.path.lexists(root / path)
+		or bool(run_git(root, "ls-files", "--", path).stdout.strip())
+	)
+
+
+def unpublished_counts(config):
+	values = run_git(
+		config["slot_worktree"],
+		"rev-list",
+		"--left-right",
+		"--count",
+		f"master...{config['slot_branch']}",
+	).stdout.strip().split()
+	return {"master_only": int(values[0]), "slot_only": int(values[1])}
+
+
+def task_relative_dir(task_id):
+	return f"tasks/{task_id}"
+
+
+def source_task_ref(task_id, name):
+	if not TASK_ID_PATTERN.fullmatch(task_id):
+		raise WorkspaceError(f"Invalid task identifier: {task_id!r}")
+	return f"refs/ai-tasks/{task_id}/{name}"
+
+
+def resolved_ref(path, value):
+	result = run_git(
+		path,
+		"rev-parse",
+		"--verify",
+		f"{value}^{{commit}}",
+		check=False,
+	)
+	return result.stdout.strip() if not result.returncode else None
+
+
+def ensure_changes_scoped(slot, task_ids, extra_paths=()):
+	allowed = tuple(task_relative_dir(task_id) + "/" for task_id in task_ids)
+	unexpected = [
+		path for path in changed_paths(slot)
+		if not path.startswith(allowed) and path not in extra_paths
+	]
+	if unexpected:
+		raise WorkspaceError(
+			"The AI slot has changes outside the active task: "
+			+ ", ".join(unexpected)
+		)
+
+
+def update_main_from_origin(config):
+	main = Path(config["ai_main"])
+	ensure_clean(main, "ai-tdesktop master")
+	if has_origin(main):
+		run_git(main, "fetch", "origin")
+		if not origin_master_exists(main):
+			raise WorkspaceError("origin/master does not exist")
+		run_git(main, "merge", "--ff-only", "origin/master")
+
+
+def sync_inbox_canonical(config):
+	update_main_from_origin(config)
+	sync_inbox_worktree(config)
+
+
+def publish_worktree(config, worktree_key, branch_key, label, validate=None):
+	main = Path(config["ai_main"])
+	worktree = Path(config[worktree_key])
+	branch = config[branch_key]
+	ensure_clean(main, "ai-tdesktop master")
+	ensure_clean(worktree, label)
+	while True:
+		update_main_from_origin(config)
+		rebase = run_git(worktree, "rebase", "master", check=False)
+		if rebase.returncode:
+			run_git(worktree, "rebase", "--abort", check=False)
+			raise RebaseConflict(
+				"AI state conflicts with newer master; the worktree commits were preserved. "
+				+ (rebase.stderr.strip() or rebase.stdout.strip())
+			)
+		if validate is not None:
+			validate(worktree)
+		if has_origin(main):
+			push = run_git(worktree, "push", "origin", "HEAD:master", check=False)
+			if push.returncode:
+				message = push.stderr.strip() or push.stdout.strip()
+				if retryable_push_failure(message):
+					continue
+				raise WorkspaceError(message)
+		merge = run_git(main, "merge", "--ff-only", branch, check=False)
+		if not merge.returncode:
+			return True
+		master_advanced = run_git(
+			main,
+			"merge-base",
+			"--is-ancestor",
+			"master",
+			branch,
+			check=False,
+		).returncode != 0
+		if master_advanced:
+			continue
+		raise WorkspaceError(
+			"Could not fast-forward local AI master: "
+			+ (merge.stderr.strip() or merge.stdout.strip())
+		)
+
+
+def publish_slot(config, validate=None):
+	return publish_worktree(
+		config,
+		"slot_worktree",
+		"slot_branch",
+		"ai-tdesktop slot",
+		validate,
+	)
+
+
+def publish_inbox(config):
+	return publish_worktree(
+		config,
+		"inbox_worktree",
+		"inbox_branch",
+		"ai-tdesktop inbox worktree",
+	)
+
+
+def commit_paths(config, paths, subject, validate=None):
+	slot = Path(config["slot_worktree"])
+	for path in paths:
+		run_git(slot, "add", "--", path)
+	if run_git(slot, "diff", "--cached", "--quiet", check=False).returncode == 0:
+		raise WorkspaceError("No AI task state changed")
+	run_git(slot, "commit", "-m", subject)
+	return publish_slot(config, validate=validate)
+
+
+def task_summary(task, states, retired=()):
+	return {
+		**task,
+		"ready": (
+			task_ready(task, states, retired)
+			if task["status"] != "split"
+			else False
+		),
+	}
+
+
+def normalized_task_name(value):
+	return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def superseded_paths(root):
+	tasks = root / "tasks"
+	if not tasks.is_dir():
+		return []
+	return sorted(tasks.glob("*/*/*/*/superseded.yaml"))
+
+
+def split_paths(root):
+	tasks = root / "tasks"
+	if not tasks.is_dir():
+		return []
+	return sorted(tasks.glob("*/*/*/*/split.yaml"))
+
+
+def retained_task_digest(directory):
+	# Read the committed blobs rather than the working tree. A checkout may
+	# materialize tracked text with different line endings than the commit
+	# stores, so a working-tree digest is host-specific: an alias sealed on a
+	# CRLF checkout can never revalidate on an LF one, and vice versa. Git's
+	# stored bytes are the same everywhere, and they also exclude ignored
+	# files such as the disposable per-task `.local/` directory for free.
+	if not directory.is_dir():
+		raise WorkspaceError(f"Task directory does not exist: {directory}")
+	root = git_root(directory)
+	prefix = directory.resolve().relative_to(root).as_posix()
+	listing = run_git_binary(root, "ls-tree", "-r", "-z", "HEAD", "--", prefix)
+	entries = []
+	for record in listing.split(b"\0"):
+		if not record:
+			continue
+		meta, _, encoded = record.partition(b"\t")
+		fields = meta.split(b" ")
+		if len(fields) != 3:
+			raise WorkspaceError(f"Unexpected git ls-tree record: {record!r}")
+		mode, kind, oid = fields
+		path = encoded.decode("utf-8")
+		if mode == b"120000":
+			raise WorkspaceError(f"Task retained content must not be a symlink: {path}")
+		if kind != b"blob":
+			continue
+		relative = PurePosixPath(path).relative_to(prefix).as_posix()
+		if relative in ("state.yaml", "superseded.yaml", "split.yaml"):
+			continue
+		entries.append((relative, oid.decode("ascii")))
+	if not entries:
+		raise WorkspaceError(f"Task retained content is not committed: {prefix}")
+	digest = hashlib.sha256()
+	for relative, oid in sorted(entries):
+		name = relative.encode("utf-8")
+		data = run_git_binary(root, "cat-file", "blob", oid)
+		digest.update(len(name).to_bytes(8, "big"))
+		digest.update(name)
+		digest.update(len(data).to_bytes(8, "big"))
+		digest.update(data)
+	return digest.hexdigest()
+
+
+def load_superseded(root):
+	result = {}
+	for path in superseded_paths(root):
+		values = {}
+		for line in path.read_text(encoding="utf-8-sig").splitlines():
+			if not line or line[0].isspace() or ":" not in line:
+				continue
+			key, value = line.split(":", 1)
+			values[key] = parse_scalar(value)
+		old_id = "/".join(path.relative_to(root).parts[1:5])
+		if not TASK_ID_PATTERN.fullmatch(old_id):
+			raise WorkspaceError(f"Invalid superseded task path: {path}")
+		for field in (
+			"superseded_by",
+			"receipt",
+			"type",
+			"project",
+			"content_sha256",
+		):
+			if field not in values:
+				raise WorkspaceError(f"Missing {field} in {path}")
+		target = values["superseded_by"]
+		if not isinstance(target, str) or not TASK_ID_PATTERN.fullmatch(target):
+			raise WorkspaceError(f"Invalid superseded_by in {path}: {target!r}")
+		kind = values["type"]
+		if kind not in VALID_TASK_TYPES:
+			raise WorkspaceError(f"Invalid type in {path}: {kind!r}")
+		project = values["project"]
+		if project is not None and not TAG_PATTERN.fullmatch(str(project)):
+			raise WorkspaceError(f"Invalid project in {path}: {project!r}")
+		if not isinstance(values["receipt"], str):
+			raise WorkspaceError(f"Invalid receipt in {path}: {values['receipt']!r}")
+		content_digest = values["content_sha256"]
+		if (
+			not isinstance(content_digest, str)
+			or not SHA256_PATTERN.fullmatch(content_digest)
+		):
+			raise WorkspaceError(
+				f"Invalid content_sha256 in {path}: {content_digest!r}"
+			)
+		result[old_id] = {
+			"id": old_id,
+			"superseded_by": target,
+			"receipt": values["receipt"],
+			"type": kind,
+			"project": project,
+			"content_sha256": content_digest,
+			"path": str(path),
+		}
+	return result
+
+
+def load_splits(root):
+	result = {}
+	for path in split_paths(root):
+		values = {}
+		for line in path.read_text(encoding="utf-8-sig").splitlines():
+			if not line or line[0].isspace() or ":" not in line:
+				continue
+			key, value = line.split(":", 1)
+			values[key] = value.strip()
+		task_id = "/".join(path.relative_to(root).parts[1:5])
+		if not TASK_ID_PATTERN.fullmatch(task_id):
+			raise WorkspaceError(f"Invalid split task path: {path}")
+		for field in (
+			"split_into",
+			"implementation_carrier",
+			"receipt",
+			"type",
+			"created",
+			"project",
+			"depends_on",
+			"model",
+			"content_sha256",
+		):
+			if field not in values:
+				raise WorkspaceError(f"Missing {field} in {path}")
+		targets = parse_dependencies(values["split_into"])
+		if (
+			len(targets) < 2
+			or len(targets) != len(set(targets))
+			or any(not TASK_ID_PATTERN.fullmatch(value) for value in targets)
+			or task_id in targets
+		):
+			raise WorkspaceError(f"Invalid split_into in {path}: {targets!r}")
+		carrier = parse_scalar(values["implementation_carrier"])
+		if carrier is not None and carrier not in targets:
+			raise WorkspaceError(
+				f"Invalid implementation_carrier in {path}: {carrier!r}"
+			)
+		kind = parse_scalar(values["type"])
+		if kind not in VALID_TASK_TYPES:
+			raise WorkspaceError(f"Invalid type in {path}: {kind!r}")
+		project = parse_scalar(values["project"])
+		if project is not None and not TAG_PATTERN.fullmatch(str(project)):
+			raise WorkspaceError(f"Invalid project in {path}: {project!r}")
+		receipt = parse_scalar(values["receipt"])
+		if not isinstance(receipt, str) or not receipt.startswith("receipts/"):
+			raise WorkspaceError(f"Invalid receipt in {path}: {receipt!r}")
+		content_digest = parse_scalar(values["content_sha256"])
+		if (
+			not isinstance(content_digest, str)
+			or not SHA256_PATTERN.fullmatch(content_digest)
+		):
+			raise WorkspaceError(
+				f"Invalid content_sha256 in {path}: {content_digest!r}"
+			)
+		dependencies = parse_dependencies(values["depends_on"])
+		if any(not TASK_ID_PATTERN.fullmatch(value) for value in dependencies):
+			raise WorkspaceError(f"Invalid depends_on in {path}: {dependencies!r}")
+		model = parse_scalar(values["model"])
+		if model is None or not MODEL_PATTERN.fullmatch(str(model)):
+			raise WorkspaceError(f"Invalid model in {path}: {model!r}")
+		result[task_id] = {
+			"id": task_id,
+			"split_into": targets,
+			"implementation_carrier": carrier,
+			"receipt": receipt,
+			"type": kind,
+			"created": str(parse_scalar(values["created"])),
+			"project": project,
+			"depends_on": dependencies,
+			"model": model,
+			"content_sha256": content_digest,
+			"path": str(path),
+		}
+	return result
+
+
+def load_retired(root):
+	# Retired history keeps only task.md: no live, alias or split record.
+	result = set()
+	for path in sorted((root / "tasks").glob("*/*/*/*/task.md")):
+		task_id = "/".join(path.relative_to(root).parts[1:5])
+		if TASK_ID_PATTERN.fullmatch(task_id) and not any(
+			(path.parent / name).is_file()
+			for name in ("state.yaml", "superseded.yaml", "split.yaml")
+		):
+			result.add(task_id)
+	return result
+
+
+def resolve_split_targets(states, superseded, splits, task_id, visited=None, retired=()):
+	visited = [] if visited is None else visited
+	if task_id in visited:
+		raise WorkspaceError(
+			"Split task cycle: " + " -> ".join(visited + [task_id])
+		)
+	if task_id in states:
+		return [task_id]
+	if task_id in retired:
+		return []
+	if task_id in superseded:
+		return resolve_split_targets(
+			states,
+			superseded,
+			splits,
+			superseded[task_id]["superseded_by"],
+			visited + [task_id],
+			retired,
+		)
+	split = splits.get(task_id)
+	if split is None:
+		raise WorkspaceError(f"Split task {task_id} targets missing task state")
+	result = []
+	for target in split["split_into"]:
+		for resolved in resolve_split_targets(
+			states,
+			superseded,
+			splits,
+			target,
+			visited + [task_id],
+			retired,
+		):
+			if resolved not in result:
+				result.append(resolved)
+	return result
+
+
+def split_task_summary(root, states, superseded, splits, task_id):
+	split = splits[task_id]
+	task_file = root / "tasks" / task_id / "task.md"
+	title = task_id.rsplit("/", 1)[-1]
+	if task_file.is_file():
+		for line in task_file.read_text(encoding="utf-8-sig").splitlines():
+			if line.startswith("# "):
+				title = line[2:].strip()
+				break
+	return {
+		"id": task_id,
+		"title": title,
+		"status": "split",
+		"type": split["type"],
+		"created": split["created"],
+		"project": split["project"],
+		"depends_on": split["depends_on"],
+		"claimed_by": None,
+		"split_into": resolve_split_targets(
+			states,
+			superseded,
+			splits,
+			task_id,
+			retired=load_retired(root),
+		),
+		"implementation_carrier": split["implementation_carrier"],
+		"receipt": split["receipt"],
+		"model": split["model"],
+	}
+
+
+def resolve_task_reference(root, states, superseded, splits, task_id):
+	visited = []
+	current = task_id
+	while current not in states and current not in splits:
+		if current in visited:
+			raise WorkspaceError(
+				"Superseded task cycle: " + " -> ".join(visited + [current])
+			)
+		visited.append(current)
+		alias = superseded.get(current)
+		if alias is None:
+			raise WorkspaceError(f"Task does not exist: {task_id}")
+		current = alias["superseded_by"]
+	result = (
+		dict(states[current])
+		if current in states
+		else split_task_summary(root, states, superseded, splits, current)
+	)
+	if current != task_id:
+		result["superseded_from"] = task_id
+	return result
+
+
+def resolve_task_id(states, superseded, task_id):
+	visited = []
+	current = task_id
+	while current not in states:
+		if current in visited:
+			raise WorkspaceError(
+				"Superseded task cycle: " + " -> ".join(visited + [current])
+			)
+		visited.append(current)
+		alias = superseded.get(current)
+		if alias is None:
+			raise WorkspaceError(f"Task does not exist: {task_id}")
+		current = alias["superseded_by"]
+	result = dict(states[current])
+	if current != task_id:
+		result["superseded_from"] = task_id
+	return result
+
+
+def resolve_task(root, states, value):
+	superseded = load_superseded(root)
+	splits = load_splits(root)
+	if TASK_ID_PATTERN.fullmatch(value):
+		return resolve_task_reference(root, states, superseded, splits, value)
+	name = normalized_task_name(value)
+	if not name:
+		raise WorkspaceError("Task name is empty")
+	exact = [
+		task for task in states.values()
+		if task["id"].rsplit("/", 1)[-1] == name
+	]
+	if not exact:
+		exact = [
+			task for task in states.values()
+			if normalized_task_name(task["title"]) == name
+		]
+	if not exact:
+		alias_ids = [
+			task_id for task_id in superseded
+			if task_id.rsplit("/", 1)[-1] == name
+		]
+		exact = [
+			resolve_task_reference(root, states, superseded, splits, task_id)
+			for task_id in alias_ids
+		]
+		exact = list({task["id"]: task for task in exact}.values())
+	if not exact:
+		split_ids = [
+			task_id for task_id in splits
+			if task_id.rsplit("/", 1)[-1] == name
+		]
+		exact = [
+			split_task_summary(root, states, superseded, splits, task_id)
+			for task_id in split_ids
+		]
+	unfinished = [
+		task for task in exact
+		if task["status"] in (
+			"todo", "in-progress", "blocked", "split-required"
+		)
+	]
+	candidates = unfinished or exact
+	if not candidates:
+		raise WorkspaceError(f"No task matches short name: {value!r}")
+	if len(candidates) != 1:
+		raise WorkspaceError(
+			f"Task name {value!r} is ambiguous: "
+			+ ", ".join(sorted(task["id"] for task in candidates))
+		)
+	return candidates[0]
+
+
+def pending_consolidations(root):
+	tasks = root / "tasks"
+	if not tasks.is_dir():
+		return []
+	result = []
+	for marker in sorted(tasks.glob(
+			"*/*/*/*/" + CONSOLIDATION_PENDING
+	)):
+		parts = marker.relative_to(root).parts
+		task_id = "/".join(parts[1:5])
+		if not TASK_ID_PATTERN.fullmatch(task_id):
+			raise WorkspaceError(f"Invalid consolidation marker path: {marker}")
+		result.append({
+			"source_task": task_id,
+			"marker": marker.relative_to(root).as_posix(),
+		})
+	return result
+
+
+def batch_relative_path(tag):
+	if not TAG_PATTERN.fullmatch(tag):
+		raise WorkspaceError(f"Invalid checkout tag: {tag!r}")
+	return f"{BATCHES_DIR}/{tag}.yaml"
+
+
+def task_record_status(root, states, task_id):
+	# The live status, the kind of retirement, or None for an unknown id.
+	if not TASK_ID_PATTERN.fullmatch(task_id):
+		return None
+	if task_id in states:
+		return states[task_id]["status"]
+	directory = root / "tasks" / task_id
+	if (directory / "superseded.yaml").is_file():
+		return "superseded"
+	if (directory / "split.yaml").is_file():
+		return "split"
+	if (directory / "task.md").is_file():
+		return "retired"
+	return None
+
+
+def batch_task_order(root, states, task_id, values):
+	# The started task leads; the rest keep their first selection position.
+	ordered = list(dict.fromkeys([task_id, *(values or [])]))
+	unknown = [
+		value for value in ordered
+		if task_record_status(root, states, value) is None
+	]
+	if unknown:
+		raise WorkspaceError("Unknown batch task ids: " + ", ".join(unknown))
+	kept = []
+	dropped = []
+	for value in ordered:
+		status = task_record_status(root, states, value)
+		if status in FINISHED_BATCH_STATUSES:
+			dropped.append({"id": value, "status": status})
+		else:
+			kept.append(value)
+	return kept, dropped
+
+
+def write_batch(root, tag, task_ids, newline):
+	relative = batch_relative_path(tag)
+	path = root / relative
+	path.parent.mkdir(exist_ok=True)
+	stamp = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+	lines = [
+		f"checkout: {tag}",
+		f"updated: {stamp}",
+		"tasks:",
+		*(f"  - {task_id}" for task_id in task_ids),
+	]
+	path.write_bytes((newline.join(lines) + newline).encode("utf-8"))
+	return relative
+
+
+def load_batch(root, tag):
+	path = root / batch_relative_path(tag)
+	try:
+		text = path.read_text(encoding="utf-8-sig")
+	except (OSError, UnicodeDecodeError):
+		return []
+	result = []
+	listing = False
+	for line in text.splitlines():
+		stripped = line.strip()
+		if not stripped or stripped.startswith("#"):
+			continue
+		if listing and stripped.startswith("- "):
+			value = parse_scalar(stripped[2:])
+			if (
+				isinstance(value, str)
+				and TASK_ID_PATTERN.fullmatch(value)
+				and value not in result
+			):
+				result.append(value)
+		elif not line[0].isspace():
+			listing = line.split(":", 1)[0].strip() == "tasks"
+	return result
+
+
+def file_newline(path):
+	return "\r\n" if b"\r\n" in path.read_bytes() else "\n"
+
+
+def command_queue(args):
+	config = worktree_config(args, create=True)
+	main = Path(config["ai_main"])
+	slot = Path(config["slot_worktree"])
+	main_dirty = changed_paths(main)
+	slot_dirty = changed_paths(slot)
+	if not main_dirty and not slot_dirty:
+		counts = unpublished_counts(config)
+		if not counts["slot_only"]:
+			sync_canonical(config)
+	states = load_states(slot)
+	tag = config["checkout_tag"]
+	retired = load_retired(slot)
+	values = [task_summary(task, states, retired) for task in states.values()]
+	own_in_progress = sorted(
+		(
+			task for task in values
+			if task["claimed_by"] == tag and task["status"] == "in-progress"
+		),
+		key=queue_sort_key,
+	)
+	own_todo = sorted(
+		(
+			task for task in values
+			if task["claimed_by"] == tag and task["status"] == "todo"
+		),
+		key=queue_sort_key,
+	)
+	own_blocked = sorted(
+		(
+			task for task in values
+			if task["claimed_by"] == tag and task["status"] == "blocked"
+		),
+		key=queue_sort_key,
+	)
+	own_split_required = sorted(
+		(
+			task for task in values
+			if task["claimed_by"] == tag
+			and task["status"] == "split-required"
+		),
+		key=queue_sort_key,
+	)
+	unclaimed_todo = sorted(
+		(
+			task for task in values
+			if task["claimed_by"] is None and task["status"] == "todo"
+		),
+		key=lambda task: (task["created"], task["id"]),
+	)
+	violations = []
+	if len(own_in_progress) > 1:
+		violations.append(f"{tag} has more than one in-progress task")
+	if len(own_split_required) > 1:
+		violations.append(f"{tag} has more than one split-required task")
+	if own_in_progress and own_split_required:
+		violations.append(
+			f"{tag} has both in-progress and split-required work"
+		)
+	for task in values:
+		if task["status"] == "in-progress" and task["claimed_by"] is None:
+			violations.append(f"{task['id']} is in-progress but unclaimed")
+		if task["status"] == "blocked" and task["claimed_by"] is None:
+			violations.append(f"{task['id']} is blocked but unclaimed")
+		if task["status"] == "split-required" and task["claimed_by"] is None:
+			violations.append(f"{task['id']} is split-required but unclaimed")
+	own_batch = [
+		{
+			"id": task_id,
+			"status": task_record_status(slot, states, task_id) or "missing",
+			"claimed_by": (
+				states[task_id]["claimed_by"] if task_id in states else None
+			),
+		}
+		for task_id in load_batch(slot, tag)
+	]
+	inbox_file = main / "inbox" / "inbox.md"
+	result = {
+		**config,
+		"current_branch": current_branch(config.get("source_root")),
+		"branch_project": branch_project(config, slot),
+		"inbox_nonempty": (
+			inbox_file.is_file()
+			and bool(inbox_file.read_text(encoding="utf-8").strip())
+		),
+		"own_batch": own_batch,
+		"own_in_progress": own_in_progress,
+		"own_todo": own_todo,
+		"own_blocked": own_blocked,
+		"own_split_required": own_split_required,
+		"unclaimed_todo": unclaimed_todo,
+		"pending_consolidations": pending_consolidations(slot),
+		"other_claimed_unfinished": sum(
+			1 for task in values
+			if task["claimed_by"] not in (None, tag)
+			and task["status"] in (
+				"todo", "in-progress", "blocked", "split-required"
+			)
+		),
+		"ai_main_dirty": main_dirty,
+		"slot_dirty": slot_dirty,
+		"commits": unpublished_counts(config),
+		"violations": violations,
+	}
+	print(json.dumps(result, indent=2, sort_keys=True))
+
+
+def command_resolve(args):
+	config = worktree_config(args, create=True)
+	main = Path(config["ai_main"])
+	slot = Path(config["slot_worktree"])
+	main_dirty = changed_paths(main)
+	if main_dirty:
+		raise WorkspaceError(
+			"ai-tdesktop master is not clean: " + ", ".join(main_dirty)
+		)
+	if not changed_paths(slot) and not unpublished_counts(config)["slot_only"]:
+		sync_canonical(config)
+	states = load_states(slot)
+	task = task_summary(
+		resolve_task(slot, states, args.name),
+		states,
+		load_retired(slot),
+	)
+	active = sorted(
+		value["id"] for value in states.values()
+		if value["claimed_by"] == config["checkout_tag"]
+		and value["status"] in ("in-progress", "split-required")
+	)
+	print(json.dumps({
+		**config,
+		"task": task,
+		"other_active_task": next(
+			(value for value in active if value != task["id"]),
+			None,
+		),
+		"slot_dirty": changed_paths(slot),
+		"commits": unpublished_counts(config),
+	}, indent=2, sort_keys=True))
+
+
+def command_start(args):
+	config = worktree_config(args, create=True)
+	sync_canonical(config)
+	slot = Path(config["slot_worktree"])
+	states = load_states(slot)
+	task = states.get(args.task)
+	if task is None:
+		raise WorkspaceError(f"Task does not exist: {args.task}")
+	if task["status"] != "todo" or task["claimed_by"] not in (
+		None,
+		config["checkout_tag"],
+	):
+		raise WorkspaceError(
+			f"Task is not available todo work for this checkout: {args.task}"
+		)
+	ensure_task_branch(config, slot, task)
+	batch, batch_dropped = batch_task_order(
+		slot,
+		states,
+		args.task,
+		getattr(args, "batch", None),
+	)
+	carried_from = task["carried_from"]
+	if carried_from is not None:
+		split = load_splits(slot).get(carried_from)
+		if (
+			split is None
+			or split["implementation_carrier"] != args.task
+			or task["claimed_by"] != config["checkout_tag"]
+		):
+			raise WorkspaceError(
+				f"Task has an invalid carried implementation source: {args.task}"
+			)
+		validate_carried_worktree(config, slot, carried_from)
+	if not task_ready(task, states, load_retired(slot)):
+		raise WorkspaceError(f"Task has unfinished dependencies: {args.task}")
+	lineage = source_lineage_report(
+		config,
+		slot,
+		args.task,
+		getattr(args, "require", []),
+	)
+	if lineage.get("unfinished_dependencies"):
+		raise WorkspaceError(
+			"Task has unfinished explicit source dependencies: "
+			+ ", ".join(lineage["unfinished_dependencies"])
+		)
+	if not lineage["current_satisfies"]:
+		branches = ", ".join(lineage["compatible_local_branches"]) or "none"
+		raise WorkspaceError(
+			"Task source dependencies are absent from the current branch: "
+			+ ", ".join(lineage["missing_source_tasks"])
+			+ f"; compatible local branches: {branches}"
+		)
+	active = [
+		value["id"] for value in states.values()
+		if value["claimed_by"] == config["checkout_tag"]
+		and value["status"] in ("in-progress", "split-required")
+	]
+	if active:
+		raise WorkspaceError("Another task is already in progress: " + ", ".join(active))
+	if carried_from is not None:
+		transfer_source_refs(config, carried_from, args.task)
+	path = state_path(slot, args.task)
+	update_state(path, {
+		"status": "in-progress",
+		"claimed_by": config["checkout_tag"],
+		"claimed_at": (
+			task["claimed_at"]
+			or datetime.datetime.now().astimezone().isoformat()
+		),
+		"claim_order": task["claim_order"] or 1,
+		"lease_until": None,
+		"phase": "setup",
+	})
+	batch_path = write_batch(
+		slot,
+		config["checkout_tag"],
+		batch,
+		file_newline(path),
+	)
+	try:
+		commit = commit_paths(
+			config,
+			[str(path.relative_to(slot)), batch_path],
+			f"Start {args.task} on {config['checkout_tag']}",
+		)
+	except WorkspaceError as error:
+		main_states = load_states(Path(config["ai_main"]))
+		main_task = main_states.get(args.task)
+		lost = (
+			main_task is not None
+			and (
+				main_task["status"] != "todo"
+				or main_task["claimed_by"] not in (
+					None,
+					config["checkout_tag"],
+				)
+			)
+		)
+		counts = unpublished_counts(config)
+		if lost and counts["slot_only"] == 1:
+			head = run_git(slot, "rev-parse", "HEAD").stdout.strip()
+			run_git(slot, "rebase", "--onto", "master", head)
+			raise WorkspaceError(
+				f"Start lost to newer master for {args.task}"
+			) from error
+		raise
+	if carried_from is not None:
+		delete_source_refs(config, carried_from)
+	print(json.dumps({
+		"task": args.task,
+		"status": "in-progress",
+		"published": bool(commit),
+		"batch": batch,
+		"batch_dropped": batch_dropped,
+	}, indent=2, sort_keys=True))
+
+
+def command_source_lineage(args):
+	config = worktree_config(args, create=True)
+	slot = Path(config["slot_worktree"])
+	states = load_states(slot)
+	task = resolve_task(slot, states, args.task)
+	report = source_lineage_report(
+		config,
+		slot,
+		task["id"],
+		args.require,
+	)
+	print(json.dumps(report, indent=2, sort_keys=True))
+
+
+def command_retry(args):
+	config = worktree_config(args, create=True)
+	sync_canonical(config)
+	slot = Path(config["slot_worktree"])
+	states = load_states(slot)
+	task = states.get(args.task)
+	if task is None:
+		raise WorkspaceError(f"Task does not exist: {args.task}")
+	if (
+		task["status"] != "blocked"
+		or task["claimed_by"] != config["checkout_tag"]
+	):
+		raise WorkspaceError(
+			f"Task is not blocked work owned by this checkout: {args.task}"
+		)
+	ensure_task_branch(config, slot, task)
+	if not task_ready(task, states, load_retired(slot)):
+		raise WorkspaceError(f"Task has unfinished dependencies: {args.task}")
+	lineage = source_lineage_report(
+		config,
+		slot,
+		args.task,
+		getattr(args, "require", []),
+	)
+	if lineage.get("unfinished_dependencies"):
+		raise WorkspaceError(
+			"Task has unfinished explicit source dependencies: "
+			+ ", ".join(lineage["unfinished_dependencies"])
+		)
+	if not lineage["current_satisfies"]:
+		branches = ", ".join(lineage["compatible_local_branches"]) or "none"
+		raise WorkspaceError(
+			"Task source dependencies are absent from the current branch: "
+			+ ", ".join(lineage["missing_source_tasks"])
+			+ f"; compatible local branches: {branches}"
+		)
+	active = [
+		value["id"] for value in states.values()
+		if value["claimed_by"] == config["checkout_tag"]
+		and value["status"] in ("in-progress", "split-required")
+	]
+	if active:
+		raise WorkspaceError("Another task is already in progress: " + ", ".join(active))
+	path = state_path(slot, args.task)
+	update_state(path, {
+		"status": "in-progress",
+		"phase": "resume",
+		"lease_until": None,
+	})
+	for marker in (
+		"work/discovered-routed.md",
+		CONSOLIDATION_PENDING,
+		CONSOLIDATION_COMPLETE,
+	):
+		marker_path = path.parent / marker
+		if marker_path.is_file():
+			marker_path.unlink()
+	print(json.dumps({
+		"task": args.task,
+		"status": "in-progress",
+		"local": True,
+		"published": False,
+	}, indent=2, sort_keys=True))
+
+
+def task_action_config(args, require_status="in-progress", allow_project=False):
+	config = worktree_config(args, create=True)
+	slot = Path(config["slot_worktree"])
+	ensure_clean(Path(config["ai_main"]), "ai-tdesktop master")
+	task = load_state(slot, state_path(slot, args.task))
+	extra_paths = ()
+	if allow_project and task["project"] is not None:
+		extra_paths = (f"projects/{task['project']}/project.md",)
+	ensure_changes_scoped(slot, [args.task], extra_paths)
+	if task["status"] != require_status or task["claimed_by"] != config["checkout_tag"]:
+		raise WorkspaceError(
+			f"Task is not {require_status} work owned by this checkout: {args.task}"
+		)
+	ensure_task_branch(config, slot, task)
+	return config, slot
+
+
+def command_checkpoint(args):
+	_, slot = task_action_config(args)
+	path = state_path(slot, args.task)
+	update_state(path, {"phase": args.phase})
+	print(json.dumps({
+		"task": args.task,
+		"phase": args.phase,
+		"local": True,
+		"published": False,
+	}, indent=2, sort_keys=True))
+
+
+def task_commit_matches(source, value, task_id):
+	message = run_git(source, "show", "-s", "--format=%B", value).stdout.rstrip("\n")
+	lines = message.split("\n")
+	return (
+		len(lines) == 3
+		and bool(lines[0])
+		and not lines[1]
+		and lines[2] == f"Task: {task_id}"
+	)
+
+
+def validate_task_commit(source, value, task_id):
+	if not task_commit_matches(source, value, task_id):
+		raise WorkspaceError(
+			"Telegram commit message must be exactly a one-line subject, a blank line, "
+			f"and Task: {task_id}"
+		)
+
+
+def task_series_refs(source, task_id):
+	commits = run_git(
+		source,
+		"log",
+		"--first-parent",
+		"--format=%H",
+		"--fixed-strings",
+		f"--grep=Task: {task_id}",
+		"HEAD",
+	).stdout.splitlines()
+	for green in commits:
+		if not task_commit_matches(source, green, task_id):
+			continue
+		current = green
+		while True:
+			parent = resolved_ref(source, f"{current}^")
+			if parent is None:
+				raise WorkspaceError(
+					"A task implementation cannot start at the repository root"
+				)
+			if not task_commit_matches(source, parent, task_id):
+				return parent, green
+			current = parent
+	return None
+
+
+def task_tip_commits(source, task_id):
+	commits = [
+		commit for commit in run_git(
+			source,
+			"log",
+			"--all",
+			"--format=%H",
+			"--fixed-strings",
+			f"--grep=Task: {task_id}",
+		).stdout.splitlines()
+		if task_commit_matches(source, commit, task_id)
+	]
+	return [
+		commit for commit in commits
+		if not any(
+			commit != other and is_ancestor(source, commit, other)
+			for other in commits
+		)
+	]
+
+
+def task_has_retained_source_change(slot, state):
+	if state["type"] == "verify":
+		return False
+	result_path = (
+		Path(slot)
+		/ task_relative_dir(state["id"])
+		/ "work"
+		/ "result.md"
+	)
+	if not result_path.is_file():
+		return True
+	outcomes = [
+		line.split(":", 1)[1].strip()
+		for line in result_path.read_text(encoding="utf-8-sig").splitlines()
+		if line.startswith("Outcome:")
+	]
+	return outcomes != ["already-satisfied"]
+
+
+def source_lineage_report(config, slot, task_id, extra_requirements=()):
+	states = load_states(slot)
+	task = states.get(task_id)
+	if task is None:
+		raise WorkspaceError(f"Task does not exist: {task_id}")
+	superseded = load_superseded(slot)
+	retired = load_retired(slot)
+	required = []
+	unfinished = []
+	for dependency in (*task["depends_on"], *extra_requirements):
+		if dependency in retired:
+			continue
+		resolved = resolve_task_id(states, superseded, dependency)["id"]
+		state = states[resolved]
+		if state["status"] != "approved":
+			if resolved not in unfinished:
+				unfinished.append(resolved)
+			continue
+		if not task_has_retained_source_change(slot, state) or resolved in required:
+			continue
+		required.append(resolved)
+
+	source = Path(config["source_root"])
+	tips = {}
+	for dependency in required:
+		commits = task_tip_commits(source, dependency)
+		carried_from = states[dependency]["carried_from"]
+		if not commits and carried_from is not None:
+			commits = task_tip_commits(source, carried_from)
+		tips[dependency] = commits
+	missing_history = [
+		dependency for dependency, commits in tips.items()
+		if not commits
+	]
+	missing = [
+		dependency for dependency, commits in tips.items()
+		if not commits or not any(is_ancestor(source, commit) for commit in commits)
+	]
+	witnesses = {}
+	for dependency in missing:
+		witness = lineage_witness(source, states, dependency)
+		if witness is not None:
+			witnesses[dependency] = witness
+	missing = [dependency for dependency in missing if dependency not in witnesses]
+	branches = run_git(
+		source,
+		"for-each-ref",
+		"--format=%(refname:short)",
+		"refs/heads",
+	).stdout.splitlines()
+	projects = live_project_slugs(slot)
+	current_branch_name = current_branch(source)
+	switchable = task["project"] is None and current_branch_name not in projects
+	compatible = [
+		branch for branch in branches
+		if switchable
+		and branch not in projects
+		and all(
+			commits and any(
+				is_ancestor(source, commit, branch)
+				for commit in commits
+			)
+			for commits in tips.values()
+		)
+	]
+	return {
+		"task": task_id,
+		"current_branch": current_branch_name,
+		"current_satisfies": not missing,
+		"unfinished_dependencies": unfinished,
+		"required_source_tasks": required,
+		"missing_source_tasks": missing,
+		"unavailable_source_tasks": missing_history,
+		"witnessed_source_tasks": witnesses,
+		"compatible_local_branches": compatible,
+	}
+
+
+def lineage_witness(source, states, dependency):
+	# A history rewrite can fold a task's commit into later work: an approved
+	# task built on it whose own commit is on HEAD shows its change is there.
+	for state in states.values():
+		if (
+			state["status"] == "approved"
+			and dependency in state["depends_on"]
+			and any(
+				is_ancestor(source, commit)
+				for commit in task_tip_commits(source, state["id"])
+			)
+		):
+			return state["id"]
+	return None
+
+
+def is_ancestor(source, older, newer="HEAD"):
+	return not run_git(
+		source,
+		"merge-base",
+		"--is-ancestor",
+		older,
+		newer,
+		check=False,
+	).returncode
+
+
+def task_type(slot, task_id):
+	return load_state(slot, state_path(slot, task_id))["type"]
+
+
+def validate_source_state(config, task_id, expected_commit):
+	source = Path(config["source_root"])
+	slot_value = config.get("slot_worktree")
+	carried_from = None
+	if slot_value:
+		slot = Path(slot_value)
+		path = slot / task_relative_dir(task_id) / "state.yaml"
+		if path.is_file():
+			carried_from = load_state(slot, path)["carried_from"]
+	base = resolved_ref(source, source_task_ref(task_id, "base"))
+	green = resolved_ref(source, source_task_ref(task_id, "green"))
+	run = resolved_ref(source, source_task_ref(task_id, "run"))
+	head = resolved_ref(source, "HEAD")
+	if base is None:
+		raise WorkspaceError("The local task baseline ref is missing")
+	if run is None or head != run:
+		raise WorkspaceError("Telegram HEAD no longer matches the task run ref")
+	if green is None:
+		if expected_commit is True:
+			raise WorkspaceError("An approved task must retain a Telegram implementation commit")
+		if head != base:
+			raise WorkspaceError(
+				"A task without an implementation must be restored to its local baseline"
+			)
+		return
+	if expected_commit is False:
+		raise WorkspaceError(
+			"An already-satisfied task must not retain a Telegram implementation commit"
+		)
+	if not is_ancestor(source, green, head):
+		raise WorkspaceError(
+			"The retained task implementation is not in Telegram HEAD history"
+		)
+	if not task_commit_matches(source, green, task_id):
+		if carried_from is None or not task_commit_matches(
+			source, green, carried_from,
+		):
+			validate_task_commit(source, green, task_id)
+
+
+def ensure_no_persisted_commit_hashes(root, exempt=()):
+	text_suffixes = {".json", ".log", ".md", ".txt", ".yaml", ".yml"}
+	paths = [root] if root.is_file() else sorted(root.rglob("*"))
+	for path in paths:
+		if not path.is_file() or path.suffix.lower() not in text_suffixes:
+			continue
+		if path != root and path.relative_to(root).parts[0] in exempt:
+			continue
+		try:
+			text = path.read_text(encoding="utf-8-sig")
+		except UnicodeDecodeError:
+			continue
+		if any(field in text for field in LEGACY_COMMIT_FIELDS):
+			raise WorkspaceError(f"Legacy commit-hash field found in {path}")
+		if COMMIT_HASH_PATTERN.search(text):
+			raise WorkspaceError(f"Persisted commit hash found in {path}")
+
+
+PROJECT_SYNC_REFS = ("shared", "rewrite-from")
+
+
+def delete_source_refs(config, task_id, retain_implementation=False):
+	source = Path(config["source_root"])
+	names = ("run",) if retain_implementation else (
+		"run", "green", "base", *PROJECT_SYNC_REFS,
+	)
+	for name in names:
+		value = source_task_ref(task_id, name)
+		if resolved_ref(source, value) is not None:
+			run_git(source, "update-ref", "-d", value)
+	if not retain_implementation:
+		clear_module_shared_refs(source, task_id)
+
+
+def transfer_source_refs(config, source_task, target_task):
+	source = Path(config["source_root"])
+	base = resolved_ref(source, source_task_ref(source_task, "base"))
+	run = resolved_ref(source, source_task_ref(source_task, "run"))
+	head = resolved_ref(source, "HEAD")
+	if base is None or run is None or run != head:
+		raise WorkspaceError(
+			f"Carried source refs are incomplete or stale for {source_task}"
+		)
+	for name in ("base", "green", "run", *PROJECT_SYNC_REFS):
+		value = resolved_ref(source, source_task_ref(source_task, name))
+		target = source_task_ref(target_task, name)
+		if value is None:
+			if resolved_ref(source, target) is not None:
+				run_git(source, "update-ref", "-d", target)
+		else:
+			run_git(source, "update-ref", target, value)
+	for module in recorded_modules(source, source_task):
+		set_task_ref(
+			module, target_task, "shared", task_ref(module, source_task, "shared"),
+		)
+		set_task_ref(module, source_task, "shared", None)
+
+
+def command_source_begin(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	carried_from = (
+		load_state(slot, state_path(slot, args.task))["carried_from"]
+		if slot is not None
+		else None
+	)
+	base = source_task_ref(args.task, "base")
+	green = source_task_ref(args.task, "green")
+	run = source_task_ref(args.task, "run")
+	base_value = resolved_ref(source, base)
+	green_value = resolved_ref(source, green)
+	head = resolved_ref(source, "HEAD")
+	retained = (
+		base_value is not None
+		and green_value is not None
+		and is_ancestor(source, base_value, green_value)
+		and is_ancestor(source, green_value, head)
+		and task_commit_matches(source, green_value, args.task)
+	)
+	carried = (
+		carried_from is not None
+		and base_value is not None
+		and resolved_ref(source, run) == head
+		and (
+			green_value is None
+			or task_commit_matches(source, green_value, args.task)
+			or task_commit_matches(source, green_value, carried_from)
+		)
+	)
+	if carried:
+		state = "adopted"
+	elif retained or (
+		base_value is not None
+		and green_value is None
+		and head == base_value
+	):
+		state = "resumed"
+	else:
+		series = task_series_refs(source, args.task)
+		if series is not None:
+			series_base, series_green = series
+			run_git(source, "update-ref", base, series_base)
+			run_git(source, "update-ref", green, series_green)
+			state = "reconciled" if base_value is not None else "recovered"
+		else:
+			prepare_source(source)
+			run_git(source, "update-ref", base, "HEAD")
+			if green_value is not None:
+				run_git(source, "update-ref", "-d", green)
+			state = "reconciled" if base_value is not None else "initialized"
+	run_git(source, "update-ref", run, "HEAD")
+	print(json.dumps({
+		"task": args.task,
+		"source_state": state,
+		"has_retained_implementation": (
+			resolved_ref(source, green) is not None
+		),
+	}, indent=2, sort_keys=True))
+
+
+def mark_source_green(config, task_id):
+	source = Path(config["source_root"])
+	ensure_source_clean(source)
+	base = source_task_ref(task_id, "base")
+	if resolved_ref(source, base) is None:
+		raise WorkspaceError("The local task baseline ref is missing")
+	if run_git(source, "merge-base", "--is-ancestor", base, "HEAD", check=False).returncode:
+		raise WorkspaceError("The retained implementation does not descend from the task baseline")
+	validate_task_commit(source, "HEAD", task_id)
+	run_git(source, "update-ref", source_task_ref(task_id, "green"), "HEAD")
+	run_git(source, "update-ref", source_task_ref(task_id, "run"), "HEAD")
+
+
+def command_source_mark_green(args):
+	config, _ = task_action_config(args)
+	mark_source_green(config, args.task)
+	print(json.dumps({
+		"task": args.task,
+		"source_state": "retained",
+	}, indent=2, sort_keys=True))
+
+
+# Every project is performed on a branch named by its slug: in tdesktop on
+# the private remote, and under the same name on the origin of every
+# submodule the project changes. Standalone tasks start only from branches
+# that are not a live project's.
+
+def current_branch(source):
+	if source is None:
+		return None
+	result = run_git(source, "branch", "--show-current", check=False)
+	return (not result.returncode and result.stdout.strip()) or None
+
+
+def live_project_slugs(root):
+	projects = Path(root) / "projects"
+	if not projects.is_dir():
+		return set()
+	return {
+		path.name for path in projects.iterdir()
+		if path.name != PROJECT_ARCHIVE_DIR and (path / "project.md").is_file()
+	}
+
+
+def branch_project(config, slot):
+	branch = current_branch(config.get("source_root"))
+	return branch if branch in live_project_slugs(slot) else None
+
+
+def ensure_task_branch(config, slot, task):
+	branch = current_branch(config.get("source_root"))
+	project = task["project"]
+	if project is not None:
+		if branch != project:
+			raise WorkspaceError(
+				f"{task['id']} belongs to project {project}: check out branch "
+				f"{project} in this checkout to start it (current branch: "
+				f"{branch or 'detached HEAD'})"
+			)
+	elif branch in live_project_slugs(slot):
+		raise WorkspaceError(
+			f"{task['id']} is standalone work, but branch {branch} belongs to "
+			f"project {branch}; start it from a non-project branch"
+		)
+
+
+def fetch_remote(repo, remote):
+	run_git(repo, "fetch", "--quiet", remote)
+
+
+def tree_gitlinks(repo, revision):
+	result = {}
+	for entry in run_git(repo, "ls-tree", "-r", "-z", revision).stdout.split("\0"):
+		if not entry:
+			continue
+		metadata, path = entry.split("\t", 1)
+		mode, _, value = metadata.split()
+		if mode == "160000":
+			result[path] = value
+	return result
+
+
+def linear_commits(repo, older, newer):
+	if run_git(repo, "rev-list", "--merges", f"{older}..{newer}").stdout.strip():
+		raise WorkspaceError(
+			f"Project history in {repo} contains a merge; it must stay linear"
+		)
+	return run_git(
+		repo, "rev-list", "--reverse", f"{older}..{newer}",
+	).stdout.split()
+
+
+def changed_files(repo, commit):
+	return set(literal_paths(
+		repo, "diff-tree", "--no-commit-id", "--name-only", "-r",
+		"--no-renames", f"{commit}^", commit,
+	))
+
+
+def changed_gitlinks(source, older, newer):
+	before = tree_gitlinks(source, older)
+	after = tree_gitlinks(source, newer)
+	return {
+		path: (before.get(path), pin)
+		for path, pin in after.items()
+		if before.get(path) not in (None, pin)
+	}
+
+
+def gitlink_changes(repo, commit):
+	"""The pins commit sets, by submodule path."""
+	tokens = run_git(
+		repo, "diff-tree", "-r", "-z", "--no-commit-id", "--raw", "--no-abbrev",
+		"--no-renames", f"{commit}^", commit,
+	).stdout.split("\0")
+	result = {}
+	for metadata, path in zip(tokens[0::2], tokens[1::2]):
+		fields = metadata.lstrip(":").split()
+		if len(fields) >= 4 and fields[1] == "160000":
+			result[path] = fields[3]
+	return result
+
+
+def submodule_ranges(source, older, commits):
+	"""Submodules whose pin any of commits sets, as (pin at older, newest pin).
+
+	The pins the commits set along one submodule must stay on one line of
+	history, which may move back and forth; the newest pin is the one every
+	other pin is an ancestor of.
+	"""
+	base = tree_gitlinks(source, older)
+	pins = {}
+	for commit in commits:
+		for path, pin in gitlink_changes(source, commit).items():
+			if path in base:
+				pins.setdefault(path, []).append(pin)
+	ranges = {}
+	for path, values in pins.items():
+		module = source / path
+		if not (module / ".git").exists():
+			raise WorkspaceError(f"Project commits change {path}, which is not initialized")
+		newest = base[path]
+		for pin in values:
+			if is_ancestor(module, newest, pin):
+				newest = pin
+			elif not is_ancestor(module, pin, newest):
+				raise WorkspaceError(
+					f"Project commits pin {path} on diverging histories; keep its "
+					"pins on one line of history"
+				)
+		if newest != base[path]:
+			ranges[path] = (base[path], newest)
+	return ranges
+
+
+def set_index_gitlink(repo, path, revision):
+	run_git(repo, "update-index", "--force-remove", "--", path)
+	run_git(repo, "update-index", "--add", "--cacheinfo", f"160000,{revision},{path}")
+
+
+def replay_commits(repo, commits, onto, adjust=None):
+	"""Cherry-pick commits onto a detached onto, keeping authors and messages.
+
+	A commit that becomes empty is dropped and maps to its predecessor.
+	Returns the new tip and a map from each replayed commit to its copy.
+	"""
+	run_git(repo, "checkout", "--quiet", "--detach", onto)
+	mapping = {}
+	tip = onto
+	for commit in commits:
+		pick = run_git(repo, "cherry-pick", "--no-commit", commit, check=False)
+		if pick.returncode and not literal_paths(
+			repo, "diff", "--name-only", "--diff-filter=U",
+		):
+			raise WorkspaceError(
+				f"Could not replay {commit} in {repo}: "
+				+ (pick.stderr.strip() or pick.stdout.strip())
+			)
+		if adjust is not None:
+			adjust(commit)
+		unmerged = literal_paths(repo, "diff", "--name-only", "--diff-filter=U")
+		if unmerged:
+			raise WorkspaceError(
+				f"Replaying {commit} in {repo} conflicts in: " + ", ".join(unmerged)
+			)
+		if run_git(repo, "diff", "--cached", "--quiet", check=False).returncode:
+			run_git(repo, "commit", "--quiet", "--no-edit", "-C", commit)
+			tip = resolved_ref(repo, "HEAD")
+		run_git(repo, "cherry-pick", "--quit", check=False)
+		mapping[commit] = tip
+	return tip, mapping
+
+
+def restore_repository(repo, branch, head):
+	run_git(repo, "cherry-pick", "--abort", check=False)
+	run_git(repo, "reset", "--quiet", "--hard")
+	if branch is not None:
+		run_git(repo, "checkout", "--quiet", "--force", branch)
+	else:
+		run_git(repo, "checkout", "--quiet", "--force", "--detach", head)
+
+
+def rewrite_project_history(source, commits, onto, ranges, targets):
+	"""Replay tdesktop commits onto onto, rebasing their submodule commits.
+
+	ranges maps a submodule path to the (older, newer) pins its project
+	commits span; targets maps it to the commit those are rebased onto. Every
+	pin a replayed commit sets is rewritten to its rebased copy. On failure
+	every touched repository is restored to where it was.
+	"""
+	branch = current_branch(source)
+	original = resolved_ref(source, "HEAD")
+	protect_worktrees_from_submodule_target(source, onto)
+	for path, (older, _) in ranges.items():
+		target = targets.get(path)
+		if target is not None and target != older:
+			protect_worktrees_from_submodule_target(source / path, target)
+	with git_safe_termination():
+		return replay_project_history(
+			source, commits, onto, ranges, targets, branch, original,
+		)
+
+
+def replay_project_history(source, commits, onto, ranges, targets, branch, original):
+	touched = []
+	pins = {}
+	try:
+		for path, (older, newer) in ranges.items():
+			target = targets.get(path)
+			if target is None or target == older:
+				continue
+			module = source / path
+			touched.append(
+				(module, current_branch(module), resolved_ref(module, "HEAD"))
+			)
+			_, mapping = replay_commits(
+				module, linear_commits(module, older, newer), target,
+			)
+			mapping[older] = target
+			pins[path] = mapping
+
+		def adjust(commit):
+			for path, mapping in pins.items():
+				pin = gitlink_at(source, commit, path)
+				if pin == gitlink_at(source, f"{commit}^", path):
+					continue
+				if pin not in mapping:
+					raise WorkspaceError(
+						f"{commit} pins {path} outside the project's submodule commits"
+					)
+				set_index_gitlink(source, path, mapping[pin])
+
+		tip, mapping = replay_commits(source, commits, onto, adjust)
+		run_git(source, "update-ref", f"refs/heads/{branch}", tip, original)
+		run_git(source, "checkout", "--quiet", branch)
+		update_source_submodules(source)
+	except BaseException:
+		for module, module_branch, head in reversed(touched):
+			restore_repository(module, module_branch, head)
+		if branch is not None:
+			run_git(source, "update-ref", f"refs/heads/{branch}", original)
+		restore_repository(source, branch, original)
+		update_source_submodules(source)
+		raise
+	return tip, mapping
+
+
+def gitlink_at(repo, revision, path):
+	entry = run_git(
+		repo, "--literal-pathspecs", "ls-tree", "-z", revision, "--", path,
+	).stdout.split("\0")[0]
+	if not entry:
+		return None
+	metadata = entry.split("\t", 1)[0].split()
+	return metadata[2] if metadata[0] == "160000" else None
+
+
+def task_ref(repo, task_id, name):
+	return resolved_ref(repo, source_task_ref(task_id, name))
+
+
+def set_task_ref(repo, task_id, name, value):
+	ref = source_task_ref(task_id, name)
+	if value is not None:
+		run_git(repo, "update-ref", ref, value)
+	elif resolved_ref(repo, ref) is not None:
+		run_git(repo, "update-ref", "-d", ref)
+
+
+def reconcile_task_refs(source, task_id, carried_from=None):
+	series = task_series_refs(source, task_id)
+	carried = (
+		task_series_refs(source, carried_from) if carried_from is not None else None
+	)
+	if series is None:
+		series = carried
+	elif carried is not None and carried[1] == series[0]:
+		series = (carried[0], series[1])
+	if series is None:
+		set_task_ref(source, task_id, "base", resolved_ref(source, "HEAD"))
+		set_task_ref(source, task_id, "green", None)
+	else:
+		set_task_ref(source, task_id, "base", series[0])
+		set_task_ref(source, task_id, "green", series[1])
+	set_task_ref(source, task_id, "run", resolved_ref(source, "HEAD"))
+
+
+def project_task_config(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	task = load_state(slot, state_path(slot, args.task))
+	if task["project"] is None:
+		raise WorkspaceError(f"{args.task} is standalone; it has no project branch")
+	ensure_task_branch(config, slot, task)
+	ensure_source_clean(source)
+	head = resolved_ref(source, "HEAD")
+	if task_ref(source, args.task, "run") != head:
+		raise WorkspaceError("Telegram HEAD no longer matches the task run ref")
+	if task_ref(source, args.task, "base") is None:
+		raise WorkspaceError("The local task baseline ref is missing")
+	if MIRROR_REMOTE not in run_git(source, "remote").stdout.split():
+		raise WorkspaceError(f"Project branches need a {MIRROR_REMOTE} remote")
+	return config, source, task
+
+
+def remote_branch_tip(repo, remote, branch):
+	return resolved_ref(repo, f"refs/remotes/{remote}/{branch}")
+
+
+def module_branch_tips(source, paths, project, tips):
+	for path in paths:
+		if path not in tips:
+			module = source / path
+			fetch_remote(module, "origin")
+			tips[path] = remote_branch_tip(module, "origin", project)
+	return tips
+
+
+def recorded_modules(source, task_id):
+	return [
+		source / path for path in tree_gitlinks(source, "HEAD")
+		if (source / path / ".git").exists()
+		and task_ref(source / path, task_id, "shared") is not None
+	]
+
+
+def recorded_module_tips_moved(source, task_id, project, rewrite_from):
+	modules = set(recorded_modules(source, task_id))
+	modules.update(
+		source / path for path in changed_gitlinks(source, rewrite_from, "HEAD")
+		if (source / path / ".git").exists()
+	)
+	for module in sorted(modules):
+		fetch_remote(module, "origin")
+		if remote_branch_tip(module, "origin", project) != task_ref(
+			module, task_id, "shared",
+		):
+			return True
+	return False
+
+
+def clear_module_shared_refs(source, task_id):
+	for module in recorded_modules(source, task_id):
+		set_task_ref(module, task_id, "shared", None)
+
+
+def command_project_sync(args):
+	"""Bring this task's work onto the shared project branch.
+
+	The shared tips a sync incorporates are recorded as the task's `shared`
+	refs (in tdesktop and in each project submodule), so that a push after a
+	base rebase leases against exactly what was incorporated. A base rebase
+	keeps the pre-rebase tip as `rewrite-from` until it is published; if the
+	shared branch moves first, that unpublished rewrite is discarded and
+	redone on the new history instead of overwriting it.
+	"""
+	config, source, task = project_task_config(args)
+	project = task["project"]
+	fetch_remote(source, MIRROR_REMOTE)
+	remote_tip = remote_branch_tip(source, MIRROR_REMOTE, project)
+	shared = task_ref(source, args.task, "shared")
+	fix = None
+	if args.base_fix:
+		fix = resolved_ref(source, args.base_fix)
+		if fix is None:
+			raise WorkspaceError(f"Unknown base fix commit: {args.base_fix}")
+	discarded = False
+	head = resolved_ref(source, "HEAD")
+	rewrite_from = task_ref(source, args.task, "rewrite-from")
+	if rewrite_from is not None and remote_tip == head:
+		set_task_ref(source, args.task, "rewrite-from", None)
+	elif rewrite_from is not None and (
+		remote_tip != shared
+		or recorded_module_tips_moved(source, args.task, project, rewrite_from)
+	):
+		protect_worktrees_from_submodule_target(source, rewrite_from)
+		run_git(source, "reset", "--quiet", "--hard", rewrite_from)
+		update_source_submodules(source)
+		set_task_ref(source, args.task, "rewrite-from", None)
+		clear_module_shared_refs(source, args.task)
+		reconcile_task_refs(source, args.task, task["carried_from"])
+		discarded = True
+		fix = None
+	head = resolved_ref(source, "HEAD")
+	base = task_ref(source, args.task, "base")
+	own = linear_commits(source, base, head)
+	ranges = submodule_ranges(source, base, own)
+	tips = module_branch_tips(source, ranges, project, {})
+	targets = {}
+	diverged = False
+	for path, (_, pin) in ranges.items():
+		module = source / path
+		pinned = gitlink_at(source, remote_tip, path) if remote_tip else None
+		tip = tips[path]
+		targets[path] = (
+			tip
+			if tip is not None and (pinned is None or is_ancestor(module, pinned, tip))
+			else pinned
+		)
+		if (
+			remote_tip != head
+			and tip is not None
+			and tip != task_ref(module, args.task, "shared")
+			and not is_ancestor(module, tip, pin)
+		):
+			diverged = True
+	moved = (
+		remote_tip is not None
+		and remote_tip != shared
+		and not is_ancestor(source, remote_tip, head)
+	)
+	synced = False
+	if moved or diverged:
+		head, mapping = rewrite_project_history(
+			source,
+			own,
+			remote_tip if moved else base,
+			ranges,
+			targets,
+		)
+		reconcile_task_refs(source, args.task, task["carried_from"])
+		if fix is not None:
+			fix = mapping.get(fix, fix)
+		synced = True
+	set_task_ref(source, args.task, "shared", remote_tip)
+	rebased = False
+	base_fix = None
+	if args.onto:
+		remote, _, name = args.onto.partition("/")
+		if not name:
+			raise WorkspaceError(f"--onto needs a remote branch, found {args.onto!r}")
+		fetch_remote(source, remote)
+		onto = remote_branch_tip(source, remote, name)
+		if onto is None:
+			raise WorkspaceError(f"Remote branch does not exist: {args.onto}")
+		fork = run_git(source, "merge-base", onto, head).stdout.strip()
+		commits = linear_commits(source, fork, head)
+		reorder = False
+		if fix is not None:
+			if fix not in commits:
+				raise WorkspaceError("The base fix is not a commit of this project branch")
+			others = [commit for commit in commits if commit != fix]
+			fixed = changed_files(source, fix)
+			if gitlink_changes(source, fix) or fixed & set().union(
+				*(changed_files(source, commit) for commit in others)
+			):
+				raise WorkspaceError(
+					"A base fix may touch only files no project commit changes"
+				)
+			reorder = commits[0] != fix
+			commits = [fix] + others
+		if fork != onto or reorder:
+			ranges = submodule_ranges(source, fork, commits)
+			module_branch_tips(source, ranges, project, tips)
+			if task_ref(source, args.task, "rewrite-from") is None:
+				set_task_ref(source, args.task, "rewrite-from", head)
+			head, mapping = rewrite_project_history(
+				source,
+				commits,
+				onto,
+				ranges,
+				{path: gitlink_at(source, onto, path) for path in ranges},
+			)
+			reconcile_task_refs(source, args.task, task["carried_from"])
+			rebased = True
+			if fix is not None and mapping[fix] != onto:
+				base_fix = mapping[fix]
+		elif fix is not None:
+			base_fix = fix
+	for path, tip in tips.items():
+		set_task_ref(source / path, args.task, "shared", tip)
+	print(json.dumps({
+		"task": args.task,
+		"branch": project,
+		"synced": synced,
+		"rebased_onto_base": rebased,
+		"rewrite_discarded": discarded,
+		"build_required": synced or rebased or discarded,
+		"base_fix": base_fix,
+	}, indent=2, sort_keys=True))
+
+
+def push_branch(repo, remote, revision, branch, lease=None, force=False):
+	arguments = ["push", "--quiet", remote]
+	if force:
+		arguments.insert(1, "--force")
+	elif lease is not None:
+		arguments.insert(1, f"--force-with-lease=refs/heads/{branch}:{lease}")
+	push = run_git(
+		repo, *arguments, f"{revision}:refs/heads/{branch}", check=False,
+	)
+	if push.returncode:
+		raise WorkspaceError(
+			f"Pushing {branch} from {repo} was rejected; rerun project-sync: "
+			+ (push.stderr.strip() or push.stdout.strip())
+		)
+
+
+def live_branch_tip(repo, remote, branch):
+	listed = run_git(repo, "ls-remote", remote, f"refs/heads/{branch}").stdout.split()
+	return listed[0] if listed else None
+
+
+def module_publications(source, head, project):
+	"""Top-level submodules whose pinned commit the project branch publishes.
+
+	A pin already on some remote branch needs nothing unless the submodule
+	has a project branch to keep up to date. Nested submodules are not
+	covered, so a pinned nested commit must already be on a remote branch.
+	"""
+	unpublished = run_git(
+		source, "rev-list", head, "--not",
+		f"--exclude={MIRROR_REMOTE}/{MIRROR_BRANCH_PREFIX}*",
+		f"--remotes={MIRROR_REMOTE}", "--remotes=origin",
+	).stdout.split()
+	newest = {}
+	for commit in unpublished:
+		for path, pin in gitlink_changes(source, commit).items():
+			module = source / path
+			if (module / ".git").exists() and (
+				path not in newest or is_ancestor(module, newest[path], pin)
+			):
+				newest[path] = pin
+	result = []
+	for path, pin in tree_gitlinks(source, head).items():
+		module = source / path
+		if not (module / ".git").exists():
+			continue
+		published = pin
+		if path in newest and is_ancestor(module, pin, newest[path]):
+			published = newest[path]
+		for revision in {pin, published}:
+			for nested, nested_pin in tree_gitlinks(module, revision).items():
+				child = module / nested
+				if (child / ".git").exists() and not run_git(
+					child, "branch", "--remotes", "--contains", nested_pin,
+					check=False,
+				).stdout.strip():
+					raise WorkspaceError(
+						f"{path}/{nested} is pinned at a commit on no remote branch; "
+						"project branches cover only top-level submodules, so "
+						"publish that nested commit first"
+					)
+		contained = bool(run_git(
+			module, "branch", "--remotes", "--contains", published,
+		).stdout.strip())
+		if contained and remote_branch_tip(module, "origin", project) is None:
+			continue
+		result.append((path, module, published, contained))
+	return result
+
+
+def command_project_push(args):
+	"""Publish the project branch: submodule branches, then tdesktop.
+
+	After a base rebase the order changes so that nothing shared moves until
+	tdesktop's lease holds: the new submodule commits go first to this
+	checkout's own staging branch _staging/<slug>/<checkout-tag>, outside the
+	project-slug grammar, which makes every pin fetchable, then
+	tdesktop moves, then the submodule project branches.
+	"""
+	config, source, task = project_task_config(args)
+	project = task["project"]
+	fetch_remote(source, MIRROR_REMOTE)
+	head = resolved_ref(source, "HEAD")
+	remote_tip = remote_branch_tip(source, MIRROR_REMOTE, project)
+	shared = task_ref(source, args.task, "shared")
+	rewritten = remote_tip is not None and not is_ancestor(source, remote_tip, head)
+	if rewritten and (not args.rewritten or remote_tip != shared):
+		raise WorkspaceError(
+			f"{MIRROR_REMOTE}/{project} has commits this branch lacks; rerun project-sync"
+		)
+	publications = module_publications(source, head, project)
+	if rewritten:
+		staging = f"_staging/{project}/{config['checkout_tag']}"
+		for _, module, pin, contained in publications:
+			if not contained:
+				push_branch(module, "origin", pin, staging, force=True)
+		push_branch(source, MIRROR_REMOTE, head, project, lease=shared)
+	modules = []
+	for path, module, pin, contained in publications:
+		fetch_remote(module, "origin")
+		tip = remote_branch_tip(module, "origin", project)
+		if tip is None:
+			if contained:
+				continue
+			push_branch(module, "origin", pin, project)
+		elif tip == pin or is_ancestor(module, pin, tip):
+			continue
+		elif is_ancestor(module, tip, pin):
+			push_branch(module, "origin", pin, project)
+		elif args.rewritten and (
+			tip == task_ref(module, args.task, "shared")
+			# Nobody published on top of this rewrite, so a commit there that
+			# the shared tdesktop branch does not pin is another checkout's
+			# unpublished half, which that checkout replays at its next sync.
+			or live_branch_tip(source, MIRROR_REMOTE, project) == head
+		):
+			push_branch(module, "origin", pin, project, lease=tip)
+		else:
+			raise WorkspaceError(
+				f"{path} branch {project} moved since project-sync; rerun project-sync"
+			)
+		modules.append(path)
+	if args.base_fix:
+		remote, _, name = (args.base or "").partition("/")
+		if not name:
+			raise WorkspaceError("--base-fix needs --base naming the remote branch")
+		fix = resolved_ref(source, args.base_fix)
+		fetch_remote(source, remote)
+		base_tip = remote_branch_tip(source, remote, name)
+		if base_tip != fix:
+			if resolved_ref(source, f"{fix}^") != base_tip:
+				raise WorkspaceError(
+					f"{args.base} moved past the base fix; rerun project-sync --onto"
+				)
+			push_branch(source, remote, fix, name)
+	if not rewritten:
+		push_branch(source, MIRROR_REMOTE, head, project)
+	set_task_ref(source, args.task, "shared", None)
+	set_task_ref(source, args.task, "rewrite-from", None)
+	clear_module_shared_refs(source, args.task)
+	print(json.dumps({
+		"task": args.task,
+		"branch": project,
+		"pushed": True,
+		"rewritten": rewritten,
+		"submodules": sorted(modules),
+		"base_fix_pushed": bool(args.base_fix),
+	}, indent=2, sort_keys=True))
+
+
+def wip_repositories(repo):
+	"""Repositories under repo to save, children before parents.
+
+	A repository with changes is saved. A clean submodule is saved too when
+	its HEAD moved from the pin its parent last committed and is on no remote
+	branch, so the parent's snapshot never pins a commit nobody can fetch.
+	"""
+	result = []
+	for path in indexed_gitlinks(repo):
+		module = Path(repo) / path
+		if module.resolve() != module or is_linked_worktree(repo, path + "/"):
+			raise WorkspaceError(
+				f"Cannot save {module}: it is a symlink or another checkout's worktree"
+			)
+		if not (module / ".git").exists():
+			continue
+		nested = wip_repositories(module)
+		if (
+			not nested
+			and resolved_ref(module, "HEAD") != gitlink_at(repo, "HEAD", path)
+			and not run_git(
+				module, "branch", "--remotes", "--contains", "HEAD",
+			).stdout.strip()
+		):
+			nested = [module]
+		result.extend(nested)
+	if source_changed_paths(repo):
+		result.append(Path(repo))
+	return result
+
+
+def command_wip_save(args):
+	"""Save source changes nobody can account for and leave the checkout clean.
+
+	Each repository to save, submodules before their parents, commits its
+	staged part and then its working tree on a detached HEAD and pushes the
+	result to a new branch wip/<branch>/<checkout-tag>/<time>: tdesktop to
+	private, submodules to their origin. An ignored working copy of a staged
+	deletion is never published; it is copied to ai-wip/<time>/ in the git
+	directory instead. Any failure, cancellation included, returns every
+	repository to its branch, index and working-tree contents.
+	"""
+	config = worktree_config(args, create=True)
+	source = Path(config["source_root"]).resolve()
+	repositories = wip_repositories(source)
+	if not repositories:
+		print(json.dumps({"saved": False}, indent=2, sort_keys=True))
+		return
+	for repo in repositories:
+		protect_worktrees_from_submodule_target(repo, "HEAD")
+		tracked = set(literal_paths(repo, "ls-tree", "-r", "--name-only", "HEAD"))
+		for ignored in literal_paths(
+			repo, "ls-files", "--others", "--ignored", "--exclude-standard",
+			"--directory",
+		):
+			parts = ignored.rstrip("/").split("/")
+			for depth in range(1, len(parts) + 1):
+				prefix = "/".join(parts[:depth])
+				if prefix in tracked and prefix != ignored:
+					raise WorkspaceError(
+						f"Cannot save {repo}: ignored {ignored} lies where HEAD "
+						f"tracks the file {prefix}, so cleaning would delete it"
+					)
+	branch = current_branch(source) or "detached"
+	stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+	name = f"wip/{branch}/{config['checkout_tag']}/{stamp}"
+	message = f"WIP on {branch} from {config['checkout_tag']}\n\n{args.reason}"
+	backups = Path(run_git(
+		source, "rev-parse", "--path-format=absolute", "--git-common-dir",
+	).stdout.strip()) / "ai-wip"
+	states = []
+	copies = []
+	with git_safe_termination():
+		save_wip(
+			source, repositories, name, message, stamp, config["checkout_tag"],
+			backups, states, copies,
+		)
+	print(json.dumps({
+		"saved": True,
+		"branch": name,
+		"repositories": [
+			"." if repo == source else repo.relative_to(source).as_posix()
+			for repo in repositories
+		],
+		"local_copies": [str(copy) for _, copy in copies],
+	}, indent=2, sort_keys=True))
+
+
+def save_wip(source, repositories, name, message, stamp, tag, backups, states, copies):
+	local = None
+	try:
+		for repo in repositories:
+			state = {
+				"repo": repo,
+				"branch": current_branch(repo),
+				"head": resolved_ref(repo, "HEAD"),
+				"index": run_git(repo, "write-tree").stdout.strip(),
+				"snapshot": None,
+			}
+			states.append(state)
+			for path, staged in indexed_gitlinks(repo).items():
+				child = repo / path
+				if (
+					(child / ".git").exists()
+					and staged not in (
+						gitlink_at(repo, "HEAD", path), resolved_ref(child, "HEAD"),
+					)
+					and not run_git(
+						child, "branch", "--remotes", "--contains", staged,
+						check=False,
+					).stdout.strip()
+				):
+					push_branch(child, "origin", staged, f"{name}-staged")
+			run_git(repo, "checkout", "--quiet", "--detach")
+			if run_git(repo, "diff", "--cached", "--quiet", check=False).returncode:
+				run_git(repo, "commit", "--quiet", "-m", f"{message}\n\nStaged part.")
+				for path in literal_paths(
+					repo, "diff", "--name-only", "--no-renames", "--diff-filter=D",
+					state["head"], "HEAD",
+				):
+					if os.path.lexists(repo / path) and not run_git(
+						repo, "check-ignore", "--quiet", "--", path, check=False,
+					).returncode:
+						if local is None:
+							backups.mkdir(parents=True, exist_ok=True)
+							local = Path(tempfile.mkdtemp(
+								prefix=f"{stamp}-{tag}-", dir=backups,
+							))
+						copy = local / repo.relative_to(source) / path
+						copy.parent.mkdir(parents=True, exist_ok=True)
+						shutil.copy2(repo / path, copy, follow_symlinks=False)
+						copies.append((repo / path, copy))
+			dirty = source_changed_paths(repo)
+			if dirty:
+				run_git(repo, "--literal-pathspecs", "add", "--all", "--", *dirty)
+			if run_git(repo, "diff", "--cached", "--quiet", check=False).returncode:
+				run_git(repo, "commit", "--quiet", "-m", message)
+			push_branch(
+				repo, MIRROR_REMOTE if repo == source else "origin", "HEAD", name,
+			)
+			state["snapshot"] = resolved_ref(repo, "HEAD")
+		for state in reversed(states):
+			if state["branch"] is not None:
+				run_git(state["repo"], "checkout", "--quiet", "--force", state["branch"])
+			else:
+				run_git(
+					state["repo"], "checkout", "--quiet", "--force", "--detach",
+					state["head"],
+				)
+		update_source_submodules(source)
+		ensure_source_clean(source)
+	except BaseException:
+		for state in reversed(states):
+			repo = state["repo"]
+			if state["snapshot"] is not None:
+				run_git(
+					repo, "checkout", "--quiet", "--force", "--detach",
+					state["snapshot"],
+				)
+			run_git(repo, "reset", "--quiet", "--mixed", state["head"])
+			run_git(repo, "read-tree", state["index"])
+			if state["branch"] is not None:
+				run_git(repo, "checkout", "--quiet", state["branch"])
+		for original, copy in copies:
+			original.parent.mkdir(parents=True, exist_ok=True)
+			shutil.copy2(copy, original, follow_symlinks=False)
+		raise
+
+
+def run_git_binary(path, *args):
+	result = run_git_process(
+		["git", "-C", str(path), *args],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+	)
+	if result.returncode:
+		raise WorkspaceError(
+			result.stderr.decode("utf-8", "replace").strip()
+			or "git failed"
+		)
+	return result.stdout
+
+
+def literal_paths(path, *args):
+	return [
+		value
+		for value in os.fsdecode(run_git_binary(path, *args, "-z")).split("\0")
+		if value
+	]
+
+
+def resolved_exe(value):
+	path = Path(value).expanduser().resolve()
+	if not path.is_file():
+		raise WorkspaceError(f"Test executable does not exist: {path}")
+	return path
+
+
+def app_bundle_of(path):
+	for parent in path.parents:
+		if parent.suffix == ".app":
+			return parent
+	return None
+
+
+def portable_root_for(exe, override):
+	if override:
+		root = Path(override).expanduser().resolve()
+		if not root.is_dir():
+			raise WorkspaceError(f"Portable root does not exist: {root}")
+		return root
+	bundle = app_bundle_of(exe)
+	return bundle.parent if bundle is not None else exe.parent
+
+
+def background_launch_bundle(exe, platform=None):
+	platform = sys.platform if platform is None else platform
+	bundle = app_bundle_of(exe)
+	if (
+		platform != "darwin"
+		or bundle is None
+		or exe.parent != bundle / "Contents" / "MacOS"
+	):
+		return None
+	try:
+		info = plistlib.loads((bundle / "Contents" / "Info.plist").read_bytes())
+	except (OSError, ValueError, xml.parsers.expat.ExpatError):
+		return None
+	if isinstance(info, dict) and info.get("CFBundleExecutable") == exe.name:
+		return bundle
+	return None
+
+
+def unique_destination(directory, name):
+	candidate = directory / name
+	index = 2
+	while candidate.exists():
+		candidate = directory / (
+			f"{Path(name).stem}-{index:02d}{Path(name).suffix}"
+		)
+		index += 1
+	return candidate
+
+
+def move_stale_leftover(path, target):
+	for attempt in reversed(range(5)):
+		moved = unique_destination(target, path.name)
+		try:
+			shutil.move(path, moved)
+			return moved
+		except OSError:
+			try:
+				moved.unlink(missing_ok=True)
+			except OSError:
+				pass
+			if not attempt:
+				raise
+			time.sleep(0.2)
+
+
+def clear_stale_crash_state(live, destination):
+	report = live / "tdata" / "working"
+	dumps_dir = live / "tdata" / "dumps"
+	leftovers = []
+	if report.is_file() and report.stat().st_size > 0:
+		leftovers.append(("report", report))
+	if dumps_dir.is_dir():
+		leftovers.extend(
+			("dump", path) for path in sorted(dumps_dir.glob("*.dmp"))
+			if path.is_file()
+		)
+	cleared = []
+	for kind, path in leftovers:
+		target = destination / "dumps" if kind == "dump" else destination
+		target.mkdir(parents=True, exist_ok=True)
+		try:
+			moved = move_stale_leftover(path, target)
+		except OSError as error:
+			if kind == "report":
+				raise WorkspaceError(
+					f"Cannot clear the stale crash report {path}: {error}"
+				) from error
+			cleared.append({"from": str(path), "kind": kind, "to": None})
+			continue
+		cleared.append({"from": str(path), "kind": kind, "to": str(moved)})
+	return cleared
+
+
+def golden_test_account(root):
+	golden = root / PORTABLE_GOLDEN
+	if not golden.is_dir():
+		raise WorkspaceError(f"Missing golden test account: {golden}")
+	return golden
+
+
+def setup_test_account(root):
+	golden = golden_test_account(root)
+	live = root / PORTABLE_LIVE
+	real = root / PORTABLE_REAL
+	if (live / PORTABLE_MARKER).exists():
+		return "reused-marked-live"
+	if live.exists():
+		if real.exists():
+			shutil.rmtree(live)
+			state = "replaced-manual-live"
+		else:
+			live.rename(real)
+			state = "preserved-real"
+	else:
+		state = "fresh-copy"
+	shutil.copytree(golden, live)
+	(live / PORTABLE_MARKER).write_text("1\n", encoding="utf-8")
+	return state
+
+
+def reset_broken_test_account(root):
+	live = root / PORTABLE_LIVE
+	if not (live / PORTABLE_MARKER).exists():
+		raise WorkspaceError(
+			f"Refusing to reset an unmarked live folder: {live}"
+		)
+	shutil.rmtree(live)
+	return setup_test_account(root)
+
+
+def processes_with_executable(exe):
+	value = str(exe)
+	pids = []
+	if sys.platform == "win32":
+		escaped = value.replace("'", "''")
+		script = (
+			"Get-CimInstance Win32_Process | "
+			f"Where-Object {{ $_.ExecutablePath -eq '{escaped}' }} | "
+			"ForEach-Object { $_.ProcessId }"
+		)
+		result = subprocess.run(
+			["powershell", "-NoProfile", "-Command", script],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True,
+		)
+		for line in result.stdout.splitlines():
+			line = line.strip()
+			if line.isdigit():
+				pids.append(int(line))
+		return pids
+	result = subprocess.run(
+		["ps", "-axo", "pid=,comm="],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		text=True,
+	)
+	for line in result.stdout.splitlines():
+		parts = line.strip().split(None, 1)
+		if len(parts) != 2 or not parts[0].isdigit():
+			continue
+		pid, comm = int(parts[0]), parts[1]
+		if comm == value:
+			pids.append(pid)
+			continue
+		if sys.platform.startswith("linux"):
+			try:
+				if os.readlink(f"/proc/{pid}/exe") == value:
+					pids.append(pid)
+			except OSError:
+				continue
+	return pids
+
+
+def kill_processes_with_executable(exe):
+	killed = []
+	for pid in processes_with_executable(exe):
+		try:
+			if sys.platform == "win32":
+				subprocess.run(
+					["taskkill", "/PID", str(pid), "/F"],
+					stdout=subprocess.PIPE,
+					stderr=subprocess.PIPE,
+				)
+			else:
+				os.kill(pid, signal.SIGKILL)
+			killed.append(pid)
+		except (OSError, subprocess.SubprocessError):
+			continue
+	return killed
+
+
+@contextlib.contextmanager
+def git_safe_termination():
+	"""Raise SIGTERM, SIGHUP and SIGINT only between git commands.
+
+	Raising inside subprocess.run would kill a git command that may hold a
+	lock, leaving a repository the rollback cannot restore.
+	"""
+	replaced = {}
+	if threading.current_thread() is threading.main_thread():
+		def defer(signum, frame):
+			_TERMINATION["pending"] = signum
+			raise_pending_termination()
+		for name in ("SIGTERM", "SIGHUP", "SIGINT"):
+			number = getattr(signal, name, None)
+			if number is not None and signal.getsignal(number) in (
+				signal.SIG_DFL, signal.default_int_handler,
+			):
+				replaced[number] = signal.signal(number, defer)
+	try:
+		yield
+	finally:
+		for number, previous in replaced.items():
+			signal.signal(number, previous)
+
+
+@contextlib.contextmanager
+def termination_raises():
+	"""Turn SIGTERM and SIGHUP into SystemExit so cleanup handlers still run."""
+	replaced = {}
+	if threading.current_thread() is threading.main_thread():
+		for name in ("SIGTERM", "SIGHUP"):
+			number = getattr(signal, name, None)
+			if number is not None and signal.getsignal(number) == signal.SIG_DFL:
+				replaced[number] = signal.signal(
+					number, lambda signum, frame: sys.exit(128 + signum)
+				)
+	try:
+		yield
+	finally:
+		for number, previous in replaced.items():
+			signal.signal(number, previous)
+
+
+@contextlib.contextmanager
+def executable_killed_on_abort(exe):
+	with termination_raises():
+		try:
+			yield
+		except BaseException:
+			# a background client is not test-run's child: a group or tree kill of test-run misses it
+			kill_processes_with_executable(exe)
+			raise
+
+
+def windows_process_records():
+	if sys.platform != "win32":
+		return []
+	script = (
+		"Get-CimInstance Win32_Process | "
+		"Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | "
+		"ConvertTo-Json -Compress"
+	)
+	result = subprocess.run(
+		["powershell", "-NoProfile", "-Command", script],
+		stdout=subprocess.PIPE,
+		stderr=subprocess.PIPE,
+		text=True,
+	)
+	if result.returncode or not result.stdout.strip():
+		return []
+	try:
+		rows = json.loads(result.stdout)
+	except json.JSONDecodeError:
+		return []
+	if isinstance(rows, dict):
+		rows = [rows]
+	records = []
+	for row in rows:
+		try:
+			pid = int(row["ProcessId"])
+			parent_pid = int(row["ParentProcessId"])
+		except (KeyError, TypeError, ValueError):
+			continue
+		records.append({
+			"pid": pid,
+			"parent_pid": parent_pid,
+			"name": str(row.get("Name") or ""),
+			"executable": str(row.get("ExecutablePath") or ""),
+			"command_line": str(row.get("CommandLine") or ""),
+		})
+	return records
+
+
+def windows_process_snapshot(size):
+	if sys.platform != "win32":
+		raise OSError(f"process snapshots need Windows, this host is {sys.platform}")
+	import ctypes
+	from ctypes import wintypes
+
+	class UnicodeString(ctypes.Structure):
+		_fields_ = [
+			("length", wintypes.USHORT),
+			("maximum_length", wintypes.USHORT),
+			("buffer", ctypes.c_void_p),
+		]
+
+	class ProcessEntry(ctypes.Structure):
+		_fields_ = [
+			("next_entry_offset", wintypes.ULONG),
+			("number_of_threads", wintypes.ULONG),
+			("working_set_private_size", ctypes.c_longlong),
+			("hard_fault_count", wintypes.ULONG),
+			("number_of_threads_high_watermark", wintypes.ULONG),
+			("cycle_time", ctypes.c_ulonglong),
+			("create_time", ctypes.c_longlong),
+			("user_time", ctypes.c_longlong),
+			("kernel_time", ctypes.c_longlong),
+			("image_name", UnicodeString),
+			("base_priority", wintypes.LONG),
+			("unique_process_id", ctypes.c_void_p),
+			("inherited_from_unique_process_id", ctypes.c_void_p),
+		]
+
+	query = ctypes.WinDLL("ntdll").NtQuerySystemInformation
+	query.argtypes = [
+		wintypes.ULONG,
+		ctypes.c_void_p,
+		wintypes.ULONG,
+		ctypes.POINTER(wintypes.ULONG),
+	]
+	query.restype = wintypes.LONG
+	needed = wintypes.ULONG()
+	for _ in range(HOST_LOAD_SNAPSHOT_ATTEMPTS):
+		buffer = ctypes.create_string_buffer(size)
+		status = query(5, buffer, size, ctypes.byref(needed)) & 0xFFFFFFFF
+		if status not in (0xC0000004, 0xC0000023):
+			break
+		size = max(needed.value + needed.value // 4, size * 2)
+	else:
+		raise OSError(
+			"NtQuerySystemInformation still wanted a larger buffer after "
+			f"{HOST_LOAD_SNAPSHOT_ATTEMPTS} attempts"
+		)
+	if status:
+		raise OSError(f"NtQuerySystemInformation failed with status 0x{status:08X}")
+	returned = needed.value
+	if not 0 < returned <= size:
+		raise OSError(f"NtQuerySystemInformation returned {returned} of {size} bytes")
+	base = ctypes.addressof(buffer)
+	entry_size = ctypes.sizeof(ProcessEntry)
+	records = {}
+	offset = 0
+	while True:
+		if offset + entry_size > returned:
+			raise OSError(f"process entry at {offset} overruns {returned} bytes")
+		entry = ProcessEntry.from_buffer(buffer, offset)
+		image = entry.image_name
+		if image.length % 2:
+			raise OSError(f"process entry at {offset} has an odd name length")
+		if image.buffer:
+			start = image.buffer - base
+			if start < 0 or start + image.length > returned:
+				raise OSError(f"process entry at {offset} names outside the buffer")
+			name = ctypes.wstring_at(image.buffer, image.length // 2)
+		elif image.length:
+			raise OSError(f"process entry at {offset} has a null nonempty name")
+		else:
+			name = ""
+		pid = entry.unique_process_id or 0
+		if pid in records:
+			raise OSError(f"process snapshot lists pid {pid} twice")
+		if pid:
+			records[pid] = {
+				"cpu": entry.user_time + entry.kernel_time,
+				"created": entry.create_time,
+				"name": name,
+				"parent_pid": entry.inherited_from_unique_process_id or 0,
+			}
+		if not entry.next_entry_offset:
+			break
+		if entry.next_entry_offset < entry_size:
+			raise OSError(f"process entry at {offset} links backward or overlaps")
+		offset += entry.next_entry_offset
+	if not records:
+		raise OSError("process snapshot listed no process")
+	return size, records
+
+
+def macos_system_library():
+	if sys.platform != "darwin":
+		raise OSError(f"process snapshots need macOS, this host is {sys.platform}")
+	import ctypes
+
+	integer, pointer, port = ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32
+	library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+	for name, result, arguments in (
+		("proc_listallpids", integer, [pointer, integer]),
+		("proc_pidinfo", integer, [integer, integer, ctypes.c_uint64, pointer, integer]),
+		("proc_pidpath", integer, [integer, pointer, ctypes.c_uint32]),
+		("responsibility_get_pid_responsible_for_pid", integer, [integer]),
+		("mach_timebase_info", integer, [pointer]),
+		("mach_host_self", port, []),
+		(
+			"host_processor_info",
+			integer,
+			[
+				port,
+				integer,
+				ctypes.POINTER(ctypes.c_uint32),
+				ctypes.POINTER(ctypes.POINTER(ctypes.c_uint32)),
+				ctypes.POINTER(ctypes.c_uint32),
+			],
+		),
+		("vm_deallocate", integer, [port, ctypes.c_size_t, ctypes.c_size_t]),
+		("mach_port_deallocate", integer, [port, port]),
+	):
+		function = getattr(library, name)
+		function.restype = result
+		function.argtypes = arguments
+	return library, port.in_dll(library, "mach_task_self_").value
+
+
+def macos_unique_id_reader(library):
+	import ctypes
+
+	class UniqueIdentifiers(ctypes.Structure):
+		_fields_ = [
+			("uuid", ctypes.c_uint8 * 16),
+			("unique_id", ctypes.c_uint64),
+			("parent_unique_id", ctypes.c_uint64),
+			("id_version", ctypes.c_int32),
+			("original_parent_id_version", ctypes.c_int32),
+			("reserved2", ctypes.c_uint64),
+			("reserved3", ctypes.c_uint64),
+		]
+
+	identifiers = UniqueIdentifiers()
+	size = ctypes.sizeof(identifiers)
+	if size != 56:
+		raise OSError(f"UniqueIdentifiers is {size} bytes, not 56")
+
+	def unique_id(pid):
+		filled = library.proc_pidinfo(pid, 17, 0, ctypes.byref(identifiers), size)
+		return identifiers.unique_id if filled == size else None
+
+	return unique_id
+
+
+def macos_process_snapshot():
+	library, task_self = macos_system_library()
+	import ctypes
+
+	class Timebase(ctypes.Structure):
+		_fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+	class ShortBsdInfo(ctypes.Structure):
+		_fields_ = [
+			("pid", ctypes.c_uint32),
+			("ppid", ctypes.c_uint32),
+			("pgid", ctypes.c_uint32),
+			("status", ctypes.c_uint32),
+			("comm", ctypes.c_char * 16),
+			("flags", ctypes.c_uint32),
+			("uid", ctypes.c_uint32),
+			("gid", ctypes.c_uint32),
+			("ruid", ctypes.c_uint32),
+			("rgid", ctypes.c_uint32),
+			("svuid", ctypes.c_uint32),
+			("svgid", ctypes.c_uint32),
+			("rfu", ctypes.c_uint32),
+		]
+
+	class TaskInfo(ctypes.Structure):
+		_fields_ = [
+			("virtual_size", ctypes.c_uint64),
+			("resident_size", ctypes.c_uint64),
+			("total_user", ctypes.c_uint64),
+			("total_system", ctypes.c_uint64),
+			("threads_user", ctypes.c_uint64),
+			("threads_system", ctypes.c_uint64),
+			("policy", ctypes.c_int32),
+			("faults", ctypes.c_int32),
+			("pageins", ctypes.c_int32),
+			("cow_faults", ctypes.c_int32),
+			("messages_sent", ctypes.c_int32),
+			("messages_received", ctypes.c_int32),
+			("syscalls_mach", ctypes.c_int32),
+			("syscalls_unix", ctypes.c_int32),
+			("csw", ctypes.c_int32),
+			("threadnum", ctypes.c_int32),
+			("numrunning", ctypes.c_int32),
+			("priority", ctypes.c_int32),
+		]
+
+	timebase, short, task = Timebase(), ShortBsdInfo(), TaskInfo()
+	for structure, expected in ((timebase, 8), (short, 64), (task, 96)):
+		size = ctypes.sizeof(structure)
+		if size != expected:
+			raise OSError(f"{type(structure).__name__} is {size} bytes, not {expected}")
+	short_size, task_size = ctypes.sizeof(short), ctypes.sizeof(task)
+	status = library.mach_timebase_info(ctypes.byref(timebase))
+	if status or timebase.numer < 1 or timebase.denom < 1:
+		raise OSError(
+			f"mach_timebase_info failed with {status}: "
+			f"{timebase.numer}/{timebase.denom}"
+		)
+	numer, divisor = timebase.numer, timebase.denom * 100
+	estimate = library.proc_listallpids(None, 0)
+	if estimate < 1:
+		raise OSError(ctypes.get_errno(), "proc_listallpids gave no process estimate")
+	capacity = estimate + estimate // 4 + 64
+	for _ in range(HOST_LOAD_SNAPSHOT_ATTEMPTS):
+		pids = (ctypes.c_int * capacity)()
+		listed = library.proc_listallpids(pids, ctypes.sizeof(pids))
+		if listed < capacity:
+			break
+		capacity *= 2
+	else:
+		raise OSError(
+			"proc_listallpids still filled its buffer after "
+			f"{HOST_LOAD_SNAPSHOT_ATTEMPTS} attempts"
+		)
+	if listed < 0:
+		raise OSError(ctypes.get_errno(), "proc_listallpids failed")
+	if not listed:
+		raise OSError("proc_listallpids listed no process")
+	listing = pids[:listed]
+	if len(set(listing)) != listed:
+		raise OSError("proc_listallpids listed a pid twice")
+	unique_id = macos_unique_id_reader(library)
+	records = {}
+	for pid in listing:
+		if not pid:
+			continue
+		created = unique_id(pid)
+		if created is None:
+			continue
+		filled = library.proc_pidinfo(pid, 13, 0, ctypes.byref(short), short_size)
+		if filled != short_size or short.pid != pid:
+			continue
+		name = short.comm.decode("utf-8", "replace")
+		parent_pid = short.ppid
+		# other users refuse task info, so their CPU reaches only the machine counter
+		filled = library.proc_pidinfo(pid, 4, 0, ctypes.byref(task), task_size)
+		cpu = (
+			(task.total_user + task.total_system) * numer // divisor
+			if filled == task_size
+			else None
+		)
+		if unique_id(pid) == created:
+			records[pid] = {
+				"cpu": cpu,
+				"created": created,
+				"name": name,
+				"parent_pid": parent_pid,
+			}
+	if not records:
+		raise OSError("process snapshot read no process")
+	clock_ticks = os.sysconf("SC_CLK_TCK")
+	if clock_ticks < 1:
+		raise OSError(f"SC_CLK_TCK is {clock_ticks}")
+	host = library.mach_host_self()
+	if not host:
+		raise OSError("mach_host_self returned no port")
+	try:
+		processors = ctypes.c_uint32()
+		array = ctypes.POINTER(ctypes.c_uint32)()
+		words = ctypes.c_uint32()
+		status = library.host_processor_info(
+			host,
+			2,
+			ctypes.byref(processors),
+			ctypes.byref(array),
+			ctypes.byref(words),
+		)
+		if status:
+			raise OSError(f"host_processor_info failed with {status}")
+		if not array:
+			raise OSError("host_processor_info returned no processor array")
+		try:
+			if processors.value < 1 or words.value != processors.value * 4:
+				raise OSError(
+					f"host_processor_info returned {words.value} words for "
+					f"{processors.value} processors"
+				)
+			ticks = array[:words.value]
+		finally:
+			status = library.vm_deallocate(
+				task_self,
+				ctypes.cast(array, ctypes.c_void_p).value,
+				words.value * ctypes.sizeof(ctypes.c_uint32),
+			)
+			if status:
+				raise OSError(f"vm_deallocate failed with {status}")
+	finally:
+		status = library.mach_port_deallocate(task_self, host)
+		if status:
+			raise OSError(f"mach_port_deallocate failed with {status}")
+	busy = sum(ticks[0::4]) + sum(ticks[1::4]) + sum(ticks[3::4])
+	return records, busy * 10**7 // clock_ticks
+
+
+def macos_process_details(pid):
+	library, _ = macos_system_library()
+	import ctypes
+
+	details = {"created": None, "path": None, "responsible": None}
+	unique_id = macos_unique_id_reader(library)
+	created = unique_id(pid)
+	if created is None:
+		return details
+	buffer = ctypes.create_string_buffer(4096)
+	length = library.proc_pidpath(pid, buffer, ctypes.sizeof(buffer))
+	path = buffer.value
+	responsible_pid = library.responsibility_get_pid_responsible_for_pid(pid)
+	responsible_id = unique_id(responsible_pid) if responsible_pid > 0 else None
+	if unique_id(pid) != created:
+		return details
+	details["created"] = created
+	if length > 0 and len(path) == length:
+		details["path"] = os.fsdecode(path)
+	if responsible_id is not None:
+		details["responsible"] = (responsible_pid, responsible_id)
+	return details
+
+
+def host_process_snapshot(size):
+	if sys.platform == "darwin":
+		return (size, *macos_process_snapshot())
+	size, records = windows_process_snapshot(size)
+	return size, records, None
+
+
+def locking_process_ids(paths):
+	if sys.platform != "win32" or not paths:
+		return [], None
+	import ctypes
+	from ctypes import wintypes
+
+	class UniqueProcess(ctypes.Structure):
+		_fields_ = [
+			("process_id", wintypes.DWORD),
+			("process_start_time", wintypes.FILETIME),
+		]
+
+	class ProcessInfo(ctypes.Structure):
+		_fields_ = [
+			("process", UniqueProcess),
+			("app_name", wintypes.WCHAR * 256),
+			("service_name", wintypes.WCHAR * 64),
+			("app_type", wintypes.DWORD),
+			("app_status", wintypes.ULONG),
+			("terminal_session_id", wintypes.DWORD),
+			("restartable", wintypes.BOOL),
+		]
+
+	manager = ctypes.WinDLL("Rstrtmgr")
+	manager.RmStartSession.argtypes = [
+		ctypes.POINTER(wintypes.DWORD),
+		wintypes.DWORD,
+		wintypes.LPWSTR,
+	]
+	manager.RmStartSession.restype = wintypes.DWORD
+	manager.RmRegisterResources.argtypes = [
+		wintypes.DWORD,
+		wintypes.UINT,
+		ctypes.POINTER(wintypes.LPCWSTR),
+		wintypes.UINT,
+		ctypes.c_void_p,
+		wintypes.UINT,
+		ctypes.c_void_p,
+	]
+	manager.RmRegisterResources.restype = wintypes.DWORD
+	manager.RmGetList.argtypes = [
+		wintypes.DWORD,
+		ctypes.POINTER(wintypes.UINT),
+		ctypes.POINTER(wintypes.UINT),
+		ctypes.POINTER(ProcessInfo),
+		ctypes.POINTER(wintypes.DWORD),
+	]
+	manager.RmGetList.restype = wintypes.DWORD
+	manager.RmEndSession.argtypes = [wintypes.DWORD]
+	manager.RmEndSession.restype = wintypes.DWORD
+
+	session = wintypes.DWORD()
+	key = ctypes.create_unicode_buffer(33)
+	started = manager.RmStartSession(ctypes.byref(session), 0, key)
+	if started:
+		return [], f"Restart Manager session failed: {started}"
+	try:
+		resources = (wintypes.LPCWSTR * len(paths))(
+			*(str(path) for path in paths)
+		)
+		registered = manager.RmRegisterResources(
+			session,
+			len(paths),
+			resources,
+			0,
+			None,
+			0,
+			None,
+		)
+		if registered:
+			return [], f"Restart Manager registration failed: {registered}"
+		needed = wintypes.UINT()
+		count = wintypes.UINT()
+		reboot_reasons = wintypes.DWORD()
+		status = manager.RmGetList(
+			session,
+			ctypes.byref(needed),
+			ctypes.byref(count),
+			None,
+			ctypes.byref(reboot_reasons),
+		)
+		if status == 0:
+			return [], None
+		if status != 234:
+			return [], f"Restart Manager query failed: {status}"
+		entries = (ProcessInfo * needed.value)()
+		count.value = needed.value
+		status = manager.RmGetList(
+			session,
+			ctypes.byref(needed),
+			ctypes.byref(count),
+			entries,
+			ctypes.byref(reboot_reasons),
+		)
+		if status:
+			return [], f"Restart Manager detail query failed: {status}"
+		return sorted({
+			entries[index].process.process_id
+			for index in range(count.value)
+		}), None
+	finally:
+		manager.RmEndSession(session)
+
+
+def normalized_path_text(path):
+	return os.path.normcase(str(Path(path).expanduser().resolve())).casefold()
+
+
+def recoverable_build_processes(records, build_root, exe, holder_pids):
+	build_text = normalized_path_text(build_root)
+	build_command_text = build_text.replace("\\", "/")
+	exe_text = normalized_path_text(exe)
+	by_pid = {record["pid"]: record for record in records}
+	reasons = {}
+	for record in records:
+		pid = record["pid"]
+		name = record["name"].casefold()
+		executable = record["executable"]
+		command_line = record["command_line"]
+		if executable and normalized_path_text(executable) == exe_text:
+			reasons[pid] = "exact-checkout-executable"
+		elif name in BUILD_LOCK_PROCESS_NAMES and pid in holder_pids:
+			reasons[pid] = "direct-build-artifact-holder"
+		elif (
+			name in BUILD_LOCK_PROCESS_NAMES
+			and build_command_text
+			in command_line.casefold().replace("\\", "/")
+		):
+			reasons[pid] = "exact-build-tree-command"
+	changed = True
+	while changed:
+		changed = False
+		for record in records:
+			pid = record["pid"]
+			if pid in reasons:
+				continue
+			if (
+				record["name"].casefold() in BUILD_LOCK_PROCESS_NAMES
+				and record["parent_pid"] in reasons
+				and record["parent_pid"] in by_pid
+			):
+				reasons[pid] = "verified-build-process-descendant"
+				changed = True
+	return [
+		{
+			**by_pid[pid],
+			"reason": reason,
+		}
+		for pid, reason in sorted(reasons.items())
+	]
+
+
+def terminate_process_ids(processes):
+	results = []
+	for process in sorted(processes, key=lambda value: value["pid"], reverse=True):
+		pid = process["pid"]
+		try:
+			if sys.platform == "win32":
+				result = subprocess.run(
+					["taskkill", "/PID", str(pid), "/F"],
+					stdout=subprocess.PIPE,
+					stderr=subprocess.PIPE,
+					text=True,
+				)
+				stopped = not result.returncode
+				error = (
+					None
+					if stopped
+					else (result.stderr.strip() or result.stdout.strip())
+				)
+			else:
+				os.kill(pid, signal.SIGKILL)
+				stopped = True
+				error = None
+		except (OSError, subprocess.SubprocessError) as exception:
+			stopped = False
+			error = str(exception)
+		results.append({
+			**process,
+			"stopped": stopped,
+			"error": error,
+		})
+	return results
+
+
+def path_inside(path, root):
+	try:
+		path.relative_to(root)
+		return path != root
+	except ValueError:
+		return False
+
+
+def build_root_matches_source(build, source):
+	cache = build / "CMakeCache.txt"
+	if not cache.is_file():
+		return False
+	prefix = "CMAKE_HOME_DIRECTORY:INTERNAL="
+	for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+		if line.startswith(prefix):
+			return (
+				normalized_path_text(line[len(prefix):])
+				== normalized_path_text(source)
+			)
+	return False
+
+
+def command_build_lock_recover(args):
+	source = source_root(args.source_root)
+	build = Path(args.build_root).expanduser().resolve()
+	exe = Path(args.exe).expanduser().resolve()
+	if (
+		not build.is_dir()
+		or not path_inside(build, source)
+		or not build_root_matches_source(build, source)
+	):
+		raise WorkspaceError(
+			"Build root must be a configured CMake tree for this checkout: "
+			f"{build}"
+		)
+	if not path_inside(exe, build):
+		raise WorkspaceError(f"Executable is outside the build root: {exe}")
+	artifacts = []
+	for value in args.artifact:
+		path = Path(value).expanduser().resolve()
+		if not path_inside(path, build):
+			raise WorkspaceError(f"Locked artifact is outside the build root: {path}")
+		if path.is_dir():
+			raise WorkspaceError(f"Locked artifact must be a file: {path}")
+		if path not in artifacts:
+			artifacts.append(path)
+	if not 0 <= args.wait <= 60:
+		raise WorkspaceError("--wait must be between 0 and 60 seconds")
+	if args.wait:
+		time.sleep(args.wait)
+
+	exact_exe_killed = kill_processes_with_executable(exe)
+	existing = [path for path in artifacts if path.exists()]
+	holder_pids, holder_query_error = locking_process_ids(existing)
+	records = windows_process_records()
+	recoverable = recoverable_build_processes(
+		records,
+		build,
+		exe,
+		set(holder_pids),
+	)
+	stopped = terminate_process_ids(recoverable)
+	if stopped:
+		time.sleep(1)
+
+	deleted = []
+	already_absent = []
+	delete_errors = {}
+	for path in artifacts:
+		if not path.exists():
+			already_absent.append(str(path))
+			continue
+		try:
+			path.unlink()
+			deleted.append(str(path))
+		except OSError as exception:
+			delete_errors[str(path)] = str(exception)
+
+	remaining = [path for path in artifacts if path.exists()]
+	remaining_holder_pids, remaining_query_error = locking_process_ids(remaining)
+	records_by_pid = {
+		record["pid"]: record for record in windows_process_records()
+	}
+	remaining_holders = [
+		records_by_pid.get(pid, {
+			"pid": pid,
+			"parent_pid": None,
+			"name": "",
+			"executable": "",
+			"command_line": "",
+		})
+		for pid in remaining_holder_pids
+	]
+	safe_to_retry = (
+		not delete_errors
+		and not remaining
+		and not remaining_holders
+	)
+	safety_basis = (
+		"all-named-artifacts-deleted-or-absent"
+		if safe_to_retry
+		else "named-artifact-or-holder-remains"
+	)
+	print(json.dumps({
+		"already_absent": already_absent,
+		"artifacts": [str(path) for path in artifacts],
+		"build_root": str(build),
+		"delete_errors": delete_errors,
+		"deleted": deleted,
+		"exact_exe_killed": exact_exe_killed,
+		"holder_query_error": holder_query_error,
+		"remaining_holder_query_error": remaining_query_error,
+		"remaining_holders": remaining_holders,
+		"safe_to_retry": safe_to_retry,
+		"safety_basis": safety_basis,
+		"stopped_processes": stopped,
+		"wait_seconds": args.wait,
+	}, indent=2, sort_keys=True))
+	if not safe_to_retry:
+		sys.exit(2)
+
+
+def screenshot_marker_path(payload, evidence_dir):
+	# Historical absolute markers and malformed quoted text stay verbatim.
+	if not SCREENSHOT_MARKER_PATTERN.fullmatch(payload):
+		return payload
+
+	def unescape(match):
+		token = match.group(1)
+		return chr(int(token[1:], 16)) if len(token) > 1 else token
+
+	relative = SCREENSHOT_ESCAPE_PATTERN.sub(unescape, payload[1:-1])
+	return str(Path(evidence_dir) / relative)
+
+
+def parse_test_log(text, evidence_dir):
+	steps = []
+	passed = []
+	failed = []
+	screenshots = []
+	for line in text.splitlines():
+		if line.startswith("TEST_STEP: "):
+			steps.append(line[len("TEST_STEP: "):])
+		elif line.startswith("TEST_RESULT: PASS: "):
+			passed.append(line[len("TEST_RESULT: PASS: "):])
+		elif line.startswith("TEST_RESULT: FAIL: "):
+			failed.append(line[len("TEST_RESULT: FAIL: "):])
+		elif line.startswith("SCREENSHOT: "):
+			screenshots.append(screenshot_marker_path(
+				line[len("SCREENSHOT: "):],
+				evidence_dir,
+			))
+	return {
+		"steps": steps,
+		"pass": passed,
+		"fail": failed,
+		"screenshots": screenshots,
+	}
+
+
+def tail_of_file(path, lines=60):
+	if not path.is_file():
+		return None
+	text = path.read_text(encoding="utf-8", errors="replace")
+	return "\n".join(text.splitlines()[-lines:]) if text.strip() else None
+
+
+def parse_env_values(values):
+	environment = {}
+	for value in values or ():
+		if "=" not in value:
+			raise WorkspaceError(f"Invalid --env value (want NAME=VALUE): {value!r}")
+		name, content = value.split("=", 1)
+		if not name:
+			raise WorkspaceError(f"Invalid --env value (empty name): {value!r}")
+		environment[name] = content
+	return environment
+
+
+def console_unsupported_reason():
+	if sys.platform == "darwin":
+		return None
+	return f"console readings need macOS, this host is {sys.platform}"
+
+
+def console_command_output(argv):
+	try:
+		result = subprocess.run(
+			argv,
+			stdin=subprocess.DEVNULL,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			timeout=CONSOLE_COMMAND_TIMEOUT,
+		)
+	except subprocess.TimeoutExpired:
+		return None, f"{argv[0]} timed out after {CONSOLE_COMMAND_TIMEOUT:g} s"
+	except OSError as error:
+		return None, f"{argv[0]} could not run: {error}"
+	if result.returncode:
+		detail = result.stderr.decode("utf-8", "replace").strip() or "no stderr"
+		return None, f"{argv[0]} exited with {result.returncode}: {detail}"
+	return result.stdout, None
+
+
+def plist_dicts(output):
+	data = plistlib.loads(output)
+	entries = data if isinstance(data, list) else [data]
+	return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def console_idle_seconds():
+	output, error = console_command_output(
+		["ioreg", "-r", "-c", "IOHIDSystem", "-d", "1", "-a"]
+	)
+	if output is None:
+		return None, error
+	values = [
+		entry["HIDIdleTime"]
+		for entry in plist_dicts(output)
+		if type(entry.get("HIDIdleTime")) is int
+	]
+	if not values:
+		return None, "ioreg listed no IOHIDSystem HIDIdleTime"
+	return round(min(values) / 1e9, 3), None
+
+
+def console_screen_locked():
+	output, error = console_command_output(["ioreg", "-n", "Root", "-d", "1", "-a"])
+	if output is None:
+		return None, error
+	sessions = [
+		session
+		for root in plist_dicts(output)
+		for session in root.get("IOConsoleUsers") or []
+		if isinstance(session, dict)
+		and session.get("kCGSSessionOnConsoleKey") is True
+	]
+	if not sessions:
+		return None, "ioreg lists no session on the console"
+	locked = any(
+		session.get("CGSSessionScreenIsLocked") is True
+		for session in sessions
+	)
+	return locked, None
+
+
+def console_frontmost_app():
+	output, error = console_command_output(["lsappinfo", "front"])
+	if output is None:
+		return None, error
+	asn = output.decode("utf-8", "replace").strip()
+	if not LSAPPINFO_ASN_PATTERN.fullmatch(asn):
+		return None, f"lsappinfo front named no application: {asn!r}"
+	output, error = console_command_output(
+		["lsappinfo", "info", "-only", "name", asn]
+	)
+	if output is None:
+		return None, error
+	lines = output.decode("utf-8", "replace").splitlines()
+	first = lines[0] if lines else ""
+	match = LSAPPINFO_NAME_PATTERN.match(first)
+	if not match:
+		return None, f"lsappinfo info printed no name: {first!r}"
+	return match.group(1), None
+
+
+def console_value(reader):
+	# a reading never fails the run, and plistlib raises ExpatError, not only ValueError
+	try:
+		return reader()
+	except Exception as error:
+		return None, f"{type(error).__name__}: {error}"
+
+
+def console_input_reading():
+	taken_at = time.time()
+	stamp = datetime.datetime.fromtimestamp(taken_at).astimezone()
+	reading = {"time": stamp.isoformat(timespec="milliseconds")}
+	unsupported = console_unsupported_reason()
+	for key, reader in (
+		("idle_seconds", console_idle_seconds),
+		("screen_locked", console_screen_locked),
+		("frontmost_app", console_frontmost_app),
+	):
+		value, error = (
+			(None, unsupported) if unsupported else console_value(reader)
+		)
+		reading[key] = value
+		reading[f"{key}_error"] = error
+	return taken_at, reading
+
+
+def wait_for_console_idle(required, bound, clock=time.monotonic, sleep=time.sleep):
+	result = {
+		"idle_seconds": None,
+		"idle_seconds_error": None,
+		"max_seconds": bound,
+		"met": None,
+		"required_seconds": required,
+		"skipped": console_unsupported_reason(),
+		"waited_seconds": 0.0,
+	}
+	if result["skipped"]:
+		return result
+	start = clock()
+	while True:
+		polled = clock()
+		idle, error = console_value(console_idle_seconds)
+		now = clock()
+		result["idle_seconds"] = idle
+		result["idle_seconds_error"] = error
+		if idle is None:
+			break
+		if idle >= required:
+			result["met"] = True
+			break
+		# a floor so a rounding-sized deficit still advances the clock
+		pause = max(required - idle, 0.01)
+		remaining = bound - (now - start)
+		if pause + (now - polled) >= remaining:
+			# WHY: idle time grows no faster than the clock, so the bound
+			# passes before the requirement can be met; sleep it out.
+			sleep(max(remaining, 0.0))
+			result["met"] = False
+			break
+		sleep(pause)
+	result["waited_seconds"] = round(clock() - start, 3)
+	return result
+
+
+def host_load_parameters(args):
+	if not args.host_load:
+		return None
+	if not 0 < args.host_load_threshold <= 100:
+		raise WorkspaceError(
+			"--host-load-threshold must be a percent above 0 and at most 100"
+		)
+	if not 0 < args.host_load_hold < float("inf"):
+		raise WorkspaceError("--host-load-hold must be a positive number of seconds")
+	if not 0 <= args.host_load_max < float("inf"):
+		raise WorkspaceError("--host-load-max must be zero or more seconds")
+	if not HOST_LOAD_INTERVAL_MIN <= args.host_load_interval < float("inf"):
+		raise WorkspaceError(
+			f"--host-load-interval must be at least {HOST_LOAD_INTERVAL_MIN:g} "
+			"seconds and finite"
+		)
+	return {
+		"hold_seconds": float(args.host_load_hold),
+		"interval_seconds": float(args.host_load_interval),
+		"max_seconds": float(args.host_load_max),
+		"threshold_percent": float(args.host_load_threshold),
+	}
+
+
+def host_load_unsupported_reason(platform=None):
+	platform = sys.platform if platform is None else platform
+	if platform in ("win32", "darwin"):
+		return None
+	return f"host-load sampling needs Windows or macOS, this host is {platform}"
+
+
+def host_load_tools_json(seen):
+	return [
+		{"name": name, "pid": pid}
+		for name, pid in sorted(seen, key=lambda tool: (tool[0].casefold(), tool[1]))
+	]
+
+
+def host_load_sample_json(sample, **extra):
+	serialized = {
+		"build_tools": sample["build_tools"],
+		"others_percent": round(sample["others_percent"], 2),
+		"seconds": round(sample["seconds"], 3),
+		"top": [
+			{**entry, "percent": round(entry["percent"], 2)}
+			for entry in sample["top"]
+		],
+		**extra,
+	}
+	if "unattributed_percent" in sample:
+		serialized["unattributed_percent"] = round(sample["unattributed_percent"], 2)
+	return serialized
+
+
+def host_load_error(error):
+	return f"{type(error).__name__}: {error}"
+
+
+class HostLoadMonitor:
+	def __init__(self, parameters, background_exe=None):
+		self.parameters = parameters
+		self.threshold = parameters["threshold_percent"]
+		self.hold = parameters["hold_seconds"]
+		self.bound = parameters["max_seconds"]
+		self.interval = parameters["interval_seconds"]
+		self.unsupported = host_load_unsupported_reason()
+		self.build_tools = (
+			HOST_LOAD_MACOS_BUILD_TOOLS
+			if sys.platform == "darwin"
+			else HOST_LOAD_BUILD_TOOLS
+		)
+		self.background_exe = None if background_exe is None else str(background_exe)
+		self.processors = os.cpu_count()
+		self.test_run_pid = os.getpid()
+		self.size = HOST_LOAD_SNAPSHOT_SIZE
+		self.previous = None
+		self.client_pid = None
+		self.launcher_created = None
+		self.client_root_checked = False
+		self.client = {}
+		self.incarnations = {}
+		self.wait_result = None
+		self.wait_samples = []
+		self.wait_tools = set()
+		self.trace_origin = None
+		self.trace_samples = []
+		self.trace_tools = set()
+		self.trace_error = None
+		self.stop_event = threading.Event()
+		self.worker = None
+
+	def _excluded(self, pid, record):
+		return pid == self.test_run_pid or (pid, record["created"]) in self.client
+
+	def _client_child(self, record):
+		parent = record["parent_pid"]
+		earlier = [
+			created
+			for created in self.incarnations.get(parent, ())
+			if created <= record["created"]
+		]
+		return bool(earlier) and (parent, max(earlier)) in self.client
+
+	def _grow_background(self, records):
+		if self.launcher_created is None:
+			return
+		live = {
+			(pid, record["created"])
+			for pid, record in records.items()
+			if (pid, record["created"]) in self.client
+		}
+		candidates = sorted(
+			(record["created"], pid)
+			for pid, record in records.items()
+			if record["created"] > self.launcher_created
+		)
+		for created, pid in candidates:
+			identity = (pid, created)
+			if identity in self.client:
+				continue
+			if not self._client_child(records[pid]):
+				details = macos_process_details(pid)
+				# WHY: launchd starts the client's helpers with ppid 1 and their own
+				# executables, so only the responsible process ties them to it; an
+				# identity alive in this reading cannot be a reused pid.
+				if details["created"] != created or (
+					details["path"] != self.background_exe
+					and details["responsible"] not in live
+				):
+					continue
+			self.client[identity] = records[pid]["name"]
+			live.add(identity)
+
+	def _grow_client(self, records):
+		if self.client_pid is None:
+			return
+		if not self.client_root_checked:
+			root = records.get(self.client_pid)
+			if root is not None:
+				self.client[(self.client_pid, root["created"])] = root["name"]
+				self.launcher_created = root["created"]
+			self.client_root_checked = root is not None or self.background_exe is None
+		for pid, record in records.items():
+			self.incarnations.setdefault(pid, set()).add(record["created"])
+		if self.background_exe is not None:
+			self._grow_background(records)
+			return
+		grown = True
+		while grown:
+			grown = False
+			for pid, record in records.items():
+				identity = (pid, record["created"])
+				if identity not in self.client and self._client_child(record):
+					self.client[identity] = record["name"]
+					grown = True
+
+	@staticmethod
+	def _delta(record, prior):
+		if prior is None or prior["created"] != record["created"]:
+			return record["cpu"]
+		if record["cpu"] is None or prior["cpu"] is None:
+			return None
+		return record["cpu"] - prior["cpu"]
+
+	def _observe(self, clock):
+		previous, self.previous = self.previous, None
+		count = self.processors
+		if type(count) is not int or count < 1:
+			raise ValueError(f"the logical processor count is unknown: {count!r}")
+		self.size, records, busy = host_process_snapshot(self.size)
+		taken = clock()
+		self._grow_client(records)
+		others = {
+			pid: record
+			for pid, record in records.items()
+			if not self._excluded(pid, record)
+		}
+		tools = sorted(
+			(
+				{"name": record["name"], "pid": pid}
+				for pid, record in others.items()
+				if record["name"].casefold() in self.build_tools
+			),
+			key=lambda tool: (tool["name"].casefold(), tool["pid"]),
+		)
+		percent = top = unattributed = None
+		if previous is not None:
+			before, prior_records, prior_busy = previous
+			elapsed = taken - before
+			if not elapsed > 0:
+				raise ValueError(f"the clock did not advance between snapshots: {elapsed!r}")
+			scale = elapsed * 1e7 * count
+			readable = excluded = 0
+			deltas = []
+			for pid, record in records.items():
+				delta = self._delta(record, prior_records.get(pid))
+				if delta is None or delta <= 0:
+					continue
+				readable += delta
+				if pid in others:
+					deltas.append((delta, pid, record["name"]))
+				else:
+					excluded += delta
+			if busy is None or prior_busy is None:
+				percent = 100 * sum(delta for delta, _, _ in deltas) / scale
+			else:
+				machine = busy - prior_busy
+				if machine < 0:
+					raise ValueError(f"the machine CPU counter went backwards: {machine!r}")
+				percent = 100 * max(0, machine - excluded) / scale
+				unattributed = 100 * max(0, machine - readable) / scale
+			deltas.sort(key=lambda item: (-item[0], item[1]))
+			top = [
+				{"name": name, "percent": 100 * delta / scale, "pid": pid}
+				for delta, pid, name in deltas[:HOST_LOAD_TOP]
+			]
+		self.previous = (taken, records, busy)
+		return taken, tools, percent, top, unattributed
+
+	def wait(self, clock=time.monotonic, sleep=time.sleep):
+		if self.unsupported:
+			return None
+		met = None
+		error = None
+		self.previous = None
+		start = clock()
+		calm_since = None
+		while True:
+			try:
+				taken, tools, percent, top, unattributed = self._observe(clock)
+			except Exception as failure:
+				error = host_load_error(failure)
+				break
+			self.wait_tools.update((tool["name"], tool["pid"]) for tool in tools)
+			elapsed = taken - start
+			if percent is None:
+				calm_since = taken
+			else:
+				sample = {
+					"build_tools": tools,
+					"others_percent": percent,
+					"seconds": elapsed,
+					"top": top,
+				}
+				if unattributed is not None:
+					sample["unattributed_percent"] = unattributed
+				self.wait_samples.append(sample)
+				if tools or percent >= self.threshold:
+					calm_since = taken
+				elif taken - calm_since >= self.hold and elapsed <= self.bound:
+					met = True
+					break
+			remaining = self.bound - elapsed
+			if remaining <= 0:
+				met = False
+				break
+			sleep(min(self.interval, remaining))
+		self.wait_result = {
+			"build_tools_seen": host_load_tools_json(self.wait_tools),
+			"error": error,
+			"last_samples": [
+				host_load_sample_json(sample)
+				for sample in self.wait_samples[-HOST_LOAD_LAST_SAMPLES:]
+			],
+			"met": met,
+			"waited_seconds": round(clock() - start, 3),
+		}
+		return self.wait_result
+
+	def start_trace(self, process):
+		if self.unsupported:
+			return
+		self.client_pid = process.pid
+		self.trace_origin = time.monotonic()
+		self.previous = None
+		try:
+			self._observe(time.monotonic)
+			self.worker = threading.Thread(
+				target=self._trace,
+				args=(process,),
+				name="host-load-trace",
+				daemon=True,
+			)
+			self.worker.start()
+		except Exception as failure:
+			self.trace_error = host_load_error(failure)
+
+	def _trace(self, process):
+		while not self.stop_event.wait(self.interval):
+			try:
+				if process.poll() is not None:
+					return
+				taken, tools, percent, top, unattributed = self._observe(time.monotonic)
+			except Exception as failure:
+				self.trace_error = host_load_error(failure)
+				return
+			self.trace_tools.update((tool["name"], tool["pid"]) for tool in tools)
+			sample = {
+				"build_tools": tools,
+				"others_percent": percent,
+				"seconds": taken - self.trace_origin,
+				"top": top,
+			}
+			if unattributed is not None:
+				sample["unattributed_percent"] = unattributed
+			self.trace_samples.append(sample)
+
+	def stop_trace(self):
+		self.stop_event.set()
+		if self.worker is not None and self.worker.is_alive():
+			self.worker.join()
+
+	def report(self, run_dir):
+		self.stop_trace()
+		report = {
+			**self.parameters,
+			"excluded": None,
+			"logical_processors": None,
+			"samples_file": None,
+			"samples_file_error": None,
+			"trace": None,
+			"unsupported": self.unsupported,
+			"wait": None,
+		}
+		if self.unsupported:
+			return report
+		values = [sample["others_percent"] for sample in self.trace_samples]
+		report.update({
+			"excluded": {
+				"client_pid": self.client_pid,
+				"client_processes": [
+					{"name": name, "pid": pid}
+					for (pid, _), name in sorted(self.client.items())
+				],
+				"test_run_pid": self.test_run_pid,
+			},
+			"logical_processors": self.processors,
+			"trace": {
+				"build_tools_seen": host_load_tools_json(self.trace_tools),
+				"error": self.trace_error,
+				"max_percent": round(max(values), 2) if values else None,
+				"mean_percent": round(sum(values) / len(values), 2) if values else None,
+				"over_threshold": sum(value >= self.threshold for value in values),
+				"samples": len(values),
+			},
+			"wait": self.wait_result,
+		})
+		path = run_dir / HOST_LOAD_SAMPLES_FILE
+		lines = [
+			json.dumps(host_load_sample_json(sample, phase=phase), sort_keys=True)
+			for phase, samples in (
+				("wait", self.wait_samples),
+				("trace", self.trace_samples),
+			)
+			for sample in samples
+		]
+		try:
+			path.write_bytes("".join(line + "\n" for line in lines).encode("utf-8"))
+			report["samples_file"] = str(path)
+		except OSError as failure:
+			report["samples_file_error"] = host_load_error(failure)
+		return report
+
+
+def command_test_run(args):
+	extra_environment = parse_env_values(args.env)
+	if LAUNCH_ACTIVATION_VARIABLE in extra_environment:
+		raise WorkspaceError(
+			f"--env cannot set {LAUNCH_ACTIVATION_VARIABLE}: test-run sets it to "
+			"launch the client without activating it, and --activate removes it"
+		)
+	if args.wait_idle is not None:
+		if not 0 < args.wait_idle < float("inf"):
+			raise WorkspaceError("--wait-idle must be a positive number of seconds")
+		if not 0 <= args.wait_idle_max < float("inf"):
+			raise WorkspaceError("--wait-idle-max must be zero or more seconds")
+	host_load = host_load_parameters(args)
+	exe = resolved_exe(args.exe)
+	run_dir = Path(args.run_dir).expanduser().resolve()
+	run_dir.mkdir(parents=True, exist_ok=True)
+	(run_dir / "screenshots").mkdir(exist_ok=True)
+	portable = portable_root_for(exe, args.portable_root)
+	if args.wait_idle is not None:
+		golden_test_account(portable)
+	wait_idle = (
+		wait_for_console_idle(args.wait_idle, args.wait_idle_max)
+		if args.wait_idle is not None
+		else None
+	)
+	account = setup_test_account(portable)
+	stragglers = kill_processes_with_executable(exe)
+
+	log_path = run_dir / TEST_LOG_FILE
+	if log_path.exists():
+		log_path.unlink()
+
+	environment = os.environ.copy()
+	environment["TDESKTOP_TEST_EVIDENCE_DIR"] = str(run_dir)
+	if args.activate:
+		environment.pop(LAUNCH_ACTIVATION_VARIABLE, None)
+	else:
+		environment[LAUNCH_ACTIVATION_VARIABLE] = "1"
+	environment.update(extra_environment)
+
+	cleared = (
+		clear_stale_crash_state(
+			portable / PORTABLE_LIVE, run_dir / STALE_CRASH_DIR
+		)
+		if account == "reused-marked-live"
+		else []
+	)
+
+	stdout_path = run_dir / "app_stdout.txt"
+	stderr_path = run_dir / "app_stderr.txt"
+	working = portable / PORTABLE_LIVE / "tdata" / "working"
+	dumps_dir = portable / PORTABLE_LIVE / "tdata" / "dumps"
+	completed_dir = dumps_dir / CRASHPAD_COMPLETED_DIR
+	completed_before = set(completed_dir.glob("*.dmp"))
+	dumps_before = set(dumps_dir.glob("*.dmp"))
+	working_before = working.stat().st_mtime_ns if working.is_file() else None
+
+	workdir = (portable / PORTABLE_LIVE) if args.portable_root else None
+	launch_args = ["-testagent", "-noupdate"]
+	if workdir is not None:
+		launch_args += ["-workdir", str(workdir)]
+	bundle = None if args.activate else background_launch_bundle(exe)
+	if bundle is None:
+		launch = [str(exe), *launch_args]
+	else:
+		# AppKit's launch event activates an exec'd client, not one launched by open -g
+		stdout_path.write_bytes(b"")
+		stderr_path.write_bytes(b"")
+		launch = [
+			MACOS_OPEN_TOOL, "-g", "-n", "-W", "-a", str(bundle),
+			"--stdout", str(stdout_path), "--stderr", str(stderr_path),
+			"--args", *launch_args,
+		]
+
+	monitor = (
+		HostLoadMonitor(host_load, None if bundle is None else exe)
+		if host_load is not None
+		else None
+	)
+	if monitor is not None:
+		monitor.wait()
+	_, input_before = console_input_reading()
+	launched_at = time.time()
+	with executable_killed_on_abort(exe), contextlib.ExitStack() as streams:
+		if bundle is None:
+			out = streams.enter_context(stdout_path.open("wb"))
+			err = streams.enter_context(stderr_path.open("wb"))
+		else:
+			out = streams.enter_context((run_dir / "launcher_output.txt").open("wb"))
+			err = subprocess.STDOUT
+		process = subprocess.Popen(
+			launch,
+			stdout=out,
+			stderr=err,
+			env=environment,
+			cwd=str(portable),
+		)
+		if monitor is not None:
+			streams.callback(monitor.stop_trace)
+			monitor.start_trace(process)
+		outcome = None
+		exit_code = None
+		complete_seen_at = None
+		last_size = -1
+		last_change = launched_at
+		while True:
+			time.sleep(0.5)
+			now = time.time()
+			size = log_path.stat().st_size if log_path.is_file() else -1
+			if size != last_size:
+				last_size = size
+				last_change = now
+			complete = False
+			if size > 0:
+				complete = TEST_COMPLETE_MARKER in log_path.read_text(
+					encoding="utf-8", errors="replace"
+				)
+			if complete and complete_seen_at is None:
+				complete_seen_at = now
+			exit_code = process.poll()
+			if exit_code is not None:
+				outcome = "exited"
+				break
+			if complete_seen_at is not None and now - complete_seen_at > args.grace:
+				process.kill()
+				outcome = "killed-after-complete"
+				break
+			if now - launched_at > args.deadline:
+				process.kill()
+				outcome = "deadline-killed"
+				break
+			if now - last_change > args.quiet and complete_seen_at is None:
+				process.kill()
+				outcome = "quiet-killed"
+				break
+		process.wait()
+		ended_at = time.time()
+		if monitor is not None:
+			monitor.stop_trace()
+		stragglers_after = kill_processes_with_executable(exe)
+	launcher_exit_code = None
+	if bundle is not None:
+		# open -W exits 0 whatever the client's status, so only open's own is known
+		launcher_exit_code, exit_code = exit_code, None
+
+	log_text = (
+		log_path.read_text(encoding="utf-8", errors="replace")
+		if log_path.is_file()
+		else ""
+	)
+	test_complete = TEST_COMPLETE_MARKER in log_text
+	crash_report_fresh = (
+		working.is_file()
+		and working.stat().st_mtime_ns != working_before
+		and working.stat().st_size > 0
+	)
+	dumps = sorted(
+		str(path)
+		for path in set(dumps_dir.glob("*.dmp")) - dumps_before
+	) if dumps_dir.is_dir() else []
+	crashpad_dumps_added = sorted(
+		str(path)
+		for path in set(completed_dir.glob("*.dmp")) - completed_before
+	)
+	death_signals = []
+	if dumps:
+		death_signals.append("breakpad_dump")
+	if crashpad_dumps_added:
+		death_signals.append("crashpad_dump")
+	if outcome == "exited" and exit_code:
+		death_signals.append("exit_code")
+	after_complete = "died-after-complete" if death_signals else "complete"
+	if outcome == "exited":
+		if test_complete:
+			verdict_hint = after_complete
+		elif crash_report_fresh or dumps:
+			verdict_hint = "crash"
+		else:
+			verdict_hint = "died-without-complete"
+	elif outcome == "killed-after-complete":
+		verdict_hint = after_complete
+	else:
+		verdict_hint = "hang"
+
+	after_at, input_after = console_input_reading()
+	input_after["seconds_since_launch"] = round(after_at - launched_at, 3)
+	input_during_run = (
+		input_after["idle_seconds"] < input_after["seconds_since_launch"]
+		if input_before["idle_seconds"] is not None
+		and input_after["idle_seconds"] is not None
+		else None
+	)
+	host_load_report = monitor.report(run_dir) if monitor is not None else None
+
+	print(json.dumps({
+		"account": account,
+		"crash_report": str(working) if working.is_file() else None,
+		"crash_report_excerpt": (
+			working.read_text(encoding="utf-8", errors="replace")[:4000]
+			if crash_report_fresh
+			else None
+		),
+		"crash_report_fresh": crash_report_fresh,
+		"crashpad_dumps_added": crashpad_dumps_added,
+		"death_signals": death_signals,
+		"dumps": dumps,
+		"duration_seconds": round(ended_at - launched_at, 1),
+		"exe": str(exe),
+		"exit_code": exit_code,
+		"golden_root": str(portable_root_for(exe, None) / PORTABLE_GOLDEN),
+		"host_load": host_load_report,
+		"input_after": input_after,
+		"input_before": input_before,
+		"input_during_run": input_during_run,
+		"launch_activation": "allowed" if args.activate else "suppressed",
+		"launch_method": "exec" if bundle is None else "background",
+		"launcher_exit_code": launcher_exit_code,
+		"log_path": str(log_path) if log_path.is_file() else None,
+		"markers": parse_test_log(log_text, run_dir),
+		"outcome": outcome,
+		"portable_root": str(portable),
+		"run_dir": str(run_dir),
+		"stale_crash_cleared": cleared,
+		"stderr_tail": tail_of_file(stderr_path),
+		"stragglers_killed": stragglers,
+		"stragglers_killed_after": stragglers_after,
+		"test_complete": test_complete,
+		"verdict_hint": verdict_hint,
+		"wait_idle": wait_idle,
+		"workdir": str(workdir) if workdir is not None else None,
+	}, indent=2, sort_keys=True))
+
+
+def command_test_cleanup(args):
+	exe = Path(args.exe).expanduser().resolve()
+	killed = kill_processes_with_executable(exe)
+	deleted = False
+	if args.delete_exe and exe.is_file():
+		exe.unlink()
+		deleted = True
+	print(json.dumps({
+		"deleted_exe": deleted,
+		"exe": str(exe),
+		"killed": killed,
+	}, indent=2, sort_keys=True))
+
+
+def command_test_account_reset(args):
+	exe = resolved_exe(args.exe)
+	kill_processes_with_executable(exe)
+	portable = portable_root_for(exe, args.portable_root)
+	account = reset_broken_test_account(portable)
+	print(json.dumps({
+		"account": account,
+		"portable_root": str(portable),
+	}, indent=2, sort_keys=True))
+
+
+def overlay_work_dir(config, slot, task_id):
+	work = slot / task_relative_dir(task_id) / "work"
+	if not work.is_dir():
+		raise WorkspaceError(f"Task work directory does not exist: {work}")
+	return work
+
+
+def read_overlay_paths(work):
+	paths_file = work / OVERLAY_PATHS_FILE
+	if not paths_file.is_file():
+		raise WorkspaceError(f"Missing overlay inventory: {paths_file}")
+	paths = [
+		line.strip() for line in
+		paths_file.read_text(encoding="utf-8-sig").splitlines()
+		if line.strip()
+	]
+	if not paths:
+		raise WorkspaceError(f"Empty overlay inventory: {paths_file}")
+	return paths
+
+
+def initialized_submodule_paths(source):
+	source = Path(source).resolve()
+	result = []
+	for path in indexed_gitlinks(source):
+		module = Path(source) / path
+		if module.resolve() != module or is_linked_worktree(source, path + "/"):
+			raise WorkspaceError(
+				"Submodule path is a symlink or registered linked worktree: " + path
+			)
+		if not (module / ".git").exists():
+			continue
+		result.append(path)
+		result.extend(
+			f"{path}/{value}" for value in initialized_submodule_paths(module)
+		)
+	return sorted(result, key=lambda path: (-path.count("/"), path))
+
+
+def overlay_inventory_groups(source, inventory):
+	submodules = initialized_submodule_paths(source)
+	groups = {"": []}
+	for value in inventory:
+		path = PurePosixPath(value)
+		if path.is_absolute() or not path.parts or ".." in path.parts:
+			raise WorkspaceError(f"Invalid overlay inventory path: {value!r}")
+		value = path.as_posix()
+		if value in submodules:
+			raise WorkspaceError(
+				"Overlay inventory must name a tracked file inside the "
+				"submodule, not its gitlink: " + value
+			)
+		owner = next(
+			(
+				submodule for submodule in submodules
+				if value.startswith(submodule + "/")
+			),
+			"",
+		)
+		local = value[len(owner) + 1:] if owner else value
+		repository = source / owner if owner else source
+		tracked = run_git(
+			repository,
+			"ls-files",
+			"--error-unmatch",
+			"--",
+			local,
+			check=False,
+		)
+		if tracked.returncode:
+			raise WorkspaceError(
+				"Overlay inventory paths must be tracked files: " + value
+			)
+		groups.setdefault(owner, []).append(local)
+	return groups, submodules
+
+
+def overlay_coverage(inventory, repository_path):
+	if not repository_path:
+		return inventory
+	prefix = repository_path + "/"
+	return [
+		path[len(prefix):]
+		for path in inventory
+		if path.startswith(prefix)
+	]
+
+
+def overlay_outside_inventory(source, inventory, submodules):
+	outside = []
+	for repository_path in [""] + submodules:
+		repository = source / repository_path if repository_path else source
+		coverage = overlay_coverage(inventory, repository_path)
+		dirty = source_changed_paths(repository)
+		gitlinks = set(gitlink_paths(repository, dirty))
+		for path in dirty:
+			covered = path_is_covered(path, coverage)
+			covered_gitlink = (
+				path in gitlinks
+				and any(value.startswith(path + "/") for value in coverage)
+			)
+			if covered or covered_gitlink:
+				continue
+			outside.append(
+				f"{repository_path}/{path}" if repository_path else path
+			)
+	return outside
+
+
+def clear_overlay_submodule_bundle(work):
+	manifest = work / OVERLAY_SUBMODULES_FILE
+	patches = work / OVERLAY_SUBMODULES_DIR
+	if manifest.is_file():
+		manifest.unlink()
+	if patches.is_dir():
+		shutil.rmtree(patches)
+
+
+def read_overlay_submodule_bundle(work):
+	manifest = work / OVERLAY_SUBMODULES_FILE
+	if not manifest.is_file():
+		return []
+	data = json.loads(manifest.read_text(encoding="utf-8"))
+	if data.get("version") != 1 or not isinstance(data.get("submodules"), list):
+		raise WorkspaceError(f"Invalid overlay submodule manifest: {manifest}")
+	result = []
+	seen = set()
+	for entry in data["submodules"]:
+		if not isinstance(entry, dict):
+			raise WorkspaceError(f"Invalid overlay submodule entry: {entry!r}")
+		repository = PurePosixPath(str(entry.get("path", "")))
+		patch = PurePosixPath(str(entry.get("patch", "")))
+		if (
+			repository.is_absolute()
+			or not repository.parts
+			or ".." in repository.parts
+			or patch.is_absolute()
+			or not patch.parts
+			or ".." in patch.parts
+			or patch.parts[0] != OVERLAY_SUBMODULES_DIR
+		):
+			raise WorkspaceError(f"Invalid overlay submodule entry: {entry!r}")
+		repository_value = repository.as_posix()
+		if repository_value in seen:
+			raise WorkspaceError(
+				"Duplicate overlay submodule entry: " + repository_value
+			)
+		seen.add(repository_value)
+		result.append({
+			"patch": patch.as_posix(),
+			"path": repository_value,
+		})
+	return result
+
+
+def command_overlay_save(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	work = overlay_work_dir(config, slot, args.task)
+	inventory = read_overlay_paths(work)
+	groups, submodules = overlay_inventory_groups(source, inventory)
+	outside = overlay_outside_inventory(source, inventory, submodules)
+	if outside:
+		raise WorkspaceError(
+			"Dirty source paths are outside the overlay inventory: "
+			+ ", ".join(outside)
+		)
+	root_paths = groups.get("", [])
+	patch = (
+		run_git_binary(source, "diff", "--binary", "HEAD", "--", *root_paths)
+		if root_paths
+		else b""
+	)
+	submodule_candidates = []
+	for repository_path, paths in groups.items():
+		if not repository_path:
+			continue
+		repository_patch = run_git_binary(
+			source / repository_path, "diff", "--binary", "HEAD", "--", *paths
+		)
+		if not repository_patch.strip():
+			continue
+		name = hashlib.sha256(repository_path.encode("utf-8")).hexdigest()[:16]
+		submodule_candidates.append((repository_path, name, repository_patch))
+	if not patch.strip() and not submodule_candidates:
+		raise WorkspaceError("The overlay diff is empty; nothing to save")
+	with tempfile.TemporaryDirectory() as staging_dir:
+		staging = Path(staging_dir)
+		checks = []
+		if patch.strip():
+			staged = staging / "root.patch"
+			staged.write_bytes(patch)
+			checks.append((source, staged))
+		for repository_path, name, repository_patch in submodule_candidates:
+			staged = staging / f"{name}.patch"
+			staged.write_bytes(repository_patch)
+			checks.append((source / repository_path, staged))
+		for repository, saved_patch in checks:
+			check = subprocess.run(
+				[
+					"git", "-C", str(repository), "apply", "--check",
+					"--reverse", str(saved_patch),
+				],
+				stdout=subprocess.PIPE,
+				stderr=subprocess.PIPE,
+				text=True,
+			)
+			if check.returncode:
+				raise WorkspaceError(
+					"The saved overlay patch does not verify: "
+					+ check.stderr.strip()
+				)
+	clear_overlay_submodule_bundle(work)
+	patch_path = work / OVERLAY_PATCH_FILE
+	if patch.strip():
+		patch_path.write_bytes(patch)
+	else:
+		patch_path.unlink(missing_ok=True)
+	submodule_entries = []
+	patches_dir = work / OVERLAY_SUBMODULES_DIR
+	for repository_path, name, repository_patch in submodule_candidates:
+		patches_dir.mkdir(parents=True, exist_ok=True)
+		relative_patch = f"{OVERLAY_SUBMODULES_DIR}/{name}.patch"
+		(work / relative_patch).write_bytes(repository_patch)
+		submodule_entries.append({
+			"patch": relative_patch,
+			"path": repository_path,
+		})
+	if submodule_entries:
+		(work / OVERLAY_SUBMODULES_FILE).write_text(
+			json.dumps({
+				"submodules": submodule_entries,
+				"version": 1,
+			}, indent=2, sort_keys=True) + "\n",
+			encoding="utf-8",
+		)
+	restored = []
+	if args.restore != "none":
+		ref = source_task_ref(args.task, args.restore)
+		if resolved_ref(source, ref) is None:
+			raise WorkspaceError(f"Missing task ref for restore: {ref}")
+		for repository_path, paths in sorted(
+			groups.items(), key=lambda item: -item[0].count("/")
+		):
+			if not repository_path:
+				continue
+			run_git(source / repository_path, "checkout", "HEAD", "--", *paths)
+		if root_paths:
+			run_git(source, "checkout", ref, "--", *root_paths)
+		restored = inventory
+		remaining = []
+		for repository_path, paths in groups.items():
+			repository = source / repository_path if repository_path else source
+			remaining.extend(
+				(
+					f"{repository_path}/{path}"
+					if repository_path else path
+				)
+				for path in source_changed_paths(repository)
+				if path_is_covered(path, paths)
+			)
+		if remaining:
+			raise WorkspaceError(
+				"Overlay paths remain dirty after restore: "
+				+ ", ".join(remaining)
+			)
+	print(json.dumps({
+		"patch": str(patch_path) if patch.strip() else None,
+		"patch_bytes": len(patch) + sum(
+			(work / entry["patch"]).stat().st_size
+			for entry in submodule_entries
+		),
+		"restored": restored,
+		"submodules": [entry["path"] for entry in submodule_entries],
+		"task": args.task,
+	}, indent=2, sort_keys=True))
+
+
+def command_overlay_apply(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	work = overlay_work_dir(config, slot, args.task)
+	patch_path = work / OVERLAY_PATCH_FILE
+	submodule_entries = read_overlay_submodule_bundle(work)
+	root_patch = patch_path.is_file() and patch_path.stat().st_size
+	if not root_patch and not submodule_entries:
+		raise WorkspaceError(f"Missing overlay patch: {patch_path}")
+	inventory = read_overlay_paths(work)
+	groups, submodules = overlay_inventory_groups(source, inventory)
+	for entry in submodule_entries:
+		if entry["path"] not in groups or entry["path"] not in submodules:
+			raise WorkspaceError(
+				"Overlay submodule manifest is outside the inventory: "
+				+ entry["path"]
+			)
+		if not (work / entry["patch"]).is_file():
+			raise WorkspaceError(
+				"Missing overlay submodule patch: " + entry["patch"]
+			)
+	applications = []
+	if root_patch:
+		applications.append(("", source, patch_path))
+	applications.extend(
+		(entry["path"], source / entry["path"], work / entry["patch"])
+		for entry in submodule_entries
+	)
+	conflicts = []
+	errors = []
+	for repository_path, repository, saved_patch in applications:
+		result = subprocess.run(
+			[
+				"git", "-C", str(repository), "apply", "--3way",
+				str(saved_patch),
+			],
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True,
+		)
+		if result.returncode:
+			errors.append(
+				f"{repository_path or '.'}: {result.stderr.strip()}"
+			)
+		for path in literal_paths(
+			repository, "diff", "--name-only", "--diff-filter=U"
+		):
+			conflicts.append(
+				f"{repository_path}/{path}" if repository_path else path
+			)
+	outside = overlay_outside_inventory(source, inventory, submodules)
+	applied = not errors and not conflicts and not outside
+	print(json.dumps({
+		"applied": applied,
+		"conflicts": conflicts,
+		"error": "\n".join(errors) if errors else None,
+		"outside_inventory": outside,
+		"submodules": [entry["path"] for entry in submodule_entries],
+		"task": args.task,
+	}, indent=2, sort_keys=True))
+
+
+def gitlink_paths(source, paths):
+	result = []
+	for path in paths:
+		entry = run_git(source, "ls-files", "-s", "--", path).stdout
+		if entry.startswith("160000 "):
+			result.append(path)
+	return result
+
+
+def mirror_source_head(config):
+	tag = config.get("checkout_tag")
+	if not tag:
+		return {"pushed": False, "skipped": "no checkout tag"}
+	source = Path(config["source_root"])
+	remotes = run_git(source, "remote").stdout.split()
+	if MIRROR_REMOTE not in remotes:
+		return {"pushed": False, "skipped": f"no {MIRROR_REMOTE} remote"}
+	branch = MIRROR_BRANCH_PREFIX + tag
+	result = {"remote": MIRROR_REMOTE, "branch": branch}
+	try:
+		push = subprocess.run(
+			[
+				"git", "-C", str(source), "push", "--force", "--quiet",
+				MIRROR_REMOTE, f"HEAD:refs/heads/{branch}",
+			],
+			stdin=subprocess.DEVNULL,
+			stdout=subprocess.PIPE,
+			stderr=subprocess.PIPE,
+			text=True,
+			timeout=MIRROR_PUSH_TIMEOUT,
+			env={
+				**os.environ,
+				"GIT_TERMINAL_PROMPT": "0",
+				"GCM_INTERACTIVE": "never",
+			},
+		)
+	except subprocess.TimeoutExpired:
+		return {
+			**result,
+			"pushed": False,
+			"error": f"push timed out after {MIRROR_PUSH_TIMEOUT:g} s",
+		}
+	if push.returncode:
+		return {
+			**result,
+			"pushed": False,
+			"error": push.stderr.strip() or push.stdout.strip(),
+		}
+	return {**result, "pushed": True}
+
+
+def command_source_commit(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	subject = args.subject.strip()
+	if not subject or "\n" in subject:
+		raise WorkspaceError("The commit subject must be a single non-empty line")
+	if len(subject) > 72:
+		raise WorkspaceError(
+			f"The commit subject is too long ({len(subject)} > 72 characters)"
+		)
+	work = slot / task_relative_dir(args.task) / "work"
+	owned_file = work / "owned-paths.txt"
+	if not owned_file.is_file():
+		raise WorkspaceError(f"Missing owned-paths inventory: {owned_file}")
+	owned = [
+		line.strip() for line in
+		owned_file.read_text(encoding="utf-8-sig").splitlines()
+		if line.strip()
+	]
+	if not owned:
+		raise WorkspaceError(f"Empty owned-paths inventory: {owned_file}")
+	source_note = f"tasks/{args.task}.md"
+	carried_from = load_state(slot, state_path(slot, args.task))["carried_from"]
+	allowed = owned + [source_note]
+	if carried_from is not None:
+		allowed.append(f"tasks/{carried_from}.md")
+	dirty = source_changed_paths(source)
+	if not dirty:
+		raise WorkspaceError("The source checkout has no changes to commit")
+	outside = [
+		path for path in dirty
+		if not path_is_covered(path, allowed)
+	]
+	if outside:
+		raise WorkspaceError(
+			"Dirty source paths are outside the owned write set: "
+			+ ", ".join(outside)
+		)
+	submodules = gitlink_paths(source, dirty)
+	if submodules:
+		raise WorkspaceError(
+			"Submodule pointers must be committed explicitly first: "
+			+ ", ".join(submodules)
+		)
+	for path in dirty:
+		if path_is_stageable(source, path):
+			run_git(source, "add", "--", path)
+	run_git(
+		source,
+		"commit",
+		"-m",
+		f"{subject}\n\nTask: {args.task}",
+	)
+	validate_task_commit(source, "HEAD", args.task)
+	if args.mark_green:
+		mark_source_green(config, args.task)
+	mirror = mirror_source_head(config)
+	print(json.dumps({
+		"committed": dirty,
+		"marked_green": bool(args.mark_green),
+		"mirror": mirror,
+		"subject": subject,
+		"task": args.task,
+	}, indent=2, sort_keys=True))
+
+
+def command_source_verify_commit(args):
+	source = source_root(args.source_root)
+	validate_task_commit(source, args.ref, args.task)
+	subject = run_git(
+		source, "show", "-s", "--format=%s", args.ref
+	).stdout.strip()
+	print(json.dumps({
+		"ref": args.ref,
+		"subject": subject,
+		"task": args.task,
+		"valid": True,
+	}, indent=2, sort_keys=True))
+
+
+def file_sha256(path):
+	digest = hashlib.sha256()
+	with path.open("rb") as stream:
+		while True:
+			chunk = stream.read(1024 * 1024)
+			if not chunk:
+				break
+			digest.update(chunk)
+	return digest.hexdigest()
+
+
+def command_fence_create(args):
+	root = Path(args.root).expanduser().resolve()
+	if not root.is_dir():
+		raise WorkspaceError(f"Fence root does not exist: {root}")
+	if not args.paths:
+		raise WorkspaceError("No fence paths were provided")
+	lines = []
+	for value in args.paths:
+		path = root / value
+		if not path.is_file():
+			raise WorkspaceError(f"Fence path does not exist: {path}")
+		lines.append(f"{file_sha256(path)}  {value}")
+	target = Path(args.file).expanduser().resolve()
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+	print(json.dumps({
+		"file": str(target),
+		"paths": len(lines),
+	}, indent=2, sort_keys=True))
+
+
+def command_fence_check(args):
+	root = Path(args.root).expanduser().resolve()
+	target = Path(args.file).expanduser().resolve()
+	if not target.is_file():
+		raise WorkspaceError(f"Fence baseline does not exist: {target}")
+	mismatched = []
+	missing = []
+	checked = 0
+	for line in target.read_text(encoding="utf-8-sig").splitlines():
+		line = line.strip()
+		if not line:
+			continue
+		if "  " not in line:
+			raise WorkspaceError(f"Invalid fence line: {line!r}")
+		expected, value = line.split("  ", 1)
+		path = root / value
+		checked += 1
+		if not path.is_file():
+			missing.append(value)
+		elif file_sha256(path) != expected:
+			mismatched.append(value)
+	ok = not mismatched and not missing
+	print(json.dumps({
+		"checked": checked,
+		"mismatched": mismatched,
+		"missing": missing,
+		"ok": ok,
+	}, indent=2, sort_keys=True))
+	if not ok:
+		sys.exit(2)
+
+
+def command_source_preflight(args):
+	config, slot = task_action_config(args)
+	source = Path(config["source_root"])
+	dirty = source_changed_paths(source)
+	submodules_dirty = mismatched_submodules(source)
+	work = slot / task_relative_dir(args.task) / "work"
+	owned_file = work / "owned-paths.txt"
+	owned = [
+		line.strip() for line in
+		owned_file.read_text(encoding="utf-8-sig").splitlines()
+		if line.strip()
+	] if owned_file.is_file() else []
+	dirty_outside_owned = [
+		path for path in dirty
+		if not path_is_covered(path, owned + [f"tasks/{args.task}.md"])
+	]
+	result = {
+		"dirty": dirty,
+		"dirty_outside_owned": dirty_outside_owned,
+		"owned_paths_present": owned_file.is_file(),
+		"source_clean": not dirty,
+		"submodules_dirty": submodules_dirty,
+		"task": args.task,
+	}
+	if args.exe:
+		exe = Path(args.exe).expanduser().resolve()
+		result["exe_present"] = exe.is_file()
+		if exe.is_file():
+			portable = portable_root_for(exe, None)
+			result["golden_account_present"] = (
+				portable / PORTABLE_GOLDEN
+			).is_dir()
+			result["live_marker_present"] = (
+				portable / PORTABLE_LIVE / PORTABLE_MARKER
+			).exists()
+	print(json.dumps(result, indent=2, sort_keys=True))
+
+
+def required_result_value(lines, result_path, field):
+	prefix = f"{field}:"
+	values = [
+		line.split(":", 1)[1].strip() for line in lines
+		if line.startswith(prefix)
+	]
+	if len(values) != 1 or not values[0]:
+		raise WorkspaceError(
+			f"Task result must record exactly one nonempty {field}: {result_path}"
+		)
+	return values[0]
+
+
+def validate_outcome_result(lines, result_path, approved):
+	outcome = required_result_value(lines, result_path, "Outcome")
+	touched = required_result_value(lines, result_path, "Touched")
+	allowed = {"changed", "already-satisfied"} if approved else {"blocked"}
+	if outcome not in allowed:
+		raise WorkspaceError(
+			"Task result Outcome must be "
+			+ " | ".join(sorted(allowed))
+			+ f": {result_path}"
+		)
+	if approved and "Test-Report: work/test.md" not in lines:
+		raise WorkspaceError(
+			f"An approved task must retain its adaptive evidence report: {result_path}"
+		)
+	if outcome == "changed" and touched == "none":
+		raise WorkspaceError(
+			f"A changed task must name its touched paths: {result_path}"
+		)
+	if outcome == "already-satisfied" and touched != "none":
+		raise WorkspaceError(
+			f"An already-satisfied task must report Touched: none: {result_path}"
+		)
+	return outcome
+
+
+def validate_blocked_result(lines, result_path):
+	blocker = required_result_value(lines, result_path, "Blocker-Type")
+	if blocker not in {"test", "impl", "unrecoverable"}:
+		raise WorkspaceError(
+			"A blocked task needs Blocker-Type: test | impl | unrecoverable: "
+			f"{result_path}"
+		)
+	if blocker != "test":
+		return
+	verdict = required_result_value(lines, result_path, "Verdict")
+	unverified = required_result_value(lines, result_path, "Unverified")
+	if unverified.lower() == "none":
+		raise WorkspaceError(
+			f"A test-blocked task must name exact unverified behavior: {result_path}"
+		)
+	lowered = verdict.lower().replace("-", "_")
+	for forbidden in (
+		"test_flaw",
+		"max_test_runs",
+		"max test runs",
+		"run_cap",
+		"run cap",
+		"blank_capture",
+		"blank capture",
+		"missing_capture",
+		"missing capture",
+		"missing_screenshot",
+		"missing screenshot",
+	):
+		if forbidden in lowered:
+			raise WorkspaceError(
+				"A recoverable harness or evidence failure cannot publish "
+				f"Blocker-Type: test ({forbidden}): {result_path}"
+			)
+	task_dir = result_path.parents[1]
+	if verdict.lower().startswith("computer-use-unavailable:"):
+		capability = task_dir / "computer-use-capability.md"
+		if not capability.is_file():
+			raise WorkspaceError(
+				"A computer-use-unavailable block needs its capability report: "
+				f"{capability}"
+			)
+		return
+	test_path = result_path.parent / "test.md"
+	if not test_path.is_file() or "## Recovery exhaustion" not in test_path.read_text(
+		encoding="utf-8-sig",
+	):
+		raise WorkspaceError(
+			"A test block requires work/test.md with ## Recovery exhaustion; "
+			"a run cap or recoverable TEST_FLAW must start a focused campaign: "
+			f"{test_path}"
+		)
+
+
+def owned_source_paths(slot, task_id):
+	path = slot / task_relative_dir(task_id) / "work" / "owned-paths.txt"
+	if not path.is_file():
+		return []
+	return [
+		line.strip()
+		for line in path.read_text(encoding="utf-8-sig").splitlines()
+		if line.strip()
+	]
+
+
+def source_worktree_snapshot(config, slot, task_id):
+	source = Path(config["source_root"])
+	owned = owned_source_paths(slot, task_id)
+	dirty = source_changed_paths(source)
+	allowed = owned + [f"tasks/{task_id}.md"]
+	gitlinks = set(gitlink_paths(source, dirty))
+	nested_owned = {}
+	for path in gitlinks:
+		prefix = path + "/"
+		nested_allowed = [
+			value[len(prefix):]
+			for value in allowed
+			if value.startswith(prefix)
+		]
+		if not nested_allowed:
+			continue
+		nested_dirty = source_changed_paths(source / path)
+		if all(path_is_covered(value, nested_allowed) for value in nested_dirty):
+			nested_owned[path] = (nested_allowed, nested_dirty)
+	owned_dirty = [
+		path for path in dirty
+		if path_is_covered(path, allowed) or path in nested_owned
+	]
+	outside = [path for path in dirty if path not in owned_dirty]
+	digest = hashlib.sha256()
+	if owned_dirty:
+		digest.update(run_git_binary(
+			source,
+			"diff",
+			"--binary",
+			"--submodule=diff",
+			"HEAD",
+			"--",
+			*owned_dirty,
+		))
+		untracked = set(literal_paths(
+			source,
+			"ls-files",
+			"--others",
+			"--exclude-standard",
+			"--",
+			*owned_dirty,
+		))
+		for relative in sorted(untracked):
+			path = source / relative
+			name = relative.encode("utf-8")
+			digest.update(len(name).to_bytes(8, "big"))
+			digest.update(name)
+			if path.is_file():
+				data = path.read_bytes()
+				digest.update(len(data).to_bytes(8, "big"))
+				digest.update(data)
+		for submodule, (nested_allowed, nested_dirty) in sorted(
+			nested_owned.items()
+		):
+			nested = source / submodule
+			nested_untracked = set(literal_paths(
+				nested,
+				"ls-files",
+				"--others",
+				"--exclude-standard",
+				"--",
+				*nested_dirty,
+			)) if nested_dirty else set()
+			for relative in sorted(nested_untracked):
+				if not path_is_covered(relative, nested_allowed):
+					continue
+				path = nested / relative
+				name = f"{submodule}/{relative}".encode("utf-8")
+				digest.update(len(name).to_bytes(8, "big"))
+				digest.update(name)
+				if path.is_file():
+					data = path.read_bytes()
+					digest.update(len(data).to_bytes(8, "big"))
+					digest.update(data)
+	return {
+		"owned_dirty_paths": owned_dirty,
+		"outside_owned_paths": outside,
+		"worktree_digest": digest.hexdigest(),
+	}
+
+
+def validate_carried_worktree(config, slot, task_id):
+	carried_path = slot / task_relative_dir(task_id) / "work" / "carried-work.json"
+	if not carried_path.is_file():
+		raise WorkspaceError(f"Split source lacks carried-work.json: {carried_path}")
+	carried = json.loads(carried_path.read_text(encoding="utf-8-sig"))
+	current = source_worktree_snapshot(config, slot, task_id)
+	for field in (
+		"owned_dirty_paths",
+		"outside_owned_paths",
+		"worktree_digest",
+	):
+		if carried.get(field) != current[field]:
+			raise WorkspaceError(
+				f"Source worktree changed after split-required publication: {field}"
+			)
+	return carried
+
+
+def reconcile_split_source_refs(config, task_id):
+	source = Path(config["source_root"])
+	base_ref = source_task_ref(task_id, "base")
+	green_ref = source_task_ref(task_id, "green")
+	run_ref = source_task_ref(task_id, "run")
+	base = resolved_ref(source, base_ref)
+	run = resolved_ref(source, run_ref)
+	head = resolved_ref(source, "HEAD")
+	if base is None or run is None or run != head:
+		raise WorkspaceError(
+			"Split-required publication needs current task base/run refs at HEAD"
+		)
+	green = resolved_ref(source, green_ref)
+	if green is None:
+		series = task_series_refs(source, task_id)
+		if series is not None:
+			_, green = series
+			run_git(source, "update-ref", green_ref, green)
+	if green is not None:
+		if not is_ancestor(source, green, head):
+			raise WorkspaceError(
+				"The retained split implementation is not in current source history"
+			)
+		validate_task_commit(source, green, task_id)
+	return green is not None
+
+
+def validate_split_required_result(lines, result_path, retained):
+	if "STATUS: SPLIT_REQUIRED" not in lines:
+		raise WorkspaceError(
+			f"Task result does not contain STATUS: SPLIT_REQUIRED: {result_path}"
+		)
+	if "Verdict: SPLIT_REQUIRED" not in lines:
+		raise WorkspaceError(
+			f"Task result does not contain Verdict: SPLIT_REQUIRED: {result_path}"
+		)
+	if "Checkout: source-state-retained" not in lines:
+		raise WorkspaceError(
+			f"Split result does not preserve source state: {result_path}"
+		)
+	outcome = required_result_value(lines, result_path, "Outcome")
+	if outcome != "split-required":
+		raise WorkspaceError(
+			f"Split result Outcome must be split-required: {result_path}"
+		)
+	implementation = required_result_value(lines, result_path, "Implementation")
+	expected = "retained" if retained else "none"
+	if implementation != expected:
+		raise WorkspaceError(
+			f"Split result Implementation must be {expected}: {result_path}"
+		)
+	touched = required_result_value(lines, result_path, "Touched")
+	if retained == (touched == "none"):
+		raise WorkspaceError(
+			f"Split result Touched does not match retained implementation: {result_path}"
+		)
+	if "Split-Proposal: work/split-proposal.md" not in lines:
+		raise WorkspaceError(
+			f"Split result must name work/split-proposal.md: {result_path}"
+		)
+	proposal = result_path.parent / "split-proposal.md"
+	if not proposal.is_file() or not proposal.read_text(
+		encoding="utf-8-sig",
+	).strip():
+		raise WorkspaceError(f"Split proposal is missing or empty: {proposal}")
+
+
+def write_carried_work(path, snapshot, retained):
+	payload = {
+		"implementation": "retained" if retained else "none",
+		**snapshot,
+	}
+	state = path.parents[1] / "state.yaml"
+	newline = "\r\n" if b"\r\n" in state.read_bytes() else "\n"
+	text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+	path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+
+
+def command_finish(args):
+	model = args.model.strip()
+	if not MODEL_PATTERN.fullmatch(model):
+		raise WorkspaceError(
+			f"Invalid --model short name {args.model!r}. Report the model you are "
+			"actually running as, lowercase, for example claude-opus-5, "
+			"gpt-5.6-sol, glm-5.3."
+		)
+	config, slot = task_action_config(args, allow_project=True)
+	kind = task_type(slot, args.task)
+	if kind != DEFAULT_TASK_TYPE:
+		raise WorkspaceError(
+			f"Historical task type {kind!r} cannot enter the current workflow"
+		)
+	approved = args.status == "approved"
+	split_required = args.status == "split-required"
+	result_path = slot / task_relative_dir(args.task) / "work" / "result.md"
+	if not result_path.is_file():
+		raise WorkspaceError(f"Task result is missing: {result_path}")
+	result = result_path.read_text(encoding="utf-8-sig")
+	lines = result.splitlines()
+	if not split_required:
+		ensure_source_clean(Path(config["source_root"]))
+		expected = "STATUS: DONE" if approved else "STATUS: BLOCKED"
+		if expected not in lines:
+			raise WorkspaceError(
+				f"Task result does not contain {expected}: {result_path}"
+			)
+	if approved and "Verdict: APPROVED" not in lines:
+		raise WorkspaceError(f"Task result does not contain an approved verdict: {result_path}")
+	if not split_required and "Checkout: clean-buildable" not in lines:
+		raise WorkspaceError(f"Task result does not confirm a clean checkout: {result_path}")
+	if not approved and not split_required:
+		validate_blocked_result(lines, result_path)
+	if split_required:
+		snapshot = source_worktree_snapshot(config, slot, args.task)
+		retained_commit = reconcile_split_source_refs(config, args.task)
+		retained = retained_commit or bool(snapshot["owned_dirty_paths"])
+		validate_split_required_result(lines, result_path, retained)
+		write_carried_work(
+			result_path.parent / "carried-work.json",
+			snapshot,
+			retained,
+		)
+		outcome = "split-required"
+	else:
+		outcome = validate_outcome_result(lines, result_path, approved)
+	if approved and not (result_path.parent / "test.md").is_file():
+		raise WorkspaceError(
+			"An approved task must retain work/test.md as adaptive evidence: "
+			f"{result_path.parent / 'test.md'}"
+		)
+	# Supplied inputs stay byte-exact, so a hash quoted there is not ours.
+	ensure_no_persisted_commit_hashes(result_path.parents[1], exempt=("input",))
+	source_note = Path(config["source_root"]) / "tasks" / f"{args.task}.md"
+	if source_note.is_file():
+		ensure_no_persisted_commit_hashes(source_note)
+	if not split_required:
+		expected_commit = outcome == "changed" if approved else None
+		validate_source_state(config, args.task, expected_commit)
+	path = state_path(slot, args.task)
+	update_state(path, {
+		"status": args.status,
+		"phase": (
+			"complete" if approved
+			else "split-required" if split_required
+			else "blocked"
+		),
+		"lease_until": None,
+		"model": model,
+	})
+	verb = (
+		"Approve" if approved
+		else "Split-required" if split_required
+		else "Block"
+	)
+	paths = [task_relative_dir(args.task)]
+	project = load_state(slot, path)["project"]
+	if project is not None:
+		project_path = f"projects/{project}/project.md"
+		if project_path in changed_paths(slot):
+			ensure_no_persisted_commit_hashes(slot / project_path)
+			paths.append(project_path)
+	commit = commit_paths(
+		config,
+		paths,
+		f"{verb} {args.task}",
+	)
+	if not split_required:
+		delete_source_refs(
+			config,
+			args.task,
+			retain_implementation=(args.status == "blocked"),
+		)
+	print(json.dumps({
+		"task": args.task,
+		"status": args.status,
+		"published": bool(commit),
+	}, indent=2, sort_keys=True))
+
+
+def recover_approval_source_refs(config, task_id):
+	source = Path(config["source_root"])
+	refs = [
+		resolved_ref(source, source_task_ref(task_id, name))
+		for name in ("base", "green", "run")
+	]
+	if all(value is None for value in refs):
+		return {"task": task_id, "action": "absent", "reason": None}
+	try:
+		main = Path(config["ai_main"])
+		state = load_state(main, state_path(main, task_id))
+		if state["status"] != "approved":
+			raise WorkspaceError(
+				f"Canonical task status is {state['status']!r}, not 'approved'"
+			)
+		if state["claimed_by"] != config["checkout_tag"]:
+			raise WorkspaceError(
+				f"Canonical task is claimed by {state['claimed_by']!r}, "
+				f"not {config['checkout_tag']!r}"
+			)
+		if state["type"] != DEFAULT_TASK_TYPE:
+			raise WorkspaceError(
+				f"Canonical task type is {state['type']!r}, not {DEFAULT_TASK_TYPE!r}"
+			)
+		result_path = main / task_relative_dir(task_id) / "work" / "result.md"
+		if not result_path.is_file():
+			raise WorkspaceError(f"Task result is missing: {result_path}")
+		lines = result_path.read_text(encoding="utf-8-sig").splitlines()
+		outcome = validate_outcome_result(lines, result_path, True)
+		ensure_source_clean(source)
+		validate_source_state(config, task_id, outcome == "changed")
+	except WorkspaceError as error:
+		return {"task": task_id, "action": "retained", "reason": str(error)}
+	delete_source_refs(config, task_id)
+	return {"task": task_id, "action": "deleted", "reason": None}
+
+
+def command_publish(args):
+	config = worktree_config(args, create=True)
+	slot = Path(config["slot_worktree"])
+	approval_task = approval_task_for_head(slot)
+	consolidation_validate = consolidation_validation_for_head(slot)
+	split_validate = split_validation_for_head(slot)
+	validate = consolidation_validate or split_validate
+	published = publish_slot(config, validate=validate)
+	if published and split_validate is not None:
+		source_task = run_git(
+			slot, "show", "-s", "--format=%s", "HEAD",
+		).stdout.strip()[len("Split "):]
+		if load_splits(slot)[source_task]["implementation_carrier"] is None:
+			delete_source_refs(config, source_task)
+	output = {"published": bool(published)}
+	if published and approval_task is not None:
+		report = recover_approval_source_refs(config, approval_task)
+		if report["action"] == "retained":
+			print(
+				f"warning: kept source refs of {approval_task}: {report['reason']}",
+				file=sys.stderr,
+			)
+		output["approval_refs"] = report
+	print(json.dumps(output, indent=2, sort_keys=True))
+
+
+def normalized_publish_path(value):
+	path = PurePosixPath(value.replace("\\", "/"))
+	minimum_parts = {
+		"tasks": 5,
+		"projects": 2,
+		"receipts": 5,
+	}
+	if (
+		path.is_absolute()
+		or not path.parts
+		or ".." in path.parts
+		or path.parts[0] not in minimum_parts
+		or len(path.parts) < minimum_parts.get(path.parts[0], 0)
+		or (
+			path.parts[0] == "projects"
+			and len(path.parts) == 2
+			and path.parts[1] == PROJECT_ARCHIVE_DIR
+		)
+	):
+		raise WorkspaceError(f"Invalid inbox publication path: {value!r}")
+	return path.as_posix()
+
+
+def path_is_covered(path, roots):
+	return any(path == root or path.startswith(root + "/") for root in roots)
+
+
+def parse_consolidation_mapping(value):
+	parts = value.split("=", 1)
+	if (
+		len(parts) != 2
+		or not TASK_ID_PATTERN.fullmatch(parts[0])
+		or not TASK_ID_PATTERN.fullmatch(parts[1])
+		or parts[0] == parts[1]
+	):
+		raise WorkspaceError(
+			f"Invalid consolidation mapping {value!r}; use old-task=new-task"
+		)
+	return tuple(parts)
+
+
+def report_graph_problem(problems, message, involved):
+	if problems is None:
+		raise WorkspaceError(message)
+	problems.append((message, set(involved)))
+
+
+def validate_dependency_graph(states, retired=(), problems=None):
+	dependents = {task_id: [] for task_id in states}
+	remaining = {}
+	for task in states.values():
+		missing = [
+			dependency for dependency in task["depends_on"]
+			if dependency not in states and dependency not in retired
+		]
+		if missing:
+			report_graph_problem(
+				problems,
+				f"{task['id']} has missing dependencies: " + ", ".join(missing),
+				[task["id"], *missing],
+			)
+		dependencies = {
+			dependency for dependency in task["depends_on"]
+			if dependency in states
+		}
+		remaining[task["id"]] = len(dependencies)
+		for dependency in dependencies:
+			dependents[dependency].append(task["id"])
+	ready = [task_id for task_id, count in remaining.items() if count == 0]
+	processed = 0
+	while ready:
+		task_id = ready.pop()
+		processed += 1
+		for dependent in dependents[task_id]:
+			remaining[dependent] -= 1
+			if remaining[dependent] == 0:
+				ready.append(dependent)
+	if processed != len(states):
+		cycle_members = sorted(
+			task_id for task_id, count in remaining.items()
+			if count
+		)
+		report_graph_problem(
+			problems,
+			"Task dependency cycle includes: " + ", ".join(cycle_members),
+			cycle_members,
+		)
+
+
+def check_superseded_alias(root, states, superseded, splits, retired, task_id, chain):
+	alias = superseded[task_id]
+	if task_id in states:
+		raise WorkspaceError(
+			f"Superseded task still has live state.yaml: {task_id}"
+		)
+	directory = root / "tasks" / task_id
+	if not (directory / "task.md").is_file():
+		raise WorkspaceError(f"Superseded task lost task.md: {task_id}")
+	actual_digest = retained_task_digest(directory)
+	if actual_digest != alias["content_sha256"]:
+		raise WorkspaceError(
+			f"Superseded task retained content changed: {task_id}"
+		)
+	current = task_id
+	while (
+		current not in states
+		and current not in splits
+		and current not in retired
+	):
+		if current in chain:
+			raise WorkspaceError(
+				"Superseded task cycle: " + " -> ".join(chain + [current])
+			)
+		chain.append(current)
+		current_alias = superseded.get(current)
+		if current_alias is None:
+			raise WorkspaceError(
+				f"Superseded task {task_id} targets missing task {current}"
+			)
+		current = current_alias["superseded_by"]
+
+
+def validate_superseded_graph(root, states, superseded, retired=None, problems=None):
+	splits = load_splits(root)
+	if retired is None:
+		retired = load_retired(root)
+	for task_id in superseded:
+		chain = []
+		try:
+			check_superseded_alias(
+				root, states, superseded, splits, retired, task_id, chain,
+			)
+		except WorkspaceError as error:
+			report_graph_problem(problems, str(error), [task_id, *chain])
+
+
+def check_split_record(root, states, superseded, splits, retired, task_id):
+	split = splits[task_id]
+	if task_id in states or task_id in superseded:
+		raise WorkspaceError(
+			f"Split task still has live or superseded state: {task_id}"
+		)
+	directory = root / "tasks" / task_id
+	if not (directory / "task.md").is_file():
+		raise WorkspaceError(f"Split task lost task.md: {task_id}")
+	actual_digest = retained_task_digest(directory)
+	if actual_digest != split["content_sha256"]:
+		raise WorkspaceError(f"Split task retained content changed: {task_id}")
+	receipt = root / split["receipt"]
+	if not receipt.is_file():
+		raise WorkspaceError(f"Split task receipt is missing: {receipt}")
+	resolve_split_targets(states, superseded, splits, task_id, retired=retired)
+
+
+def validate_split_graph(root, states, superseded, splits, retired=None, problems=None):
+	if retired is None:
+		retired = load_retired(root)
+	for task_id, split in splits.items():
+		try:
+			check_split_record(root, states, superseded, splits, retired, task_id)
+		except WorkspaceError as error:
+			report_graph_problem(
+				problems, str(error), [task_id, *split["split_into"]],
+			)
+
+
+def touched_task_ids(root):
+	# None when there is no master to compare with: every problem then blocks.
+	if run_git(
+		root, "rev-parse", "--verify", "--quiet", "master", check=False,
+	).returncode:
+		return None
+	paths = literal_paths(root, "diff", "--name-only", "--no-renames", "master")
+	paths += literal_paths(root, "ls-files", "--others", "--exclude-standard")
+	return {
+		"/".join(parts[1:5])
+		for parts in (path.split("/") for path in paths)
+		if len(parts) > 5 and parts[0] == "tasks"
+	}
+
+
+def validate_queue_graph(root):
+	# A problem blocks only a publication that touches one of its records, so a
+	# record broken on master never stops unrelated work from publishing.
+	states = load_states(root)
+	superseded = load_superseded(root)
+	splits = load_splits(root)
+	retired = load_retired(root)
+	problems = []
+	validate_dependency_graph(states, retired, problems)
+	validate_superseded_graph(root, states, superseded, retired, problems)
+	validate_split_graph(root, states, superseded, splits, retired, problems)
+	if not problems:
+		return
+	touched = touched_task_ids(root)
+	for message, involved in problems:
+		if touched is None or involved & touched:
+			raise WorkspaceError(message)
+	for message, _ in problems:
+		print(f"warning: queue graph problem already on master: {message}", file=sys.stderr)
+
+
+def validate_split_tree(root, source_task, replacements, receipt, carrier):
+	states = load_states(root)
+	superseded = load_superseded(root)
+	splits = load_splits(root)
+	split = splits.get(source_task)
+	if split is None:
+		raise WorkspaceError(f"Missing split record for {source_task}")
+	if split["split_into"] != replacements:
+		raise WorkspaceError(
+			f"Split replacements changed for {source_task}: {split['split_into']!r}"
+		)
+	if split["receipt"] != receipt or split["implementation_carrier"] != carrier:
+		raise WorkspaceError(f"Split routing metadata changed for {source_task}")
+	validate_queue_graph(root)
+	receipt_path = root / receipt
+	receipt_text = receipt_path.read_text(encoding="utf-8-sig")
+	for task_id in [source_task, *replacements]:
+		if task_id not in receipt_text:
+			raise WorkspaceError(f"Split receipt omits task {task_id}: {receipt}")
+	for index, task_id in enumerate(replacements):
+		task = states.get(task_id)
+		if task is None:
+			raise WorkspaceError(f"Split replacement has no live state: {task_id}")
+		if task["type"] != DEFAULT_TASK_TYPE or task["status"] != "todo":
+			raise WorkspaceError(
+				f"Split replacement is not todo implementation work: {task_id}"
+			)
+		if task["inbox_receipt"] != receipt or task["model"] is not None:
+			raise WorkspaceError(
+				f"Split replacement has invalid routing state: {task_id}"
+			)
+		if task_id == carrier:
+			if index != 0:
+				raise WorkspaceError(
+					"The implementation carrier must be the first replacement"
+				)
+			if (
+				task["carried_from"] != source_task
+				or task["claimed_by"] is None
+				or task["claimed_at"] is None
+				or task["claim_order"] is None
+				or task["phase"] is not None
+			):
+				raise WorkspaceError(
+					f"Implementation carrier does not own the split handoff: {task_id}"
+				)
+		elif any(task[field] is not None for field in (
+			"claimed_by",
+			"claimed_at",
+			"claim_order",
+			"lease_until",
+			"phase",
+			"carried_from",
+		)):
+			raise WorkspaceError(
+				f"Non-carrier split replacement is not pristine: {task_id}"
+			)
+	for project_path in sorted((root / "projects").glob("*/tasks.md")):
+		text = project_path.read_text(encoding="utf-8-sig")
+		if f"tasks/{source_task}/task.md" in text:
+			raise WorkspaceError(
+				f"Project index still links split task {source_task}: {project_path}"
+			)
+	for task_id in replacements:
+		project = states[task_id]["project"]
+		if project is None:
+			continue
+		project_path = root / "projects" / project / "tasks.md"
+		if (
+			not project_path.is_file()
+			or f"tasks/{task_id}/task.md" not in project_path.read_text(
+				encoding="utf-8-sig",
+			)
+		):
+			raise WorkspaceError(
+				f"Project index omits split replacement {task_id}: {project_path}"
+			)
+
+
+def approval_task_for_head(slot):
+	subject = run_git(slot, "show", "-s", "--format=%s", "HEAD").stdout.strip()
+	prefix = "Approve "
+	if not subject.startswith(prefix):
+		return None
+	task_id = subject[len(prefix):]
+	return task_id if TASK_ID_PATTERN.fullmatch(task_id) else None
+
+
+def split_validation_for_head(slot):
+	subject = run_git(slot, "show", "-s", "--format=%s", "HEAD").stdout.strip()
+	prefix = "Split "
+	if not subject.startswith(prefix):
+		return None
+	source_task = subject[len(prefix):]
+	if not TASK_ID_PATTERN.fullmatch(source_task):
+		raise WorkspaceError(f"Invalid split commit subject: {subject!r}")
+	split = load_splits(slot).get(source_task)
+	if split is None:
+		raise WorkspaceError(f"Split commit lost its split record: {source_task}")
+	return lambda root: validate_split_tree(
+		root,
+		source_task,
+		split["split_into"],
+		split["receipt"],
+		split["implementation_carrier"],
+	)
+
+
+def write_split_record(path, source_state, replacements, receipt, carrier, digest):
+	newline = "\r\n" if b"\r\n" in path.with_name("state.yaml").read_bytes() else "\n"
+	values = [
+		"split_into: [" + ", ".join(replacements) + "]",
+		f"implementation_carrier: {format_scalar(carrier)}",
+		f"receipt: {receipt}",
+		f"type: {source_state['type']}",
+		f"created: {source_state['created']}",
+		f"project: {format_scalar(source_state['project'])}",
+		"depends_on: [" + ", ".join(source_state["depends_on"]) + "]",
+		f"model: {source_state['model']}",
+		f"content_sha256: {digest}",
+	]
+	path.write_bytes((newline.join(values) + newline).encode("utf-8"))
+
+
+def command_split_publish(args):
+	config = worktree_config(args, create=True)
+	slot = Path(config["slot_worktree"])
+	ensure_clean(Path(config["ai_main"]), "ai-tdesktop master")
+	if not TASK_ID_PATTERN.fullmatch(args.source_task):
+		raise WorkspaceError(f"Invalid split source task: {args.source_task!r}")
+	replacements = list(dict.fromkeys(args.replacements))
+	if (
+		len(replacements) < 2
+		or len(replacements) != len(args.replacements)
+		or any(not TASK_ID_PATTERN.fullmatch(value) for value in replacements)
+		or args.source_task in replacements
+	):
+		raise WorkspaceError("A split needs at least two unique replacement task ids")
+	carrier = args.implementation_carrier
+	if carrier is not None and (carrier not in replacements or carrier != replacements[0]):
+		raise WorkspaceError(
+			"The implementation carrier must be the first replacement task"
+		)
+	receipt = normalized_publish_path(args.receipt)
+	if not receipt.startswith("receipts/"):
+		raise WorkspaceError("The split receipt must be below receipts/")
+	paths = sorted({normalized_publish_path(value) for value in args.paths})
+	required_paths = [
+		f"tasks/{args.source_task}",
+		*(f"tasks/{task_id}" for task_id in replacements),
+		receipt,
+	]
+	for required in required_paths:
+		if not path_is_covered(required, paths):
+			raise WorkspaceError(
+				f"Split publication path does not cover {required}"
+			)
+	changes = changed_paths(slot)
+	unexpected = [path for path in changes if not path_is_covered(path, paths)]
+	if unexpected:
+		raise WorkspaceError(
+			"Split changes are outside the explicit publication paths: "
+			+ ", ".join(unexpected)
+		)
+	source_prefix = f"tasks/{args.source_task}/"
+	source_changes = [path for path in changes if path.startswith(source_prefix)]
+	if source_changes:
+		raise WorkspaceError(
+			"The split worker must not rewrite retained source-task content: "
+			+ ", ".join(source_changes)
+		)
+	states = load_states(slot)
+	source_state = states.get(args.source_task)
+	if (
+		source_state is None
+		or source_state["status"] != "split-required"
+		or source_state["claimed_by"] != config["checkout_tag"]
+		or source_state["model"] is None
+	):
+		raise WorkspaceError(
+			f"Task is not split-required work owned by this checkout: {args.source_task}"
+		)
+	carried = validate_carried_worktree(config, slot, args.source_task)
+	retained = carried.get("implementation") == "retained"
+	if retained != (carrier is not None):
+		raise WorkspaceError(
+			"Retained implementation requires exactly one implementation carrier"
+		)
+	for task_id in replacements:
+		task = states.get(task_id)
+		if task is None:
+			raise WorkspaceError(f"Split replacement is missing: {task_id}")
+		if (
+			task["status"] != "todo"
+			or task["type"] != DEFAULT_TASK_TYPE
+			or task["claimed_by"] is not None
+			or task["model"] is not None
+			or task["carried_from"] is not None
+			or task["inbox_receipt"] != receipt
+		):
+			raise WorkspaceError(
+				f"Split replacement is not pristine routed todo work: {task_id}"
+			)
+	if carrier is not None:
+		old_owned = (
+			slot / task_relative_dir(args.source_task) / "work" / "owned-paths.txt"
+		)
+		if not old_owned.is_file():
+			raise WorkspaceError(
+				f"Retained implementation lacks owned-paths.txt: {old_owned}"
+			)
+		carrier_work = slot / task_relative_dir(carrier) / "work"
+		carrier_work.mkdir(parents=True, exist_ok=True)
+		shutil.copyfile(old_owned, carrier_work / "owned-paths.txt")
+		update_state(state_path(slot, carrier), {
+			"claimed_by": config["checkout_tag"],
+			"claimed_at": source_state["claimed_at"],
+			"claim_order": source_state["claim_order"] or 1,
+			"lease_until": None,
+			"phase": None,
+			"carried_from": args.source_task,
+		})
+	source_dir = slot / task_relative_dir(args.source_task)
+	digest = retained_task_digest(source_dir)
+	source_state_path = source_dir / "state.yaml"
+	split_path = source_dir / "split.yaml"
+	write_split_record(
+		split_path,
+		source_state,
+		replacements,
+		receipt,
+		carrier,
+		digest,
+	)
+	source_state_path.unlink()
+	post_changes = changed_paths(slot)
+	required_source_changes = {
+		f"tasks/{args.source_task}/state.yaml",
+		f"tasks/{args.source_task}/split.yaml",
+	}
+	actual_source_changes = {
+		path for path in post_changes if path.startswith(source_prefix)
+	}
+	if actual_source_changes != required_source_changes:
+		raise WorkspaceError(
+			"Split retirement changed unexpected source-task content: "
+			+ ", ".join(sorted(actual_source_changes ^ required_source_changes))
+		)
+	validate = lambda root: validate_split_tree(
+		root, args.source_task, replacements, receipt, carrier,
+	)
+	validate(slot)
+	commit = commit_paths(
+		config,
+		paths,
+		f"Split {args.source_task}",
+		validate=validate,
+	)
+	if carrier is None:
+		delete_source_refs(config, args.source_task)
+	print(json.dumps({
+		"implementation_carrier": carrier,
+		"published": bool(commit),
+		"replacements": replacements,
+		"source_task": args.source_task,
+		"status": "split",
+	}, indent=2, sort_keys=True))
+
+
+def validate_consolidation_tree(root, source_task, mappings, receipt):
+	states = load_states(root)
+	superseded = load_superseded(root)
+	splits = load_splits(root)
+	if source_task not in states:
+		raise WorkspaceError(
+			f"Consolidation source task does not exist: {source_task}"
+		)
+	if states[source_task]["status"] not in ("approved", "blocked"):
+		raise WorkspaceError(
+			f"Consolidation source task is not finished: {source_task}"
+		)
+	source = root / "tasks" / source_task
+	pending = source / CONSOLIDATION_PENDING
+	complete = source / CONSOLIDATION_COMPLETE
+	if pending.exists():
+		raise WorkspaceError(f"Consolidation pending marker remains: {pending}")
+	if not complete.is_file():
+		raise WorkspaceError(f"Missing consolidation completion marker: {complete}")
+	complete_text = complete.read_text(encoding="utf-8-sig")
+	expected_status = "MERGED" if mappings else "NO_MERGE"
+	if source_task not in complete_text or f"STATUS: {expected_status}" not in complete_text:
+		raise WorkspaceError(
+			f"Consolidation completion marker must name {source_task} and "
+			f"contain STATUS: {expected_status}"
+		)
+	validate_queue_graph(root)
+	if not mappings:
+		if receipt is not None:
+			raise WorkspaceError("A no-merge consolidation must not publish a receipt")
+		return
+	if receipt is None:
+		raise WorkspaceError("A merged consolidation requires a receipt")
+	receipt_path = root / receipt
+	if not receipt_path.is_file():
+		raise WorkspaceError(f"Missing consolidation receipt: {receipt}")
+	receipt_text = receipt_path.read_text(encoding="utf-8-sig")
+	targets = {}
+	for old_id, new_id in mappings.items():
+		alias = superseded.get(old_id)
+		if alias is None or alias["superseded_by"] != new_id:
+			raise WorkspaceError(
+				f"Missing exact superseded mapping {old_id} -> {new_id}"
+			)
+		if alias["receipt"] != receipt:
+			raise WorkspaceError(
+				f"Superseded task {old_id} names the wrong receipt"
+			)
+		new_task = states.get(new_id)
+		if new_task is None:
+			raise WorkspaceError(f"Replacement task does not exist: {new_id}")
+		if (
+			new_task["status"] != "todo"
+			or any(new_task[field] is not None for field in (
+				"claimed_by",
+				"claimed_at",
+				"claim_order",
+				"lease_until",
+				"phase",
+			))
+		):
+			raise WorkspaceError(
+				f"Replacement task is not pristine unclaimed todo work: {new_id}"
+			)
+		if (
+			alias["type"] != new_task["type"]
+			or alias["project"] != new_task["project"]
+		):
+			raise WorkspaceError(
+				f"Replacement changes type or project for {old_id}: {new_id}"
+			)
+		if new_task["inbox_receipt"] != receipt:
+			raise WorkspaceError(f"Replacement task names the wrong receipt: {new_id}")
+		if old_id not in receipt_text or new_id not in receipt_text:
+			raise WorkspaceError(
+				f"Consolidation receipt omits mapping {old_id} -> {new_id}"
+			)
+		targets.setdefault(new_id, []).append(old_id)
+	for new_id, old_ids in targets.items():
+		if len(old_ids) < 2:
+			raise WorkspaceError(
+				f"Replacement {new_id} consolidates fewer than two tasks"
+			)
+	for project_path in sorted((root / "projects").glob("*/tasks.md")):
+		text = project_path.read_text(encoding="utf-8-sig")
+		for old_id in mappings:
+			if f"tasks/{old_id}/task.md" in text:
+				raise WorkspaceError(
+					f"Project index still links superseded task {old_id}: {project_path}"
+				)
+
+
+def consolidation_validation_for_head(slot):
+	subject = run_git(slot, "show", "-s", "--format=%s", "HEAD").stdout.strip()
+	prefix = "Consolidate pending tasks after "
+	if not subject.startswith(prefix):
+		return None
+	source_task = subject[len(prefix):]
+	if not TASK_ID_PATTERN.fullmatch(source_task):
+		raise WorkspaceError(f"Invalid consolidation commit subject: {subject!r}")
+	changed = literal_paths(
+		slot,
+		"diff-tree",
+		"--no-commit-id",
+		"--name-only",
+		"-r",
+		"HEAD^",
+		"HEAD",
+	)
+	superseded = load_superseded(slot)
+	mappings = {}
+	for path in changed:
+		if not path.endswith("/superseded.yaml"):
+			continue
+		parts = PurePosixPath(path).parts
+		if len(parts) != 6 or parts[0] != "tasks":
+			raise WorkspaceError(
+				f"Invalid superseded path in consolidation commit: {path}"
+			)
+		old_id = "/".join(parts[1:5])
+		alias = superseded.get(old_id)
+		if alias is None:
+			raise WorkspaceError(
+				f"Consolidation commit removed superseded alias: {old_id}"
+			)
+		mappings[old_id] = alias["superseded_by"]
+	receipts = {
+		superseded[old_id]["receipt"]
+		for old_id in mappings
+	}
+	if len(receipts) > 1:
+		raise WorkspaceError("Consolidation mappings name different receipts")
+	receipt = next(iter(receipts), None)
+	return lambda root: validate_consolidation_tree(
+		root,
+		source_task,
+		mappings,
+		receipt,
+	)
+
+
+def command_task_content_digest(args):
+	config = worktree_config(args, create=True)
+	slot = Path(config["slot_worktree"])
+	path = state_path(slot, args.task).parent
+	print(json.dumps({
+		"content_sha256": retained_task_digest(path),
+		"task": args.task,
+	}, indent=2, sort_keys=True))
+
+
+def command_consolidate_publish(args):
+	config = worktree_config(args, create=True)
+	if getattr(args, "routing", False):
+		routing = routing_worktree_config(args, create=True)
+		config["slot_worktree"] = routing["routing_worktree"]
+		config["slot_branch"] = routing["routing_branch"]
+	slot = Path(config["slot_worktree"])
+	if not TASK_ID_PATTERN.fullmatch(args.source_task):
+		raise WorkspaceError(f"Invalid source task: {args.source_task!r}")
+	mappings = {}
+	for value in args.mappings:
+		old_id, new_id = parse_consolidation_mapping(value)
+		if old_id in mappings:
+			raise WorkspaceError(f"Duplicate consolidation source task: {old_id}")
+		mappings[old_id] = new_id
+	receipt = normalized_publish_path(args.receipt) if args.receipt else None
+	if receipt is not None and not receipt.startswith("receipts/"):
+		raise WorkspaceError("The consolidation receipt must be below receipts/")
+	if mappings and receipt is None:
+		raise WorkspaceError("A merged consolidation requires a receipt")
+	if not mappings and receipt is not None:
+		raise WorkspaceError("A no-merge consolidation must not publish a receipt")
+	paths = sorted({normalized_publish_path(value) for value in args.paths})
+	complete = f"tasks/{args.source_task}/{CONSOLIDATION_COMPLETE}"
+	if not path_is_covered(complete, paths):
+		raise WorkspaceError(
+			"The consolidation completion marker is not covered by a publication path"
+		)
+	if receipt is not None and not path_is_covered(receipt, paths):
+		raise WorkspaceError(
+			"The consolidation receipt is not covered by a publication path"
+		)
+	changes = changed_paths(slot)
+	unexpected = [path for path in changes if not path_is_covered(path, paths)]
+	if unexpected:
+		raise WorkspaceError(
+			"Consolidation changes are outside the explicit publication paths: "
+			+ ", ".join(unexpected)
+		)
+	changed_aliases = {
+		"/".join(PurePosixPath(path).parts[1:5])
+		for path in changes
+		if path.endswith("/superseded.yaml")
+	}
+	if changed_aliases != set(mappings):
+		raise WorkspaceError(
+			"Changed superseded aliases do not match explicit mappings: "
+			+ ", ".join(sorted(changed_aliases ^ set(mappings)))
+		)
+	for old_id in mappings:
+		required = {
+			f"tasks/{old_id}/state.yaml",
+			f"tasks/{old_id}/superseded.yaml",
+		}
+		if not required.issubset(changes):
+			raise WorkspaceError(
+				f"Consolidation does not retire {old_id} with state and alias changes"
+			)
+		old_prefix = f"tasks/{old_id}/"
+		unexpected_old = [
+			path for path in changes
+			if path.startswith(old_prefix) and path not in required
+		]
+		if unexpected_old:
+			raise WorkspaceError(
+				f"Consolidation modifies retained content for {old_id}: "
+				+ ", ".join(unexpected_old)
+			)
+	source_allowed = {
+		f"tasks/{args.source_task}/{CONSOLIDATION_PENDING}",
+		f"tasks/{args.source_task}/{CONSOLIDATION_COMPLETE}",
+	}
+	if changes and not source_allowed.issubset(changes):
+		raise WorkspaceError(
+			"Consolidation must replace the pending marker with a completion marker"
+		)
+	unexpected_source = [
+		path for path in changes
+		if path.startswith(f"tasks/{args.source_task}/")
+		and path not in source_allowed
+	]
+	if unexpected_source:
+		raise WorkspaceError(
+			"Consolidation modifies discovery source content: "
+			+ ", ".join(unexpected_source)
+		)
+	if not mappings:
+		unexpected_no_merge = [
+			path for path in changes
+			if path not in source_allowed
+		]
+		if unexpected_no_merge:
+			raise WorkspaceError(
+				"No-merge consolidation changes non-marker paths: "
+				+ ", ".join(unexpected_no_merge)
+			)
+	else:
+		for new_id in set(mappings.values()):
+			required = {
+				f"tasks/{new_id}/task.md",
+				f"tasks/{new_id}/state.yaml",
+			}
+			if not required.issubset(changes):
+				raise WorkspaceError(
+					f"Replacement task is not newly created: {new_id}"
+				)
+		if receipt not in changes:
+			raise WorkspaceError(
+				f"Consolidation receipt is not newly written: {receipt}"
+			)
+	counts = unpublished_counts(config)
+	if changes and counts["slot_only"]:
+		raise WorkspaceError(
+			"The AI slot has unpublished commits before consolidation staging"
+		)
+	validate = lambda root: validate_consolidation_tree(
+		root,
+		args.source_task,
+		mappings,
+		receipt,
+	)
+	validate(slot)
+	committed = False
+	if changes:
+		for path in paths:
+			if path_is_stageable(slot, path):
+				run_git(slot, "add", "-A", "--", path)
+		unstaged = literal_paths(slot, "diff", "--name-only")
+		untracked = literal_paths(
+			slot,
+			"ls-files",
+			"--others",
+			"--exclude-standard",
+		)
+		if unstaged or untracked:
+			raise WorkspaceError(
+				"Consolidation changes remain unstaged: "
+				+ ", ".join(sorted(set(unstaged + untracked)))
+			)
+		if run_git(slot, "diff", "--cached", "--quiet", check=False).returncode == 0:
+			raise WorkspaceError("No consolidation state changed")
+		run_git(
+			slot,
+			"commit",
+			"-m",
+			f"Consolidate pending tasks after {args.source_task}",
+		)
+		committed = True
+	elif not counts["slot_only"]:
+		raise WorkspaceError("No consolidation changes or unpublished commit")
+	published = publish_slot(config, validate=validate)
+	print(json.dumps({
+		"committed": committed,
+		"mappings": mappings,
+		"published": bool(published),
+		"receipt": receipt,
+		"source_task": args.source_task,
+	}, indent=2, sort_keys=True))
+
+
+def validate_receipt_text(text, metadata, label):
+	if metadata["digest"] not in text:
+		raise WorkspaceError(
+			f"{label} does not contain the inbox digest: {metadata['digest']}"
+		)
+
+
+def command_inbox_publish(args):
+	config = inbox_worktree_config(args, create=True)
+	_, metadata = load_transaction(args.transaction)
+	if metadata["checkout_tag"] != config["checkout_tag"]:
+		raise WorkspaceError("The inbox transaction belongs to another checkout")
+	if Path(metadata["ai_main"]).resolve() != Path(config["ai_main"]).resolve():
+		raise WorkspaceError(
+			"The inbox transaction belongs to another ai-tdesktop repository"
+		)
+	worktree = Path(config["inbox_worktree"])
+	receipt = normalized_publish_path(args.receipt)
+	if not receipt.startswith("receipts/"):
+		raise WorkspaceError("The tracked receipt must be below receipts/")
+	if not (worktree / receipt).is_file():
+		raise WorkspaceError(
+			f"Tracked receipt is missing from the inbox worktree: {receipt}"
+		)
+	validate_receipt_text(
+		(worktree / receipt).read_text(encoding="utf-8-sig"),
+		metadata,
+		"Tracked receipt",
+	)
+	paths = sorted({normalized_publish_path(value) for value in args.paths})
+	if not path_is_covered(receipt, paths):
+		raise WorkspaceError(
+			"The tracked receipt is not covered by an explicit publication path"
+		)
+	changes = changed_paths(worktree)
+	unexpected = [path for path in changes if not path_is_covered(path, paths)]
+	if unexpected:
+		raise WorkspaceError(
+			"Inbox worktree changes are outside the explicit publication paths: "
+			+ ", ".join(unexpected)
+		)
+	unstaged_before = set(literal_paths(worktree, "diff", "--name-only"))
+	unstaged_before.update(literal_paths(
+		worktree,
+		"ls-files",
+		"--others",
+		"--exclude-standard",
+	))
+	for path in paths:
+		if (
+			(worktree / path).exists()
+			or any(path_is_covered(change, [path]) for change in unstaged_before)
+		):
+			run_git(worktree, "add", "-A", "--", path)
+	unstaged = literal_paths(worktree, "diff", "--name-only")
+	untracked = literal_paths(
+		worktree,
+		"ls-files",
+		"--others",
+		"--exclude-standard",
+	)
+	if unstaged or untracked:
+		raise WorkspaceError(
+			"Inbox worktree changes remain unstaged: "
+			+ ", ".join(sorted(set(unstaged + untracked)))
+		)
+	committed = run_git(
+		worktree,
+		"diff",
+		"--cached",
+		"--quiet",
+		check=False,
+	).returncode != 0
+	if committed:
+		run_git(
+			worktree,
+			"commit",
+			"-m",
+			f"Process inbox for {config['checkout_tag']}",
+		)
+	published = publish_inbox(config)
+	print(json.dumps({
+		"committed": committed,
+		"inbox_branch": config["inbox_branch"],
+		"inbox_worktree": config["inbox_worktree"],
+		"published": bool(published),
+		"receipt": receipt,
+	}, indent=2, sort_keys=True))
+
+
+def rewrite_project_links(directory, pattern, replacement):
+	for path in sorted(directory.rglob("*.md")):
+		data = path.read_bytes()
+		if data.startswith(b"\xef\xbb\xbf"):
+			raise WorkspaceError(f"Refusing to preserve a UTF-8 BOM in {path}")
+		text = data.decode("utf-8")
+		replaced = pattern.sub(replacement, text)
+		if replaced != text:
+			path.write_bytes(replaced.encode("utf-8"))
+
+
+def project_last_activity(states):
+	activity = {}
+	unfinished = set()
+	for task in states.values():
+		project = task["project"]
+		if project is None:
+			continue
+		try:
+			created = datetime.date.fromisoformat(task["created"])
+		except ValueError as error:
+			raise WorkspaceError(
+				f"Invalid created date in {task['id']}: {task['created']!r}"
+			) from error
+		if project not in activity or created > activity[project]:
+			activity[project] = created
+		if task["status"] != "approved":
+			unfinished.add(project)
+	return activity, unfinished
+
+
+def command_archive_stale(args):
+	if args.days < 1:
+		raise WorkspaceError("The archive threshold must be at least one day")
+	config = worktree_config(args, create=True)
+	sync_canonical(config)
+	slot = Path(config["slot_worktree"])
+	activity, unfinished = project_last_activity(load_states(slot))
+	cutoff = datetime.date.today() - datetime.timedelta(days=args.days)
+	projects = slot / "projects"
+	candidates = sorted(
+		entry.name for entry in projects.iterdir()
+		if entry.is_dir() and entry.name != PROJECT_ARCHIVE_DIR
+	) if projects.is_dir() else []
+	archived = []
+	published = False
+	for slug in candidates:
+		if slug in unfinished or slug not in activity or activity[slug] > cutoff:
+			continue
+		target = projects / PROJECT_ARCHIVE_DIR / slug
+		if target.exists():
+			raise WorkspaceError(f"The archive already contains a project: {slug}")
+		target.parent.mkdir(exist_ok=True)
+		run_git(
+			slot,
+			"mv",
+			f"projects/{slug}",
+			f"projects/{PROJECT_ARCHIVE_DIR}/{slug}",
+		)
+		rewrite_project_links(target, PROJECT_LINK_PATTERN, "](../../../")
+		published = commit_paths(
+			config,
+			[f"projects/{PROJECT_ARCHIVE_DIR}/{slug}"],
+			f"Archive {slug}",
+		)
+		archived.append(slug)
+	print(json.dumps({
+		"archived": archived,
+		"days": args.days,
+		"published": bool(published),
+	}, indent=2, sort_keys=True))
+
+
+def unarchive_project(config, worktree_key, slug):
+	if slug == PROJECT_ARCHIVE_DIR or not TAG_PATTERN.fullmatch(slug):
+		raise WorkspaceError(f"Invalid project slug: {slug!r}")
+	worktree = Path(config[worktree_key])
+	archived = worktree / "projects" / PROJECT_ARCHIVE_DIR / slug
+	target = worktree / "projects" / slug
+	if not archived.is_dir():
+		raise WorkspaceError(f"No archived project: {slug}")
+	if target.exists():
+		raise WorkspaceError(f"The project is already live: {slug}")
+	run_git(
+		worktree,
+		"mv",
+		f"projects/{PROJECT_ARCHIVE_DIR}/{slug}",
+		f"projects/{slug}",
+	)
+	rewrite_project_links(target, ARCHIVED_PROJECT_LINK_PATTERN, "](../../")
+	run_git(worktree, "add", "--", f"projects/{slug}")
+	archive_root = worktree / "projects" / PROJECT_ARCHIVE_DIR
+	if archive_root.is_dir() and not any(archive_root.iterdir()):
+		archive_root.rmdir()
+	print(json.dumps({
+		"project": slug,
+		"published": False,
+		"unarchived": True,
+	}, indent=2, sort_keys=True))
+
+
+def command_unarchive(args):
+	config = worktree_config(args, create=True)
+	unarchive_project(config, "slot_worktree", args.project)
+
+
+def command_inbox_unarchive(args):
+	config = inbox_worktree_config(args, create=True)
+	unarchive_project(config, "inbox_worktree", args.project)
+
+
+def payload_entries(inbox):
+	return sorted(
+		(path for path in inbox.iterdir() if path.name != "backup"),
+		key=lambda path: path.name,
+	)
+
+
+def iter_payload_files(inbox):
+	for entry in payload_entries(inbox):
+		if entry.is_symlink():
+			raise WorkspaceError(f"Inbox symlinks are not supported: {entry}")
+		if entry.is_file():
+			yield entry
+		elif entry.is_dir():
+			for path in sorted(entry.rglob("*")):
+				if path.is_symlink():
+					raise WorkspaceError(f"Inbox symlinks are not supported: {path}")
+				if path.is_file():
+					yield path
+
+
+def payload_digest(inbox):
+	digest = hashlib.sha256()
+	for path in iter_payload_files(inbox):
+		relative = path.relative_to(inbox).as_posix().encode("utf-8")
+		digest.update(relative)
+		digest.update(b"\0")
+		with path.open("rb") as stream:
+			while True:
+				chunk = stream.read(1024 * 1024)
+				if not chunk:
+					break
+				digest.update(chunk)
+		digest.update(b"\0")
+	return digest.hexdigest()
+
+
+def copy_payload(inbox, destination):
+	for entry in payload_entries(inbox):
+		target = destination / entry.name
+		if entry.is_symlink():
+			raise WorkspaceError(f"Inbox symlinks are not supported: {entry}")
+		if entry.is_dir():
+			shutil.copytree(entry, target)
+		else:
+			shutil.copy2(entry, target)
+
+
+def unique_backup_name(backup, base):
+	candidate = base
+	index = 2
+	while (backup / candidate).exists() or (backup / f".processing-{candidate}").exists():
+		candidate = f"{base}-{index:02d}"
+		index += 1
+	return candidate
+
+
+def command_ensure(args):
+	config = worktree_config(args, create=True)
+	print(json.dumps(config, indent=2, sort_keys=True))
+
+
+def command_route_ensure(args):
+	config = routing_worktree_config(args, create=True)
+	worktree = Path(config["routing_worktree"])
+	dirty = changed_paths(worktree)
+	unpublished = routing_unpublished_count(config)
+	if not dirty and not unpublished:
+		sync_routing_canonical(config)
+	print(json.dumps({
+		**config,
+		"routing_dirty": dirty,
+		"routing_unpublished": unpublished,
+	}, indent=2, sort_keys=True))
+
+
+def ensure_routing_valid(worktree):
+	ensure_revisions_unclaimed(worktree)
+	validate_queue_graph(worktree)
+
+
+def ensure_revisions_unclaimed(worktree):
+	revised = set()
+	for path in literal_paths(
+		worktree, "diff", "--name-only", "--no-renames", "master", "HEAD",
+	):
+		parts = path.split("/")
+		if (
+			len(parts) == 6
+			and parts[0] == "tasks"
+			and parts[5] in ("task.md", "state.yaml")
+		):
+			revised.add("/".join(parts[1:5]))
+	for task_id in sorted(revised):
+		before = run_git(
+			worktree, "show", f"master:tasks/{task_id}/state.yaml", check=False,
+		)
+		if before.returncode:
+			if not run_git(
+				worktree, "cat-file", "-e", f"master:tasks/{task_id}", check=False,
+			).returncode:
+				raise RebaseConflict(
+					f"{task_id} is retired history; leave its record unchanged"
+				)
+			continue
+		values = dict(
+			(key.strip(), value.strip())
+			for key, _, value in (
+				line.partition(":") for line in before.stdout.splitlines()
+			)
+		)
+		if (
+			parse_scalar(values.get("status", "null")) != "todo"
+			or parse_scalar(values.get("claimed_by", "null")) is not None
+		):
+			raise RebaseConflict(
+				f"{task_id} is no longer unclaimed todo work; drop its revision "
+				"from the routing commit"
+			)
+
+
+def command_route_publish(args):
+	config = routing_worktree_config(args, create=True)
+	worktree = Path(config["routing_worktree"])
+	if not TASK_ID_PATTERN.fullmatch(args.source_task):
+		raise WorkspaceError(f"Invalid source task: {args.source_task!r}")
+	changes = changed_paths(worktree)
+	if not changes:
+		if not routing_unpublished_count(config):
+			raise WorkspaceError("The routing worktree has nothing to publish")
+		published = publish_routing(config, ensure_routing_valid)
+		print(json.dumps({
+			"committed": False,
+			"published": bool(published),
+			"routing_branch": config["routing_branch"],
+		}, indent=2, sort_keys=True))
+		return
+	if not args.paths:
+		raise WorkspaceError("Publication paths are required when changes exist")
+	paths = sorted({normalized_publish_path(value) for value in args.paths})
+	marker = f"tasks/{args.source_task}/work/discovered-routed.md"
+	if not path_is_covered(marker, paths):
+		raise WorkspaceError(
+			"The discovered-routed marker is not covered by a publication path"
+		)
+	unexpected = [path for path in changes if not path_is_covered(path, paths)]
+	if unexpected:
+		raise WorkspaceError(
+			"Routing worktree changes are outside the explicit publication paths: "
+			+ ", ".join(unexpected)
+		)
+	for path in paths:
+		if (worktree / path).exists() or any(
+			path_is_covered(change, [path]) for change in changes
+		):
+			run_git(worktree, "add", "-A", "--", path)
+	unstaged = literal_paths(worktree, "diff", "--name-only")
+	untracked = literal_paths(
+		worktree,
+		"ls-files",
+		"--others",
+		"--exclude-standard",
+	)
+	if unstaged or untracked:
+		raise WorkspaceError(
+			"Routing worktree changes remain unstaged: "
+			+ ", ".join(sorted(set(unstaged + untracked)))
+		)
+	committed = run_git(
+		worktree,
+		"diff",
+		"--cached",
+		"--quiet",
+		check=False,
+	).returncode != 0
+	if committed:
+		run_git(
+			worktree,
+			"commit",
+			"-m",
+			f"Route follow-ups from {args.source_task}",
+		)
+	published = publish_routing(config, ensure_routing_valid)
+	print(json.dumps({
+		"committed": committed,
+		"published": bool(published),
+		"routing_branch": config["routing_branch"],
+		"routing_worktree": config["routing_worktree"],
+	}, indent=2, sort_keys=True))
+
+
+def command_health_ensure(args):
+	config = health_worktree_config(args, create=True)
+	worktree = Path(config["health_worktree"])
+	dirty = changed_paths(worktree)
+	unpublished = health_unpublished_count(config)
+	if not dirty and not unpublished:
+		update_main_from_origin(config)
+		sync_branch_worktree(
+			config,
+			"health_worktree",
+			"health_branch",
+			"ai-tdesktop code-health worktree",
+		)
+	print(json.dumps({
+		**config,
+		"health_dirty": dirty,
+		"health_unpublished": unpublished,
+	}, indent=2, sort_keys=True))
+
+
+def command_health_publish(args):
+	config = health_worktree_config(args, create=True)
+	worktree = Path(config["health_worktree"])
+	changes = changed_paths(worktree)
+	outside = [path for path in changes if not path_is_covered(path, [HEALTH_STATE])]
+	if outside:
+		raise WorkspaceError(
+			"Code-health worktree changes outside code-health/: "
+			+ ", ".join(outside)
+		)
+	committed = bool(changes)
+	if committed:
+		if not args.message:
+			raise WorkspaceError("A commit message is required when changes exist")
+		run_git(worktree, "add", "-A", "--", HEALTH_STATE)
+		run_git(worktree, "commit", "-m", args.message)
+	elif not health_unpublished_count(config):
+		raise WorkspaceError("The code-health worktree has nothing to publish")
+	result = {
+		"committed": committed,
+		"health_branch": config["health_branch"],
+		"health_worktree": config["health_worktree"],
+	}
+	try:
+		publish_worktree(
+			config,
+			"health_worktree",
+			"health_branch",
+			"ai-tdesktop code-health worktree",
+		)
+	except RebaseConflict:
+		if not args.drop_on_conflict:
+			raise
+		run_git(worktree, "reset", "--hard", "master")
+		print(json.dumps({
+			**result,
+			"published": False,
+			"dropped": True,
+		}, indent=2, sort_keys=True))
+		return
+	print(json.dumps({
+		**result,
+		"published": True,
+		"dropped": False,
+	}, indent=2, sort_keys=True))
+
+
+def command_inbox_ensure(args):
+	config = inbox_worktree_config(args, create=True)
+	print(json.dumps(config, indent=2, sort_keys=True))
+
+
+def command_prepare(args):
+	config = inbox_worktree_config(args, create=True)
+	inbox = Path(config["inbox"])
+	inbox_file = inbox / "inbox.md"
+	backup = inbox / "backup"
+	active = sorted(backup.glob(".processing-*"))
+	if active:
+		if len(active) != 1:
+			raise WorkspaceError(
+				"Several inbox transactions are active: "
+				+ ", ".join(str(path) for path in active)
+			)
+		transaction, metadata = load_transaction(active[0])
+		if metadata["checkout_tag"] != config["checkout_tag"]:
+			raise WorkspaceError(
+				"Active inbox transaction belongs to "
+				f"{metadata['checkout_tag']}, not {config['checkout_tag']}"
+			)
+		if Path(metadata["ai_main"]).resolve() != Path(config["ai_main"]).resolve():
+			raise WorkspaceError(
+				"Active inbox transaction belongs to another ai-tdesktop repository"
+			)
+		current_digest = payload_digest(inbox)
+		print(json.dumps({
+			**config,
+			"transaction": str(transaction),
+			"digest": metadata["digest"],
+			"resumed": True,
+			"inbox_changed": current_digest != metadata["digest"],
+		}, indent=2, sort_keys=True))
+		return
+	if not inbox_file.read_text(encoding="utf-8").strip():
+		raise WorkspaceError(f"Inbox is empty: {inbox_file}")
+	sync_inbox_canonical(config)
+
+	stamp = datetime.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+	name = unique_backup_name(backup, f"{stamp}-inbox")
+	transaction = backup / f".processing-{name}"
+	transaction.mkdir()
+	digest = payload_digest(inbox)
+	copy_payload(inbox, transaction)
+	metadata = {
+		"version": 1,
+		"name": name,
+		"digest": digest,
+		"created_at": datetime.datetime.now().astimezone().isoformat(),
+		**config,
+	}
+	(transaction / "transaction.json").write_text(
+		json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+		encoding="utf-8",
+	)
+	print(json.dumps({
+		**config,
+		"transaction": str(transaction),
+		"digest": digest,
+		"resumed": False,
+		"inbox_changed": False,
+	}, indent=2, sort_keys=True))
+
+
+def load_transaction(value):
+	transaction = Path(value).expanduser().resolve()
+	metadata_path = transaction / "transaction.json"
+	if not metadata_path.is_file():
+		raise WorkspaceError(f"Invalid transaction: {transaction}")
+	metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+	backup = Path(metadata["inbox"]) / "backup"
+	if transaction.parent.resolve() != backup.resolve():
+		raise WorkspaceError(f"Transaction is outside the inbox backup: {transaction}")
+	return transaction, metadata
+
+
+def write_local_receipt(path, metadata, receipt, result):
+	text = (
+		f"Processed: {metadata['created_at']}\n"
+		f"Checkout: {metadata['checkout_tag']}\n"
+		f"Digest: {metadata['digest']}\n"
+		f"Tracked receipt: {receipt}\n"
+		f"Result: {result}\n"
+	)
+	(path / "receipt.txt").write_text(text, encoding="utf-8")
+
+
+def clear_payload(inbox):
+	for entry in payload_entries(inbox):
+		if entry.is_dir() and not entry.is_symlink():
+			shutil.rmtree(entry)
+		else:
+			entry.unlink()
+	(inbox / "inbox.md").write_text("", encoding="utf-8")
+
+
+def command_finalize(args):
+	transaction, metadata = load_transaction(args.transaction)
+	inbox = Path(metadata["inbox"])
+	main = Path(metadata["ai_main"]).resolve()
+	receipt_value = normalized_publish_path(args.receipt)
+	if not receipt_value.startswith("receipts/"):
+		raise WorkspaceError("The tracked receipt must be below receipts/")
+	if git_root(main) != main:
+		raise WorkspaceError(f"ai-tdesktop is not a worktree root: {main}")
+	main_branch = run_git(main, "branch", "--show-current").stdout.strip()
+	if main_branch != "master":
+		raise WorkspaceError(
+			f"The main ai-tdesktop worktree must be on master, not {main_branch!r}."
+		)
+	tracked = run_git(main, "show", f"HEAD:{receipt_value}", check=False)
+	if tracked.returncode:
+		raise WorkspaceError(
+			f"Tracked receipt is missing from master HEAD: {main / receipt_value}"
+		)
+	validate_receipt_text(tracked.stdout, metadata, "Tracked receipt on master")
+	current_digest = payload_digest(inbox)
+	unchanged = current_digest == metadata["digest"]
+	backup = inbox / "backup"
+	name = metadata["name"] if unchanged else f"{metadata['name']}-processed-snapshot"
+	final = backup / name
+	if final.exists():
+		name = unique_backup_name(backup, name)
+		final = backup / name
+	transaction.rename(final)
+	if unchanged:
+		clear_payload(inbox)
+	write_local_receipt(
+		final,
+		metadata,
+		receipt_value,
+		"inbox-cleared" if unchanged else "inbox-changed-and-left-intact",
+	)
+	print(json.dumps({
+		"backup": str(final),
+		"cleared": unchanged,
+		"published": True,
+	}, indent=2, sort_keys=True))
+
+
+def command_abort(args):
+	transaction, metadata = load_transaction(args.transaction)
+	backup = transaction.parent
+	name = unique_backup_name(backup, f"{metadata['name']}-failed")
+	final = backup / name
+	transaction.rename(final)
+	write_local_receipt(final, metadata, "not-created", "processing-failed")
+	print(json.dumps({"backup": str(final), "cleared": False}, indent=2, sort_keys=True))
+
+
+def add_common_arguments(parser):
+	parser.add_argument("--source-root")
+	parser.add_argument("--ai-main")
+	parser.add_argument("--worktrees-root")
+
+
+def parse_args():
+	parser = argparse.ArgumentParser()
+	subparsers = parser.add_subparsers(dest="command", required=True)
+
+	ensure = subparsers.add_parser("ensure")
+	add_common_arguments(ensure)
+	ensure.set_defaults(handler=command_ensure)
+
+	inbox_ensure = subparsers.add_parser("inbox-ensure")
+	add_common_arguments(inbox_ensure)
+	inbox_ensure.set_defaults(handler=command_inbox_ensure)
+
+	prepare = subparsers.add_parser("prepare")
+	add_common_arguments(prepare)
+	prepare.set_defaults(handler=command_prepare)
+
+	finalize = subparsers.add_parser("finalize")
+	finalize.add_argument("--transaction", required=True)
+	finalize.add_argument("--receipt", required=True)
+	finalize.set_defaults(handler=command_finalize)
+
+	abort = subparsers.add_parser("abort")
+	abort.add_argument("--transaction", required=True)
+	abort.set_defaults(handler=command_abort)
+
+	queue = subparsers.add_parser("queue")
+	add_common_arguments(queue)
+	queue.set_defaults(handler=command_queue)
+
+	resolve = subparsers.add_parser("resolve")
+	add_common_arguments(resolve)
+	resolve.add_argument("--name", required=True)
+	resolve.set_defaults(handler=command_resolve)
+
+	start = subparsers.add_parser("start")
+	add_common_arguments(start)
+	start.add_argument("--task", required=True)
+	start.add_argument("--require", action="append", default=[])
+	start.add_argument("--batch", action="extend", nargs="+", metavar="ID")
+	start.set_defaults(handler=command_start)
+
+	source_lineage = subparsers.add_parser("source-lineage")
+	add_common_arguments(source_lineage)
+	source_lineage.add_argument("--task", required=True)
+	source_lineage.add_argument("--require", action="append", default=[])
+	source_lineage.set_defaults(handler=command_source_lineage)
+
+	retry = subparsers.add_parser("retry")
+	add_common_arguments(retry)
+	retry.add_argument("--task", required=True)
+	retry.add_argument("--require", action="append", default=[])
+	retry.set_defaults(handler=command_retry)
+
+	checkpoint = subparsers.add_parser("checkpoint")
+	add_common_arguments(checkpoint)
+	checkpoint.add_argument("--task", required=True)
+	checkpoint.add_argument("--phase", required=True)
+	checkpoint.set_defaults(handler=command_checkpoint)
+
+	source_begin = subparsers.add_parser("source-begin")
+	add_common_arguments(source_begin)
+	source_begin.add_argument("--task", required=True)
+	source_begin.set_defaults(handler=command_source_begin)
+
+	source_mark_green = subparsers.add_parser("source-mark-green")
+	add_common_arguments(source_mark_green)
+	source_mark_green.add_argument("--task", required=True)
+	source_mark_green.set_defaults(handler=command_source_mark_green)
+
+	source_commit = subparsers.add_parser("source-commit")
+	add_common_arguments(source_commit)
+	source_commit.add_argument("--task", required=True)
+	source_commit.add_argument("--subject", required=True)
+	source_commit.add_argument("--mark-green", action="store_true")
+	source_commit.set_defaults(handler=command_source_commit)
+
+	source_verify_commit = subparsers.add_parser("source-verify-commit")
+	add_common_arguments(source_verify_commit)
+	source_verify_commit.add_argument("--task", required=True)
+	source_verify_commit.add_argument("--ref", default="HEAD")
+	source_verify_commit.set_defaults(handler=command_source_verify_commit)
+
+	source_prepare = subparsers.add_parser("source-prepare")
+	add_common_arguments(source_prepare)
+	source_prepare.set_defaults(handler=command_source_prepare)
+
+	project_sync = subparsers.add_parser("project-sync")
+	add_common_arguments(project_sync)
+	project_sync.add_argument("--task", required=True)
+	project_sync.add_argument("--onto", metavar="REMOTE/BRANCH")
+	project_sync.add_argument("--base-fix", metavar="COMMIT")
+	project_sync.set_defaults(handler=command_project_sync)
+
+	project_push = subparsers.add_parser("project-push")
+	add_common_arguments(project_push)
+	project_push.add_argument("--task", required=True)
+	project_push.add_argument("--rewritten", action="store_true")
+	project_push.add_argument("--base-fix", metavar="COMMIT")
+	project_push.add_argument("--base", metavar="REMOTE/BRANCH")
+	project_push.set_defaults(handler=command_project_push)
+
+	wip_save = subparsers.add_parser("wip-save")
+	add_common_arguments(wip_save)
+	wip_save.add_argument("--reason", required=True)
+	wip_save.set_defaults(handler=command_wip_save)
+
+	source_preflight = subparsers.add_parser("source-preflight")
+	add_common_arguments(source_preflight)
+	source_preflight.add_argument("--task", required=True)
+	source_preflight.add_argument("--exe")
+	source_preflight.set_defaults(handler=command_source_preflight)
+
+	build_lock_recover = subparsers.add_parser("build-lock-recover")
+	build_lock_recover.add_argument("--source-root", required=True)
+	build_lock_recover.add_argument("--build-root", required=True)
+	build_lock_recover.add_argument("--exe", required=True)
+	build_lock_recover.add_argument("--artifact", action="append", required=True)
+	build_lock_recover.add_argument("--wait", type=float, default=10.0)
+	build_lock_recover.set_defaults(handler=command_build_lock_recover)
+
+	overlay_save = subparsers.add_parser("overlay-save")
+	add_common_arguments(overlay_save)
+	overlay_save.add_argument("--task", required=True)
+	overlay_save.add_argument(
+		"--restore",
+		choices=("run", "green", "none"),
+		default="run",
+	)
+	overlay_save.set_defaults(handler=command_overlay_save)
+
+	overlay_apply = subparsers.add_parser("overlay-apply")
+	add_common_arguments(overlay_apply)
+	overlay_apply.add_argument("--task", required=True)
+	overlay_apply.set_defaults(handler=command_overlay_apply)
+
+	test_run = subparsers.add_parser("test-run")
+	test_run.add_argument("--exe", required=True)
+	test_run.add_argument("--run-dir", required=True)
+	test_run.add_argument("--portable-root")
+	test_run.add_argument("--deadline", type=float, default=120.0)
+	test_run.add_argument("--quiet", type=float, default=60.0)
+	test_run.add_argument("--grace", type=float, default=15.0)
+	test_run.add_argument("--wait-idle", type=float)
+	test_run.add_argument("--wait-idle-max", type=float, default=WAIT_IDLE_MAX_DEFAULT)
+	test_run.add_argument("--host-load", action="store_true")
+	test_run.add_argument(
+		"--host-load-threshold", type=float, default=HOST_LOAD_THRESHOLD_DEFAULT
+	)
+	test_run.add_argument("--host-load-hold", type=float, default=HOST_LOAD_HOLD_DEFAULT)
+	test_run.add_argument("--host-load-max", type=float, default=HOST_LOAD_MAX_DEFAULT)
+	test_run.add_argument(
+		"--host-load-interval", type=float, default=HOST_LOAD_INTERVAL_DEFAULT
+	)
+	test_run.add_argument("--activate", action="store_true")
+	test_run.add_argument("--env", action="append")
+	test_run.set_defaults(handler=command_test_run)
+
+	test_cleanup = subparsers.add_parser("test-cleanup")
+	test_cleanup.add_argument("--exe", required=True)
+	test_cleanup.add_argument("--delete-exe", action="store_true")
+	test_cleanup.set_defaults(handler=command_test_cleanup)
+
+	test_account_reset = subparsers.add_parser("test-account-reset")
+	test_account_reset.add_argument("--exe", required=True)
+	test_account_reset.add_argument("--portable-root")
+	test_account_reset.set_defaults(handler=command_test_account_reset)
+
+	fence_create = subparsers.add_parser("fence-create")
+	fence_create.add_argument("--file", required=True)
+	fence_create.add_argument("--root", default=".")
+	fence_create.add_argument("paths", nargs="*")
+	fence_create.set_defaults(handler=command_fence_create)
+
+	fence_check = subparsers.add_parser("fence-check")
+	fence_check.add_argument("--file", required=True)
+	fence_check.add_argument("--root", default=".")
+	fence_check.set_defaults(handler=command_fence_check)
+
+	finish = subparsers.add_parser("finish")
+	add_common_arguments(finish)
+	finish.add_argument("--task", required=True)
+	finish.add_argument(
+		"--status",
+		choices=("approved", "blocked", "split-required"),
+		required=True,
+	)
+	finish.add_argument("--model", required=True)
+	finish.set_defaults(handler=command_finish)
+
+	publish = subparsers.add_parser("publish")
+	add_common_arguments(publish)
+	publish.set_defaults(handler=command_publish)
+
+	inbox_publish = subparsers.add_parser("inbox-publish")
+	add_common_arguments(inbox_publish)
+	inbox_publish.add_argument("--transaction", required=True)
+	inbox_publish.add_argument("--receipt", required=True)
+	inbox_publish.add_argument(
+		"--path",
+		action="append",
+		dest="paths",
+		required=True,
+	)
+	inbox_publish.set_defaults(handler=command_inbox_publish)
+
+	route_ensure = subparsers.add_parser("route-ensure")
+	add_common_arguments(route_ensure)
+	route_ensure.set_defaults(handler=command_route_ensure)
+
+	route_publish = subparsers.add_parser("route-publish")
+	add_common_arguments(route_publish)
+	route_publish.add_argument("--source-task", required=True)
+	route_publish.add_argument(
+		"--path",
+		action="append",
+		dest="paths",
+	)
+	route_publish.set_defaults(handler=command_route_publish)
+
+	health_ensure = subparsers.add_parser("health-ensure")
+	add_common_arguments(health_ensure)
+	health_ensure.set_defaults(handler=command_health_ensure)
+
+	health_publish = subparsers.add_parser("health-publish")
+	add_common_arguments(health_publish)
+	health_publish.add_argument("--message")
+	health_publish.add_argument("--drop-on-conflict", action="store_true")
+	health_publish.set_defaults(handler=command_health_publish)
+
+	consolidate_publish = subparsers.add_parser("consolidate-publish")
+	add_common_arguments(consolidate_publish)
+	consolidate_publish.add_argument("--routing", action="store_true")
+	consolidate_publish.add_argument("--source-task", required=True)
+	consolidate_publish.add_argument("--receipt")
+	consolidate_publish.add_argument(
+		"--mapping",
+		action="append",
+		dest="mappings",
+		default=[],
+	)
+	consolidate_publish.add_argument(
+		"--path",
+		action="append",
+		dest="paths",
+		required=True,
+	)
+	consolidate_publish.set_defaults(handler=command_consolidate_publish)
+
+	split_publish = subparsers.add_parser("split-publish")
+	add_common_arguments(split_publish)
+	split_publish.add_argument("--source-task", required=True)
+	split_publish.add_argument("--receipt", required=True)
+	split_publish.add_argument(
+		"--replacement",
+		action="append",
+		dest="replacements",
+		required=True,
+	)
+	split_publish.add_argument("--implementation-carrier")
+	split_publish.add_argument(
+		"--path",
+		action="append",
+		dest="paths",
+		required=True,
+	)
+	split_publish.set_defaults(handler=command_split_publish)
+
+	task_content_digest = subparsers.add_parser("task-content-digest")
+	add_common_arguments(task_content_digest)
+	task_content_digest.add_argument("--task", required=True)
+	task_content_digest.set_defaults(handler=command_task_content_digest)
+
+	archive_stale = subparsers.add_parser("archive-stale")
+	add_common_arguments(archive_stale)
+	archive_stale.add_argument("--days", type=int, default=90)
+	archive_stale.set_defaults(handler=command_archive_stale)
+
+	unarchive = subparsers.add_parser("unarchive")
+	add_common_arguments(unarchive)
+	unarchive.add_argument("--project", required=True)
+	unarchive.set_defaults(handler=command_unarchive)
+
+	inbox_unarchive = subparsers.add_parser("inbox-unarchive")
+	add_common_arguments(inbox_unarchive)
+	inbox_unarchive.add_argument("--project", required=True)
+	inbox_unarchive.set_defaults(handler=command_inbox_unarchive)
+
+	return parser.parse_args()
+
+
+def main():
+	args = parse_args()
+	enable_git_long_paths(os.environ)
+	try:
+		args.handler(args)
+	except (OSError, ValueError, WorkspaceError) as error:
+		print(f"error: {error}", file=sys.stderr)
+		return 1
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main())

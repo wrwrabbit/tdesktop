@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history_item_helpers.h"
+#include "iv/iv_rich_page.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "ui/chat/chat_style.h"
@@ -264,6 +265,28 @@ auto CreateBackgroundGiftInstance(
 		Data::CustomEmojiSizeTag::Normal);
 }
 
+void FillPreviewSpoiler(
+		QPainter &p,
+		QRect rect,
+		const QPixmap &preview,
+		const Ui::SpoilerMessFrame &frame,
+		QImage &cache) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto full = rect.size() * ratio;
+	if (cache.size() != full) {
+		cache = QImage(full, QImage::Format_ARGB32_Premultiplied);
+		cache.setDevicePixelRatio(ratio);
+	}
+	cache.fill(Qt::transparent);
+	const auto to = QRect(QPoint(), rect.size());
+	auto q = QPainter(&cache);
+	Ui::FillSpoilerRect(q, to, frame);
+	q.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+	q.drawPixmap(to, preview);
+	q.end();
+	p.drawImage(rect, cache);
+}
+
 void FillBackgroundEmoji(
 		QPainter &p,
 		const QRect &rect,
@@ -332,6 +355,7 @@ void Reply::update(
 		not_null<HistoryMessageReply*> data) {
 	const auto item = view->data();
 	const auto &fields = data->fields();
+	const auto &quote = fields.displayQuote();
 	const auto message = data->resolvedMessage.get();
 	const auto messageMedia = (message
 			&& (fields.todoItemId || !fields.pollOption.isEmpty()))
@@ -375,6 +399,7 @@ void Reply::update(
 	_hiddenSenderColorIndexPlusOne = (!_colorPeer && message)
 		? (message->originalHiddenSenderInfo()->colorIndex + 1)
 		: 0;
+	_hasBackgroundEmoji = hasBackgroundEmoji();
 	const auto pollMediaPtr = pollAnswer
 		? &pollAnswer->media
 		: (messagePoll && fields.pollOption.isEmpty())
@@ -392,7 +417,7 @@ void Reply::update(
 	_multiline = data->multiline() ? 1 : 0;
 	const auto hasQuoteIcon = _displaying
 		&& fields.manualQuote
-		&& !fields.quote.empty();
+		&& !quote.empty();
 	_hasQuoteIcon = hasQuoteIcon ? 1 : 0;
 
 	const auto repaint = [=] { item->customEmojiRepaint(); };
@@ -421,10 +446,10 @@ void Reply::update(
 		? Ui::Text::Colorized(
 			Ui::Text::IconEmoji(&st::historyPollReplyIcon)
 		).append(messagePoll->question)
-		: (message && (fields.quote.empty() || !fields.manualQuote))
+		: (message && (quote.empty() || !fields.manualQuote))
 		? message->inReplyText()
-		: !fields.quote.empty()
-		? fields.quote
+		: !quote.empty()
+		? quote
 		: story
 		? Ui::Text::Colorized(
 			Ui::Text::IconEmoji(&st::historyReplyStoryIcon)
@@ -444,13 +469,18 @@ void Reply::update(
 		text,
 		_multiline ? Ui::ItemTextDefaultOptions() : Ui::DialogTextOptions(),
 		helper.context());
+	if (view->context() == Context::MediaEditor) {
+		_text.setSpoilerRevealed(true, anim::type::instant);
+	}
 
 	updateName(view, data);
 
 	if (_displaying) {
 		setLinkFrom(view, data);
 		const auto media = message ? message->media() : nullptr;
-		if (!media || !media->hasReplyPreview() || !media->hasSpoiler()) {
+		if (!media
+			|| !media->hasReplyPreview()
+			|| !media->hasSpoilerForPreview()) {
 			_spoiler = nullptr;
 		} else if (!_spoiler) {
 			_spoiler = std::make_unique<Ui::SpoilerAnimation>(repaint);
@@ -476,12 +506,7 @@ void Reply::setLinkFrom(
 	const auto isAdminLogEntry = view->data()->isAdminLogEntry();
 	const auto externalChannelId = peerToChannel(fields.externalPeerId);
 	const auto messageId = fields.messageId;
-	const auto highlight = MessageHighlightId{
-		.quote = fields.manualQuote ? fields.quote : TextWithEntities(),
-		.quoteOffset = int(fields.quoteOffset),
-		.todoItemId = fields.todoItemId,
-		.pollOption = fields.pollOption,
-	};
+	const auto highlight = fields.highlight();
 	const auto returnToId = view->data()->fullId();
 	const auto externalLink = [=](ClickContext context) {
 		const auto my = context.other.value<ClickHandlerContext>();
@@ -588,6 +613,9 @@ QString Reply::senderName(
 bool Reply::isNameUpdated(
 		not_null<const Element*> view,
 		not_null<HistoryMessageReply*> data) const {
+	if (hasBackgroundEmoji() != _hasBackgroundEmoji) {
+		return true;
+	}
 	if (const auto from = sender(view, data)) {
 		if (_nameVersion < from->nameVersion()) {
 			updateName(view, data, from);
@@ -673,10 +701,7 @@ void Reply::updateName(
 	}
 	const auto nameMaxWidth = previewSkip
 		+ _name.maxWidth()
-		+ st::messageGiftIconSkip
-		+ (_hasQuoteIcon
-			? st::messageTextStyle.blockquote.icon.width()
-			: 0);
+		+ nameIconsSkip();
 	const auto optimalTextSize = _multiline
 		? countMultilineOptimalSize(previewSkip)
 		: QSize(
@@ -707,6 +732,17 @@ void Reply::updateName(
 		+ st::historyReplyPadding.bottom();
 }
 
+bool Reply::hasBackgroundEmoji() const {
+	return _colorPeer && (_colorPeer->backgroundEmojiId() != 0);
+}
+
+int Reply::nameIconsSkip() const {
+	return (_hasQuoteIcon
+		? st::messageTextStyle.blockquote.icon.width()
+		: 0)
+		+ (_hasBackgroundEmoji ? st::messageGiftIconSkip : 0);
+}
+
 int Reply::resizeToWidth(int width) const {
 	_ripple.animation = nullptr;
 
@@ -726,7 +762,7 @@ int Reply::resizeToWidth(int width) const {
 	const auto innerw = width
 		- st::historyReplyPadding.left()
 		- st::historyReplyPadding.right();
-	const auto namew = innerw - previewSkip;
+	const auto namew = innerw - previewSkip - nameIconsSkip();
 	const auto desiredNameHeight = _name.countHeight(namew);
 	_nameTwoLines = (desiredNameHeight > st::semiboldFont->height) ? 1 : 0;
 	const auto nameh = (_nameTwoLines ? 2 : 1) * st::semiboldFont->height;
@@ -955,27 +991,26 @@ void Reply::paint(
 							.outer = to.size(),
 						});
 					p.drawPixmap(to.x(), to.y(), preview);
-					if (_spoiler) {
+					const auto mediaEditor = (view->context()
+						== Context::MediaEditor);
+					if (_spoiler && !mediaEditor) {
 						view->clearCustomEmojiRepaint();
-						Ui::FillSpoilerRect(
+						FillPreviewSpoiler(
 							p,
 							to,
+							preview,
 							Ui::DefaultImageSpoiler().frame(
 								_spoiler->index(
 									context.now,
-									pausedSpoiler)));
+									pausedSpoiler)),
+							_spoilerCache);
 					}
 				}
 			}
 			const auto textw = w
 				- st::historyReplyPadding.left()
 				- st::historyReplyPadding.right();
-			const auto namew = textw
-				- previewSkip
-				- st::messageGiftIconSkip
-				- (_hasQuoteIcon
-					? st::messageTextStyle.blockquote.icon.width()
-					: 0);
+			const auto namew = textw - previewSkip - nameIconsSkip();
 			auto firstLineSkip = _nameTwoLines ? 0 : previewSkip;
 			if (namew > 0) {
 				p.setPen(!inBubble
@@ -1118,7 +1153,7 @@ TextWithEntities Reply::ComposePreviewName(
 	const auto groupNameAdded = displayAsExternal
 		&& (toPeer != sender)
 		&& (toPeer->isChat() || toPeer->isMegagroup());
-	const auto quote = replyTo && !replyTo.quote.empty();
+	const auto quote = replyTo && !ComposePreviewQuote(replyTo).empty();
 	const auto shorten = groupNameAdded || quote;
 
 	auto nameFull = TextWithEntities();
@@ -1139,6 +1174,11 @@ TextWithEntities Reply::ComposePreviewName(
 			nameFull,
 			tr::marked);
 
+}
+
+const TextWithEntities &Reply::ComposePreviewQuote(
+		const FullReplyTo &replyTo) {
+	return replyTo.richQuote ? replyTo.richQuote->text : replyTo.quote;
 }
 
 void Reply::unloadPersistentAnimation() {

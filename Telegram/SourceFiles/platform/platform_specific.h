@@ -20,6 +20,16 @@ namespace Platform {
 void start();
 void finish();
 
+// Passed to the instance relaunched from its original location after an
+// App Translocation fix, so a relaunch that is still translocated stops
+// instead of trying again.
+inline constexpr auto kUntranslocatedArgument = "-untranslocated";
+
+// Returns false when startup must stop right away: the process was
+// started by macOS from a read-only translocated copy of the bundle and
+// either relaunched itself from the original location or told the user.
+[[nodiscard]] bool CheckAppTranslocation();
+
 enum class PermissionStatus {
 	Granted,
 	CanRequest,
@@ -37,17 +47,24 @@ enum class SystemSettingsType {
 
 void SetApplicationIcon(const QIcon &icon);
 [[nodiscard]] QString SingleInstanceLocalServerName(const QString &hash);
+[[nodiscard]] bool LocalSocketPeerAllowed(qintptr descriptor);
 [[nodiscard]] PermissionStatus GetPermissionStatus(PermissionType type);
 void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCallback);
 void OpenSystemSettingsForPermission(PermissionType type);
 bool OpenSystemSettings(SystemSettingsType type);
 void IgnoreApplicationActivationRightNow();
+// macOS Hide (Cmd+H) leaves Qt windows shown and unminimized.
+[[nodiscard]] rpl::producer<bool> ApplicationHiddenValue();
+[[nodiscard]] int64 ClipboardChangeCount();
 [[nodiscard]] bool AutostartSupported();
 void AutostartRequestStateFromSystem(Fn<void(bool)> callback);
 void AutostartToggle(bool enabled, Fn<void(bool)> done = nullptr);
 [[nodiscard]] bool AutostartSkip();
 [[nodiscard]] bool TrayIconSupported();
 [[nodiscard]] bool SkipTaskbarSupported();
+[[nodiscard]] bool ScreenshotProtectionSupported();
+[[nodiscard]] bool AmbientScreenshotProtectionSupported();
+void SetWindowScreenshotProtection(not_null<QWidget*> window, bool enabled);
 void WriteCrashDumpDetails();
 void NewVersionLaunched(int oldVersion);
 [[nodiscard]] QImage DefaultApplicationIcon();
@@ -55,6 +72,9 @@ void NewVersionLaunched(int oldVersion);
 [[nodiscard]] bool PreventsQuit(Core::QuitReason reason);
 [[nodiscard]] QString ExecutablePathForShortcuts();
 void LaunchMaps(const Data::LocationPoint &point, Fn<void()> fail);
+[[nodiscard]] QString LocalizedCurrencyName(
+	const QString &currency,
+	const QString &languageId);
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 [[nodiscard]] std::optional<bool> IsDarkMode();

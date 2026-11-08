@@ -46,6 +46,8 @@ struct UploadState {
 	int64 offset = 0;
 	int64 size = 0;
 	bool waitingForAlbum = false;
+	bool preparing = false;
+	float64 prepareProgress = 0.;
 };
 
 Storage::Cache::Key DocumentCacheKey(int32 dcId, uint64 id);
@@ -112,8 +114,6 @@ using FilterId = int32;
 using MessageIdsList = std::vector<FullMsgId>;
 
 [[nodiscard]] PeerId PeerFromMessage(const MTPmessage &message);
-[[nodiscard]] MTPDmessage::Flags FlagsFromMessage(
-	const MTPmessage &message);
 [[nodiscard]] MsgId IdFromMessage(const MTPmessage &message);
 [[nodiscard]] TimeId DateFromMessage(const MTPmessage &message);
 [[nodiscard]] BusinessShortcutId BusinessShortcutIdFromMessage(
@@ -301,8 +301,7 @@ enum class MessageFlag : uint64 {
 	// Outgoing message and failed to be sent.
 	SendingFailed         = (1ULL << 27),
 
-	// No media and only a several emoji or an only custom emoji text.
-	SpecialOnlyEmoji      = (1ULL << 28),
+	EmojiInteractionWatched = (1ULL << 28),
 
 	// Message existing in the message history.
 	HistoryEntry          = (1ULL << 29),
@@ -370,6 +369,8 @@ enum class MessageFlag : uint64 {
 	TextAppearingStarted  = (1ULL << 61),
 
 	GuestChatViaFrom      = (1ULL << 62),
+
+	Ephemeral             = (1ULL << 63),
 };
 inline constexpr bool is_flag_type(MessageFlag) { return true; }
 using MessageFlags = base::flags<MessageFlag>;

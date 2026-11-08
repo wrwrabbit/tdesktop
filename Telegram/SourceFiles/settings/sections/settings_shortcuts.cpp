@@ -8,24 +8,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/sections/settings_shortcuts.h"
 
 #include "base/event_filter.h"
+#include "base/qt/qt_possible_keys.h"
 #include "core/application.h"
 #include "core/shortcuts.h"
 #include "lang/lang_keys.h"
 #include "settings/sections/settings_chat.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
+#include "ui/boxes/confirm_box.h"
 #include "ui/text/text_utilities.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/search_field_controller.h"
 #include "ui/vertical_list.h"
 #include "window/window_session_controller.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
-
-#include <private/qkeymapper_p.h>
 
 namespace Settings {
 namespace {
@@ -62,6 +64,7 @@ struct Labeled {
 		{ C::Lock, tr::lng_shortcuts_lock() },
 		{ C::Minimize, tr::lng_shortcuts_minimize() },
 		{ C::Quit, tr::lng_shortcuts_quit() },
+		{ C::ReopenClosedWindow, tr::lng_shortcuts_reopen_closed_window() },
 		separator,
 		{ C::Search, tr::lng_shortcuts_search() },
 		separator,
@@ -111,7 +114,9 @@ struct Labeled {
 		{ C::ScheduleMessage, tr::lng_shortcuts_schedule() },
 		separator,
 		{ C::ComposeAiApplyInPlace, tr::lng_shortcuts_ai_compose_apply() },
+		{ C::ShowRichEditor, tr::lng_shortcuts_rich_editor() },
 		{ C::ToggleWebPagePreview, tr::lng_shortcuts_toggle_link_preview() },
+		{ C::StashMessage, tr::lng_shortcuts_stash_message() },
 		separator,
 		{ C::RecordVoice, tr::lng_shortcuts_record_voice_message() },
 		{ C::RecordRound, tr::lng_shortcuts_record_round_message() },
@@ -129,20 +134,24 @@ struct Labeled {
 	};
 }
 
-[[nodiscard]] QString ToString(const QKeySequence &key) {
-	auto result = key.toString();
+[[nodiscard]] QStringList KeyWords(const QKeySequence &key) {
+	if (key.isEmpty()) {
+		return {};
+	}
+	auto text = key.toString();
 #ifdef Q_OS_MAC
-	result = result.replace(u"Ctrl+"_q, QString() + QChar(0x2318));
-	result = result.replace(u"Meta+"_q, QString() + QChar(0x2303));
-	result = result.replace(u"Alt+"_q, QString() + QChar(0x2325));
-	result = result.replace(u"Shift+"_q, QString() + QChar(0x21E7));
+	text.replace(u"Ctrl+"_q, u"Ctrl Cmd Command "_q);
+	text.replace(u"Meta+"_q, u"Meta Control "_q);
+	text.replace(u"Alt+"_q, u"Alt Opt Option "_q);
 #endif // Q_OS_MAC
-	return result;
+	return SearchWords(text);
 }
 
 struct SetupShortcutsResult {
 	Fn<void()> save;
 	QPointer<Ui::RpWidget> resetButton;
+	Fn<void(const QString &query)> applyFilter;
+	rpl::producer<> recordingStarts;
 };
 
 [[nodiscard]] SetupShortcutsResult SetupShortcutsContent(
@@ -161,17 +170,23 @@ struct SetupShortcutsResult {
 	struct Entry {
 		S::Command command;
 		rpl::producer<QString> label;
+		QStringList terms;
 		std::vector<QKeySequence> original;
 		std::vector<QKeySequence> now;
-		Ui::VerticalLayout *wrap = nullptr;
+		Ui::SlideWrap<Ui::VerticalLayout> *wrap = nullptr;
+		Ui::VerticalLayout *inner = nullptr;
 		std::vector<std::unique_ptr<Button>> buttons;
 	};
 	struct State {
 		std::vector<Entry> entries;
+		std::vector<Ui::SlideWrap<Ui::VerticalLayout>*> separators;
+		QString query;
+		QStringList resetTerms;
 		rpl::variable<bool> modified;
+		rpl::variable<bool> resetShown = true;
 		rpl::variable<Button*> recording;
 		rpl::variable<QKeySequence> lastKey;
-		Fn<void(S::Command command)> showMenuFor;
+		Fn<void(Button *button)> showMenuFor;
 	};
 	const auto state = content->lifetime().make_state<State>();
 	const auto labeled = Entries();
@@ -199,13 +214,16 @@ struct SetupShortcutsResult {
 		}
 	}
 
+	const auto entryModified = [](const Entry &entry) {
+		auto original = entry.original;
+		auto now = entry.now;
+		ranges::sort(original);
+		ranges::sort(now);
+		return original != now;
+	};
 	const auto checkModified = [=] {
 		for (const auto &entry : state->entries) {
-			auto original = entry.original;
-			auto now = entry.now;
-			ranges::sort(original);
-			ranges::sort(now);
-			if (original != now) {
+			if (entryModified(entry)) {
 				state->modified = true;
 				return;
 			}
@@ -233,9 +251,9 @@ struct SetupShortcutsResult {
 					.key = now,
 				});
 				const auto raw = button.get();
-				const auto widget = entry.wrap->add(
+				const auto widget = entry.inner->add(
 					object_ptr<Ui::SettingsButton>(
-						entry.wrap,
+						entry.inner,
 						rpl::duplicate(entry.label),
 						st::settingsButtonNoIcon));
 				if (highlights && index == 0) {
@@ -276,9 +294,9 @@ struct SetupShortcutsResult {
 						? TextWithEntities()
 						: removed
 						? Ui::Text::Wrapped(
-							TextWithEntities{ ToString(key) },
+							TextWithEntities{ Shortcuts::ToDisplayString(key) },
 							EntityType::StrikeOut)
-						: TextWithEntities{ ToString(key) });
+						: TextWithEntities{ Shortcuts::ToDisplayString(key) });
 					keys->setTextColorOverride((recording == raw)
 						? st::boxTextFgGood->c
 						: removed
@@ -299,7 +317,7 @@ struct SetupShortcutsResult {
 						return;
 					}
 					if (button == Qt::RightButton) {
-						state->showMenuFor(raw->command);
+						state->showMenuFor(raw);
 					} else {
 						S::Pause();
 						state->recording = raw;
@@ -311,31 +329,115 @@ struct SetupShortcutsResult {
 			}
 			++index;
 		}
-		while (entry.wrap->count() > index) {
+		while (entry.inner->count() > index) {
 			entry.buttons.pop_back();
 		}
 	};
-	state->showMenuFor = [=](S::Command command) {
+	const auto deleteBinding = [=](Button *button) {
+		for (auto &entry : state->entries) {
+			const auto i = ranges::find(
+				entry.buttons,
+				button,
+				&std::unique_ptr<Button>::get);
+			if (i == end(entry.buttons)) {
+				continue;
+			}
+			const auto index = i - begin(entry.buttons);
+			const auto was = entry.now[index];
+			if (was.isEmpty()) {
+				return;
+			}
+			entry.now.erase(begin(entry.now) + index);
+			fill(entry);
+			checkModified();
+			S::Change(was, QKeySequence(), entry.command);
+			return;
+		}
+	};
+	const auto restoreRowDefault = [=](Button *button) {
+		for (auto &entry : state->entries) {
+			const auto i = ranges::find(
+				entry.buttons,
+				button,
+				&std::unique_ptr<Button>::get);
+			if (i == end(entry.buttons)) {
+				continue;
+			}
+			const auto index = i - begin(entry.buttons);
+			const auto was = entry.now[index];
+			const auto restore = ranges::find_if(
+				entry.original,
+				[&](const QKeySequence &k) {
+					return !k.isEmpty() && !ranges::contains(entry.now, k);
+				});
+			if (restore == end(entry.original)) {
+				return;
+			}
+			for (auto &other : state->entries) {
+				if (&other == &entry) {
+					continue;
+				}
+				const auto j = ranges::find(other.now, *restore);
+				if (j != end(other.now)
+					&& !ranges::contains(other.original, *restore)) {
+					other.now.erase(j);
+					fill(other);
+					S::Change(*restore, QKeySequence(), other.command);
+				}
+			}
+			entry.now[index] = *restore;
+			fill(entry);
+			checkModified();
+			S::RestoreDefaultFor(was, *restore, entry.command);
+			return;
+		}
+	};
+	state->showMenuFor = [=](Button *button) {
+		const auto i = ranges::find(
+			state->entries,
+			button->command,
+			&Entry::command);
+		if (i == end(state->entries)) {
+			return;
+		}
+		const auto entry = &*i;
+		const auto key = button->key.current();
+		const auto rowIsDefault = !key.isEmpty()
+			&& ranges::contains(entry->original, key);
+		const auto defaultsKept = ranges::all_of(
+			entry->original,
+			[&](const QKeySequence &k) {
+				return k.isEmpty() || ranges::contains(entry->now, k);
+			});
 		*menu = Ui::CreateChild<Ui::PopupMenu>(
 			content,
 			st::popupMenuWithIcons);
 		(*menu)->addAction(tr::lng_shortcuts_add_another(tr::now), [=] {
-			const auto i = ranges::find(
-				state->entries,
-				command,
-				&Entry::command);
-			if (i != end(state->entries)) {
-				S::Pause();
-				const auto j = ranges::find(i->now, QKeySequence());
-				if (j != end(i->now)) {
-					state->recording = i->buttons[j - begin(i->now)].get();
-				} else {
-					i->now.push_back(QKeySequence());
-					fill(*i);
-					state->recording = i->buttons.back().get();
-				}
+			S::Pause();
+			const auto j = ranges::find(entry->now, QKeySequence());
+			if (j != end(entry->now)) {
+				state->recording = entry->buttons[j - begin(entry->now)].get();
+			} else {
+				entry->now.push_back(QKeySequence());
+				fill(*entry);
+				state->recording = entry->buttons.back().get();
 			}
 		}, &st::menuIconTopics);
+		if (!key.isEmpty() && !rowIsDefault) {
+			if (!defaultsKept) {
+				(*menu)->addAction(tr::lng_shortcuts_reset(tr::now), [=] {
+					restoreRowDefault(button);
+				}, &st::menuIconRestore);
+			} else {
+				(*menu)->addAction(tr::lng_box_delete(tr::now), [=] {
+					deleteBinding(button);
+				}, &st::menuIconDelete);
+			}
+		} else if (key.isEmpty() && !defaultsKept) {
+			(*menu)->addAction(tr::lng_shortcuts_reset(tr::now), [=] {
+				restoreRowDefault(button);
+			}, &st::menuIconRestore);
+		}
 		(*menu)->popup(QCursor::pos());
 	};
 
@@ -404,6 +506,7 @@ struct SetupShortcutsResult {
 			S::Change(was, now, command);
 		}
 	};
+	content->lifetime().add(S::Unpause);
 	base::install_event_filter(content, qApp, [=](not_null<QEvent*> e) {
 		const auto type = e->type();
 		if (type == QEvent::ShortcutOverride && state->recording.current()) {
@@ -429,7 +532,7 @@ struct SetupShortcutsResult {
 			const auto r = [&] {
 				auto result = int(k);
 				if (m & Qt::ShiftModifier) {
-					const auto keys = QKeyMapper::possibleKeys(key);
+					const auto keys = base::PossibleKeys(key);
 					for (const auto &possible : keys) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
 						if (possible.keyboardModifiers() == m) {
@@ -471,34 +574,123 @@ struct SetupShortcutsResult {
 		st::settingsButtonNoIcon));
 	reset->setClickedCallback([=] {
 		stopRecording();
-		for (auto &entry : state->entries) {
-			if (entry.now != entry.original) {
-				entry.now = entry.original;
-				fill(entry);
-			}
-		}
-		checkModified();
-		S::ResetToDefaults();
+		controller->show(Ui::MakeConfirmBox({
+			.text = tr::lng_shortcuts_reset_sure(),
+			.confirmed = crl::guard(content, [=](Fn<void()> close) {
+				for (auto &entry : state->entries) {
+					if (entry.now != entry.original) {
+						entry.now = entry.original;
+						fill(entry);
+					}
+				}
+				checkModified();
+				S::ResetToDefaults();
+				close();
+			}),
+			.confirmText = tr::lng_shortcuts_reset(),
+		}));
 	});
 	AddSkip(modifiedInner);
 	AddDivider(modifiedInner);
-	modifiedWrap->toggleOn(state->modified.value());
+	modifiedWrap->toggleOn(rpl::combine(
+		state->modified.value(),
+		state->resetShown.value()
+	) | rpl::map([](bool modified, bool shown) {
+		return modified && shown;
+	}));
 
 	AddSkip(content);
+	const auto nothingFound = content->add(
+		object_ptr<Ui::SlideWrap<Ui::FlatLabel>>(
+			content,
+			object_ptr<Ui::FlatLabel>(
+				content,
+				tr::lng_search_tab_no_results(),
+				st::settingsSearchNoResults),
+			st::settingsSearchNoResultsPadding),
+		style::margins(),
+		style::al_justify);
+	nothingFound->setDuration(0);
+	nothingFound->hide(anim::type::instant);
+
+	const auto refreshFilter = [=] {
+		const auto words = SearchWords(state->query);
+		const auto reset = MatchesWords(state->resetTerms, words);
+		state->resetShown = reset;
+		auto found = reset && state->modified.current();
+		for (auto &entry : state->entries) {
+			if (!entry.wrap) {
+				continue;
+			}
+			auto terms = entry.terms;
+			for (const auto &key : entry.now) {
+				terms += KeyWords(key);
+			}
+			const auto shown = MatchesWords(terms, words);
+			entry.wrap->toggle(shown, anim::type::instant);
+			found = found || shown;
+		}
+		for (const auto separator : state->separators) {
+			separator->toggle(words.isEmpty(), anim::type::instant);
+		}
+		nothingFound->toggle(!found, anim::type::instant);
+	};
+
+	tr::lng_shortcuts_reset(
+	) | rpl::on_next([=](const QString &text) {
+		state->resetTerms = SearchWords(text);
+		if (!state->query.isEmpty()) {
+			refreshFilter();
+		}
+	}, content->lifetime());
+
 	for (auto &entry : entries) {
 		if (!entry.label) {
-			AddSkip(content);
-			AddDivider(content);
-			AddSkip(content);
+			const auto separator = content->add(
+				object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+					content,
+					object_ptr<Ui::VerticalLayout>(content)),
+				style::margins(),
+				style::al_justify);
+			separator->setDuration(0);
+			AddSkip(separator->entity());
+			AddDivider(separator->entity());
+			AddSkip(separator->entity());
+			state->separators.push_back(separator);
 			continue;
 		}
-		entry.wrap = content->add(object_ptr<Ui::VerticalLayout>(content));
+		entry.wrap = content->add(
+			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+				content,
+				object_ptr<Ui::VerticalLayout>(content)),
+			style::margins(),
+			style::al_justify);
+		entry.wrap->setDuration(0);
+		entry.inner = entry.wrap->entity();
 		fill(entry);
+
+		const auto raw = &entry;
+		rpl::duplicate(
+			entry.label
+		) | rpl::on_next([=](const QString &text) {
+			raw->terms = SearchWords(text);
+			if (!state->query.isEmpty()) {
+				refreshFilter();
+			}
+		}, content->lifetime());
 	}
 
 	return {
 		.save = [=] {},
 		.resetButton = reset,
+		.applyFilter = [=](const QString &query) {
+			state->query = query;
+			refreshFilter();
+		},
+		.recordingStarts = state->recording.changes(
+		) | rpl::filter([](Button *button) {
+			return button != nullptr;
+		}) | rpl::to_empty,
 	};
 }
 
@@ -519,13 +711,19 @@ public:
 		not_null<Window::SessionController*> controller);
 	~Shortcuts();
 
-	void showFinished() override;
+	void setInnerFocus() override;
 
 	[[nodiscard]] rpl::producer<QString> title() override;
+
+	[[nodiscard]] base::weak_qptr<Ui::RpWidget> createPinnedToTop(
+		not_null<QWidget*> parent) override;
 
 private:
 	void setupContent();
 
+	std::unique_ptr<Ui::SearchFieldController> _searchController;
+	QPointer<Ui::InputField> _searchField;
+	Fn<void(const QString &query)> _applyFilter;
 	Fn<void()> _save;
 	QPointer<Ui::RpWidget> _resetButton;
 
@@ -548,10 +746,29 @@ rpl::producer<QString> Shortcuts::title() {
 	return tr::lng_settings_shortcuts();
 }
 
+base::weak_qptr<Ui::RpWidget> Shortcuts::createPinnedToTop(
+		not_null<QWidget*> parent) {
+	auto search = CreateSectionSearchRow(parent);
+	_searchController = std::move(search.controller);
+	const auto row = search.row;
+	_searchField = search.field;
+
+	_searchController->queryChanges(
+	) | rpl::on_next([=](const QString &query) {
+		if (_applyFilter) {
+			_applyFilter(query);
+		}
+	}, row->lifetime());
+
+	return base::make_weak(row);
+}
+
 void Shortcuts::setupContent() {
 	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
 
 	const SectionBuildMethod buildMethod = [
+		section = this,
+		applyFilter = &_applyFilter,
 		resetButton = &_resetButton,
 		save = &_save
 	](
@@ -579,6 +796,13 @@ void Shortcuts::setupContent() {
 			highlights);
 		*save = std::move(result.save);
 		*resetButton = result.resetButton;
+		*applyFilter = std::move(result.applyFilter);
+
+		std::move(
+			result.recordingStarts
+		) | rpl::on_next([=] {
+			section->setFocus();
+		}, lifetime);
 
 		if (highlights && *resetButton) {
 			highlights->push_back({
@@ -604,8 +828,12 @@ void Shortcuts::setupContent() {
 	Ui::ResizeFitChild(this, content);
 }
 
-void Shortcuts::showFinished() {
-	Section<Shortcuts>::showFinished();
+void Shortcuts::setInnerFocus() {
+	if (_searchField) {
+		_searchField->setFocus();
+	} else {
+		setFocus();
+	}
 }
 
 const auto kMeta = BuildHelper({

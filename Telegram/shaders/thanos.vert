@@ -12,6 +12,8 @@ layout(std140, binding = 0) uniform Params {
 	vec2 size;
 	uvec2 particleResolution;
 	vec4 scale;
+	// -1.0 when the NDC Y axis points down (Vulkan), 1.0 otherwise.
+	float flipY;
 };
 
 void main() {
@@ -19,12 +21,15 @@ void main() {
 	uint pX = particleId % particleResolution.x;
 	uint pY = particleId / particleResolution.x;
 
-	vec4 state = texelFetch(
+	// One R32F texel per float: offset.x, offset.y, lifetime.
+	ivec2 stateCoord = ivec2(int(pX) * 3, int(pY));
+	vec2 inOffset = vec2(
+		texelFetch(particleStateTex, stateCoord, 0).x,
+		texelFetch(particleStateTex, stateCoord + ivec2(1, 0), 0).x);
+	float inLifetime = texelFetch(
 		particleStateTex,
-		ivec2(int(pX), int(pY)),
-		0);
-	vec2 inOffset = state.xy;
-	float inLifetime = state.z;
+		stateCoord + ivec2(2, 0),
+		0).x;
 
 	vec2 particleSize = size / vec2(particleResolution);
 
@@ -43,7 +48,7 @@ void main() {
 	ndc.x = -1.0 + ndc.x * 2.0;
 	ndc.y = -1.0 + ndc.y * 2.0;
 
-	gl_Position = vec4(ndc, 0.0, 1.0);
+	gl_Position = vec4(ndc.x, ndc.y * flipY, 0.0, 1.0);
 
 	v_alpha = clamp(inLifetime / 0.6, 0.0, 1.0) * scale.z;
 }

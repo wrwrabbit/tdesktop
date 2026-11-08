@@ -24,7 +24,6 @@ namespace Info::Media {
 
 using Type = Storage::SharedMediaType;
 
-[[nodiscard]] std::optional<int> TypeToTabIndex(Type type);
 [[nodiscard]] Type TabIndexToType(int index);
 [[nodiscard]] tr::phrase<> SharedMediaTitle(Type type);
 
@@ -126,6 +125,7 @@ public:
 	void selectionAction(SelectionAction action) override;
 
 	void fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) override;
+	bool processZoomKey(not_null<QKeyEvent*> e) override;
 
 	rpl::producer<QString> title() override;
 

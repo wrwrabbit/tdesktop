@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/controls/compose_controls_common.h"
 #include "history/view/reactions/history_view_reactions_strip.h"
 #include "history/view/history_view_paid_reaction_toast.h"
+#include "history/history_location_manager.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "media/stories/media_stories_caption_full_view.h"
@@ -61,7 +62,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_chat_helpers.h" // defaultReportBox
 #include "styles/style_media_view.h"
-#include "styles/style_boxes.h" // UserpicButton
+#include "styles/style_userpic_button.h"
 
 #include <QtGui/QWindow>
 
@@ -1426,7 +1427,7 @@ void Controller::checkWaitingFor() {
 	Expects(shown());
 
 	const auto peer = shownPeer();
-	auto &stories = peer->owner().stories();
+	const auto &stories = peer->owner().stories();
 	const auto maybe = stories.lookup(_waitingForId);
 	if (!maybe) {
 		if (maybe.error() == Data::NoStory::Deleted) {
@@ -1554,7 +1555,7 @@ Fn<void(Data::StoryViews)> Controller::viewsGotMoreCallback() {
 	return crl::guard(&_viewsLoadGuard, [=](Data::StoryViews result) {
 		if (_viewsSlice.list.empty()) {
 			const auto peer = shownPeer();
-			auto &stories = peer->owner().stories();
+			const auto &stories = peer->owner().stories();
 			if (const auto maybeStory = stories.lookup(_shown)) {
 				if (peer->isChannel()) {
 					_viewsSlice = (*maybeStory)->channelReactionsList();
@@ -1719,7 +1720,7 @@ void Controller::refreshViewsFromData() {
 	Expects(shown());
 
 	const auto peer = shownPeer();
-	auto &stories = peer->owner().stories();
+	const auto &stories = peer->owner().stories();
 	const auto maybeStory = stories.lookup(_shown);
 	const auto check = peer->isSelf()
 		|| CanViewReactionsFor(peer);
@@ -2045,6 +2046,10 @@ Ui::Toast::Config PrepareTogglePinToast(
 					tr::now,
 					lt_count,
 					count))) },
+		.iconLottie = pin
+			? u"toast/pin"_q
+			: u"toast/unpin"_q,
+		.iconLottieSize = st::toastLottieIconSize,
 		.st = &st::storiesActionToast,
 		.duration = (pin
 			? Data::Stories::kInProfileToastDuration

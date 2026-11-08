@@ -490,6 +490,37 @@ struct State {
 const auto state = lifetime.make_state<State>();
 ```
 
+## Don't keep rpl per-subscription state in a mutable capture
+
+`rpl` stores the next-handler `OnNext _next` by value on `consumer_handlers`. Both `put_next` and `put_next_copy` copy it (`auto handler = this->_next;`) and invoke the copy. The stored `_next` stays intact while that copy runs, so a nested `put_next` copies `_next` again instead of re-entering the running object. `put_error` and `put_done` instead move the stored callback and terminate, because those complete the subscription.
+
+A `mutable` init-capture mutated inside `rpl::on_next` is written on that copy and discarded. The next emission starts from the original capture again. The result compiles and runs, and silently degrades a "the value grew" rule into "the value is non-zero".
+
+```cpp
+// BAD - the write never carries:
+events | rpl::on_next([last = 0](int value) mutable {
+	const auto grew = (value > last);
+	last = value;
+	if (grew) {
+		...
+	}
+}, lifetime);
+
+// GOOD - make_state lives beside the handler for the subscription's lifetime:
+const auto last = lifetime.make_state<int>(0);
+events | rpl::on_next([=](int value) {
+	const auto grew = (value > *last);
+	*last = value;
+	if (grew) {
+		...
+	}
+}, lifetime);
+```
+
+State behind a `shared_ptr` is the other correct shape when the pointer identity is the state (including a self-destroying `shared_ptr<rpl::lifetime>`). Mutating a member through captured `this` is not this trap.
+
+Do not flag a `mutable` lambda that is one-shot: `rpl::take(1)`, a self-destroying subscription, a `crl::on_main` or `crl::async` callback, or a `done` or `error` callback.
+
 ## Use trailing return type only when the normal form is too long
 
 Prefer the normal return type form when the opening line fits comfortably, roughly around 77 characters or less. A short return type is easier to read in the normal position:
@@ -552,4 +583,25 @@ Non-static member functions use camelCase (`startBatch`, `finalize`). Static mem
 
 // GOOD - PascalCase for static method:
 [[nodiscard]] static bool ShouldTrack(not_null<HistoryItem*> item);
+```
+
+## No Q_OS_LINUX platform checks in new code
+
+Telegram Desktop distinguishes at most three platforms: Windows / macOS / all-other, where "all-other" covers Linux, the BSD variants and more — and this is almost always the branch that is wanted. A `Q_OS_LINUX` check narrows it to Linux alone, silently excluding the non-Linux Unix platforms, which is almost never intended. For the all-other branch use `!defined Q_OS_WIN && !defined Q_OS_MAC` at compile time, or its runtime equivalent `Platform::IsLinux()` — which, despite the name, means exactly `!defined Q_OS_WIN && !defined Q_OS_MAC` ("everything except Windows and macOS"), not Linux specifically. `Q_OS_LINUX` is only for the rare case where exactly Linux is meant and not the other Unix-like systems — usually it is not. The few existing uses (`Telegram/SourceFiles/core/sandbox.cpp`, `Telegram/SourceFiles/platform/linux/specific_linux.cpp`) are such genuinely Linux-only code paths and stay as-is.
+
+```cpp
+// BAD - excludes FreeBSD and other non-Linux Unix:
+#ifdef Q_OS_LINUX
+UnixSpecificCode();
+#endif // Q_OS_LINUX
+
+// GOOD - the all-other branch, compile time:
+#if !defined Q_OS_WIN && !defined Q_OS_MAC
+UnixSpecificCode();
+#endif // !Q_OS_WIN && !Q_OS_MAC
+
+// GOOD - the all-other branch, runtime (same meaning, NOT Linux-only):
+if (Platform::IsLinux()) {
+	UnixSpecificCode();
+}
 ```

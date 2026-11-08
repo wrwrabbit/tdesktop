@@ -98,6 +98,8 @@ void AlbumPreview::updateFileRows() {
 	for (auto i = 0; i < _order.size(); i++) {
 		const auto &thumb = _thumbs[_order[i]];
 		thumb->setButtonVisible(isFile && !thumb->isCompressedSticker());
+		// Video edits only apply when the file is sent as a video.
+		thumb->setModifyAllowed(!isFile && thumb->canEditVideo());
 		thumb->moveButtons(top);
 		top += thumb->fileHeight() + st::sendMediaRowSkip;
 	}
@@ -123,6 +125,16 @@ bool AlbumPreview::canHaveSpoiler(int index) const {
 void AlbumPreview::toggleSpoilers(bool enabled) {
 	for (auto &thumb : _thumbs) {
 		thumb->setSpoiler(enabled);
+	}
+}
+
+void AlbumPreview::setSelectionMode(bool enabled) {
+	_selectionMode = enabled;
+}
+
+void AlbumPreview::setSelected(int index, bool selected) {
+	if (index >= 0 && index < _order.size()) {
+		_thumbs[_order[index]]->setSelected(selected);
 	}
 }
 
@@ -173,6 +185,7 @@ void AlbumPreview::prepareThumbs(gsl::span<Ui::PreparedFile> items) {
 	const auto layout = generateOrderedLayout();
 	_thumbs.reserve(count);
 	for (auto i = 0; i != count; ++i) {
+		const auto self = std::make_shared<AlbumThumbnail*>(nullptr);
 		_thumbs.push_back(std::make_unique<AlbumThumbnail>(
 			_st,
 			items[i],
@@ -181,8 +194,9 @@ void AlbumPreview::prepareThumbs(gsl::span<Ui::PreparedFile> items) {
 			this,
 			[=] { update(); },
 			[=](QRect rect) { update(rect); },
-			[=] { changeThumbByIndex(orderIndex(thumbUnderCursor())); },
-			[=] { deleteThumbByIndex(orderIndex(thumbUnderCursor())); }));
+			[=] { changeThumbByIndex(orderIndex(*self)); },
+			[=] { deleteThumbByIndex(orderIndex(*self)); }));
+		*self = _thumbs.back().get();
 		if (_thumbs.back()->isCompressedSticker()) {
 			_hasMixedFileHeights = true;
 		}
@@ -457,10 +471,6 @@ void AlbumPreview::paintFiles(Painter &p, QRect clip) const {
 	}
 }
 
-AlbumThumbnail *AlbumPreview::thumbUnderCursor() {
-	return findThumb(mapFromGlobal(QCursor::pos()));
-}
-
 void AlbumPreview::deleteThumbByIndex(int index) {
 	if (index < 0) {
 		return;
@@ -505,6 +515,10 @@ void AlbumPreview::mousePressEvent(QMouseEvent *e) {
 	const auto position = e->pos();
 	cancelDrag();
 	if (const auto thumb = findThumb(position)) {
+		if (selectingByClick(e, thumb)) {
+			_selectPressedThumb = thumb;
+			return;
+		}
 		_draggedStartPosition = position;
 		_pressedThumb = thumb;
 		_pressedButtonType = thumb->buttonTypeFromPoint(position);
@@ -605,6 +619,12 @@ void AlbumPreview::updateSuggestedDrag(QPoint position) {
 }
 
 void AlbumPreview::mouseReleaseEvent(QMouseEvent *e) {
+	if (const auto thumb = base::take(_selectPressedThumb)) {
+		if (e->button() == Qt::LeftButton && findThumb(e->pos()) == thumb) {
+			_thumbSelected.fire(orderIndex(thumb));
+		}
+		return;
+	}
 	if (_draggedThumb) {
 		finishDrag();
 		_shrinkAnimation.start(
@@ -623,6 +643,16 @@ void AlbumPreview::mouseReleaseEvent(QMouseEvent *e) {
 		}
 	}
 	_pressedButtonType = AttachButtonType::None;
+}
+
+bool AlbumPreview::selectingByClick(
+		QMouseEvent *e,
+		not_null<AlbumThumbnail*> thumb) const {
+	return !_sendWay.sendImagesAsPhotos()
+		&& thumb->selectable()
+		&& (e->button() == Qt::LeftButton)
+		&& (_selectionMode
+			|| e->modifiers().testFlag(Qt::ControlModifier));
 }
 
 void AlbumPreview::switchToDrag() {

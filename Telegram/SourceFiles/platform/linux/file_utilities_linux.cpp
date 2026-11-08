@@ -25,6 +25,8 @@ using base::Platform::XdgActivationToken;
 
 } // namespace
 
+namespace Unfused {
+
 bool UnsafeShowOpenWith(const QString &filepath) {
 	auto proxy = XdpOpenURI::OpenURIProxy::new_for_bus_sync(
 		Gio::BusType::SESSION_,
@@ -76,11 +78,13 @@ bool UnsafeShowOpenWith(const QString &filepath) {
 	}
 
 	auto loop = GLib::MainLoop::new_();
+	auto response = guint(2);
 
-	const auto signalId = request.signal_response().connect([=](
+	const auto signalId = request.signal_response().connect([&response, loop](
 			XdpRequest::Request,
-			guint,
+			guint code,
 			GLib::Variant) mutable {
+		response = code;
 		loop.quit();
 	});
 
@@ -119,8 +123,12 @@ bool UnsafeShowOpenWith(const QString &filepath) {
 	window.show();
 	loop.run();
 
-	return true;
+	// WHY: OpenURI Response 0 (success) and 1 (user cancelled) both mean a
+	// chooser was shown, so don't fall back; any other Response code means
+	// none appeared and the caller falls back to the launch warning policy.
+	return (response == 0) || (response == 1);
 }
 
+} // namespace Unfused
 } // namespace File
 } // namespace Platform

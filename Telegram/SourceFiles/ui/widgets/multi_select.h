@@ -34,7 +34,9 @@ public:
 	void setQueryChangedCallback(Fn<void(const QString &query)> callback);
 	void setSubmittedCallback(Fn<void(Qt::KeyboardModifiers)> callback);
 	void setCancelledCallback(Fn<void()> callback);
+	void setFocusedChangedCallback(Fn<void(bool focused)> callback);
 	void setResizedCallback(Fn<void()> callback);
+	void setCancelButtonShown(bool shown);
 
 	enum class AddItemWay {
 		Default,
@@ -42,7 +44,7 @@ public:
 	};
 	using PaintRoundImage = Fn<void(Painter &p, int x, int y, int outerWidth, int size)>;
 	void addItem(uint64 itemId, const QString &text, style::color color, PaintRoundImage paintRoundImage, AddItemWay way = AddItemWay::Default);
-	void addItemInBunch(uint64 itemId, const QString &text, style::color color, PaintRoundImage paintRoundImage);
+	bool addItemInBunch(uint64 itemId, const QString &text, style::color color, PaintRoundImage paintRoundImage);
 	void finishItemsBunch();
 	void setItemText(uint64 itemId, const QString &text);
 

@@ -107,7 +107,9 @@ float roundedCorner() {
 	};
 }
 
-[[nodiscard]] QRectF StoryCropTextureRect(
+} // namespace
+
+QRectF OverlayWidget::Renderer::StoryCropTextureRect(
 		QSizeF imageSize,
 		QSizeF targetSize) {
 	if (imageSize.isEmpty() || targetSize.isEmpty()) {
@@ -134,8 +136,6 @@ float roundedCorner() {
 	}
 	return QRectF(0., 0., 1., 1.);
 }
-
-} // namespace
 
 OverlayWidget::RendererGL::RendererGL(not_null<OverlayWidget*> owner)
 : _owner(owner) {
@@ -169,7 +169,7 @@ OverlayWidget::RendererGL::RendererGL(not_null<OverlayWidget*> owner)
 }
 
 void OverlayWidget::RendererGL::init(QOpenGLFunctions &f) {
-	constexpr auto kQuads = 9;
+	constexpr auto kQuads = 11;
 	constexpr auto kQuadVertices = kQuads * 4;
 	constexpr auto kQuadValues = kQuadVertices * 4;
 	constexpr auto kControlsValues = kControlsCount * kControlValues;
@@ -231,12 +231,13 @@ void OverlayWidget::RendererGL::init(QOpenGLFunctions &f) {
 			FragmentRoundedCorners()
 		}));
 
+	_nv12ChromaFormat = TwoComponentTextureFormat();
 	_nv12Program.emplace();
 	LinkProgram(
 		&*_nv12Program,
 		_texturedVertexShader,
 		FragmentShader({
-			FragmentSampleNV12Texture(),
+			FragmentSampleNV12Texture(_nv12ChromaFormat),
 			FragmentApplyControlsFade(),
 			FragmentRoundedCorners()
 		}));
@@ -438,8 +439,8 @@ void OverlayWidget::RendererGL::paintTransformedVideoFrame(
 	_textures.bind(*_f, 4);
 	if (upload) {
 		uploadTexture(
-			nv12 ? GL_RG : GL_ALPHA,
-			nv12 ? GL_RG : GL_ALPHA,
+			nv12 ? _nv12ChromaFormat : GL_ALPHA,
+			nv12 ? _nv12ChromaFormat : GL_ALPHA,
 			yuv->chromaSize,
 			nv12changed ? QSize() : _chromaSize,
 			yuv->u.stride / (nv12 ? 2 : 1),
@@ -1290,6 +1291,39 @@ void OverlayWidget::RendererGL::paintRecognitionOverlay(
 	};
 	_contentBuffer->write(0, darkRect, sizeof(darkRect));
 	FillRectangle(*_f, &*_fillProgram, 0, QColor(dark, dark, dark, 255));
+
+	const auto spans = _owner->_recognition.spans();
+	if (!spans.empty()) {
+		_f->glDisable(GL_STENCIL_TEST);
+		_f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		const auto alpha = int(128 * opacity);
+		for (const auto &span : spans) {
+			const auto band = _owner->_recognition.bandFor(
+				span.item,
+				span.from,
+				span.till);
+			if (band.isEmpty()) {
+				continue;
+			}
+			const auto selRect = QRectF(
+				imageTopLeft.x() + band.left() * _ifactor * scale,
+				imageTopLeft.y()
+					+ (image.height() - (band.y() + band.height()) * _ifactor)
+						* scale,
+				band.width() * _ifactor * scale,
+				band.height() * _ifactor * scale);
+			const auto stl = rotated(selRect.left(), selRect.top());
+			const auto str = rotated(selRect.right(), selRect.top());
+			const auto sbr = rotated(selRect.right(), selRect.bottom());
+			const auto sbl = rotated(selRect.left(), selRect.bottom());
+			const GLfloat selCoords[] = {
+				stl[0], stl[1], str[0], str[1],
+				sbr[0], sbr[1], sbl[0], sbl[1],
+			};
+			_contentBuffer->write(0, selCoords, sizeof(selCoords));
+			FillRectangle(*_f, &*_fillProgram, 0, QColor(48, 128, 255, alpha));
+		}
+	}
 
 	_f->glDisable(GL_BLEND);
 	_f->glDisable(GL_STENCIL_TEST);

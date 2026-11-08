@@ -7,14 +7,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "data/data_file_origin.h"
+
+#include <QtCore/QString>
+
+#include <vector>
+
 class History;
 class PhotoData;
 class DocumentData;
 struct FilePrepareResult;
-
-namespace Data {
-struct InputVenue;
-} // namespace Data
 
 namespace Main {
 class Session;
@@ -24,11 +26,19 @@ namespace Api {
 
 struct MessageToSend;
 struct SendAction;
+struct MusicSelectionItem {
+	not_null<DocumentData*> document;
+	Data::FileOrigin origin;
+};
 
 void SendExistingDocument(
 	MessageToSend &&message,
 	not_null<DocumentData*> document,
 	std::optional<MsgId> localMessageId = std::nullopt);
+
+void SendMusicSelection(
+	MessageToSend &&message,
+	std::vector<MusicSelectionItem> items);
 
 void SendExistingPhoto(
 	MessageToSend &&message,
@@ -42,12 +52,15 @@ bool SendDice(MessageToSend &message);
 // map thumbnail in messages history without access hash.
 void SendLocation(SendAction action, float64 lat, float64 lon);
 
-void SendVenue(SendAction action, Data::InputVenue venue);
-
 void FillMessagePostFlags(
 	const SendAction &action,
 	not_null<PeerData*> peer,
 	MessageFlags &flags);
+
+[[nodiscard]] MTPmessages_SendMedia::Flags PrepareSendMedia(
+	not_null<Main::Session*> session,
+	SendAction &action,
+	int &starsPaid);
 
 void SendConfirmedFile(
 	not_null<Main::Session*> session,

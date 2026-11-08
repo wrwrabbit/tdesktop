@@ -494,10 +494,16 @@ MTPInputMedia PollMediaToMTP(const PollMedia &media) {
 				MTP_double(media.geo->lat()),
 				MTP_double(media.geo->lon()),
 				MTPint())); // accuracy_radius
-	} else if (!media.url.isEmpty()) {
+	}
+	const auto url = !media.url.isEmpty()
+		? media.url
+		: media.webpage
+		? media.webpage->url
+		: QString();
+	if (!url.isEmpty()) {
 		return MTP_inputMediaWebPage(
 			MTP_flags(MTPDinputMediaWebPage::Flag::f_optional),
-			MTP_string(media.url));
+			MTP_string(url));
 	}
 	return MTPInputMedia();
 }
@@ -521,20 +527,17 @@ PollMedia PollMediaFromMTP(
 			});
 		}
 	}, [&](const MTPDmessageMediaGeo &data) {
-		data.vgeo().match([&](const MTPDgeoPoint &point) {
-			result.geo = Data::LocationPoint(point);
-		}, [](const MTPDgeoPointEmpty &) {
-		});
+		result.geo = Data::LocationPoint::FromMTP(data.vgeo());
 	}, [&](const MTPDmessageMediaVenue &data) {
-		data.vgeo().match([&](const MTPDgeoPoint &point) {
-			result.geo = Data::LocationPoint(point);
-		}, [](const MTPDgeoPointEmpty &) {
-		});
+		result.geo = Data::LocationPoint::FromMTP(data.vgeo());
 	}, [&](const MTPDmessageMediaWebPage &data) {
 		data.vwebpage().match([&](const MTPDwebPage &page) {
 			result.webpage = owner->processWebpage(page);
 		}, [&](const MTPDwebPagePending &page) {
 			result.webpage = owner->processWebpage(page);
+			if (const auto url = page.vurl()) {
+				result.url = qs(*url);
+			}
 		}, [&](const MTPDwebPageEmpty &page) {
 			if (const auto url = page.vurl()) {
 				result.url = qs(*url);
@@ -565,10 +568,9 @@ PollMedia PollMediaFromInputMTP(
 		});
 	}, [&](const MTPDinputMediaGeoPoint &data) {
 		data.vgeo_point().match([&](const MTPDinputGeoPoint &point) {
-			result.geo.emplace(
+			result.geo = Data::LocationPoint::FromCoordinates(
 				point.vlat().v,
-				point.vlong().v,
-				Data::LocationPoint::NoAccessHash);
+				point.vlong().v);
 		}, [](const auto &) {
 		});
 	}, [&](const MTPDinputMediaWebPage &data) {

@@ -59,6 +59,16 @@ constexpr auto kMegabyte = int64(1024) * 1024;
 	});
 }
 
+[[nodiscard]] bool SizeLimitFitsOptionLine(
+		int outerWidth,
+		int optionWidth,
+		int labelWidth) {
+	const auto available = outerWidth
+		- st::exportSettingPadding.left()
+		- st::exportFileSizePadding.right();
+	return (optionWidth + labelWidth <= available);
+}
+
 void ChooseFormatBox(
 		not_null<Ui::GenericBox*> box,
 		Output::Format format,
@@ -810,14 +820,14 @@ void SettingsWidget::addMediaOptions(
 		container,
 		tr::lng_export_option_gifs(tr::now),
 		MediaType::GIF);
-	addMediaOption(
+	const auto files = addMediaOption(
 		container,
 		tr::lng_export_option_files(tr::now),
 		MediaType::File);
-	addSizeSlider(container);
+	addSizeSlider(container, files);
 }
 
-void SettingsWidget::addMediaOption(
+not_null<Ui::Checkbox*> SettingsWidget::addMediaOption(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &text,
 		MediaType type) {
@@ -838,12 +848,14 @@ void SettingsWidget::addMediaOption(
 			}
 		});
 	}, checkbox->lifetime());
+	return checkbox;
 }
 
 void SettingsWidget::addSizeSlider(
-		not_null<Ui::VerticalLayout*> container) {
-	using namespace rpl::mappers;
-
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Ui::Checkbox*> above) {
+	const auto wrap = container->add(
+		object_ptr<Ui::FixedHeightWidget>(container));
 	const auto slider = container->add(
 		object_ptr<Ui::MediaSlider>(container, st::exportFileSizeSlider),
 		st::exportFileSizePadding);
@@ -873,14 +885,31 @@ void SettingsWidget::addSizeSlider(
 		label->setText(text);
 	}, slider->lifetime());
 
+	_sizeLimitExtraHeight = SizeLimitFitsOptionLine(
+		st::exportPanelSize.width(),
+		above->naturalWidth(),
+		label->width())
+		? 0
+		: label->height();
+
 	rpl::combine(
+		container->widthValue(),
 		label->widthValue(),
-		slider->geometryValue(),
-		_2
-	) | rpl::on_next([=](QRect geometry) {
+		slider->geometryValue()
+	) | rpl::on_next([=](int outerWidth, int labelWidth, QRect geometry) {
+		const auto sameLine = SizeLimitFitsOptionLine(
+			outerWidth,
+			above->naturalWidth(),
+			labelWidth);
+		wrap->resize(wrap->width(), sameLine ? 0 : label->height());
 		label->moveToRight(
 			st::exportFileSizePadding.right(),
-			geometry.y() - label->height() - st::exportFileSizeLabelBottom);
+			(sameLine
+				? (geometry.y()
+					- label->height()
+					- st::exportFileSizeLabelBottom)
+				: wrap->y()),
+			outerWidth);
 	}, label->lifetime());
 }
 
@@ -946,6 +975,10 @@ void SettingsWidget::chooseFolder() {
 
 rpl::producer<Settings> SettingsWidget::changes() const {
 	return _changes.events();
+}
+
+int SettingsWidget::sizeLimitExtraHeight() const {
+	return _sizeLimitExtraHeight;
 }
 
 rpl::producer<Settings> SettingsWidget::value() const {

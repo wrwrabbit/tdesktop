@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 
 class PeerData;
+class ChannelData;
 
 namespace Data {
 
@@ -68,6 +69,7 @@ public:
 	void resetToDefault(not_null<PeerData*> peer);
 
 	void forumParentMuteUpdated(not_null<Forum*> forum);
+	void communityParentMuteUpdated(not_null<ChannelData*> community);
 
 	void cacheSound(DocumentId id);
 	void cacheSound(not_null<DocumentData*> document);
@@ -104,8 +106,6 @@ public:
 
 	void loadExceptions();
 	[[nodiscard]] rpl::producer<DefaultNotify> exceptionsUpdates() const;
-	[[nodiscard]] auto exceptionsUpdatesRealtime() const
-		-> rpl::producer<DefaultNotify>;
 	[[nodiscard]] const base::flat_set<not_null<PeerData*>> &exceptions(
 		DefaultNotify type) const;
 	void clearExceptions(DefaultNotify type);
@@ -160,7 +160,6 @@ private:
 	} _ringtones;
 
 	rpl::event_stream<DefaultNotify> _exceptionsUpdates;
-	rpl::event_stream<DefaultNotify> _exceptionsUpdatesRealtime;
 	std::array<
 		base::flat_set<not_null<PeerData*>>,
 		kDefaultNotifyTypes> _exceptions;

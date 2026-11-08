@@ -21,8 +21,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/time_input.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_keys.h"
+#include "styles/style_choose_date_time.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
 
 #include <QtWidgets/QTextEdit>
 
@@ -51,6 +53,28 @@ QString TimeString(QTime time) {
 	return QString("%1:%2"
 	).arg(time.hour()
 	).arg(time.minute(), 2, 10, QLatin1Char('0'));
+}
+
+QDate DateFollowingTimeWheel(
+		QDate date,
+		QTime was,
+		QTime now,
+		QDateTime minimum,
+		QDate maxDate) {
+	const auto minDate = minimum.date();
+	if (!was.isValid()) {
+		return date;
+	} else if (was.hour() == 23
+		&& now.hour() == 0
+		&& QDateTime(date, now) < minimum) {
+		return std::clamp(date.addDays(1), minDate, maxDate);
+	} else if (was.hour() == 0
+		&& now.hour() == 23
+		&& date == minDate.addDays(1)
+		&& QDateTime(minDate, now) >= minimum) {
+		return std::clamp(date.addDays(-1), minDate, maxDate);
+	}
+	return date;
 }
 
 class RepeatButton final : public Ui::RippleButton {
@@ -201,6 +225,27 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 		return base::EventFilterResult::Continue;
 	});
 
+	const auto lastTime = box->lifetime().make_state<QTime>(
+		parsed.time());
+	state->time->value(
+	) | rpl::on_next([=](const QString &value) {
+		const auto parts = value.split(':');
+		if (parts.size() != 2) {
+			return;
+		}
+		const auto time = QTime(parts[0].toInt(), parts[1].toInt());
+		if (!time.isValid()) {
+			return;
+		}
+		state->date = DateFollowingTimeWheel(
+			state->date.current(),
+			*lastTime,
+			time,
+			base::unixtime::parse(min()),
+			maxDate());
+		*lastTime = time;
+	}, state->time->lifetime());
+
 	state->at->widthValue() | rpl::on_next([=](int width) {
 		const auto full = st::scheduleDateWidth
 			+ st::scheduleAtSkip
@@ -235,6 +280,7 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 	const auto calendar
 		= content->lifetime().make_state<base::weak_qptr<CalendarBox>>();
 	const auto calendarStyle = args.style.calendarStyle;
+	const auto dynamicImageForDate = std::move(args.dynamicImageForDate);
 	state->day->focusedChanges(
 	) | rpl::on_next([=](bool focused) {
 		if (*calendar || !focused) {
@@ -253,6 +299,7 @@ ChooseDateTimeBoxDescriptor ChooseDateTimeBox(
 				.minDate = minDate(),
 				.maxDate = maxDate(),
 				.stColors = *calendarStyle,
+				.dynamicImageForDate = dynamicImageForDate,
 			}));
 		(*calendar)->boxClosing(
 		) | rpl::on_next(crl::guard(state->time, [=] {

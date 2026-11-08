@@ -65,11 +65,20 @@ public:
 		QPoint point,
 		Fn<void()> updateCallback) override;
 	void elementsStopLastRipple() override;
+	int paintNameIconGetLeadingWidth(
+		Painter &p,
+		Fn<void()> repaint,
+		crl::time now,
+		int nameLeft,
+		int nameTop,
+		int outerWidth,
+		bool selected) override;
 	void elementsPaint(
 		Painter &p,
 		int outerWidth,
 		bool selected,
 		int selectedElement) override;
+	bool elementsAnimating() const override;
 
 	QSize rightActionSize() const override;
 	QMargins rightActionMargins() const override;

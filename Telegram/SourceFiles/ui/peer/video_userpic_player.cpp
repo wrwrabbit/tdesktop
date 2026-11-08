@@ -18,11 +18,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image_prepare.h"
 #include "ui/empty_userpic.h"
 #include "ui/painter.h"
-#include "styles/style_widgets.h"
 
 namespace Ui {
 
-VideoUserpicPlayer::VideoUserpicPlayer() = default;
+VideoUserpicPlayer::VideoUserpicPlayer(Fn<void()> repaint)
+: _repaint(std::move(repaint)) {
+}
 
 VideoUserpicPlayer::~VideoUserpicPlayer() = default;
 
@@ -47,7 +48,10 @@ void VideoUserpicPlayer::clear() {
 	_peer = nullptr;
 }
 
-QImage VideoUserpicPlayer::frame(QSize size, not_null<PeerData*> peer) {
+QImage VideoUserpicPlayer::frame(
+		QSize size,
+		not_null<PeerData*> peer,
+		bool paused) {
 	if (!_streamed
 		|| !_streamed->player().ready()
 		|| _streamed->player().videoSize().isEmpty()
@@ -91,7 +95,9 @@ QImage VideoUserpicPlayer::frame(QSize size, not_null<PeerData*> peer) {
 			_monoforumMask);
 		q.end();
 	}
-	_streamed->markFrameShown();
+	if (!paused) {
+		_streamed->markFrameShown();
+	}
 	return result;
 }
 
@@ -150,7 +156,10 @@ void VideoUserpicPlayer::handleUpdate(
 	v::match(update.data, [&](Information &update) {
 		streamingReady(std::move(update));
 	}, [](PreloadedVideo) {
-	}, [](UpdateVideo) {
+	}, [&](UpdateVideo) {
+		if (_repaint) {
+			_repaint();
+		}
 	}, [](PreloadedAudio) {
 	}, [](UpdateAudio) {
 	}, [](WaitingForData) {
@@ -163,10 +172,16 @@ void VideoUserpicPlayer::handleUpdate(
 void VideoUserpicPlayer::handleError(::Media::Streaming::Error &&error) {
 	_streamedPhoto->setVideoPlaybackFailed();
 	clear();
+	if (_repaint) {
+		_repaint();
+	}
 }
 
 void VideoUserpicPlayer::streamingReady(
 		::Media::Streaming::Information &&info) {
+	if (_repaint) {
+		_repaint();
+	}
 }
 
 } // namespace Ui

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/group/calls_choose_join_as.h"
 #include "calls/group/calls_group_call.h"
 #include "calls/group/calls_group_rtmp.h"
+#include "chat_helpers/compose/compose_show.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "mtproto/mtproto_dh_utils.h"
@@ -101,6 +102,9 @@ DhConfig Instance::Delegate::getDhConfig() const {
 
 void Instance::Delegate::callFinished(not_null<Call*> call) {
 	crl::on_main(call, [=] {
+		if (call->ratingInPanel()) {
+			return;
+		}
 		_instance->destroyCall(call);
 	});
 }
@@ -202,7 +206,8 @@ Instance::~Instance() {
 void Instance::startOutgoingCall(
 		not_null<UserData*> user,
 		StartOutgoingCallArgs args) {
-	if (activateCurrentCall()) {
+	if (activateCurrentCall()
+		|| (!args.isConfirmed && activateUnconfirmedCall(user))) {
 		return;
 	}
 	if (user->callsStatus() == UserData::CallsStatus::Private) {
@@ -215,6 +220,10 @@ void Instance::startOutgoingCall(
 		return;
 	}
 	requestPermissionsOrFail(crl::guard(this, [=] {
+		if (activateCurrentCall()
+			|| (!args.isConfirmed && activateUnconfirmedCall(user))) {
+			return;
+		}
 		createCall(user, Call::Type::Outgoing, args);
 	}), args.video);
 }
@@ -441,6 +450,10 @@ void Instance::createCall(
 			destroyCall(raw);
 		}, raw->lifetime());
 
+		if (_currentCall && _currentCall->ratingInPanel()) {
+			_currentCall->finishRating();
+			destroyCall(_currentCall.get());
+		}
 		if (_currentCall) {
 			_currentCallPanel->replaceCall(raw);
 			std::swap(_currentCall, call);
@@ -841,7 +854,7 @@ void Instance::handleSignalingData(
 }
 
 bool Instance::inCall() const {
-	if (!_currentCall) {
+	if (!_currentCall || _currentCall->ratingInPanel()) {
 		return false;
 	}
 	const auto state = _currentCall->state();
@@ -916,6 +929,16 @@ bool Instance::activateCurrentCall(const QString &joinHash) {
 	return false;
 }
 
+bool Instance::activateUnconfirmedCall(not_null<UserData*> user) {
+	if (_currentCall
+		&& _currentCall->user() == user
+		&& _currentCall->state() == Call::State::WaitingUserConfirmation) {
+		_currentCallPanel->showAndActivate();
+		return true;
+	}
+	return false;
+}
+
 bool Instance::minimizeCurrentActiveCall() {
 	if (inCall() && _currentCallPanel->isActive()) {
 		_currentCallPanel->minimize();
@@ -944,6 +967,15 @@ bool Instance::closeCurrentActiveCall() {
 		return true;
 	}
 	return false;
+}
+
+void Instance::hidePanelLayers() {
+	if (_currentCallPanel) {
+		_currentCallPanel->uiShow()->hideLayer();
+	}
+	if (_currentGroupCallPanel) {
+		_currentGroupCallPanel->uiShow()->hideLayer();
+	}
 }
 
 Call *Instance::currentCall() const {
@@ -1029,13 +1061,6 @@ std::shared_ptr<tgcalls::VideoCaptureInterface> Instance::getVideoCapture(
 			startDeviceId.toStdString()));
 	_videoCapture = result;
 	return result;
-}
-
-const ConferenceInvites &Instance::conferenceInvites(
-		CallId conferenceId) const {
-	static const auto kEmpty = ConferenceInvites();
-	const auto i = _conferenceInvites.find(conferenceId);
-	return (i != end(_conferenceInvites)) ? i->second : kEmpty;
 }
 
 void Instance::registerConferenceInvite(
@@ -1202,6 +1227,10 @@ void Instance::showConferenceInvite(
 			destroyCall(raw);
 		}, raw->lifetime());
 
+		if (_currentCall && _currentCall->ratingInPanel()) {
+			_currentCall->finishRating();
+			destroyCall(_currentCall.get());
+		}
 		if (_currentCall) {
 			_currentCallPanel->replaceCall(raw);
 			std::swap(_currentCall, call);

@@ -59,6 +59,51 @@ else
   AlphaBetaParam='-beta'
 fi
 
+TDESKTOP_UPDATE_V2=1
+: "${TDESKTOP_UPDATE_SIGNING_CONFIG:?Set TDESKTOP_UPDATE_SIGNING_CONFIG to the production signing configuration.}"
+if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+  if [ "$AlphaVersion" != "0" ]; then
+    Error "The v2 update format has no alpha channel."
+  fi
+  case "$AppVersionStr" in
+    *.*.*) ;;
+    *) Error "AppVersionStr '$AppVersionStr' must have three components for the v2 names." ;;
+  esac
+  UpdateChannel="stable"
+  V2Suffix=""
+  if [ "$BetaChannel" != "0" ]; then
+    UpdateChannel="beta"
+    V2Suffix="-beta"
+  fi
+  UpdateKeysLoc="$FullScriptPath/../Resources/update"
+fi
+
+# The per-target deploy folder, both under the local backup and, through
+# deploy.sh, on the remote. The classical name is a plain "t" before the
+# build target, the v2 one names the architecture. Every place that
+# writes into the backup reads this one variable.
+BackupFolder="t$BuildTarget"
+if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+  if [ "$BuildTarget" == "linux" ]; then
+    BackupFolder="linux-x64"
+  elif [ "$BuildTarget" == "mac" ]; then
+    BackupFolder="mac"
+  fi
+fi
+
+PackUpdate() {
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    "./Packer" "$@" -version $VersionForPacker -channel $UpdateChannel \
+      -keys-loc "$UpdateKeysLoc" -emit-signing-input signing-input.bin
+    python3 "$FullScriptPath/update_signing.py" \
+      --config "$TDESKTOP_UPDATE_SIGNING_CONFIG" \
+      --keys-loc "$UpdateKeysLoc" --input signing-input.bin \
+      --output release-es256.sig --packer "$(pwd)/Packer" \
+      --unsigned "$UpdateFile.unsigned" --channel "$UpdateChannel"
+    rm signing-input.bin release-es256.sig "$UpdateFile.unsigned"
+  fi
+}
+
 echo ""
 HomePath="$FullScriptPath/.."
 if [ "$BuildTarget" == "linux" ]; then
@@ -66,6 +111,10 @@ if [ "$BuildTarget" == "linux" ]; then
   UpdateFile="tlinuxupd$PtgAppVersion"
   SetupFile="tsetup.$AppVersionStrFull.tar.xz"
   SetupFile="tsetup.latest.tar.xz"
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    UpdateFile="td-update-linux-x64-$PtgAppVersion$V2Suffix"
+    SetupFile="td-setup-linux-x64-$PtgAppVersionStr$V2Suffix.tar.xz"
+  fi
   ProjectPath="$HomePath/../out"
   ReleasePath="$ProjectPath/Release"
   BinaryName="Telegram"
@@ -94,12 +143,12 @@ elif [ "$BuildTarget" == "mac" ] ; then
     echo "CP_ARCH set to $CP_ARCH, building single architecture..."
     # Note: arg1 (MacArch) will be set by caller, or empty for universal
   fi
-
-  #if [ "$AC_USERNAME" == "" ]; then
-  #  Error "AC_USERNAME not found!"
-  #fi
   UpdateFileAMD64="tmacupd$PtgAppVersion"
   UpdateFileARM64="tarmacupd$PtgAppVersion"
+  if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+    UpdateFileAMD64="td-update-mac-x64-$PtgAppVersion$V2Suffix"
+    UpdateFileARM64="td-update-mac-arm-$PtgAppVersion$V2Suffix"
+  fi
   if [ "$MacArch" == "arm64" ]; then
     UpdateFile="$UpdateFileARM64"
   elif [ "$MacArch" == "x86_64" ]; then
@@ -110,12 +159,20 @@ elif [ "$BuildTarget" == "mac" ] ; then
   BinaryName="Telegram"
   if [ "$MacArch" != "" ]; then
     BundleName="$BinaryName.$MacArch.app"
-    SetupFile="tsetup.$MacArch.$AppVersionStrFull.dmg"
     SetupFile="tsetup.$MacArch.latest.dmg"
+    if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+      if [ "$MacArch" == "arm64" ]; then
+        SetupFile="td-setup-mac-arm-$PtgAppVersionStr$V2Suffix.dmg"
+      else
+        SetupFile="td-setup-mac-x64-$PtgAppVersionStr$V2Suffix.dmg"
+      fi
+    fi
   else
     BundleName="$BinaryName.app"
-    SetupFile="tsetup.$AppVersionStrFull.dmg"
     SetupFile="tsetup.latest.dmg"
+    if [ "$TDESKTOP_UPDATE_V2" == "1" ]; then
+      SetupFile="td-setup-mac-$PtgAppVersionStr$V2Suffix.dmg"
+    fi
   fi
 elif [ "$BuildTarget" == "macstore" ]; then
   if [ "$AlphaVersion" != "0" ]; then
@@ -184,11 +241,12 @@ if [ "$BuildTarget" == "linux" ]; then
 
   echo "Stripping the executable.."
   strip -s "$ReleasePath/$BinaryName"
+#  "$FullScriptPath/minidebug.sh" "$ReleasePath/$BinaryName"
   echo "Done!"
 
   echo "Preparing version $AppVersionStrFull, executing Packer.."
   cd "$ReleasePath"
-  "./Packer" -path "$BinaryName" -path Updater -version $VersionForPacker $AlphaBetaParam
+  PackUpdate -path "$BinaryName" -path Updater
   echo "Packer done!"
 
   if [ "$AlphaVersion" != "0" ]; then
@@ -377,7 +435,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         echo "Decoding certificate from environment..."
         echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
         echo "✓ Certificate decoded to certificate.p12"
-        
+
         # Check if keychain already exists
         if security show-keychain-info build.keychain >/dev/null 2>&1; then
           echo "⚠ Keychain 'build.keychain' already exists (parallel build detected)"
@@ -387,25 +445,25 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         else
           echo "✓ Keychain does not exist, creating new one"
         fi
-        
+
         echo "Creating keychain 'build.keychain'..."
         security create-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (keychain may already exist from parallel build, continuing...)"
-        
+
         echo "Setting default keychain..."
         security default-keychain -s build.keychain 2>&1 || echo "  (could not set default, continuing...)"
-        
+
         echo "Unlocking keychain..."
         security unlock-keychain -p ptelegram_pass build.keychain 2>&1 || echo "  (could not unlock, continuing...)"
-        
+
         echo "Importing certificate..."
         security import certificate.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign 2>&1 || echo "  (could not import, continuing...)"
-        
+
         echo "Setting key partition list..."
         security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ptelegram_pass build.keychain 2>&1 || echo "  (could not set partition list, continuing...)"
-        
+
         echo "✓ Keychain setup complete"
       fi
-      
+
       if [ "$identity" == "" ]; then
         echo "Finding developer identity..."
         identity=$(security find-identity -v 2>&1 | grep Developer | awk -F " " 'END {print $2}')
@@ -417,11 +475,11 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       else
         echo "Using previously found identity: ${identity:0:3}..."
       fi
-      
+
       echo "Code signing application at: $ReleasePath/$BundleName"
       codesign --force --deep -s ${identity} "$ReleasePath/$BundleName" -v --entitlements "$HomePath/Telegram/Telegram.entitlements" 2>&1
       echo "✓ Code signing complete"
-      
+
       #codesign --force --deep --timestamp --options runtime --sign "Developer ID Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName" --entitlements "$HomePath/Telegram/Telegram.entitlements"
     elif [ "$BuildTarget" == "macstore" ]; then
       codesign --force --timestamp --options runtime --sign "3rd Party Mac Developer Application: Telegram FZ-LLC (C67CF9S4VU)" "$ReleasePath/$BundleName/Contents/Frameworks/Breakpad.framework/Versions/A/Resources/breakpadUtilities.dylib" --entitlements "$HomePath/Telegram/Breakpad.entitlements"
@@ -476,7 +534,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
         if [ "$CP_MAC_SKIPDMG" != "1" ]; then
           create-dmg \
               --volname "Telegram Desktop" \
-              --volicon "./$BundleName/Contents/Resources/AppIcon.icns" \
+              --volicon "./$BundleName/Contents/Resources/Icon.icns" \
               --hide-extension "$BundleName" \
               --icon-size 100 \
               --app-drop-link 400 20 \
@@ -563,7 +621,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       mv "$ReleasePath/$BundleName" "$UpdatePackPath/$BinaryName.app"
       cp "$ReleasePath/Packer" "$UpdatePackPath/"
       cd "$UpdatePackPath"
-      "./Packer" -path "$BinaryName.app" -target "$BuildTarget" -version $VersionForPacker -arch $MacArch $AlphaBetaParam
+      PackUpdate -path "$BinaryName.app" -target "$BuildTarget" -arch $MacArch
       echo "Packer done!"
       mv "$UpdateFile" "$ReleasePath/"
 
@@ -619,12 +677,12 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
 
     if [ "$BuildTarget" == "mac" ]; then
     if [ "$CP_ARCH" == "" ]; then
-      mkdir -p "$BackupPath/tmac"
-      cp "$DeployPath/$UpdateFileAMD64" "$BackupPath/tmac/"
-      cp "$DeployPath/$UpdateFileARM64" "$BackupPath/tmac/"
-      cp "$DeployPath/$SetupFile" "$BackupPath/tmac/"
+      mkdir -p "$BackupPath/$BackupFolder"
+      cp "$DeployPath/$UpdateFileAMD64" "$BackupPath/$BackupFolder/"
+      cp "$DeployPath/$UpdateFileARM64" "$BackupPath/$BackupFolder/"
+      cp "$DeployPath/$SetupFile" "$BackupPath/$BackupFolder/"
       if [ "$AlphaVersion" != "0" ]; then
-        cp -v "$DeployPath/$AlphaKeyFile" "$BackupPath/tmac/"
+        cp -v "$DeployPath/$AlphaKeyFile" "$BackupPath/$BackupFolder/"
       fi
     fi # no CP_ARCH
     fi

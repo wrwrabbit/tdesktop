@@ -17,8 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/painter.h"
 #include "styles/style_info.h"
 #include "styles/style_boxes.h"
-#include "styles/style_chat.h"
-#include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
 
 namespace Info {
@@ -489,6 +487,27 @@ void MemberListRow::paintRemove(
 	p.setOpacity(o);
 }
 
+int MemberListRow::paintNameIconGetLeadingWidth(
+		Painter &p,
+		Fn<void()> repaint,
+		crl::time now,
+		int nameLeft,
+		int nameTop,
+		int outerWidth,
+		bool selected) {
+	if (!_refreshCallback) {
+		_refreshCallback = repaint;
+	}
+	return PeerListRow::paintNameIconGetLeadingWidth(
+		p,
+		std::move(repaint),
+		now,
+		nameLeft,
+		nameTop,
+		outerWidth,
+		selected);
+}
+
 void MemberListRow::elementsPaint(
 		Painter &p,
 		int outerWidth,
@@ -515,6 +534,10 @@ void MemberListRow::elementsPaint(
 			outerWidth,
 			(selectedElement == kTagElement));
 	}
+}
+
+bool MemberListRow::elementsAnimating() const {
+	return _wasHovered || _hoverAnimation.animating();
 }
 
 std::unique_ptr<ParticipantsBoxController> CreateMembersController(

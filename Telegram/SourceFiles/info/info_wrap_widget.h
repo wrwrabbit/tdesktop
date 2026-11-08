@@ -47,6 +47,7 @@ class MoveMemento;
 class ContentMemento;
 class ContentWidget;
 class TopBar;
+struct MementoThreadLifetime;
 
 enum class Wrap {
 	Layer,
@@ -93,17 +94,18 @@ public:
 		Wrap wrap,
 		not_null<Memento*> memento);
 
-	Key key() const;
+	[[nodiscard]] Key key() const;
 	Dialogs::RowDescriptor activeChat() const override;
-	Wrap wrap() const {
+	[[nodiscard]] Wrap wrap() const {
 		return _wrap.current();
 	}
-	rpl::producer<Wrap> wrapValue() const;
+	[[nodiscard]] rpl::producer<Wrap> wrapValue() const;
 	void setWrap(Wrap wrap);
 
-	rpl::producer<> contentChanged() const;
+	[[nodiscard]] rpl::producer<bool> contentTillBottomValue() const;
+	[[nodiscard]] rpl::producer<> contentChanged() const;
 
-	not_null<Controller*> controller() {
+	[[nodiscard]] not_null<Controller*> controller() {
 		return _controller.get();
 	}
 
@@ -137,6 +139,7 @@ public:
 	void updateGeometry(
 		QRect newGeometry,
 		bool expanding,
+		bool contentTillBottom,
 		int additionalScroll,
 		int maxVisibleHeight);
 	[[nodiscard]] int scrollBottomSkip() const;
@@ -186,19 +189,19 @@ private:
 	void showNewContent(
 		not_null<ContentMemento*> memento,
 		const Window::SectionShow &params);
+	void subscribeToThreadDestroyed();
+	void subscribeToStackThreadsDestroyed();
+	void removeThreadFromStack(not_null<Data::Thread*> thread);
 	bool returnToFirstStackFrame(
 		not_null<ContentMemento*> memento,
 		const Window::SectionShow &params);
 	void setupTop();
 	void setupTopBarMenuToggle();
 	void createTopBar();
-	void highlightTopBar();
 	void setupShortcuts();
 
 	[[nodiscard]] bool willHaveBackButton(
 		const Window::SectionShow &params) const;
-
-	not_null<RpWidget*> topWidget() const;
 
 	QRect contentGeometry() const;
 	rpl::producer<int> desiredHeightForContent() const;
@@ -217,18 +220,23 @@ private:
 	bool requireTopBarSearch() const;
 
 	void addTopBarMenuButton();
+	[[nodiscard]] bool topBarMenuHasActions() const;
 	void addProfileCallsButton();
-	void showTopBarMenu(bool check);
+	void showTopBarMenu();
 
 	const bool _isSeparatedWindow = false;
 
 	rpl::variable<Wrap> _wrap;
+	// Declared before _content, so that it outlives it: the content widgets
+	// hold the controller by a raw pointer and are destroyed first.
 	std::unique_ptr<Controller> _controller;
 	object_ptr<ContentWidget> _content = { nullptr };
+	bool _mementoTaken = false;
 	int _additionalScroll = 0;
 	int _maxVisibleHeight = 0;
 	bool _expanding = false;
 	rpl::variable<bool> _grabbingForExpanding = false;
+	rpl::variable<bool> _contentTillBottom = false;
 	object_ptr<TopBar> _topBar = { nullptr };
 	object_ptr<Ui::RpWidget> _topBarSurrogate = { nullptr };
 	Ui::Animations::Simple _topBarOverrideAnimation;
@@ -240,6 +248,9 @@ private:
 
 	std::vector<StackItem> _historyStack;
 	rpl::event_stream<> _removeRequests;
+	rpl::lifetime _threadDestroyedLifetime;
+	std::vector<std::unique_ptr<MementoThreadLifetime>> _mementoThreadLifetimes;
+	bool _shortcutsSetup = false;
 
 	rpl::event_stream<rpl::producer<int>> _desiredHeights;
 	rpl::event_stream<rpl::producer<bool>> _desiredShadowVisibilities;

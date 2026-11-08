@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QImage>
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 
 class QRhi;
 class QRhiBuffer;
@@ -58,9 +58,13 @@ public:
 	}
 
 	void addItem(ThanosItem item);
+	void finishAll();
 	[[nodiscard]] bool hasActiveItems() const;
 
 	rpl::producer<> allDone() const;
+	[[nodiscard]] bool failed() const {
+		return _creationFailed;
+	}
 
 private:
 	struct AnimatingItem {
@@ -116,6 +120,7 @@ private:
 	crl::time _lastFrameTime = 0;
 	bool _initialized = false;
 	bool _creationFailed = false;
+	bool _finishRequested = false;
 	uint32_t _seedCounter = 0;
 
 	rpl::event_stream<> _allDone;
@@ -125,4 +130,4 @@ private:
 
 } // namespace Ui
 
-#endif // Qt >= 6.7
+#endif // Qt >= 6.7 && !DESKTOP_APP_DISABLE_PRIVATE_QT_API

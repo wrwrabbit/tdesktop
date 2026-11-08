@@ -70,10 +70,6 @@ EmojiStatusPanel::~EmojiStatusPanel() {
 	}
 }
 
-void EmojiStatusPanel::setChooseFilter(Fn<bool(EmojiStatusId)> filter) {
-	_chooseFilter = std::move(filter);
-}
-
 void EmojiStatusPanel::show(
 		not_null<Window::SessionController*> controller,
 		not_null<QWidget*> button,
@@ -172,6 +168,22 @@ void EmojiStatusPanel::show(Descriptor &&descriptor) {
 			local.x() + button->width() * 3);
 	}
 	_panel->toggleAnimated();
+}
+
+void EmojiStatusPanel::hideFast() {
+	if (_panel) {
+		_panel->hideFast();
+	}
+}
+
+void EmojiStatusPanel::hideAnimated() {
+	if (_panel) {
+		_panel->hideAnimated();
+	}
+}
+
+bool EmojiStatusPanel::shown() const {
+	return _panel && !_panel->isHidden();
 }
 
 bool EmojiStatusPanel::hasFocus() const {
@@ -303,9 +315,7 @@ void EmojiStatusPanel::create(const Descriptor &descriptor) {
 bool EmojiStatusPanel::filter(
 		not_null<Window::SessionController*> controller,
 		EmojiStatusId chosenId) const {
-	if (_chooseFilter) {
-		return _chooseFilter(chosenId);
-	} else if (chosenId && !controller->session().premium()) {
+	if (chosenId && !controller->session().premium()) {
 		ShowPremiumPreviewBox(controller, PremiumFeature::EmojiStatus);
 		return false;
 	}

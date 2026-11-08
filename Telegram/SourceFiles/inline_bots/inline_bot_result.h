@@ -54,6 +54,12 @@ public:
 	QString getId() const {
 		return _id;
 	}
+	DocumentData *document() const {
+		return _document;
+	}
+	const QString &contentUrl() const {
+		return _content_url;
+	}
 
 	// This is real SendClickHandler::onClick implementation for the specified
 	// inline bot result. If it returns true you need to send this result.
@@ -82,7 +88,6 @@ public:
 
 private:
 	void createGame(not_null<Main::Session*> session);
-	QSize thumbBox() const;
 	MTPWebDocument adjustAttributes(const MTPWebDocument &document);
 	MTPVector<MTPDocumentAttribute> adjustAttributes(
 		const MTPVector<MTPDocumentAttribute> &document,
@@ -101,6 +106,7 @@ private:
 		Geo,
 		Venue,
 		Game,
+		Widget,
 	};
 
 	friend class internal::SendData;

@@ -35,7 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_cursor_state.h"
 #include "history/history.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_menu_icons.h"
 
 #include <QtWidgets/QApplication>
 
@@ -572,7 +571,16 @@ int Inner::refreshInlineRows(PeerData *queryPeer, UserData *bot, const CacheEntr
 			return item != nullptr;
 		}) | ranges::to<std::vector<not_null<ItemBase*>>>;
 
-		_mosaic.addItems(resultItems);
+		auto pending = std::vector<not_null<ItemBase*>>();
+		for (const auto &item : resultItems) {
+			if (item->isFullLine()) {
+				_mosaic.addItems(base::take(pending));
+				_mosaic.addItems({ item });
+			} else {
+				pending.push_back(item);
+			}
+		}
+		_mosaic.addItems(pending);
 		added = resultItems.size();
 		preloadImages();
 	}
@@ -738,8 +746,8 @@ void Inner::switchPm() {
 		});
 	} else {
 		_inlineBot->botInfo->startToken = _switchPmStartToken;
-		_inlineBot->botInfo->inlineReturnTo
-			= _controller->dialogsEntryStateCurrent();
+		_inlineBot->botInfo->setInlineReturnTo(
+			_controller->dialogsEntryStateCurrent());
 		_controller->showPeerHistory(
 			_inlineBot,
 			Window::SectionShow::Way::ClearStack,

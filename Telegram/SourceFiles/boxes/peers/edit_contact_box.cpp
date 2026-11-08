@@ -58,6 +58,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
+#include "styles/style_edit_peer_members.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -111,7 +112,7 @@ void SendRequest(
 			first,
 			last,
 			user->nameOrPhone,
-			user->username());
+			user->editableUsername());
 		user->session().api().applyUpdates(result);
 		if (const auto settings = user->barSettings()) {
 			const auto flags = PeerBarSetting::AddContact
@@ -759,13 +760,17 @@ void Controller::setupDeleteContactButton() {
 			tr::now,
 			lt_contact,
 			_user->name());
+		const auto user = _user;
+		const auto weak = base::make_weak(_box);
 		const auto deleteSure = [=](Fn<void()> &&close) {
 			close();
-			_user->session().api().request(MTPcontacts_DeleteContacts(
-				MTP_vector<MTPInputUser>(1, _user->inputUser())
+			user->session().api().request(MTPcontacts_DeleteContacts(
+				MTP_vector<MTPInputUser>(1, user->inputUser())
 			)).done([=](const MTPUpdates &result) {
-				_user->session().api().applyUpdates(result);
-				_box->closeBox();
+				user->session().api().applyUpdates(result);
+				if (const auto box = weak.get()) {
+					box->closeBox();
+				}
 			}).send();
 		};
 		_window->show(Ui::MakeConfirmBox({
@@ -841,7 +846,7 @@ void Controller::showPhotoMenu(bool suggest) {
 					[=](QImage &&editedImage) {
 						processChosenPhoto(std::move(editedImage), suggest);
 					},
-					qvariant_cast<QImage>(data->imageData()));
+					QGuiApplication::clipboard()->image());
 			};
 			_photoMenu->addAction(
 				tr::lng_profile_photo_from_clipboard(tr::now),
