@@ -79,7 +79,7 @@ void ChooseFormatBox(
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(
-		tr::lng_export_option_html_and_json(tr::now),
+		tr::lng_export_option_html_and_json_ptg(tr::now),
 		Format::HtmlAndJson);
 	if (!PTG::IsFakeActive()) {
 		addFormatOption(
@@ -297,7 +297,7 @@ void SettingsWidget::setupPathAndFormat(
 	addLocationLabel(container);
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
-	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
+	addFormatOption(tr::lng_export_option_html_and_json_ptg(tr::now), Format::HtmlAndJson);
 	if (!PTG::IsFakeActive()) {
 		addFormatOption(
 			tr::lng_export_option_whatsapp(tr::now),
@@ -380,7 +380,7 @@ void SettingsWidget::addFormatAndLocationLabel(
 			? "JSON"
 			: (format == Format::WhatsApp)
 			? tr::lng_export_option_whatsapp(tr::now)
-			: tr::lng_export_option_html_and_json(tr::now);
+			: tr::lng_export_option_html_and_json_ptg(tr::now);
 		return tr::link(text, u"internal:edit_format"_q);
 	});
 	const auto label = container->add(
