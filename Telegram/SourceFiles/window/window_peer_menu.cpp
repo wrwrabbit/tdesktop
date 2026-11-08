@@ -2051,68 +2051,194 @@ void Filler::addSetPersonalChannel() {
 }
 
 constexpr int kImportPartSize = 512 * 1024;
+constexpr auto kImportMaxEntries = 100000;
+constexpr auto kImportMaxFileNameSize = 4096;
+constexpr auto kImportMaxFileSize = uint64(512) * 1024 * 1024;
+
+class ZipArchive final {
+public:
+	explicit ZipArchive(unzFile file)
+	: _file(file) {
+	}
+	ZipArchive(const ZipArchive &other) = delete;
+	ZipArchive &operator=(const ZipArchive &other) = delete;
+	~ZipArchive() {
+		unzClose(_file);
+	}
+
+	[[nodiscard]] unzFile file() const {
+		return _file;
+	}
+
+private:
+	const unzFile _file;
+
+};
+
+struct ImportEntry {
+	QString name;
+	unz64_file_pos position = {};
+	int64 size = 0;
+};
+
+struct ZipScan {
+	std::vector<ImportEntry> entries;
+	bool tooBig = false;
+};
 
 struct ImportState {
-	PeerData* peer = nullptr;
+	base::weak_ptr<Main::Session> session;
+	std::shared_ptr<ZipArchive> archive;
 	MTPInputPeer inputPeer;
 	int64 importId = 0;
-
-	struct Entry { QString name; QByteArray data; };
-	std::vector<Entry> media;
+	std::vector<ImportEntry> media;
 	size_t mediaIndex = 0;
 };
 
+[[nodiscard]] ZipScan ScanZipEntries(unzFile zf) {
+	auto result = ZipScan();
+	if (unzGoToFirstFile(zf) != UNZ_OK) {
+		return result;
+	}
+	do {
+		auto info = unz_file_info64();
+		if (unzGetCurrentFileInfo64(
+				zf,
+				&info,
+				nullptr,
+				0,
+				nullptr,
+				0,
+				nullptr,
+				0) != UNZ_OK
+			|| int64(info.size_filename) > kImportMaxFileNameSize) {
+			continue;
+		} else if (uint64(info.uncompressed_size) > kImportMaxFileSize
+			|| int(result.entries.size()) >= kImportMaxEntries) {
+			result.tooBig = true;
+			return result;
+		}
+		auto name = std::vector<char>(info.size_filename + 1, 0);
+		auto entry = ImportEntry{ .size = int64(info.uncompressed_size) };
+		if (unzGetCurrentFileInfo64(
+				zf,
+				&info,
+				name.data(),
+				name.size(),
+				nullptr,
+				0,
+				nullptr,
+				0) != UNZ_OK
+			|| unzGetFilePos64(zf, &entry.position) != UNZ_OK
+			|| unzOpenCurrentFile(zf) != UNZ_OK) {
+			continue;
+		}
+		unzCloseCurrentFile(zf);
+		entry.name = QString::fromUtf8(name.data(), int(info.size_filename));
+		result.entries.push_back(std::move(entry));
+	} while (unzGoToNextFile(zf) == UNZ_OK);
+	return result;
+}
+
+[[nodiscard]] std::optional<QByteArray> ReadZipEntry(
+		not_null<ZipArchive*> archive,
+		const ImportEntry &entry) {
+	const auto zf = archive->file();
+	auto position = entry.position;
+	if (unzGoToFilePos64(zf, &position) != UNZ_OK
+		|| unzOpenCurrentFile(zf) != UNZ_OK) {
+		return std::nullopt;
+	}
+	auto data = QByteArray(int(entry.size), Qt::Uninitialized);
+	const auto read = unzReadCurrentFile(zf, data.data(), data.size());
+	const auto closed = unzCloseCurrentFile(zf);
+	if (read != data.size() || closed != UNZ_OK) {
+		return std::nullopt;
+	}
+	return data;
+}
+
+class ImportFileUpload final
+	: public std::enable_shared_from_this<ImportFileUpload> {
+public:
+	ImportFileUpload(
+		std::shared_ptr<ImportState> state,
+		QByteArray data,
+		QString name,
+		Fn<void(MTPInputFile)> done,
+		Fn<void(QString)> fail);
+
+	void sendPart(int index);
+
+private:
+	const std::shared_ptr<ImportState> _state;
+	const QByteArray _data;
+	const QString _name;
+	const Fn<void(MTPInputFile)> _done;
+	const Fn<void(QString)> _fail;
+	const int64 _fileId = 0;
+	const int _total = 0;
+
+};
+
+ImportFileUpload::ImportFileUpload(
+	std::shared_ptr<ImportState> state,
+	QByteArray data,
+	QString name,
+	Fn<void(MTPInputFile)> done,
+	Fn<void(QString)> fail)
+: _state(std::move(state))
+, _data(std::move(data))
+, _name(std::move(name))
+, _done(std::move(done))
+, _fail(std::move(fail))
+, _fileId(base::RandomValue<int64>())
+, _total(std::max(
+	1,
+	int((_data.size() + kImportPartSize - 1) / kImportPartSize))) {
+}
+
+void ImportFileUpload::sendPart(int index) {
+	const auto session = _state->session.get();
+	if (!session) {
+		return;
+	}
+	const auto offset = index * kImportPartSize;
+	const auto chunk = QByteArray::fromRawData(
+		_data.constData() + offset,
+		std::min(kImportPartSize, int(_data.size()) - offset));
+	const auto self = shared_from_this();
+	session->api().request(MTPupload_SaveFilePart(
+		MTP_long(_fileId),
+		MTP_int(index),
+		MTP_bytes(chunk)
+	)).done([=](const MTPBool &) {
+		if (index + 1 < self->_total) {
+			self->sendPart(index + 1);
+		} else {
+			self->_done(MTP_inputFile(
+				MTP_long(self->_fileId),
+				MTP_int(self->_total),
+				MTP_string(self->_name),
+				MTP_string(QString())));
+		}
+	}).fail([=](const MTP::Error &err) {
+		self->_fail(u"upload: "_q + err.type());
+	}).toDC(MTP::uploadDcId(0)).send();
+}
+
 void ImportUploadFile(
 		std::shared_ptr<ImportState> st,
-		const QByteArray &data,
+		QByteArray data,
 		const QString &name,
 		Fn<void(MTPInputFile)> done,
 		Fn<void(QString)> fail) {
-	const auto fileId = base::RandomValue<int64>();
-	const int totalParts = std::max(
-		1,
-		int((data.size() + kImportPartSize - 1) / kImportPartSize));
-
-	struct PartCtx {
-		int sent = 0;
-		int total = 0;
-		int64 fileId = 0;
-		QString name;
-		const QByteArray *data = nullptr;
-	};
-	const auto ctx = std::make_shared<PartCtx>();
-	ctx->total = totalParts;
-	ctx->fileId = fileId;
-	ctx->name = name;
-	ctx->data = &data;
-
-	const auto sendPart = std::make_shared<std::function<void(int)>>();
-	*sendPart = [=](int idx) {
-		const int offset = idx * kImportPartSize;
-		const auto chunk = QByteArray::fromRawData(
-			ctx->data->constData() + offset,
-			std::min(kImportPartSize, int(ctx->data->size()) - offset));
-
-		st->peer->session().api().request(MTPupload_SaveFilePart(
-			MTP_long(ctx->fileId),
-			MTP_int(idx),
-			MTP_bytes(chunk)
-		)).done([=](const MTPBool &) {
-			++ctx->sent;
-			if (ctx->sent < ctx->total) {
-				(*sendPart)(idx + 1);
-			} else {
-				done(MTP_inputFile(
-					MTP_long(ctx->fileId),
-					MTP_int(ctx->total),
-					MTP_string(ctx->name),
-					MTP_string(QString())));
-			}
-		}).fail([=](const MTP::Error &err) {
-			fail(u"upload: "_q + err.type());
-		}).toDC(MTP::uploadDcId(0)).send();
-	};
-	(*sendPart)(0);
+	std::make_shared<ImportFileUpload>(
+		std::move(st),
+		std::move(data),
+		name,
+		std::move(done),
+		std::move(fail))->sendPart(0);
 }
 
 void ImportUploadNextMedia(
@@ -2124,7 +2250,11 @@ void ImportFinalize(
 		std::shared_ptr<ImportState> st,
 		Fn<void()> done,
 		Fn<void(QString)> fail) {
-	st->peer->session().api().request(MTPmessages_StartHistoryImport(
+	const auto session = st->session.get();
+	if (!session) {
+		return;
+	}
+	session->api().request(MTPmessages_StartHistoryImport(
 		st->inputPeer,
 		MTP_long(st->importId)
 	)).done([=](const MTPBool &) {
@@ -2144,7 +2274,12 @@ void ImportUploadNextMedia(
 	}
 	const auto &entry = st->media[st->mediaIndex];
 	const auto name = entry.name;
-	ImportUploadFile(st, entry.data, name,
+	auto data = ReadZipEntry(st->archive.get(), entry);
+	if (!data) {
+		fail(tr::lng_whatsapp_import_zip_damaged(tr::now));
+		return;
+	}
+	ImportUploadFile(st, std::move(*data), name,
 	[=](MTPInputFile uploaded) {
 		const auto media = MTP_inputMediaUploadedDocument(
 			MTP_flags(0),
@@ -2159,7 +2294,11 @@ void ImportUploadNextMedia(
 			MTP_int(0),
 			MTP_int(0));
 
-		st->peer->session().api().request(MTPmessages_UploadImportedMedia(
+		const auto session = st->session.get();
+		if (!session) {
+			return;
+		}
+		session->api().request(MTPmessages_UploadImportedMedia(
 			st->inputPeer,
 			MTP_long(st->importId),
 			MTP_string(name),
@@ -2177,7 +2316,7 @@ void StartWhatsAppImport(
 		not_null<PeerData*> peer,
 		const QString &zipPath) {
 	const auto utf = zipPath.toUtf8();
-	const auto zf = unzOpen(utf.constData());
+	const auto zf = unzOpen64(utf.constData());
 	if (!zf) {
 		Ui::Toast::Show(tr::lng_whatsapp_import_cannot_open_zip(
 			tr::now,
@@ -2185,31 +2324,18 @@ void StartWhatsAppImport(
 			zipPath));
 		return;
 	}
-	const auto closeGuard = gsl::finally([&] { unzClose(zf); });
+	const auto archive = std::make_shared<ZipArchive>(zf);
 
-	auto entries = std::vector<ImportState::Entry>();
-
-	if (unzGoToFirstFile(zf) != UNZ_OK) {
+	auto scan = ScanZipEntries(zf);
+	if (scan.tooBig) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_zip_too_big(tr::now));
+		return;
+	}
+	auto &entries = scan.entries;
+	if (entries.empty()) {
 		Ui::Toast::Show(tr::lng_whatsapp_import_zip_empty(tr::now));
 		return;
 	}
-	do {
-		char nameBuf[512] = {};
-		unz_file_info fi{};
-		if (unzGetCurrentFileInfo(
-				zf, &fi, nameBuf, sizeof(nameBuf),
-				nullptr, 0, nullptr, 0) != UNZ_OK) {
-			continue;
-		}
-		if (unzOpenCurrentFile(zf) != UNZ_OK) {
-			continue;
-		}
-		QByteArray data(int(fi.uncompressed_size), Qt::Uninitialized);
-		unzReadCurrentFile(zf, data.data(), data.size());
-		unzCloseCurrentFile(zf);
-
-		entries.push_back({ QString::fromUtf8(nameBuf), std::move(data) });
-	} while (unzGoToNextFile(zf) == UNZ_OK);
 
 	auto chatIndex = -1;
 	for (auto i = 0; i != int(entries.size()); ++i) {
@@ -2235,8 +2361,12 @@ void StartWhatsAppImport(
 		return;
 	}
 
-	auto chatTxt = std::move(entries[chatIndex].data);
-	auto media = std::vector<ImportState::Entry>();
+	auto chatTxt = ReadZipEntry(archive.get(), entries[chatIndex]);
+	if (!chatTxt) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_zip_damaged(tr::now));
+		return;
+	}
+	auto media = std::vector<ImportEntry>();
 	media.reserve(entries.size() - 1);
 	for (auto i = 0; i != int(entries.size()); ++i) {
 		if (i != chatIndex) {
@@ -2245,17 +2375,20 @@ void StartWhatsAppImport(
 	}
 
 	const auto st = std::make_shared<ImportState>();
-	st->peer = peer;
+	st->session = base::make_weak(&peer->session());
+	st->archive = archive;
 	st->inputPeer = peer->input();
 	st->media = std::move(media);
 
-	const auto chatTxtEntry = std::make_shared<QByteArray>(std::move(chatTxt));
-
 	Ui::Toast::Show(tr::lng_whatsapp_import_uploading_chat(tr::now));
 
-	ImportUploadFile(st, *chatTxtEntry, u"_chat.txt"_q,
+	ImportUploadFile(st, std::move(*chatTxt), u"_chat.txt"_q,
 	[=](MTPInputFile uploaded) {
-		peer->session().api().request(MTPmessages_InitHistoryImport(
+		const auto session = st->session.get();
+		if (!session) {
+			return;
+		}
+		session->api().request(MTPmessages_InitHistoryImport(
 			st->inputPeer,
 			uploaded,
 			MTP_int(int(st->media.size()))
@@ -2304,14 +2437,24 @@ void PeerMenuExportChat(
 void PeerMenuImportChat(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
-	const auto widget = controller->widget();
+	const auto weak = base::make_weak(controller);
+	const auto peerId = peer->id;
 	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
 		FileDialog::GetOpenPath(
-			QPointer<QWidget>(widget),
+			QPointer<QWidget>(strong->widget().get()),
 			u"Choose WhatsApp ZIP export"_q,
 			u"ZIP files (*.zip)"_q,
 			[=](const FileDialog::OpenResult &result) {
-				if (result.paths.isEmpty()) {
+				const auto strong = weak.get();
+				if (!strong || result.paths.isEmpty()) {
+					return;
+				}
+				const auto peer = strong->session().data().peerLoaded(peerId);
+				if (!peer) {
 					return;
 				}
 				StartWhatsAppImport(peer, result.paths.front());
