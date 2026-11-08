@@ -9,6 +9,7 @@ on:
 
 jobs:
   Unused-styles:
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: desktop-app/action_code_updater@master
