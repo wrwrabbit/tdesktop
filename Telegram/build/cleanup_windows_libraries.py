@@ -5,7 +5,7 @@ import stat
 from pathlib import Path
 
 
-KEPT_SUFFIXES = {'.lib', '.a', '.exe', '.h', '.hpp', '.inc', '.cmake', '.pc'}
+KEPT_SUFFIXES = {'.lib', '.a', '.exe', '.h', '.hpp', '.inc', '.cmake', '.pc', '.patch', '.diff'}
 RUST_SOURCES = {'tlottie', 'wallet-engine', 'tdesktop_rust'}
 
 

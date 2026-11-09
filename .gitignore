@@ -80,3 +80,6 @@ settings.local.json
 
 # Generated changelog page (built by CI, deployed to GitHub Pages)
 /docs/changelog/
+
+# Local VS Code Copilot instructions
+/.github/instructions/local.instructions.md
