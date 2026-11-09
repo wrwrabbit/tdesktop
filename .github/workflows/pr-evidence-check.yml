@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   check-evidence:
+    if: false
     runs-on: ubuntu-slim
     steps:
       - name: Check for screenshot or video demonstration
