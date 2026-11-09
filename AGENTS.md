@@ -2,6 +2,69 @@
 
 This guide defines repository-wide instructions for coding agents working with the Telegram Desktop codebase.
 
+## AI Tasks
+
+In this repository "task" is a specific term. It always means one work record in
+the sibling `ai-tdesktop` repository, never a `TODO` comment, a checklist item,
+or a unit of work invented during the current conversation. "The tasks", "the
+queue", "the board", "what's most pressing", and a bare task slug all refer to
+that queue.
+
+- The queue lives in `../ai-tdesktop`, a sibling of this checkout, with one
+  record per directory under `tasks/YYYY/MM/DD/<slug>/`. A task id is that dated
+  path, for example `2026/07/18/fix-community-forward`, and it is the only
+  durable link between a source commit and its task. Linked slot worktrees live
+  in `../ai-tdesktop-worktrees`. Read `../ai-tdesktop/AGENTS.md` before doing
+  anything inside that repository.
+- Each record holds `task.md` — one `# ` title line, then one self-contained
+  paragraph that is the task's description wherever it is summarized — and
+  `state.yaml` with `status`, `type`, `depends_on`, `claimed_by`, and dates.
+  Open statuses are `todo`, `in-progress`, `blocked`, and `split-required`;
+  `approved` is completed history, and `split.yaml` / `superseded.yaml` mark
+  retired records.
+- To browse the queue, read those files directly. Do not run `python3 ai.py`: it
+  is a full-screen browser for the user's own terminal and refuses to run in a
+  pipe. A compact open listing:
+
+```bash
+cd ../ai-tdesktop && for state in tasks/*/*/*/*/state.yaml; do
+  status=$(sed -n 's/^status: //p' "$state")
+  case "$status" in todo|in-progress|blocked|split-required)
+    dir=$(dirname "$state")
+    printf '%-14s %-70s %s\n' "$status" "${dir#tasks/}" \
+      "$(sed -n '1s/^# //p' "$dir/task.md")";;
+  esac
+done | sort
+```
+
+- When ranking open work by urgency, use `in-progress`, then `blocked`, then
+  `split-required`, then ready `todo` (no `claimed_by`, and every `depends_on`
+  already `approved`), then `todo` still waiting on a dependency. Say who owns
+  claimed work. This checkout's tag is the `Telegram/build/ai-machine-tag` value
+  plus the checkout folder name, such as `macbook-tdesktop`, and work claimed by
+  another checkout is never taken over without an explicit human reassignment.
+- Browsing is read-only. Listing, summarizing, comparing, or recommending tasks
+  never edits `state.yaml`, publishes a lifecycle commit, or starts
+  implementation, no matter how small the task looks.
+- Acting on an existing queue task goes through the workflow skills instead of
+  by hand: `perform-task <slug or full id>` starts or resumes and performs
+  exactly one known task, and `continue <batch specification>` runs the batch
+  of tasks the specification selects. Source commits owned by a task use the
+  three-line form described under `## Commits`.
+- A request the user makes in conversation is ordinary work: do it directly in
+  this checkout. Do not write it to the ignored `../ai-tdesktop/inbox/inbox.md`,
+  and do not run `process-inbox` or `continue` over it, unless the user asks for
+  that. The queue's planning, review and evidence campaign costs hours, so
+  spending it on a request the user expected you to just do is a real error, not
+  thoroughness.
+- You may *offer* the queue when the work genuinely earns it: a large or
+  ambiguous change, one whose correctness needs a real testing campaign, or one
+  that is safety-, security- or data-safety-critical. Make the offer in one
+  line, say why, and route it only after the user approves. Absent approval,
+  implement it directly and say what you skipped.
+- Never guess between similarly named tasks. Report the matching full ids and
+  let the user choose.
+
 ## Working from Codex on Windows + WSL
 
 This checkout may be opened in Codex Desktop through the Windows UNC path `\\wsl.localhost\{distro}\home\{user}\Telegram\tdesktop`, while the real Linux path is `/home/{user}/Telegram/tdesktop`. Treat it as a WSL/Linux checkout first, not as a native Windows checkout.
@@ -21,7 +84,7 @@ wsl.exe -d {distro} --cd /home/{user}/Telegram/tdesktop -- <command>
 - For WSL/Linux builds, use the Docker build entry point from the repository root: `Telegram/build/docker/centos_env/build_debug.sh`. The Docker daemon must be reachable from WSL; checking `docker info` is fine, but do not start a build unless the user asked for one.
 - Existing build outputs may be Linux binaries, for example `out/Debug/Telegram` as an ELF executable, not `Telegram.exe`. Verify the build tree before assuming which platform produced it.
 - Be careful with text file line endings. In a WSL/Linux checkout, files should remain LF-only unless the file already uses another convention. CRLF finishing applies only to native, non-WSL Windows runs/checkouts. Do not let PowerShell or Windows tools silently rewrite WSL files to CRLF. If a file becomes mixed, normalize it back to the convention appropriate for the current checkout, without adding a UTF-8 BOM.
-- When using the local `task-think` skill from this WSL checkout, keep `.ai/...` artifacts and edited project text files LF-only. Treat the skill's Windows text-normalization phase as not applicable to WSL, except to record that line endings were checked and kept LF/no-BOM. Run CRLF normalization for `task-think` only in a native, non-WSL Windows checkout.
+- When using the local `perform-task` skill from this WSL checkout, keep external AI task artifacts and edited project text files LF-only. Treat its Windows text-normalization phase as not applicable to WSL, except to record that line endings were checked and kept LF/no-BOM. Run CRLF normalization only in a native, non-WSL Windows checkout.
 
 ## Build System Structure
 
@@ -36,6 +99,35 @@ L:\Telegram\ThirdParty\         # Build tools (NuGet, Python, etc.)
 ```
 
 Dependencies are located relative to the repository: `../Libraries`, `../win64/Libraries`, or `../ThirdParty`.
+
+## Dependency backports
+
+For explicitly requested dependency updates and backports, use the dependency
+repositories' `master` branches directly. Do not create `codex/*` or other topic
+branches in `Libraries/patches`, `Libraries/tg_owt`, or `Libraries/tg_angle`.
+The scheduled dependency monitor remains advisory and does not implement fixes.
+
+- Before editing each dependency repository, inspect its working tree and
+  current branch, fetch `origin`, and verify that the checkout is on `master`,
+  tracks `origin/master`, and is synchronized with the fetched remote branch.
+  Switch to `master` when necessary and fast-forward it when possible. Review
+  divergence before integrating it; preserve unrelated edits, untracked library
+  checkouts and local commits. Do not reset them away or publish unrelated local
+  commits implicitly.
+- Commit fixes to our copied dependencies, including WebRTC and ANGLE, directly
+  in `tg_owt` and `tg_angle`. For external dependencies such as Qt and FFmpeg,
+  commit patch files to `Libraries/patches` and apply them consistently through
+  the applicable prepare, Docker and Snap recipes. Keep intentional differences
+  between platform versions and do not add patch copies inside tdesktop.
+- Keep each independent fix in a separate commit and retain its upstream
+  provenance. Review applicability, prerequisites and patch interactions before
+  committing. Respect the requested validation scope; do not rebuild dependencies
+  unless the user explicitly requests it.
+- Push `master` to `origin/master` without force, fetch again and verify that
+  every new dependency commit is reachable from the published `origin/master`.
+  Only then update the applicable tdesktop revisions to those published SHAs.
+  If integration changes a SHA, update every recipe that consumed the old one.
+  A commit available only on a local or topic branch is not a finished update.
 
 ## Build Configuration
 
@@ -60,7 +152,39 @@ Telegram/build/docker/centos_env/build_debug.sh
 cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 ```
 
-**Never build Release** - it's extremely heavy and not needed for testing changes.
+**Test changes with Debug builds.** Build Release only to measure
+performance, and only without link-time optimization: `out/CMakeCache.txt`
+must read `DESKTOP_APP_ENABLE_LTO:BOOL=OFF` before the build, and nothing may
+configure it ON. Build it with:
+
+```bash
+cmake --build out --config Release --target Telegram
+```
+
+The app lands in `out/Release`. To drive it with the `-testagent` harness,
+follow "Release builds with the harness" in
+`Telegram/SourceFiles/test/docs/launch.md`; on macOS reconfigure with
+`env -u QT cmake -S . -B out -DTDESKTOP_RELEASE_TEST_HARNESS=ON`, and switch it
+back OFF the same way when the measurement is done. A Release build never
+replaces the Debug build that proves a change compiles.
+
+**On macOS, never run an Xcode clean against `out/`** - not `--target clean`,
+not `--clean-first` with any target, not `xcodebuild ... clean` and not a
+Clean in the Xcode app. Xcode's build-products folder for `Telegram` is
+`out/Debug`, which also holds the portable account folders. When `out/Debug`
+carries the `com.apple.xcode.CreatedByBuildSystem` extended attribute,
+`--target clean` deletes `out/Debug` with every folder in it, and
+`--target Telegram --clean-first` does the same before it builds. Without the
+attribute, `--target clean` refuses to delete `out/Debug` and ends
+`** CLEAN FAILED **` (exit 65). It ends the same way when it refuses only
+another, unmarked products folder and deletes a marked `out/Debug`, so exit 65
+alone does not prove that `out/Debug` survived. To force a full recompile,
+follow the `out/build` deletion in "### Forcing a full recompile on macOS"
+under "## Troubleshooting" exactly as written there, its precondition and its
+checks before and after the rebuild included. Never mark `out/Debug` deletable
+with `xattr -w com.apple.xcode.CreatedByBuildSystem true`, as the note in
+Xcode's refusal suggests, and never move, rename or remove any `out/Debug`
+entry to make a clean succeed.
 
 ## Platform-Specific Requirements
 
@@ -75,7 +199,19 @@ cmake --build "l:\Telegram\tx64\out" --config Debug --target Telegram
 ### macOS
 - Requires Xcode
 - Dependencies: `../Libraries/local/Qt-*`
-- Set `QT` environment variable: `export QT=6.8`
+- First-time configure of a new `out/` tree: set the `QT` environment variable
+  to the Qt version this checkout actually has, for example `export QT=6.11.1`
+  when `../Libraries/local/Qt-6.11.1` is the installed one. The value names a
+  directory, so it is the checkout's version, not a constant.
+- Reconfiguring an existing `out/` tree: do **not** export `QT`. Run
+  `env -u QT cmake -S . -B out` instead. `cmake/external/qt/package.cmake`
+  writes an exported `QT` into the `qt_requested` cache entry with `FORCE`, so
+  it overwrites the version the tree was already configured with instead of
+  being ignored. A value that disagrees with the configured tree then fails the
+  regeneration, and the generated project keeps the source list it was last
+  generated with: newly added sources are never compiled — which surfaces later
+  as undefined-symbol link errors rather than as a configure error — and newly
+  added `.style` modules leave the generated `style_*.h` includes stale.
 
 ### Linux
 - Build dependencies in `../Libraries`
@@ -94,40 +230,175 @@ Ensure the repository is in `L:\Telegram\tdesktop`. The build system requires `.
 ### Build fails with "wrong command prompt"
 On Windows, use the correct Visual Studio Native Tools Command Prompt matching your target (x64/x86/ARM64).
 
-### Build fails with PDB or EXE access errors
+### macOS crashes while reading the cached language pack
 
-**âš ï¸ CRITICAL: DO NOT RETRY THE BUILD. STOP AND WAIT FOR USER.**
+After an incremental Xcode build that regenerated `lang.strings` outputs, the
+app can link a new generated key lookup with stale objects that still use an
+older `kKeysCount`. The characteristic failure is:
 
-If the build fails with ANY of these errors:
-- `fatal error C1041: cannot open program database`
-- `cannot open output file 'Telegram.exe'`
-- `LNK1104: cannot open file`
-- Any "access denied" or "file in use" error
+- the Debug log stops immediately after
+  `Lang Info: Loaded cached, keys: ...`;
+- stderr and `tdata/working` may be empty;
+- a fresh `~/Library/Logs/DiagnosticReports/Telegram-*.ips` shows `SIGABRT`
+  from `std::vector<unsigned char>::operator[]`, then
+  `Lang::Instance::applyValue()`, `fillFromSerialized()`, and
+  `Local::readLangPack()`.
 
-**STOP IMMEDIATELY.** These errors mean files are locked by a running process (Telegram.exe or debugger).
+If this exact startup failure repeats twice, do not change the implementation,
+test overlay, or portable account. Rebuild every object once by following the
+`out/build` deletion in "### Forcing a full recompile on macOS" exactly as
+written there, its precondition and checks included, never with an Xcode clean
+(see the macOS statement in "### Build Commands" under
+"## Build Configuration"). Then rerun the same test once. If the signature
+persists after that clean rebuild, continue normal crash diagnosis or report
+the blocker. Do not loop clean rebuilds.
 
-**What to do:**
-1. Do NOT attempt another build - it will fail the same way
-2. Do NOT try to delete files - they are locked
-3. Do NOT try any workarounds or fixes
-4. IMMEDIATELY inform the user:
+### Forcing a full recompile on macOS
 
-> "Build failed - files are locked. Please close Telegram.exe (and any debugger) so I can rebuild."
+Start only when no build of this checkout is running and this checkout's exact
+Telegram process is stopped. Never stop any other process for this procedure.
+Outside the autonomous `continue` / `perform-task` workflow, stopping that
+process follows "### Build output locks": the user may be testing it, so ask
+the user first and never terminate it without explicit permission. Then
+rebuild every object by deleting the intermediate tree `out/build`, never with
+an Xcode clean (see the macOS statement in "### Build Commands" under
+"## Build Configuration").
 
-**Then WAIT for user confirmation before attempting any build.**
+The generated project keeps every intermediate (object files, precompiled
+headers and Xcode's build database) under `out/build`, its `SYMROOT`, and
+only build products in `out/Debug` and the other per-target `Debug` folders.
+Deleting `out/build` therefore works the same whether or not `out/Debug`
+carries the `com.apple.xcode.CreatedByBuildSystem` attribute, and it touches
+nothing in `out/Debug`. From the repository root, record what `out/Debug`
+holds, delete the intermediates and confirm that `out/build` is gone:
 
-Retrying builds wastes time and context. The ONLY fix is for the user to close the running process.
+```bash
+test -d out/Telegram.xcodeproj &&
+  ls -A out/Debug | sort > out/language-rebuild-mark.txt &&
+  rm -rf out/build &&
+  test ! -e out/build &&
+  echo 'out/build is gone'
+```
+
+It must print `out/build is gone`: no intermediate object survived. Object
+files elsewhere in `out/`, such as CMake's compiler checks or a release
+build's tree, belong to other builds; leave them alone. This step has no
+accepted failure: an error, other output or no output stops the procedure.
+Then run one full Debug rebuild, which has to compile every object again:
+
+```bash
+cmake --build out --config Debug --target Telegram
+```
+
+It must end `** BUILD SUCCEEDED **`. Then check that the rebuild compiled every
+object and that nothing in `out/Debug` was lost:
+
+```bash
+test -f out/language-rebuild-mark.txt &&
+  find out/build -name '*.o' ! -newer out/language-rebuild-mark.txt | wc -l &&
+  find out/build -name '*.o' | wc -l &&
+  ls -A out/Debug | sort | comm -23 out/language-rebuild-mark.txt -
+```
+
+It must print `0` (no object file is older than the mark written before
+`out/build` was deleted), then a nonzero object count, and nothing else (every
+entry `out/Debug` held before is still there). Anything else stops the
+procedure; report what it printed.
+
+### Build output locks
+
+For builds owned by the autonomous `continue` / `perform-task` workflow, read
+and follow `.agents/shared/build-lock-recovery.md`. PDB, EXE, OBJ, and other
+build-output lock errors are recoverable: stop only the exact checkout
+executable or verified build-tree holders, delete only exact named artifacts
+inside that checkout's build tree, and retry within the bounded recovery
+budget. Never stop an installed Telegram client, another checkout, an IDE, or
+an unknown process.
+
+Outside that autonomous workflow, an exact checkout executable may be running
+because the user is testing it. Do not terminate it or delete locked build
+outputs without explicit permission. Report the exact locked path and ask the
+user to close that checkout's Telegram/debugger before rebuilding.
 
 ## Best Practices
 
-1. **Always use Debug builds** - Release builds are extremely heavy
-2. **Don't build Release configuration** - it's too heavy for testing
+1. **Always use Debug builds** to build and test changes
+2. **Build Release only to measure performance**, without LTO, as
+   "### Build Commands" describes
+
+## Remote CI Build Validation (private-ci)
+
+Fast Debug build checks on Depot.dev (`.github/workflows/private-ci.yml`) run on
+`private-ci/<slug>` branches. Strictly on-demand: never push or babysit CI unless
+the user explicitly asks. Track with `gh run watch`, inspect with
+`gh run view --log-failed`. Amend your commit on your own build error; make a
+separate commit if broken by upstream. Delete the remote branch when green.
+
+## Debug-Only Code
+
+Production translation units stay free of debug machinery. The permanent test
+harness lives in `Telegram/SourceFiles/test/`, and the disposable `-testagent`
+overlay owns per-task instrumentation; production code carries at most a thin
+single-call seam (a `Test::Fire()`-style waitpoint or a live-object
+publication at a construction seam).
+
+- Do not add `#ifdef _DEBUG` blocks, debug-only types, debug state, mutexes,
+  counters, or observation structs to production headers or sources. When a
+  behavior cannot be observed without such machinery, that is a harness gap:
+  extend the `test/` helpers or the overlay instead.
+- Never commit debugging machinery interleaved with working code in the same
+  translation unit. A permanent helper belongs under `test/`; a temporary one
+  belongs in the overlay and is never retained.
+- Exceptions exist — a few `#ifdef _DEBUG` hooks are deliberately kept in
+  production files — but they are exceptions and each new one needs a solid,
+  stated reason. "The test needed it" is not one.
+
+## Harness documentation
+
+Keep `Telegram/SourceFiles/test/README.md` a short mandatory guide, under
+8 KiB. When adding or changing a harness helper, follow
+`Telegram/SourceFiles/test/docs/adding-helpers.md`: add or update one helper
+index row and its on-demand reference, and keep the source header focused on
+its callable contract. Detailed examples, platform caveats and diagnostic
+history belong in the references, not in the mandatory README. Overlay work
+reads that guide, the references selected by the task and their headers;
+never require reading every helper page.
 
 ## Text File Format
 
 - On Windows, keep project text files with CRLF line endings.
 - Do not save source, header, build/config, style, or localization files as UTF-8 with BOM. Use UTF-8 without BOM.
 - When rewriting project text files for normalization, preserve file content otherwise and do not introduce a BOM.
+
+## Commits
+
+- Subject: one concise, plain-language line summarizing the change, ~50-60 characters, matching the style of recent `git log` subjects. This is usually the entire message.
+- Decide the `[ai] ` prefix separately for each commit. Use it only when every
+  retained change in that commit, and the commit's purpose, are exclusively
+  about the AI workflow: the agent harness, skills, prompts, custom commands,
+  agent documentation, or AI testing infrastructure. Typical qualifying paths
+  include `Telegram/SourceFiles/test/`, `.agents/`, `.claude/`, `.grok/`,
+  `AGENTS.md`, `CLAUDE.md`, and `GROK.md`, but paths alone do not decide the
+  prefix. Product-specific test seams, app code, and build-system integration do
+  not qualify merely because agents use them for verification. Split mixed
+  workflow and product work into separate commits when practical; otherwise the
+  mixed commit must not use `[ai] `. Do not count the disposable test overlay or
+  external AI task artifacts. Every other commit must not contain `[ai]`
+  anywhere.
+- The `[ai] ` prefix marks the commit's scope, never its authorship. It does
+  not mean "authored by an AI": an AI-authored product fix takes a plain
+  subject, and a workflow-only commit takes the prefix no matter who wrote it.
+- For ordinary work not associated with an AI task, add a short plain-language body only when the subject can't carry it (what was done, not the technical how) — a line or two at most.
+- Never add a `Co-Authored-By:` line or any tool/assistant attribution trailer.
+- Never add `Autotask:`/attempt or other internal run markers. A commit owned by
+  an `ai-tdesktop` task has exactly three lines: the concise subject, a blank
+  line, and `Task: <task-id>`. Do not add a body. Keep rationale and
+  implementation notes out of the commit message; put a short durable note
+  under `tasks/<task-id>.md` only when useful. Do not copy commit hashes into
+  that note or any AI task artifact; the task id is the cross-repository link.
+- Never create backup branches or tags before a rebase, reorder, squash or any
+  other history rewrite. The branch reflog keeps the old tip; report its sha
+  as the undo path instead.
 
 ## Local Storage Serialization
 
@@ -142,11 +413,26 @@ Both app-level (`Core::Settings`) and session-level (`Main::SessionSettings`) us
 
 # Development Guidelines
 
+## Area maps
+
+`Telegram/SourceFiles/AGENTS.md` is the source atlas: every area of the
+tree with its paths and responsibility. A directory may also
+have its own `AGENTS.md`: the map of that area's modules, placement rules,
+invariants, and things to leave alone. Before adding code, read the atlas
+entry of the area you touch and the nearest map, and put new code where they
+say. A change that needs a different shape amends the map in the same task.
+How the atlas and maps are written and how changes are checked against them
+is in `.agents/skills/code-health/SKILL.md`.
+
 ## Coding Style
 
-**Do NOT write comments in code:**
+**Comments:**
 
-This is important! Do not write single-line comments that describe what the next line does - they are bloat. Comments are allowed ONLY to describe complex algorithms in detail, when the explanation requires at least 4-5 lines. Self-documenting code with clear variable and function names is preferred.
+Add no comments. A one-line comment carrying a reason is acceptable, at most two such lines per commit; anything longer only to carry a reference URL. `Telegram/SourceFiles/test/` is exempt.
+
+Do not remove existing comments just to satisfy this rule. Preserve comments unless your change makes them incorrect or truly obsolete; when moving or refactoring code, move the useful comment with it. Inline comments that label positional arguments for generated or schema-driven APIs (for example TL/MTP constructors) are useful because the field names are not visible in the call itself.
+
+**Never cite line numbers** in comments, `README.md` files or other checked-in text. Name the function, member, constant or type, and its file when that helps: write `Runner::finish()` in `test_runner.cpp`, not `test_runner.cpp:NNN` or `:NNN-MMM`. Line numbers drift with every edit and nothing updates them. This covers submodule, Qt and other third-party sources too. Quoted log or crash text stays verbatim.
 
 ```cpp
 // BAD - don't do this:
@@ -159,15 +445,17 @@ if (user->isPremium()) {
 auto name = user->name();
 if (user->isPremium()) {
 
-// ACCEPTABLE - complex algorithm explanation (4+ lines):
-// The algorithm works by first collecting all visible messages
-// in the viewport, then calculating their intersection with
-// the clip rectangle. Messages are grouped by date headers,
-// and we need to account for sticky headers that may overlap
-// with the first message in each group.
+// ACCEPTABLE - one line, and it carries a reason:
+_limit = kDefaultLimit; // the server rejects anything larger
+
+// ACCEPTABLE - longer, and it carries a reference URL:
+// The flag is ignored until the server rolls out the scheme
+// described at https://core.telegram.org/api/updates
 ```
 
 **Style and formatting rules** are in `REVIEW.md` — see that file for empty-line-before-closing-brace, operator placement in multi-line expressions, if-with-initializer, and other mechanical style rules.
+
+**Never discard a result with a cast:** `static_cast<void>(...)` and `(void)expr` are banned; instead of silencing `[[nodiscard]]`, fix the design.
 
 **Use `auto` for type deduction:**
 
@@ -234,6 +522,99 @@ auto text = u"Settings"_q;
 auto text = QStringLiteral("Settings");
 ```
 
+**Never use `Q_OS_LINUX` for platform checks in new code:**
+
+Telegram Desktop distinguishes at most three platforms: Windows / macOS / all-other. The "all-other" branch covers Linux, the BSD variants and more — and this is almost always the branch you want. `Q_OS_LINUX` narrows it to Linux alone, silently excluding the non-Linux Unix platforms, which is almost never intended. For the all-other branch use `!defined Q_OS_WIN && !defined Q_OS_MAC` at compile time, or its runtime equivalent `Platform::IsLinux()` — which, despite the name, means exactly `!defined Q_OS_WIN && !defined Q_OS_MAC` ("everything except Windows and macOS"), not Linux specifically:
+
+```cpp
+// BAD - excludes FreeBSD and other non-Linux Unix:
+#ifdef Q_OS_LINUX
+UnixSpecificCode();
+#endif // Q_OS_LINUX
+
+// GOOD - the all-other branch, compile time:
+#if !defined Q_OS_WIN && !defined Q_OS_MAC
+UnixSpecificCode();
+#endif // !Q_OS_WIN && !Q_OS_MAC
+
+// GOOD - the all-other branch, runtime (same meaning, NOT Linux-only):
+if (Platform::IsLinux()) {
+	UnixSpecificCode();
+}
+```
+
+`Q_OS_LINUX` is only for the rare case where you genuinely want exactly Linux and not the other Unix-like systems — usually you don't. The few existing uses (`Telegram/SourceFiles/core/sandbox.cpp`, `Telegram/SourceFiles/platform/linux/specific_linux.cpp`) are such genuinely Linux-only code paths and stay as-is.
+
+**Treat CMake `LINUX` as the all-other platform:**
+
+In this project, `cmake/validate_special_target.cmake` sets `LINUX` in the
+final `else()` after checking `WIN32` and `APPLE`. It therefore means
+`NOT WIN32 AND NOT APPLE`, including non-Linux Unix platforms; it does not
+mean exactly Linux. For the usual three-way platform split, write:
+
+```cmake
+if (WIN32)
+    set(platform_source platform/win.cpp)
+elseif (APPLE)
+    set(platform_source platform/mac.mm)
+else()
+    set(platform_source platform/linux.cpp)
+endif()
+target_sources(my_target PRIVATE ${platform_source})
+```
+
+Do not add a separate fallback branch after `if (LINUX)` as though `LINUX`
+were one platform among several remaining platforms. There are no remaining
+platforms in this project's CMake platform model.
+
+**Prefer cppgir wrappers over the GLib C API:**
+
+When implementing all-other-platform code with GLib, GObject, or GIO, use the
+generated cppgir C++ bindings under `gi::repository` as much as possible.
+Prefer their `GLib`, `GObject`, and `Gio` types, ownership handling, results,
+and callbacks over raw `g_*`, `g_object_*`, and `g_io_*` APIs. Use the C API
+only when cppgir does not expose the required functionality or at a narrow
+interop boundary that genuinely requires raw GLib types, and keep that raw
+API surface as small as possible.
+
+**Generate typed D-Bus bindings from introspection XML:**
+
+For a D-Bus interface known at build time, prefer the CMake `generate_dbus`
+function from `cmake/external/glib/generate_dbus.cmake` over handwritten
+`GDBusProxy` calls, stringly typed method and signal names, or manually
+maintained C wrappers. Its signature is:
+
+```cmake
+generate_dbus(
+    target_name
+    interface_prefix
+    namespace
+    interface_file)
+```
+
+`target_name` is the existing target that will use the bindings,
+`interface_prefix` is the common D-Bus interface prefix passed to
+`gdbus-codegen`, `namespace` names the generated API, and `interface_file` is
+the D-Bus introspection XML file. Include the helper and call it inside the
+all-other-platform branch:
+
+```cmake
+include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
+generate_dbus(
+    my_target
+    org.example.
+    Example
+    ${src_loc}/platform/linux/org.example.Service.xml)
+```
+
+The helper runs `gdbus-codegen`, generates proxy, skeleton, and object-manager
+types, produces GIR metadata, wraps that metadata with cppgir, and links the
+result into `target_name`. Consume the resulting typed API from
+`gi::repository::Example` (using the namespace argument from the example);
+do not edit or separately list files under the build `gen` directory. Use
+generic GLib D-Bus calls only when the interface is genuinely dynamic or
+cannot be represented by suitable introspection XML.
+
 ## API Usage
 
 ### API Schema Files
@@ -292,6 +673,77 @@ api().request(MTPnamespace_MethodName(
 - Include `.handleFloodErrors()` before `.send()` in rare cases where you want special case flood error handling
 - Silently ignore HTTP 406 errors in UI: the server uses 406 to mean "show nothing to the user". Guard toasts with `MTP::IgnoreError(error)` or use `MTP::ShowErrorFallback(show, error)` (both in `mtproto/mtproto_response.h`) which shows `error.type()` as a toast unless the error should be ignored.
 
+### API Request Callback Lifetime
+
+`api().request(...)` callbacks are owned by the session, not by whatever created
+them. A `.done()` / `.fail()` handler stays alive for the whole session lifetime,
+so a handler that captured a widget, a box, a controller, or any shorter-lived
+state still runs after that state is gone. A plain `[=]` capture warns about
+nothing, which makes this one of the easiest ways to write a use-after-free here.
+
+Capturing only plain values or session-owned objects is fine. When anything
+captured can die before the session does, pick one of three:
+
+**1. Guard the callback with `crl::guard`.** The request is always sent; the
+handler is skipped when the context is gone. Use when the call itself must reach
+the server and only the local reaction is optional.
+
+```cpp
+api().request(MTPmethod(
+	...
+)).done(crl::guard(this, [=](const MTPResult &result) {
+	// runs only while `this` is still alive
+})).send();
+```
+
+Accepted guards, in rough order of how often they are used: a raw pointer or
+`not_null` to any `QObject`-derived type — widgets, boxes, controllers — where the
+`QPointer` is created on the spot, so passing `this` is the normal case; a raw
+pointer or `not_null` to a `base::has_weak_ptr` type; `QPointer`, `QWeakPointer`,
+`QSharedPointer`; `base::weak_ptr`, `base::weak_qptr`; `std::weak_ptr`,
+`std::shared_ptr`; and `base::binary_guard`.
+
+**2. Remember the `mtpRequestId` and cancel it.** Cancel when the result stops
+being relevant, and in the destructor. The request may never reach the server —
+if it is still queued when cancelled, or connectivity dies first, it is simply
+dropped — so never use this when the call itself has to happen.
+
+```cpp
+_requestId = api().request(MTPmethod(
+	...
+)).done([=](const MTPResult &result) {
+	_requestId = 0;
+	...
+}).send();
+
+// when the result is no longer relevant, and in the destructor:
+api().request(base::take(_requestId)).cancel();
+```
+
+**3. Own an `MTP::Sender`.** Its destructor cancels everything it sent that is
+still in flight, so request lifetime follows the owner with no bookkeeping. Same
+delivery caveat as (2). Prefer this for a widget, box, or controller that issues
+more than a request or two.
+
+```cpp
+// header
+	MTP::Sender _api;
+
+// constructor initializer list
+, _api(&session->mtp())
+
+// requests sent through it die with the owner
+_api.request(MTPmethod(
+	...
+)).done([=](const MTPResult &result) {
+	...
+}).send();
+```
+
+Choosing between them: if the server must see the request, use (1). If it only
+matters while its owner is alive, use (3) — or (2) when a single request does not
+justify a `Sender` member.
+
 ## UI Styling
 
 ### Style Files
@@ -325,7 +777,7 @@ primaryButton: MyButtonStyle(defaultButton) {
 - `pixels` - Pixel values with `px` suffix (e.g., `10px`)
 - `color` - Named colors from `ui/colors.palette`
 - `icon` - Inline icon definition: `icon{{ "path/stem", color }}`
-- `margins` - Four values: `margins(top, right, bottom, left)`
+- `margins` - Four values: `margins(left, top, right, bottom)`
 - `size` - Two values: `size(width, height)`
 - `point` - Two values: `point(x, y)`
 - `align` - Alignment: `align(center)`, `align(left)`
@@ -385,6 +837,23 @@ void MyWidget::paintEvent(QPaintEvent *e) {
 }
 ```
 
+## Input Method Hints
+
+A field for typed content tells the input method what it is for: call `setInputMethodHints` right after creating it (`Ui::InputField` forwards the hints to its inner editor; `Ui::MaskedInputField` subclasses set them in the constructor). Combinations already used in the code:
+
+- URL: `Qt::ImhUrlCharactersOnly | Qt::ImhNoAutoUppercase | Qt::ImhNoPredictiveText`
+- E-mail: `Qt::ImhEmailCharactersOnly | Qt::ImhNoAutoUppercase | Qt::ImhNoPredictiveText`
+- Phone: `Qt::ImhDialableCharactersOnly | Qt::ImhNoPredictiveText`
+- Digits only (codes, date and time parts): `Qt::ImhDigitsOnly | Qt::ImhNoPredictiveText`
+- Numbers with separators (amounts, timestamps): `Qt::ImhFormattedNumbersOnly | Qt::ImhNoPredictiveText`
+- Latin identifiers (usernames, file extensions, keys): `Qt::ImhLatinOnly | Qt::ImhNoAutoUppercase | Qt::ImhNoPredictiveText`
+- Add `Qt::ImhSensitiveData` to one-time codes and to secrets shown in clear text, such as recovery phrase words
+- Free text (names, titles, comments, search) gets no hints; `Ui::PasswordInput` sets its own
+
+Prefer the hint that says what the field is for, as long as it works or at least doesn't conflict with what works. To see what works, check every consumer on every platform tdesktop ships at the Qt version in use: the Qt platform plugins (windows, cocoa, xcb, wayland) and the input context plugins, including the bundled ones (fcitx5-qt). If the semantic hint conflicts, pick what works. Hints don't filter input: the field still drops unwanted characters itself.
+
+As of 2026-10-20, `Qt::ImhDate` and `Qt::ImhTime` do nothing anywhere tdesktop runs. Qt on Wayland sends them as the date/time content purpose, but no Wayland on-screen keyboard implements those purposes (Qt Virtual Keyboard, which Plasma Keyboard is built on, GNOME Shell, Squeekboard). Qt reads them on none of tdesktop's other platforms (Windows, macOS, X11), and neither does the bundled fcitx5-qt. Used instead of the digit hints, they lose the digit layouts, so date and time fields use the digit hints above.
+
 ## Localization
 
 ### String Definitions
@@ -431,6 +900,7 @@ auto filesTextProducer = tr::lng_files_selected(
 - Omit `tr::now` for reactive `rpl::producer<QString>`
 - Placeholders use `lt_tag_name, value` pattern
 - For `{count}`: immediate uses `int`, reactive uses `rpl::producer<float64>` with `| tr::to_count()`
+- Every plural form, `#one` included, keeps `{count}`: many languages put more than 1 into their "one" category (Russian: 21, 31, ...), so a `#one` phrase written for exactly 1 is wrong for them. When exactly 1 deserves different wording, add a separate non-plural key and pick it in code, so every language gets that special case
 - Move producers with `std::move` when passing to placeholders
 - Rich text projectors — these `tr::` helpers serve double duty: as the **last argument** (projector) they set the return type to `TextWithEntities`, and as **placeholder values** they wrap individual substitutions in formatting. Always prefer them over `Ui::Text::Bold()`, `Ui::Text::RichLangValue`, etc. — see REVIEW.md for the full mapping.
   - `tr::marked` — basic projection, converts `QString` to `TextWithEntities`
@@ -539,3 +1009,30 @@ The `Error` template parameter defaults to `rpl::no_error`: `rpl::producer<Type,
 - Pass `rpl::lifetime` to `on_...` methods or store returned lifetime
 - Use `rpl::duplicate(producer)` to reuse a producer multiple times
 - Combined producers automatically unpack tuples in lambdas (works with `rpl::map`, `rpl::filter`, and `rpl::on_next`)
+
+### Per-subscription state
+
+`rpl::on_next` stores the handler by value. Each emission invokes a *copy* of that stored handler, so a nested emit does not re-enter the running callable. Writes a `mutable` lambda makes to its own captures land on the copy and are discarded, so they never become per-subscription state.
+
+```cpp
+// BAD - compiles, runs, and grew is just value > 0 every time:
+events | rpl::on_next([last = 0](int value) mutable {
+    const auto grew = (value > last);
+    last = value;
+    if (grew) {
+        // ...
+    }
+}, lifetime);
+
+// GOOD - state lives beside the handler:
+const auto last = lifetime.make_state<int>(0);
+events | rpl::on_next([=](int value) {
+    const auto grew = (value > *last);
+    *last = value;
+    if (grew) {
+        // ...
+    }
+}, lifetime);
+```
+
+Keep per-subscription state in `lifetime.make_state<T>()`, behind a `shared_ptr`, or on the object that owns the subscription. A `mutable` lambda that is one-shot — `rpl::take(1)`, a self-destroying subscription, a `crl::on_main` or `crl::async` callback, a `done` or `error` callback — is not this trap.

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_hash.h"
 #include "apiwrap.h"
 #include "base/unixtime.h"
+#include "data/data_messages.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "api/api_text_entities.h"
@@ -200,9 +201,10 @@ void ShortcutMessages::mergeMessagesFromTo(
 			destroy.emplace(item.get());
 		}
 	}
-	for (const auto &item : destroy) {
-		item->destroy();
-	}
+	_session->data().destroyMessagesWithCacheCleanup(
+		std::vector<not_null<HistoryItem*>>(
+			begin(destroy),
+			end(destroy)));
 	_data.remove(fromId);
 
 	cancelRequest(fromId);
@@ -345,21 +347,20 @@ void ShortcutMessages::apply(
 	if (!shortcutId) {
 		return;
 	}
-	auto i = _data.find(shortcutId);
+	const auto i = _data.find(shortcutId);
 	if (i == end(_data)) {
 		return;
 	}
+	auto items = std::vector<not_null<HistoryItem*>>();
+	items.reserve(update.vmessages().v.size());
 	for (const auto &id : update.vmessages().v) {
 		const auto &list = i->second;
 		const auto j = list.itemById.find(id.v);
 		if (j != end(list.itemById)) {
-			j->second->destroy();
-			i = _data.find(shortcutId);
-			if (i == end(_data)) {
-				break;
-			}
+			items.push_back(j->second);
 		}
 	}
+	_session->data().destroyMessagesWithCacheCleanup(items);
 	_updates.fire_copy(shortcutId);
 	updateCount(shortcutId);
 
@@ -372,10 +373,14 @@ void ShortcutMessages::apply(const MTPDupdateDeleteQuickReply &update) {
 	if (!shortcutId) {
 		return;
 	}
-	auto i = _data.find(shortcutId);
-	while (i != end(_data) && !i->second.itemById.empty()) {
-		i->second.itemById.back().second->destroy();
-		i = _data.find(shortcutId);
+	const auto i = _data.find(shortcutId);
+	if (i != end(_data)) {
+		auto items = std::vector<not_null<HistoryItem*>>();
+		items.reserve(i->second.itemById.size());
+		for (const auto &entry : i->second.itemById) {
+			items.push_back(entry.second);
+		}
+		_session->data().destroyMessagesWithCacheCleanup(items);
 	}
 	_updates.fire_copy(shortcutId);
 	if (_data.contains(shortcutId)) {
@@ -395,7 +400,7 @@ void ShortcutMessages::apply(
 	auto &list = i->second;
 	const auto j = list.itemById.find(id);
 	if (j != end(list.itemById) || !IsServerMsgId(id)) {
-		local->destroy();
+		_session->data().destroyMessageWithCacheCleanup(local);
 	} else {
 		Assert(!list.itemById.contains(local->id));
 		local->setRealId(localMessageId(id));
@@ -418,7 +423,7 @@ void ShortcutMessages::removeSending(not_null<HistoryItem*> item) {
 	Expects(item->isSending() || item->hasFailed());
 	Expects(item->isBusinessShortcut());
 
-	item->destroy();
+	_session->data().destroyMessageWithCacheCleanup(item);
 }
 
 rpl::producer<> ShortcutMessages::updates(BusinessShortcutId shortcutId) {
@@ -568,15 +573,16 @@ void ShortcutMessages::editShortcut(
 }
 
 void ShortcutMessages::removeShortcut(BusinessShortcutId shortcutId) {
-	auto i = _data.find(shortcutId);
-	while (i != end(_data)) {
-		if (i->second.items.empty()) {
-			_data.erase(i);
-		} else {
-			i->second.items.front()->destroy();
+	const auto i = _data.find(shortcutId);
+	if (i != end(_data)) {
+		auto items = std::vector<not_null<HistoryItem*>>();
+		items.reserve(i->second.items.size());
+		for (const auto &item : i->second.items) {
+			items.push_back(item.get());
 		}
-		i = _data.find(shortcutId);
+		_session->data().destroyMessagesWithCacheCleanup(items);
 	}
+	_data.remove(shortcutId);
 	_shortcuts.list.remove(shortcutId);
 	_shortcutIdChanges.fire({ shortcutId, 0 });
 
@@ -667,12 +673,7 @@ HistoryItem *ShortcutMessages::append(
 			if (data.is_edit_hide()) {
 				existing->applyEdition(HistoryMessageEdition(_session, data));
 			} else {
-				existing->updateSentContent({
-					qs(data.vmessage()),
-					Api::EntitiesFromMTP(
-						_session,
-						data.ventities().value_or_empty())
-				}, data.vmedia());
+				existing->updateSentContent(data);
 				existing->updateReplyMarkup(
 					HistoryMessageMarkupData(data.vreply_markup()));
 				existing->updateForwardedInfo(data.vfwd_from());
@@ -721,11 +722,10 @@ void ShortcutMessages::updated(
 		BusinessShortcutId shortcutId,
 		const base::flat_set<not_null<HistoryItem*>> &added,
 		const base::flat_set<not_null<HistoryItem*>> &clear) {
-	if (!clear.empty()) {
-		for (const auto &item : clear) {
-			item->destroy();
-		}
-	}
+	_session->data().destroyMessagesWithCacheCleanup(
+		std::vector<not_null<HistoryItem*>>(
+			begin(clear),
+			end(clear)));
 	const auto i = _data.find(shortcutId);
 	if (i != end(_data)) {
 		sort(i->second);

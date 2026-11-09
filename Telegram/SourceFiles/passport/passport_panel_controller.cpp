@@ -502,6 +502,9 @@ EditContactScheme GetContactScheme(Scope::Type type) {
 		result.newHeader = tr::lng_passport_new_email(tr::now);
 		result.newPlaceholder = tr::lng_passport_email_title();
 		result.aboutNew = tr::lng_passport_new_email_code(tr::now);
+		result.inputHints = Qt::ImhEmailCharactersOnly
+			| Qt::ImhNoAutoUppercase
+			| Qt::ImhNoPredictiveText;
 		result.validate = [](const QString &value) {
 			const auto at = value.indexOf('@');
 			const auto dot = value.lastIndexOf('.');
@@ -532,15 +535,6 @@ const std::map<QString, QString> &NativeToLatinMap() {
 		{ "middle_name_native"_q, "middle_name"_q },
 	};
 	return result;
-}
-
-QString AdjustKeyName(not_null<const Value*> value, const QString &key) {
-	if (!value->nativeNames) {
-		return key;
-	}
-	const auto &map = LatinToNativeMap();
-	const auto i = map.find(key);
-	return (i == end(map)) ? key : i->second;
 }
 
 bool SkipFieldCheck(not_null<const Value*> value, const QString &key) {

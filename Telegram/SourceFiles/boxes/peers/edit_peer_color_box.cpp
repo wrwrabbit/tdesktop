@@ -37,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "info/channel_statistics/boosts/info_boosts_widget.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
+#include "info/profile/tabs/info_profile_tabs_strip.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
 #include "info/profile/info_profile_top_bar.h"
 #include "info/info_controller.h" // Key
@@ -59,7 +60,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/peer/color_sample.h"
 #include "ui/text/text_utilities.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/pill_tabs.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/color_contrast.h"
 #include "ui/painter.h"
@@ -68,9 +68,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/themes/window_theme.h"
 #include "window/section_widget.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_chat.h"
 #include "styles/style_credits.h"
-#include "styles/style_info.h" // defaultSubTabs.
+#include "styles/style_info.h" // defaultSubTabs, infoProfileTabsStrip.
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
@@ -1498,26 +1499,37 @@ Fn<void(int)> CreateTabsWidget(
 		const std::vector<QString> &labels,
 		const std::vector<Fn<void()>> &callbacks) {
 	const auto tabs = container->add(
-		object_ptr<Ui::PillTabs>(
+		object_ptr<Info::Profile::TabsStrip>(
 			container,
-			labels,
-			0,
-			st::giftBoxPillTabs),
+			st::infoProfileTabsStrip),
 		st::boxRowPadding,
 		style::al_top);
 
-	tabs->activeIndexChanges(
-	) | rpl::on_next([=](int index) {
+	auto list = std::vector<Info::Profile::StripTab>();
+	list.reserve(labels.size());
+	for (auto i = 0, count = int(labels.size()); i != count; ++i) {
+		list.push_back({
+			.id = QString::number(i),
+			.text = { labels[i] },
+		});
+	}
+	tabs->setTabs(std::move(list));
+	tabs->setActiveTab(u"0"_q);
+
+	const auto invoke = [=](int index) {
 		if (index >= 0 && index < int(callbacks.size()) && callbacks[index]) {
 			callbacks[index]();
 		}
+	};
+	tabs->activated(
+	) | rpl::on_next([=](const QString &id) {
+		tabs->setActiveTab(id);
+		invoke(id.toInt());
 	}, tabs->lifetime());
 
 	return [=](int index) {
-		tabs->setActiveIndex(index);
-		if (index >= 0 && index < int(callbacks.size()) && callbacks[index]) {
-			callbacks[index]();
-		}
+		tabs->setActiveTab(QString::number(index));
+		invoke(index);
 	};
 }
 
@@ -1549,6 +1561,48 @@ not_null<Info::Profile::TopBar*> CreateProfilePreview(
 void ProcessButton(not_null<Ui::RoundButton*> button) {
 	// Raise to be above right emoji from buttons.
 	crl::on_main(button, [=] { button->raise(); });
+}
+
+void SetApplyButtonText(
+		not_null<Ui::RoundButton*> button,
+		not_null<PeerData*> peer,
+		const Data::UniqueGift *buy,
+		rpl::producer<QString> applyText) {
+	if (!buy) {
+		button->setText(rpl::combine(
+			std::move(applyText),
+			Data::AmPremiumValue(&peer->session())
+		) | rpl::map([=](const QString &text, bool premium) {
+			auto result = TextWithEntities();
+			if (!premium && peer->isSelf()) {
+				result.append(Ui::Text::IconEmoji(&st::giftBoxLock));
+			}
+			result.append(text);
+			return result;
+		}));
+	} else if (buy->onlyAcceptTon) {
+		button->setText(rpl::single(QString()));
+		Ui::SetButtonTwoLabels(
+			button,
+			tr::lng_gift_buy_resale_button(
+				lt_cost,
+				rpl::single(Data::FormatGiftResaleTon(*buy)),
+				tr::marked),
+			tr::lng_gift_buy_resale_equals(
+				lt_cost,
+				rpl::single(Ui::Text::IconEmoji(
+					&st::starIconEmojiSmall
+				).append(Lang::FormatCountDecimal(buy->starsForResale))),
+				tr::marked),
+			st::resaleButtonTitle,
+			st::resaleButtonSubtitle);
+	} else {
+		button->setText(tr::lng_gift_buy_resale_button(
+			lt_cost,
+			rpl::single(Ui::Text::IconEmoji(&st::starIconEmoji).append(
+				Lang::FormatCountDecimal(buy->starsForResale))),
+			tr::marked));
+	}
 }
 
 void CreateBoostLevelContainer(
@@ -2073,41 +2127,11 @@ void EditPeerColorSection(
 		while (!button->children().isEmpty()) {
 			delete button->children().first();
 		}
-		if (!buy) {
-			button->setText(rpl::combine(
-				tr::lng_settings_color_apply(),
-				Data::AmPremiumValue(&peer->session())
-			) | rpl::map([=](const QString &text, bool premium) {
-				auto result = TextWithEntities();
-				if (!premium && peer->isSelf()) {
-					result.append(Ui::Text::IconEmoji(&st::giftBoxLock));
-				}
-				result.append(text);
-				return result;
-			}));
-		} else if (buy->onlyAcceptTon) {
-			button->setText(rpl::single(QString()));
-			Ui::SetButtonTwoLabels(
-				button,
-				tr::lng_gift_buy_resale_button(
-					lt_cost,
-					rpl::single(Data::FormatGiftResaleTon(*buy)),
-					tr::marked),
-				tr::lng_gift_buy_resale_equals(
-					lt_cost,
-					rpl::single(Ui::Text::IconEmoji(
-						&st::starIconEmojiSmall
-					).append(Lang::FormatCountDecimal(buy->starsForResale))),
-					tr::marked),
-				st::resaleButtonTitle,
-				st::resaleButtonSubtitle);
-		} else {
-			button->setText(tr::lng_gift_buy_resale_button(
-				lt_cost,
-				rpl::single(Ui::Text::IconEmoji(&st::starIconEmoji).append(
-					Lang::FormatCountDecimal(buy->starsForResale))),
-				tr::marked));
-		}
+		SetApplyButtonText(
+			button,
+			peer,
+			buy,
+			tr::lng_settings_color_apply());
 	}, button->lifetime());
 }
 
@@ -2345,43 +2369,13 @@ void EditPeerProfileColorSection(
 		while (!button->children().isEmpty()) {
 			delete button->children().first();
 		}
-		if (!buy) {
-			button->setText(rpl::combine(
-				(id.collectible
-					? tr::lng_settings_color_wear()
-					: tr::lng_settings_color_apply()),
-				Data::AmPremiumValue(&peer->session())
-			) | rpl::map([=](const QString &text, bool premium) {
-				auto result = TextWithEntities();
-				if (!premium && peer->isSelf()) {
-					result.append(Ui::Text::IconEmoji(&st::giftBoxLock));
-				}
-				result.append(text);
-				return result;
-			}));
-		} else if (buy->onlyAcceptTon) {
-			button->setText(rpl::single(QString()));
-			Ui::SetButtonTwoLabels(
-				button,
-				tr::lng_gift_buy_resale_button(
-					lt_cost,
-					rpl::single(Data::FormatGiftResaleTon(*buy)),
-					tr::marked),
-				tr::lng_gift_buy_resale_equals(
-					lt_cost,
-					rpl::single(Ui::Text::IconEmoji(
-						&st::starIconEmojiSmall
-					).append(Lang::FormatCountDecimal(buy->starsForResale))),
-					tr::marked),
-				st::resaleButtonTitle,
-				st::resaleButtonSubtitle);
-		} else {
-			button->setText(tr::lng_gift_buy_resale_button(
-				lt_cost,
-				rpl::single(Ui::Text::IconEmoji(&st::starIconEmoji).append(
-					Lang::FormatCountDecimal(buy->starsForResale))),
-				tr::marked));
-		}
+		SetApplyButtonText(
+			button,
+			peer,
+			buy,
+			(id.collectible
+				? tr::lng_settings_color_wear()
+				: tr::lng_settings_color_apply()));
 	}, button->lifetime());
 }
 

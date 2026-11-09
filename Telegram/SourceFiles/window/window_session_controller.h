@@ -9,8 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "chat_helpers/compose/compose_show.h"
-#include "data/data_chat_participant_status.h"
-#include "data/data_report.h"
 #include "dialogs/dialogs_key.h"
 #include "mtproto/sender.h"
 #include "settings/settings_type.h"
@@ -30,6 +28,7 @@ enum class WindowLayout;
 namespace Data {
 struct StoriesContext;
 struct DrawToReplyRequest;
+struct ReportInput;
 class SavedMessages;
 enum class StorySourcesList : uchar;
 } // namespace Data
@@ -87,6 +86,7 @@ struct CloudTheme;
 enum class CloudThemeType;
 class PhotoMedia;
 class Thread;
+class CommunityInfo;
 class Forum;
 class ForumTopic;
 class SavedSublist;
@@ -211,9 +211,11 @@ struct SectionShow {
 	bool childColumn = false;
 	bool forbidLayer = false;
 	bool forceTopicsList = false;
+	bool preferCurrentWindow = false;
 	bool reapplyLocalDraft = false;
 	bool dropSameFromStack = false;
 	bool allowDuplicateInStack = false;
+	bool slideFromBottom = false;
 	Origin origin;
 
 };
@@ -339,6 +341,10 @@ protected:
 	void fullInfoLoadedHook(not_null<PeerData*> peer);
 
 private:
+	void resolveContactToken(
+		const QString &token,
+		Fn<void(not_null<PeerData*>)> done);
+	void cancelContactTokenResolve();
 	void resolvePhone(
 		const QString &phone,
 		Fn<void(not_null<PeerData*>)> done);
@@ -367,6 +373,11 @@ private:
 	void showPeerByLinkResolved(
 		not_null<PeerData*> peer,
 		const PeerByLinkInfo &info);
+	void loadAndShowBotTopic(
+		not_null<History*> history,
+		MsgId rootId,
+		MsgId commentId,
+		const SectionShow &params);
 	void joinVoiceChatFromLink(
 		not_null<PeerData*> peer,
 		const PeerByLinkInfo &info);
@@ -384,11 +395,15 @@ private:
 	MTP::Sender _api;
 
 	mtpRequestId _resolveRequestId = 0;
+	mtpRequestId _contactTokenRequestId = 0;
+	QString _contactToken;
+	Fn<void(not_null<PeerData*>)> _contactTokenDone;
 	PeerData *_waitingDirectChannel = nullptr;
 
 	History *_showingRepliesHistory = nullptr;
 	MsgId _showingRepliesRootId = 0;
 	mtpRequestId _showingRepliesRequestId = 0;
+	int _botTopicLoads = 0;
 
 	ChannelData *_boostStateResolving = nullptr;
 	int _boostsToLift = 0;
@@ -464,6 +479,10 @@ public:
 	void closeForum();
 	const rpl::variable<Data::Forum*> &shownForum() const;
 
+	void openCommunity(not_null<Data::CommunityInfo*> info);
+	void closeCommunity();
+	const rpl::variable<Data::CommunityInfo*> &openedCommunity() const;
+
 	void setActiveChatEntry(Dialogs::RowDescriptor row);
 	void setActiveChatEntry(Dialogs::Key key);
 	Dialogs::RowDescriptor activeChatEntryCurrent() const;
@@ -476,8 +495,6 @@ public:
 
 	void setDialogsEntryState(Dialogs::EntryState state);
 	[[nodiscard]] Dialogs::EntryState dialogsEntryStateCurrent() const;
-	[[nodiscard]] auto dialogsEntryStateValue() const
-		-> rpl::producer<Dialogs::EntryState>;
 	bool switchInlineQuery(
 		Dialogs::EntryState to,
 		not_null<UserData*> bot,
@@ -518,7 +535,6 @@ public:
 	void resizeForThirdSection();
 	void closeThirdSection();
 
-	[[nodiscard]] bool canShowSeparateWindow(SeparateId id) const;
 	void showPeer(not_null<PeerData*> peer, MsgId msgId = ShowAtUnreadMsgId);
 
 	void startOrJoinGroupCall(not_null<PeerData*> peer);
@@ -748,9 +764,14 @@ public:
 private:
 	struct CachedThemeKey;
 	struct CachedTheme;
+	struct ChatEntryHistoryItem {
+		Dialogs::RowDescriptor row;
+		base::weak_ptr<Data::Thread> thread;
+	};
 
 	void init();
 	void setupShortcuts();
+	void setupScreenshotProtection();
 	void checkOpenedFilter();
 	void suggestArchiveAndMute();
 	void activateFirstChatsFilter();
@@ -791,6 +812,8 @@ private:
 	void checkNonPremiumLimitToastUpload(FullMsgId id);
 
 	bool openFolderInDifferentWindow(not_null<Data::Folder*> folder);
+	bool openCommunityInDifferentWindow(
+		not_null<Data::CommunityInfo*> info);
 	bool showForumInDifferentWindow(
 		not_null<Data::Forum*> forum,
 		const SectionShow &params,
@@ -798,7 +821,8 @@ private:
 
 	[[nodiscard]] bool openPhotoExternal(
 		not_null<PhotoData*> photo,
-		Data::FileOrigin origin);
+		Data::FileOrigin origin,
+		HistoryItem *item);
 	void handleDrawToReplyRequest(Data::DrawToReplyRequest request);
 	[[nodiscard]] Data::Thread *resolveDrawToReplyThread(
 		const Data::DrawToReplyRequest &request) const;
@@ -839,11 +863,13 @@ private:
 	rpl::lifetime _activeHistoryLifetime;
 	rpl::variable<bool> _mainSectionShown = false;
 	rpl::variable<bool> _chatsForceDisplayWide = false;
-	std::deque<Dialogs::RowDescriptor> _chatEntryHistory;
+	std::deque<ChatEntryHistoryItem> _chatEntryHistory;
 	int _chatEntryHistoryPosition = -1;
 	bool _filtersActivated = false;
 
 	rpl::variable<Dialogs::EntryState> _dialogsEntryState;
+	// A topic or sublist can be freed without a destroyed() event.
+	base::weak_ptr<Data::Thread> _dialogsEntryThread;
 
 	base::Timer _invitePeekTimer;
 
@@ -858,10 +884,13 @@ private:
 	rpl::variable<Data::Folder*> _openedFolder;
 	rpl::variable<Data::Forum*> _shownForum;
 	rpl::lifetime _shownForumLifetime;
+	rpl::variable<Data::CommunityInfo*> _openedCommunity;
+	rpl::lifetime _openedCommunityLifetime;
 
 	rpl::event_stream<> _filtersMenuChanged;
 
 	const std::shared_ptr<Ui::ChatTheme> _defaultChatTheme;
+	std::vector<QColor> _defaultChatThemeBubblesColors;
 	base::flat_map<CachedThemeKey, CachedTheme> _customChatThemes;
 	rpl::event_stream<std::shared_ptr<Ui::ChatTheme>> _cachedThemesStream;
 	rpl::event_stream<> _giftSymbolLoaded;

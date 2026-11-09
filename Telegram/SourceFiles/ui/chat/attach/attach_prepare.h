@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "editor/photo_editor_common.h"
+#include "editor/video/video_editor_common.h"
 #include "ui/chat/attach/attach_send_files_way.h"
 #include "ui/rect_part.h"
 
@@ -43,8 +44,11 @@ struct PreparedFileInformation {
 		bool isGifv = false;
 		bool isWebmSticker = false;
 		bool supportsStreaming = false;
+		bool hasAudio = false;
 		crl::time duration = -1;
+		// Always the raw frame at |modifications.cover|, never modified.
 		QImage thumbnail;
+		Editor::VideoModifications modifications;
 	};
 
 	QString filemime;
@@ -56,6 +60,13 @@ enum class AlbumType {
 	PhotoVideo,
 	Music,
 	File,
+};
+
+struct PreparedFileArchive {
+	QString folder;
+	QString root;
+	QStringList paths;
+	QStringList names;
 };
 
 struct PreparedFile {
@@ -84,7 +95,17 @@ struct PreparedFile {
 	[[nodiscard]] bool isVideoFile() const;
 	[[nodiscard]] bool isGifv() const;
 	[[nodiscard]] bool canUseHighQualityPhoto() const;
+	[[nodiscard]] bool hasAnimatedEditScene() const;
+	[[nodiscard]] bool hasAudioEditScene() const;
+	[[nodiscard]] bool sendsVideoAsGif() const;
 
+	[[nodiscard]] bool canEditVideo() const;
+
+	[[nodiscard]] int videoQuality() const;
+	[[nodiscard]] int64 memoryUsage() const;
+
+	// Assigned on demand, so deferred work can find this entry back.
+	int64 id = 0;
 	QString path;
 	QString displayName;
 	TextWithTags caption;
@@ -96,8 +117,12 @@ struct PreparedFile {
 	QSize shownDimensions;
 	QSize originalDimensions;
 	Type type = Type::File;
+	crl::time ttlSeconds = 0;
 	bool spoiler = false;
+	bool selected = false;
 	bool sendLargePhotos = false;
+	std::shared_ptr<Media::Encode::Job> animationJob;
+	std::shared_ptr<PreparedFileArchive> archive;
 };
 
 [[nodiscard]] bool CanBeInAlbumType(PreparedFile::Type type, AlbumType album);
@@ -120,11 +145,6 @@ struct PreparedList {
 	PreparedList(PreparedList &&other) = default;
 	PreparedList &operator=(PreparedList &&other) = default;
 
-	[[nodiscard]] static PreparedList Reordered(
-		PreparedList &&list,
-		std::vector<int> order);
-	void mergeToEnd(PreparedList &&other, bool cutToAlbumSize = false);
-
 	[[nodiscard]] bool canAddCaption(bool compress) const;
 	[[nodiscard]] bool canMoveCaption(
 		bool sendingAlbum,
@@ -142,6 +162,7 @@ struct PreparedList {
 	[[nodiscard]] bool hasSticker() const;
 	[[nodiscard]] bool hasSpoilerMenu(bool compress) const;
 	[[nodiscard]] bool hasSendLargePhotosOption(bool compress) const;
+	[[nodiscard]] int64 memoryUsage() const;
 
 	Error error = Error::None;
 	QString errorData;
@@ -170,6 +191,8 @@ struct PreparedBundle {
 	std::vector<PreparedGroup> groups,
 	SendFilesWay way,
 	bool ctrlShiftEnter);
+[[nodiscard]] std::shared_ptr<PreparedBundle> MakeSingleFileBundle(
+	PreparedList &&list);
 
 [[nodiscard]] int MaxAlbumItems();
 [[nodiscard]] bool ValidateThumbDimensions(int width, int height);
@@ -185,5 +208,15 @@ void PaintHighQualityBadge(
 	const style::ComposeControls &st,
 	QRect rect,
 	RectPart origin = RectPart::BottomLeft);
+
+void PaintAnimatedBadge(
+	QPainter &p,
+	const style::ComposeControls &st,
+	QRect rect,
+	RectPart origin = RectPart::BottomRight);
+
+void PaintMediaTtlBadge(QPainter &p, QRect preview, crl::time ttlSeconds);
+
+void PaintVideoQualityBadge(QPainter &p, QRect preview, int quality);
 
 } // namespace Ui

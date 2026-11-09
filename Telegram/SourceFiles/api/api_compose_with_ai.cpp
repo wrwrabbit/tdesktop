@@ -43,6 +43,21 @@ ComposeWithAi::ComposeWithAi(not_null<ApiWrap*> api)
 , _api(&api->instance()) {
 }
 
+MTPInputAiComposeTone ComposeWithAi::SerializeTone(
+		const std::optional<ToneRef> &tone) {
+	if (!tone) {
+		return MTPInputAiComposeTone();
+	} else if (tone->id) {
+		return MTP_inputAiComposeToneID(
+			MTP_long(tone->id),
+			MTP_long(tone->accessHash));
+	} else if (!tone->customPrompt.isEmpty()) {
+		return MTP_inputAiComposeToneSingleUse(
+			MTP_string(tone->customPrompt));
+	}
+	return MTP_inputAiComposeToneDefault(MTP_string(tone->defaultTone));
+}
+
 mtpRequestId ComposeWithAi::request(
 		Request request,
 		Fn<void(Result &&)> done,
@@ -68,14 +83,7 @@ mtpRequestId ComposeWithAi::request(
 		request.translateToLang.isEmpty()
 			? MTPstring()
 			: MTP_string(request.translateToLang),
-		request.tone
-			? (request.tone->id
-				? MTP_inputAiComposeToneID(
-					MTP_long(request.tone->id),
-					MTP_long(request.tone->accessHash))
-				: MTP_inputAiComposeToneDefault(
-					MTP_string(request.tone->defaultTone)))
-			: MTPInputAiComposeTone()
+		SerializeTone(request.tone)
 	)).done([=, done = std::move(done)](
 			const MTPmessages_ComposedMessageWithAI &result) mutable {
 		const auto &data = result.data();
@@ -142,7 +150,7 @@ void ApplyAiInPlaceBySlug(
 		Fn<void(const MTP::Error &)> fail) {
 	auto apply = [=, text = std::move(text), done = std::move(done)](
 			ComposeWithAi::ToneRef tone) mutable {
-		(void)session->api().composeWithAi().request({
+		session->api().composeWithAi().request({
 			.text = std::move(text),
 			.tone = std::move(tone),
 		}, [done = std::move(done)](ComposeWithAi::Result &&result) {
@@ -183,14 +191,7 @@ void ClearAiApplyBoundSlug() {
 QString AiApplyShortcutText() {
 	for (const auto &[keys, commands] : Shortcuts::KeysCurrents()) {
 		if (commands.contains(Shortcuts::Command::ComposeAiApplyInPlace)) {
-			auto result = keys.toString();
-#ifdef Q_OS_MAC
-			result = result.replace(u"Ctrl+"_q, QString() + QChar(0x2318));
-			result = result.replace(u"Meta+"_q, QString() + QChar(0x2303));
-			result = result.replace(u"Alt+"_q, QString() + QChar(0x2325));
-			result = result.replace(u"Shift+"_q, QString() + QChar(0x21E7));
-#endif // Q_OS_MAC
-			return result;
+			return Shortcuts::ToDisplayString(keys);
 		}
 	}
 	return QString();

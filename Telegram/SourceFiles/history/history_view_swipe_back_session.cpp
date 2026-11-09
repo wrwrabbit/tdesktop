@@ -17,7 +17,7 @@ namespace Window {
 
 void SetupSwipeBackSection(
 		not_null<Ui::RpWidget*> parent,
-		not_null<Ui::ScrollArea*> scroll,
+		not_null<Ui::ElasticScroll*> scroll,
 		not_null<HistoryView::ListWidget*> list) {
 	const auto swipeBackData
 		= list->lifetime().make_state<Ui::Controls::SwipeBackResult>();
@@ -57,6 +57,7 @@ void SetupSwipeBackSection(
 		.update = std::move(update),
 		.init = std::move(init),
 		.dontStart = list->touchMaybeSelectingValue(),
+		.handoff = list->touchSwipeHandoff(),
 	});
 }
 

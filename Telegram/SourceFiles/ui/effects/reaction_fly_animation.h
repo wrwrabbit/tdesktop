@@ -27,9 +27,12 @@ struct ReactionFlyAnimationArgs {
 	::Data::ReactionId id;
 	QImage flyIcon;
 	QRect flyFrom;
+	int flyUp = 0;
 	crl::time scaleOutDuration = 0;
 	float64 scaleOutTarget = 0.;
 	float64 miniCopyMultiplier = 1.;
+	float64 centerSizeMultiplier = 0.;
+	bool flyKeepSize = false;
 	bool effectOnly = false;
 	bool forceFirstFrame = false;
 
@@ -45,6 +48,13 @@ struct ReactionFlyCenter {
 	int size = 0;
 	bool forceFirstFrame = false;
 };
+
+// The arc every fly takes, its apex `top` above the higher end.
+struct FlyParabola {
+	float64 a = 0.;
+	float64 b = 0.;
+};
+[[nodiscard]] FlyParabola ComputeFlyParabola(int from, int to, int top);
 
 class ReactionFlyAnimation final {
 public:
@@ -68,6 +78,7 @@ public:
 	[[nodiscard]] bool flying() const;
 	[[nodiscard]] float64 flyingProgress() const;
 	[[nodiscard]] bool finished() const;
+	[[nodiscard]] bool centerInDefaultState();
 
 	[[nodiscard]] ReactionFlyCenter takeCenter();
 
@@ -120,8 +131,10 @@ private:
 	QRect _flyFrom;
 	float64 _centerSizeMultiplier = 0.;
 	int _customSize = 0;
+	int _flyUp = 0;
 	crl::time _scaleOutDuration = 0;
 	float64 _scaleOutTarget = 0.;
+	bool _flyKeepSize = false;
 	bool _noEffectScaleStarted = false;
 	bool _forceFirstFrame = false;
 	bool _effectOnly = false;

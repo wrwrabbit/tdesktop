@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/show.h"
 #include "styles/style_calls.h"
 
+#include <QtGui/QWindow>
+
 namespace Calls {
 namespace {
 
@@ -128,11 +130,11 @@ void Window::setControlsShown(float64 shown) {
 #endif // Q_OS_MAC
 }
 
-int Window::controlsWrapTop() const {
+Ui::RpWidget *Window::controlsWrap() const {
 #ifndef Q_OS_MAC
-	return _controls->wrap.y();
+	return &_controls->wrap;
 #else // Q_OS_MAC
-	return 0;
+	return nullptr;
 #endif // Q_OS_MAC
 }
 
@@ -165,6 +167,41 @@ bool Window::controlsHasHitTest(QPoint widgetPoint) const {
 
 rpl::producer<bool> Window::maximizeRequests() const {
 	return _maximizeRequests.events();
+}
+
+bool Window::pinnedOnTop() const {
+	const auto handle = window()->windowHandle();
+	return handle && (handle->flags() & Qt::WindowStaysOnTopHint);
+}
+
+void Window::setPinnedOnTop(bool pinned) {
+	if (const auto handle = window()->windowHandle()) {
+		handle->setFlag(Qt::WindowStaysOnTopHint, pinned);
+	}
+}
+
+bool Window::unpinFromTopMaximized() {
+#ifdef Q_OS_WIN
+	// Changing the flag recreates the window, so while it is maximized
+	// only the z-order is dropped and the flag is reset on restoring.
+	if (const auto handle = window()->windowHandle()) {
+		SetWindowPos(
+			reinterpret_cast<HWND>(handle->winId()),
+			HWND_NOTOPMOST,
+			0,
+			0,
+			0,
+			0,
+			(SWP_NOMOVE
+				| SWP_NOSIZE
+				| SWP_NOOWNERZORDER
+				| SWP_FRAMECHANGED
+				| SWP_NOACTIVATE));
+	}
+	return true;
+#else // Q_OS_WIN
+	return false;
+#endif // Q_OS_WIN
 }
 
 base::weak_ptr<Ui::Toast::Instance> Window::showToast(

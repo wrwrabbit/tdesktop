@@ -11,17 +11,20 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "base/call_delayed.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "data/components/gift_auctions.h"
 #include "data/components/promo_suggestions.h"
 #include "data/data_peer_values.h" // Data::AmPremiumValue.
 #include "dialogs/suggestions/suggestion.h"
 #include "dialogs/ui/dialogs_top_bar_suggestion_content.h"
 #include "main/main_session.h"
+#include "mainwindow.h"
 #include "ui/ui_utility.h"
 #include "ui/wrap/slide_wrap.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
-#include "styles/style_dialogs.h"
+#include "styles/style_basic.h"
+#include "styles/style_window.h"
 
 namespace Dialogs {
 namespace {
@@ -34,6 +37,19 @@ namespace {
 }
 
 } // namespace
+
+Fn<void()> ExpandChatsListCallback(not_null<Ui::RpWidget*> widget) {
+	return [=] {
+		const auto controller = FindSessionController(widget);
+		const auto nochat = !controller->mainSectionShown();
+		const auto body = controller->widget()->bodyWidget()->width()
+			- controller->filtersWidth();
+		Core::App().settings().updateDialogsWidthRatio(
+			st::columnMinimalWidthLeft / float64(std::max(body, 1)),
+			nochat);
+		Core::App().saveSettingsDelayed();
+	};
+}
 
 rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 		not_null<Ui::RpWidget*> parent,
@@ -63,6 +79,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			std::optional<TopBarSuggestions::Priority> activeSpec;
 			std::optional<int> activeSpecDay;
 			Fn<void()> prepareSnapshot;
+			int wrapGeneration = 0;
+			int deliveredGeneration = 0;
+			int activationId = 0;
 		};
 
 		const auto state = lifetime.make_state<State>();
@@ -78,6 +97,8 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						Window::GifPauseReason::Layer); });
 				state->content->setCollapseProgress(
 					rpl::duplicate(childListShown));
+				state->content->setNarrowExpandCallback(
+					ExpandChatsListCallback(parent));
 			}
 			return state->content;
 		};
@@ -95,6 +116,13 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			},
 		};
 
+		const auto deliver = [=] {
+			if (state->deliveredGeneration != state->wrapGeneration) {
+				state->deliveredGeneration = state->wrapGeneration;
+				consumer.put_next_copy(state->wrap.get());
+			}
+		};
+
 		const auto specs = lifetime.make_state<std::vector<
 			TopBarSuggestions::Spec>>(TopBarSuggestions::AllSpecs());
 		ranges::sort(
@@ -103,8 +131,6 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			&TopBarSuggestions::Spec::priority);
 
 		const auto processCurrentSuggestion = [=](auto repeat) -> void {
-			const auto recompute = [=] { repeat(repeat); };
-
 			auto winner = (const TopBarSuggestions::Spec*)(nullptr);
 			for (auto i = 0; i < int(specs->size()); ++i) {
 				const auto &spec = (*specs)[i];
@@ -135,6 +161,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			state->activeSpecDay = (winner && winner->dayDependent)
 				? std::optional<int>(currentDay)
 				: std::nullopt;
+			const auto activationId = ++state->activationId;
 
 			if (winner) {
 				auto args = TopBarSuggestions::ActivateArgs{
@@ -143,6 +170,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 					.done = [=](
 							not_null<Ui::RpWidget*> widget,
 							Fn<void()> prepareSnapshot) {
+						if (state->activationId != activationId) {
+							return;
+						}
 						if (state->wrap
 							&& state->wrap->entity() != widget.get()) {
 							state->wrap = nullptr;
@@ -156,6 +186,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 								Ui::SlideWrap<Ui::RpWidget>>(
 								parent,
 								object_ptr<Ui::RpWidget>::fromRaw(widget));
+							++state->wrapGeneration;
 							state->desiredWrapToggle.force_assign(
 								Toggle{ false, anim::type::instant });
 							state->prepareSnapshot = std::move(
@@ -163,8 +194,14 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 						}
 						state->desiredWrapToggle.force_assign(
 							Toggle{ true, anim::type::normal });
+
+						deliver();
 					},
-					.recompute = recompute,
+					.recompute = [=] {
+						if (state->activationId == activationId) {
+							repeat(repeat);
+						}
+					},
 				};
 				winner->activate(std::move(args));
 				return;
@@ -182,8 +219,9 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 				}
 				state->content = nullptr;
 				state->wrap = nullptr;
+				++state->wrapGeneration;
 				state->prepareSnapshot = nullptr;
-				consumer.put_next(nullptr);
+				deliver();
 			});
 		};
 
@@ -214,12 +252,7 @@ rpl::producer<Ui::SlideWrap<Ui::RpWidget>*> TopBarSuggestionValue(
 			Data::AmPremiumValue(session) | rpl::skip(1) | rpl::to_empty,
 			session->giftAuctions().hasActiveChanges() | rpl::to_empty
 		) | rpl::on_next([=] {
-			const auto was = state->wrap.get();
-			const auto weak = base::make_weak(was);
 			processCurrentSuggestion(processCurrentSuggestion);
-			if (was != state->wrap || (was && !weak)) {
-				consumer.put_next_copy(state->wrap.get());
-			}
 		}, lifetime);
 
 		rpl::duplicate(prepareCollapseSnapshot) | rpl::on_next([=] {

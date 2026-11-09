@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 class DynamicImage;
 class RippleAnimation;
+struct CommunityUserpicEffect;
 } // namespace Ui
 
 namespace style {
@@ -51,6 +52,10 @@ public:
 		bool pressed);
 	[[nodiscard]] virtual bool hasHeavyPart();
 	virtual void unloadHeavyPart();
+	virtual void hideSpoilers();
+	[[nodiscard]] virtual Media::BubbleRoll bubbleRoll(QSize outer) const;
+	[[nodiscard]] virtual QMargins bubbleRollRepaintMargins(
+		QSize outer) const;
 	[[nodiscard]] virtual auto stickerTakePlayer(
 		not_null<DocumentData*> data,
 		const Lottie::ColorReplacements *replacements
@@ -66,9 +71,11 @@ public:
 
 struct MediaGenericDescriptor {
 	int maxWidth = 0;
+	int minWidth = 0;
 	MediaGenericPart::PaintBgFactory paintBgFactory;
 	ClickHandlerPtr fullAreaLink;
 	bool expandCurrentWidth = false;
+	bool fitToContent = false;
 	bool service = false;
 	bool hideServiceText = false;
 };
@@ -88,6 +95,7 @@ public:
 	[[nodiscard]] bool service() const {
 		return _service;
 	}
+	[[nodiscard]] Part *partAt(int index) const;
 
 	void draw(Painter &p, const PaintContext &context) const override;
 	TextState textState(QPoint point, StateRequest request) const override;
@@ -131,6 +139,9 @@ public:
 
 	void unloadHeavyPart() override;
 	bool hasHeavyPart() const override;
+	void hideSpoilers() override;
+	BubbleRoll bubbleRoll() const override;
+	QMargins bubbleRollRepaintMargins() const override;
 
 private:
 	struct Entry {
@@ -147,7 +158,9 @@ private:
 	mutable Part::PaintBg _paintBg;
 	ClickHandlerPtr _fullAreaLink;
 	int _maxWidthCap = 0;
+	int _minWidth = 0;
 	bool _expandCurrentWidth : 1 = false;
+	bool _fitToContent : 1 = false;
 	bool _service : 1 = false;
 	bool _hideServiceText : 1 = false;
 
@@ -300,6 +313,44 @@ private:
 	mutable QMargins _padding;
 	mutable std::optional<Sticker> _sticker;
 	mutable ClickHandlerPtr _link;
+
+};
+
+class DynamicImagePart final : public MediaGenericPart {
+public:
+	DynamicImagePart(
+		not_null<Element*> parent,
+		std::shared_ptr<Ui::DynamicImage> image,
+		int size,
+		QMargins margins,
+		ClickHandlerPtr link = nullptr,
+		bool communityEffect = false);
+	~DynamicImagePart();
+
+	void draw(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context,
+		int outerWidth) const override;
+	TextState textState(
+		QPoint point,
+		StateRequest request,
+		int outerWidth) const override;
+	bool hasHeavyPart() override;
+	void unloadHeavyPart() override;
+
+	QSize countOptimalSize() override;
+	QSize countCurrentSize(int newWidth) override;
+
+private:
+	const not_null<Element*> _parent;
+	const std::shared_ptr<Ui::DynamicImage> _image;
+	const ClickHandlerPtr _link;
+	const QMargins _margins;
+	const int _size = 0;
+	const bool _communityEffect = false;
+	mutable std::unique_ptr<Ui::CommunityUserpicEffect> _communityCache;
+	mutable bool _subscribed = false;
 
 };
 

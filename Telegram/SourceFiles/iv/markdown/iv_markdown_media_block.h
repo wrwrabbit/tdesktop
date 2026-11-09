@@ -9,14 +9,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "iv/markdown/iv_markdown_common.h"
 
+#include "ui/chat/message_bubble.h"
 #include "ui/click_handler.h"
-#include "ui/painter.h"
 #include "ui/text/text_entity.h"
 
 #include <memory>
+#include <vector>
 
 #include <QtCore/QPoint>
 #include <QtCore/QRect>
+
+class Painter;
 
 namespace style {
 struct Markdown;
@@ -26,8 +29,8 @@ namespace Iv::Markdown {
 
 struct MarkdownArticlePaintContext;
 class MediaRuntime;
-struct PreparedAudioBlockData;
 struct PreparedChannelBlockData;
+struct PreparedDocumentBlockData;
 struct PreparedGroupedMediaBlockData;
 struct PreparedMapBlockData;
 struct PreparedPhotoBlockData;
@@ -52,8 +55,12 @@ public:
 
 	void setHost(MediaBlockHost *host);
 	[[nodiscard]] MediaBlockHost *host() const;
+	void setMediaPixelScale(double scale);
+	void setBubbleRounding(Ui::BubbleRounding rounding);
+	[[nodiscard]] Ui::BubbleRounding bubbleRounding() const;
 
 	[[nodiscard]] virtual uint64 stableId() const = 0;
+	[[nodiscard]] virtual bool alive() const;
 	[[nodiscard]] virtual int resizeGetHeight(int width) = 0;
 	virtual void setGeometry(QRect geometry) = 0;
 	[[nodiscard]] virtual QRect geometry() const = 0;
@@ -64,21 +71,46 @@ public:
 		const MarkdownArticlePaintContext &context) const = 0;
 	[[nodiscard]] virtual ClickHandlerPtr linkAt(QPoint point) const = 0;
 	[[nodiscard]] virtual MediaActivation activationAt(QPoint point) const = 0;
+	virtual void clickHandlerActiveChanged(const ClickHandlerPtr &, bool) {
+	}
+	virtual void clickHandlerPressedChanged(const ClickHandlerPtr &, bool) {
+	}
+	virtual void updatePressed(QPoint) {
+	}
 	[[nodiscard]] virtual MediaBlockSelectionData selectionData() const = 0;
 	[[nodiscard]] virtual bool hasHeavyPart() const;
 	virtual void unloadHeavyPart();
 	virtual void hideSpoilers();
+	[[nodiscard]] virtual std::vector<QRect> itemRects() const {
+		return {};
+	}
+	[[nodiscard]] virtual int activeItemIndex() const {
+		return -1;
+	}
+	virtual void setActiveItemIndex(int index) {
+	}
+	[[nodiscard]] virtual bool canHandleHorizontalScroll() const {
+		return false;
+	}
+	virtual bool handleHorizontalScroll(int delta, Qt::ScrollPhase phase) {
+		return false;
+	}
 
 protected:
 	void requestRepaint(QRect articleRect) const;
 	void requestRelayout(QRect articleRect) const;
 	[[nodiscard]] const style::Markdown &layoutStyle() const;
+	[[nodiscard]] double mediaPixelScale() const;
 	virtual void layoutStyleUpdated();
+	virtual void mediaPixelScaleUpdated();
 	virtual void hostUpdated();
 
 private:
 	MediaBlockHost *_host = nullptr;
 	const style::Markdown *_st = nullptr;
+	double _mediaPixelScale = 1.;
+	Ui::BubbleRounding _bubbleRounding;
+
 };
 
 [[nodiscard]] std::shared_ptr<MediaBlock> CreatePhotoMediaBlock(
@@ -89,8 +121,8 @@ private:
 	const PreparedVideoBlockData &prepared,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &st);
-[[nodiscard]] std::shared_ptr<MediaBlock> CreateAudioMediaBlock(
-	const PreparedAudioBlockData &prepared,
+[[nodiscard]] std::shared_ptr<MediaBlock> CreateDocumentMediaBlock(
+	const PreparedDocumentBlockData &prepared,
 	const std::shared_ptr<MediaRuntime> &mediaRuntime,
 	const style::Markdown &st);
 [[nodiscard]] std::shared_ptr<MediaBlock> CreateMapMediaBlock(

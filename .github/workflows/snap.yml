@@ -19,10 +19,6 @@ on:
       - 'Telegram/Telegram/**'
       - 'Telegram/configure.bat'
       - 'Telegram/Telegram.plist'
-  pull_request:
-    types: [opened, reopened]
-    branches-ignore:
-      - 'compare/**'
   workflow_dispatch:
 
 jobs:
@@ -38,7 +34,7 @@ jobs:
 
     steps:
       - name: Clone.
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive
@@ -79,3 +75,4 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact
+          retention-days: 1

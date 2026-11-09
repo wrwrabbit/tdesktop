@@ -42,6 +42,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_peer_photo.h"
 #include "api/api_self_destruct.h"
 #include "main/main_session.h"
+#include "styles/style_add_contact_box.h"
+#include "styles/style_boxes.h"
+#include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_menu_icons.h"
@@ -536,7 +539,8 @@ GroupInfoBox::GroupInfoBox(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<UserData*> bot,
 	RequestPeerQuery query,
-	Fn<void(not_null<PeerData*>)> done)
+	Fn<void(not_null<PeerData*>)> done,
+	Fn<void(QString, Fn<void()>)> creationConfirm)
 : _navigation(navigation)
 , _api(&_navigation->session().mtp())
 , _type((query.type == RequestPeerQuery::Type::Broadcast)
@@ -548,7 +552,8 @@ GroupInfoBox::GroupInfoBox(
 	: Type::Group)
 , _mustBePublic(query.hasUsername == RequestPeerQuery::Restriction::Yes)
 , _canAddBot(query.isBotParticipant ? bot.get() : nullptr)
-, _done(std::move(done)) {
+, _done(std::move(done))
+, _creationConfirm(std::move(creationConfirm)) {
 }
 
 void GroupInfoBox::prepare() {
@@ -744,8 +749,19 @@ void GroupInfoBox::createGroup(
 		const auto period = ttlPeriod();
 		const auto navigation = _navigation;
 		const auto done = _done;
+		const auto request = (_creationConfirm != nullptr);
 
-		getDelegate()->hideLayer(); // Destroys 'this'.
+		if (request) {
+			// WHY: hideLayer would also close the still-unsent chooser below
+			// and fire its cancelled() before _done sends; close only this
+			// form and the participant selector it opened for this request.
+			if (const auto strong = selectUsersBox.get()) {
+				strong->closeBox();
+			}
+			closeBox();
+		} else {
+			getDelegate()->hideLayer(); // Destroys 'this'.
+		}
 		ChatCreateDone(navigation, std::move(image), period, result, done);
 	}).fail([=](const MTP::Error &error) {
 		const auto &type = error.type();
@@ -789,6 +805,18 @@ void GroupInfoBox::submit() {
 		_title->showError();
 		return;
 	}
+	if (_creationConfirm) {
+		_creationConfirm(title, crl::guard(this, [=] {
+			performCreate(title, description);
+		}));
+	} else {
+		performCreate(title, description);
+	}
+}
+
+void GroupInfoBox::performCreate(
+		const QString &title,
+		const QString &description) {
 	if (_type != Type::Group) {
 		createChannel(title, description);
 	} else if (_canAddBot) {
@@ -875,7 +903,11 @@ void GroupInfoBox::createChannel(
 				}
 				channel->session().api().requestFullPeer(channel);
 				_createdChannel = channel;
-				checkInviteLink();
+				if (_done && !_mustBePublic) {
+					channelReady();
+				} else {
+					checkInviteLink();
+				}
 			};
 		if (!success) {
 			LOG(("API Error: channel not found in updates "
@@ -1248,7 +1280,11 @@ void SetupChannelBox::mousePressEvent(QMouseEvent *e) {
 		return;
 	} else if (!_channel->inviteLink().isEmpty()) {
 		QGuiApplication::clipboard()->setText(_channel->inviteLink());
-		showToast(tr::lng_create_channel_link_copied(tr::now));
+		showToast({
+			.text = { tr::lng_create_channel_link_copied(tr::now) },
+			.iconLottie = u"toast/voip_invite"_q,
+			.iconLottieSize = st::toastLottieIconSize,
+		});
 	} else if (_channel->isFullLoaded() && !_creatingInviteLink) {
 		_creatingInviteLink = true;
 		_channel->session().api().inviteLinks().create({ _channel });
@@ -1568,15 +1604,16 @@ void EditNameBox::prepare() {
 	_last->submits(
 	) | rpl::on_next([=] { submit(); }, _last->lifetime());
 
+	using TabbedRequest = Ui::InputField::TabbedRequest;
 	_first->tabbed(
-	) | rpl::on_next([=](not_null<bool*> handled) {
+	) | rpl::on_next([=](not_null<TabbedRequest*> request) {
 		_last->setFocus();
-		*handled = true;
+		request->handled = true;
 	}, _first->lifetime());
 	_last->tabbed(
-	) | rpl::on_next([=](not_null<bool*> handled) {
+	) | rpl::on_next([=](not_null<TabbedRequest*> request) {
 		_first->setFocus();
-		*handled = true;
+		request->handled = true;
 	}, _last->lifetime());
 }
 
@@ -1667,7 +1704,7 @@ void EditNameBox::saveSelfFail(const QString &error) {
 			TextUtilities::SingleLine(_first->getLastText().trimmed()),
 			TextUtilities::SingleLine(_last->getLastText().trimmed()),
 			QString(),
-			TextUtilities::SingleLine(_user->username()));
+			TextUtilities::SingleLine(_user->editableUsername()));
 		closeBox();
 	} else if (error == "FIRSTNAME_INVALID") {
 		_first->setFocus();

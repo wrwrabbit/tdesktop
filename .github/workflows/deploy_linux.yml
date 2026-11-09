@@ -85,6 +85,9 @@ jobs:
       - name: Telegram Desktop build.
         env:
           RSA_PRIVATE: ${{ secrets.RSA_PRIVATE }}
+          UPDATE_ED25519_PRIVATE: ${{ secrets.UPDATE_ED25519_PRIVATE }}
+          UPDATE_ES256_PRIVATE: ${{ secrets.UPDATE_ES256_PRIVATE }}
+          UPDATE_SIGNING_CONFIG: ${{ secrets.UPDATE_SIGNING_CONFIG }}
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
         run: |
@@ -95,6 +98,9 @@ jobs:
           -v $PWD:/usr/src/tdesktop \
           -v $PWD/DesktopPrivate:/usr/src/DesktopPrivate \
           -e CONFIG=Release \
+          -e UPDATE_ED25519_PRIVATE \
+          -e UPDATE_ES256_PRIVATE \
+          -e UPDATE_SIGNING_CONFIG \
           -e RSA_PRIVATE="${{ secrets.RSA_PRIVATE }}" \
           -e API_ID=${{ secrets.API_ID }} \
           -e API_HASH=${{ secrets.API_HASH }} \
@@ -120,22 +126,24 @@ jobs:
         run: |
           cd out/Release/deploy
           mkdir ../artifact
-          mv -t ../artifact tlinux*
-          mv -t ../artifact tsetup*
+          mv -t ../artifact td-update-linux-x64-*
+          mv -t ../artifact td-setup-linux-x64-*.tar.xz
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_gh
-          path: out/Release/artifact/tsetup*
+          path: out/Release/artifact/td-setup-linux-x64-*.tar.xz
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         name: Upload artifact for TG.
         if: (env.UPLOAD_ARTIFACT == 'true')
         with:
           name: build_tg
-          path: out/Release/artifact/tlinux*
+          path: out/Release/artifact/td-update-linux-x64-*
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         name: Upload symbols artifact.

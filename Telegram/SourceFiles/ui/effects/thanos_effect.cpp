@@ -13,15 +13,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "ui/rp_widget.h"
 #include "ui/ui_utility.h"
+#include "base/event_filter.h"
 #include "base/qt_signal_producer.h"
 
 #include <QtGui/QWindow>
 
 namespace Ui {
 
+bool ThanosEffectFailedOnce = false;
+
 bool ThanosEffect::Supported() {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	if (PowerSaving::On(PowerSaving::kChatEffects)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
+	if (ThanosEffectFailedOnce
+		|| PowerSaving::On(PowerSaving::kChatEffects)
 		|| PowerSaving::On(PowerSaving::kAnimations)) {
 		return false;
 	}
@@ -34,8 +38,16 @@ bool ThanosEffect::Supported() {
 #endif
 }
 
+bool ThanosEffect::WindowVisible(QWidget *window) {
+	if (!window || window->isHidden() || window->isMinimized()) {
+		return false;
+	}
+	const auto handle = window->windowHandle();
+	return handle && handle->isExposed();
+}
+
 void ThanosEffect::WarmUp() {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 	if (PowerSaving::On(PowerSaving::kChatEffects)
 		|| PowerSaving::On(PowerSaving::kAnimations)) {
 		return;
@@ -43,13 +55,18 @@ void ThanosEffect::WarmUp() {
 	if (!GL::WidgetsRhiEnabled()) {
 		return;
 	}
-	(void)GL::CheckRhiCapabilities();
+	[[maybe_unused]] const auto capabilities = GL::CheckRhiCapabilities();
 #endif
 }
 
 ThanosEffect::ThanosEffect(not_null<QWidget*> parent)
 : _parent(parent)
 , _animation([=] {
+	if (_renderer && _renderer->failed()) {
+		ThanosEffectFailedOnce = true;
+		hideSurface();
+		return;
+	}
 	if (const auto w = surfaceWidget()) {
 		w->update();
 	}
@@ -63,7 +80,7 @@ QWidget *ThanosEffect::surfaceWidget() const {
 }
 
 void ThanosEffect::ensureSurface() {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 	if (_surface) {
 		return;
 	}
@@ -113,6 +130,15 @@ void ThanosEffect::ensureSurface() {
 		w->setGeometry(_parent->rect());
 		w->hide();
 	}
+
+	if (const auto handle = _parent->windowHandle()) {
+		base::install_event_filter(handle, [=](not_null<QEvent*> e) {
+			if (e->type() == QEvent::Expose && !handle->isExposed()) {
+				finishNow();
+			}
+			return base::EventFilterResult::Continue;
+		}, _lifetime);
+	}
 #endif
 }
 
@@ -124,7 +150,11 @@ void ThanosEffect::showSurface() {
 		// before the first render. Without this, w->show() triggers
 		// an immediate platform compositing pass with only the first
 		// item visible.
-		Ui::PostponeCall(w, [w] {
+		_shown = true;
+		Ui::PostponeCall(w, [=] {
+			if (!_shown) {
+				return;
+			}
 			w->show();
 			w->raise();
 		});
@@ -133,34 +163,43 @@ void ThanosEffect::showSurface() {
 }
 
 void ThanosEffect::hideSurface() {
+	_shown = false;
 	_animation.stop();
 	if (const auto w = surfaceWidget()) {
 		w->hide();
 	}
 }
 
+void ThanosEffect::finishNow() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
+	if (!_renderer || !_renderer->hasActiveItems()) {
+		return;
+	}
+	_renderer->finishAll();
+	hideSurface();
+#endif
+}
+
 void ThanosEffect::addItem(QImage snapshot, QRect rect) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 	ensureSurface();
 	if (!_renderer) {
 		return;
 	}
-
-	const auto wasAnimating = _renderer->hasActiveItems();
 
 	_renderer->addItem({
 		.snapshot = std::move(snapshot),
 		.rect = QRectF(rect),
 	});
 
-	if (!wasAnimating) {
+	if (!_shown) {
 		showSurface();
 	}
 #endif
 }
 
 bool ThanosEffect::animating() const {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0) && !defined DESKTOP_APP_DISABLE_PRIVATE_QT_API
 	return _renderer && _renderer->hasActiveItems();
 #else
 	return false;
@@ -169,6 +208,10 @@ bool ThanosEffect::animating() const {
 
 rpl::producer<> ThanosEffect::allDone() const {
 	return _allDone.events();
+}
+
+bool ThanosEffect::FailedOnce() {
+	return ThanosEffectFailedOnce;
 }
 
 void ThanosEffect::setGeometry(QRect rect) {

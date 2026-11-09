@@ -90,7 +90,8 @@ bool ReadSetting(
 		stream >> serialized;
 		if (!CheckStreamStatus(stream)) return false;
 
-		Core::App().settings().addFromSerialized(serialized);
+		Core::App().settings().addFromSerialized(serialized, version);
+		psDownloadPathEnableAccess();
 	} break;
 
 	case dbiChatSizeMaxOld: {
@@ -418,7 +419,7 @@ bool ReadSetting(
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
-		context.sessionSettings().addFromSerialized(v);
+		context.sessionSettings().addFromSerialized(v, version);
 	} break;
 
 	case dbiWorkModeOld: {
@@ -1005,7 +1006,7 @@ bool ReadSetting(
 				}
 				auto id = Ui::Emoji::IdFromOldKey(oldKey);
 				if (!id.isEmpty()) {
-					p.push_back(qMakePair(id, item.second));
+					p.push_back({ id, item.second });
 				}
 			}
 			Core::App().settings().setLegacyRecentEmojiPreload(std::move(p));
@@ -1024,7 +1025,7 @@ bool ReadSetting(
 			for (auto &item : v) {
 				auto id = Ui::Emoji::IdFromOldKey(item.first);
 				if (!id.isEmpty()) {
-					p.push_back(qMakePair(id, item.second));
+					p.push_back({ id, item.second });
 				}
 			}
 			Core::App().settings().setLegacyRecentEmojiPreload(std::move(p));

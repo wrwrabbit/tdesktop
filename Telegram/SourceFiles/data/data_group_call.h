@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/timer.h"
+#include "base/weak_ptr.h"
 
 class PeerData;
 
@@ -56,8 +57,6 @@ struct GroupCallParticipant {
 
 	[[nodiscard]] const std::string &cameraEndpoint() const;
 	[[nodiscard]] const std::string &screenEndpoint() const;
-	[[nodiscard]] bool cameraPaused() const;
-	[[nodiscard]] bool screenPaused() const;
 };
 
 enum class GroupCallOrigin : uchar {
@@ -66,7 +65,7 @@ enum class GroupCallOrigin : uchar {
 	VideoStream,
 };
 
-class GroupCall final {
+class GroupCall final : public base::has_weak_ptr {
 public:
 	GroupCall(
 		not_null<PeerData*> peer,
@@ -157,8 +156,6 @@ public:
 		-> rpl::producer<not_null<Participant*>>;
 
 	void setParticipantsWithAccess(base::flat_set<UserId> list);
-	[[nodiscard]] auto participantsWithAccessCurrent() const
-		-> const base::flat_set<UserId> &;
 	[[nodiscard]] auto participantsWithAccessValue() const
 		-> rpl::producer<base::flat_set<UserId>>;
 	[[nodiscard]] auto staleParticipantIds() const

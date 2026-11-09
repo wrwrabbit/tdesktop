@@ -9,6 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_document.h"
 #include "data/data_peer.h"
+#include "data/data_session.h"
+#include "history/history.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/view/history_view_element.h"
@@ -20,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/power_saving.h"
 #include "ui/rect.h"
 #include "ui/round_rect.h"
+#include "ui/userpic_view.h"
 #include "styles/style_chat.h"
 
 namespace HistoryView {
@@ -46,6 +49,17 @@ bool MediaGenericPart::hasHeavyPart() {
 }
 
 void MediaGenericPart::unloadHeavyPart() {
+}
+
+void MediaGenericPart::hideSpoilers() {
+}
+
+Media::BubbleRoll MediaGenericPart::bubbleRoll(QSize outer) const {
+	return Media::BubbleRoll();
+}
+
+QMargins MediaGenericPart::bubbleRollRepaintMargins(QSize outer) const {
+	return QMargins();
 }
 
 auto MediaGenericPart::stickerTakePlayer(
@@ -81,7 +95,9 @@ MediaGeneric::MediaGeneric(
 , _paintBg(_paintBgFactory ? _paintBgFactory() : nullptr)
 , _fullAreaLink(descriptor.fullAreaLink)
 , _maxWidthCap(descriptor.maxWidth)
+, _minWidth(descriptor.minWidth)
 , _expandCurrentWidth(descriptor.expandCurrentWidth)
+, _fitToContent(descriptor.fitToContent)
 , _service(descriptor.service)
 , _hideServiceText(descriptor.hideServiceText) {
 	generate(this, [&](std::unique_ptr<Part> part) {
@@ -89,6 +105,12 @@ MediaGeneric::MediaGeneric(
 			.object = std::move(part),
 		});
 	});
+}
+
+MediaGeneric::Part *MediaGeneric::partAt(int index) const {
+	return (index >= 0 && index < int(_entries.size()))
+		? _entries[index].object.get()
+		: nullptr;
 }
 
 MediaGeneric::~MediaGeneric() {
@@ -99,15 +121,23 @@ MediaGeneric::~MediaGeneric() {
 }
 
 QSize MediaGeneric::countOptimalSize() {
-	const auto maxWidth = _maxWidthCap
+	const auto cap = _maxWidthCap
 		? _maxWidthCap
 		: st::chatGiveawayWidth;
 
-	auto top = 0;
+	auto contentWidth = 0;
 	for (auto &entry : _entries) {
 		const auto raw = entry.object.get();
 		raw->initDimensions();
-		top += raw->resizeGetHeight(maxWidth);
+		accumulate_max(contentWidth, raw->maxWidth());
+	}
+	const auto maxWidth = (_fitToContent && contentWidth)
+		? std::clamp(contentWidth, std::min(_minWidth, cap), cap)
+		: cap;
+
+	auto top = 0;
+	for (auto &entry : _entries) {
+		top += entry.object->resizeGetHeight(maxWidth);
 	}
 	return { maxWidth, top };
 }
@@ -139,7 +169,7 @@ void MediaGeneric::draw(Painter &p, const PaintContext &context) const {
 		p.setPen(Qt::NoPen);
 		p.setBrush(context.st->msgServiceBg());
 		const auto rect = QRect(0, 0, width(), height());
-		if (parent()->data()->inlineReplyKeyboard()) {
+		if (parent()->inlineReplyKeyboard()) {
 			const auto half = rect.height() / 2;
 			p.setClipRect(rect - QMargins(0, 0, 0, half));
 			p.drawRoundedRect(rect, radius, radius);
@@ -340,6 +370,36 @@ void MediaGeneric::unloadHeavyPart() {
 	for (const auto &entry : _entries) {
 		entry.object->unloadHeavyPart();
 	}
+}
+
+void MediaGeneric::hideSpoilers() {
+	for (const auto &entry : _entries) {
+		entry.object->hideSpoilers();
+	}
+}
+
+Media::BubbleRoll MediaGeneric::bubbleRoll() const {
+	const auto outer = QSize(width(), height());
+	for (const auto &entry : _entries) {
+		if (const auto roll = entry.object->bubbleRoll(outer)) {
+			return roll;
+		}
+	}
+	return BubbleRoll();
+}
+
+QMargins MediaGeneric::bubbleRollRepaintMargins() const {
+	const auto outer = QSize(width(), height());
+	auto result = QMargins();
+	for (const auto &entry : _entries) {
+		const auto margins = entry.object->bubbleRollRepaintMargins(outer);
+		result = QMargins(
+			std::max(result.left(), margins.left()),
+			std::max(result.top(), margins.top()),
+			std::max(result.right(), margins.right()),
+			std::max(result.bottom(), margins.bottom()));
+	}
+	return result;
 }
 
 QMargins MediaGeneric::inBubblePadding() const {
@@ -655,6 +715,86 @@ void StickerInBubblePart::ensureCreated(Element *replacing) const {
 			_sticker->setCustomCachingTag(data.cacheTag);
 		}
 	}
+}
+
+DynamicImagePart::DynamicImagePart(
+	not_null<Element*> parent,
+	std::shared_ptr<Ui::DynamicImage> image,
+	int size,
+	QMargins margins,
+	ClickHandlerPtr link,
+	bool communityEffect)
+: _parent(parent)
+, _image(std::move(image))
+, _link(std::move(link))
+, _margins(margins)
+, _size(size)
+, _communityEffect(communityEffect) {
+}
+
+DynamicImagePart::~DynamicImagePart() = default;
+
+void DynamicImagePart::draw(
+		Painter &p,
+		not_null<const MediaGeneric*> owner,
+		const PaintContext &context,
+		int outerWidth) const {
+	if (!_subscribed) {
+		_subscribed = true;
+		const auto raw = _parent;
+		_image->subscribeToUpdates([raw] { raw->repaint(); });
+		raw->history()->owner().registerHeavyViewPart(raw);
+	}
+	const auto left = (outerWidth - _size) / 2;
+	const auto top = _margins.top();
+	if (_communityEffect) {
+		if (!_communityCache) {
+			_communityCache = std::make_unique<Ui::CommunityUserpicEffect>();
+		}
+		Ui::PaintCommunityUserpicEffect(
+			p,
+			*_communityCache,
+			left,
+			top,
+			_size,
+			context.st->msgServiceBg()->c);
+	}
+	p.drawImage(QPoint(left, top), _image->image(_size));
+}
+
+TextState DynamicImagePart::textState(
+		QPoint point,
+		StateRequest request,
+		int outerWidth) const {
+	auto result = TextState(_parent);
+	const auto left = (outerWidth - _size) / 2;
+	if (_link && QRect(left, _margins.top(), _size, _size).contains(point)) {
+		result.link = _link;
+	}
+	return result;
+}
+
+bool DynamicImagePart::hasHeavyPart() {
+	return _subscribed;
+}
+
+void DynamicImagePart::unloadHeavyPart() {
+	if (_subscribed) {
+		_subscribed = false;
+		_image->subscribeToUpdates(nullptr);
+	}
+	_communityCache = nullptr;
+}
+
+QSize DynamicImagePart::countOptimalSize() {
+	return {
+		_margins.left() + _size + _margins.right(),
+		_margins.top() + _size + _margins.bottom(),
+	};
+}
+
+QSize DynamicImagePart::countCurrentSize(int newWidth) {
+	return { newWidth, minHeight() };
 }
 
 StickerWithBadgePart::StickerWithBadgePart(

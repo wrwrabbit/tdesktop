@@ -16,7 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/controls/jump_down_button.h"
 #include "ui/controls/swipe_handler.h"
 #include "ui/effects/animations.h"
-#include "ui/widgets/scroll_area.h"
+#include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/buttons.h"
 #include "ui/controls/userpic_button.h"
@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
-#include "styles/style_window.h"
 #include "styles/style_info.h"
 
 namespace AdminLog {
@@ -290,7 +289,7 @@ Widget::Widget(
 	not_null<Window::SessionController*> controller,
 	not_null<ChannelData*> channel)
 : Window::SectionWidget(parent, controller, rpl::single<PeerData*>(channel))
-, _scroll(this, st::historyScroll, false)
+, _scroll(this, st::historyScroll)
 , _fixedBar(this, controller, channel)
 , _fixedBarShadow(this)
 , _settingsFilter(
@@ -319,8 +318,16 @@ Widget::Widget(
 		updateAdaptiveLayout();
 	}, lifetime());
 
+	_scroll->setHandleTouch(false);
+	_scroll->lockWheelDirection();
 	_inner = _scroll->setOwnedWidget(
 		object_ptr<InnerWidget>(this, controller, channel));
+	Tgw::ListScroll::WatchInput(_scroll.data(), [=] {
+		if (_inner) {
+			Tgw::ListScroll::Input(_inner.data());
+		}
+	});
+	_inner->lower();
 	_inner->showSearchSignal(
 	) | rpl::on_next([=] {
 		_fixedBar->showSearch();
@@ -341,6 +348,12 @@ Widget::Widget(
 
 	_scroll->move(0, _fixedBar->height());
 	_scroll->show();
+	_scroll->setOverscrollBg(QColor(0, 0, 0, 0));
+	_scroll->setOverscrollEdges([=] {
+		return !_inner || _inner->loadedAtTop();
+	}, [=] {
+		return !_inner || _inner->loadedAtBottom();
+	});
 	_scroll->scrolls() | rpl::on_next([=] {
 		onScroll();
 	}, lifetime());
@@ -372,6 +385,10 @@ void Widget::scrollDownClicked() {
 		_scrollToAnimation.stop();
 		return;
 	}
+	const auto consumed = [=] {
+		return _inner ? Tgw::ListScroll::Consumed(_inner.data()) : uint32();
+	};
+	const auto count = consumed();
 	const auto maxAnimatedDelta = _scroll->height();
 	auto transition = anim::sineInOut;
 	if (scrollTo > scrollTop + maxAnimatedDelta) {
@@ -380,7 +397,18 @@ void Widget::scrollDownClicked() {
 		transition = anim::easeOutCubic;
 	}
 	_scrollToAnimation.stop();
-	_scrollToAnimation.start(
+	Tgw::ListScroll::Input(_inner.data());
+	_scrollToFlight.start(
+		scrollTop,
+		scrollTo,
+		consumed,
+		count,
+		[=] {
+			return _inner ? Tgw::ListScroll::Inputs(_inner.data()) : uint32();
+		},
+		[=] { return std::make_optional(_scroll->scrollTopMax()); });
+	_scrollToFlight.animate(
+		&_scrollToAnimation,
 		[=] { scrollToAnimationCallback(); },
 		scrollTop,
 		scrollTo,
@@ -390,7 +418,13 @@ void Widget::scrollDownClicked() {
 
 void Widget::scrollToAnimationCallback() {
 	const auto scrollTo = _scroll->scrollTopMax();
-	_scroll->scrollToY(qRound(_scrollToAnimation.value(scrollTo)));
+	const auto value = _scrollToAnimation.value(scrollTo);
+	_scrollToFlight.frame(
+		0,
+		value,
+		_scroll->scrollTop(),
+		!_scrollToAnimation.animating(),
+		[=](int top) { _scroll->scrollToY(top); });
 }
 
 void Widget::updateScrollDownVisibility() {
@@ -546,6 +580,7 @@ void Widget::setupSwipeReply() {
 		.scroll = _scroll.data(),
 		.update = std::move(update),
 		.init = std::move(init),
+		.handoff = _inner->touchSwipeHandoff(),
 	});
 }
 
@@ -553,6 +588,11 @@ std::shared_ptr<Window::SectionMemento> Widget::createMemento() {
 	auto result = std::make_shared<SectionMemento>(channel());
 	saveState(result.get());
 	return result;
+}
+
+auto Widget::createIdentityMemento()
+-> std::shared_ptr<Window::SectionMemento> {
+	return std::make_shared<SectionMemento>(channel());
 }
 
 void Widget::saveState(not_null<SectionMemento*> memento) {
@@ -574,7 +614,8 @@ void Widget::resizeEvent(QResizeEvent *e) {
 
 	const auto contentWidth = width();
 
-	const auto newScrollTop = _scroll->scrollTop() + topDelta();
+	const auto delta = takeTopDelta();
+	const auto newScrollTop = _scroll->scrollTop() + delta;
 	_fixedBar->resizeToWidth(contentWidth);
 	_fixedBarShadow->resize(contentWidth, st::lineWidth);
 
@@ -590,7 +631,7 @@ void Widget::resizeEvent(QResizeEvent *e) {
 	}
 
 	if (!_scroll->isHidden()) {
-		if (topDelta()) {
+		if (delta) {
 			_scroll->scrollToY(newScrollTop);
 		}
 		auto scrollTop = _scroll->scrollTop();

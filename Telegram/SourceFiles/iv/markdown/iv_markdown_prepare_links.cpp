@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QUrl>
 
 #include <algorithm>
+#include <array>
 
 namespace Iv::Markdown {
 namespace {
@@ -142,7 +143,39 @@ namespace {
 	return result.trimmed();
 }
 
-[[nodiscard]] QString ExternalLinkDisplayText(const PreparedLink &link) {
+[[nodiscard]] bool IsAllowedExternalTarget(const QString &target) {
+	static const auto kSchemes = std::array{
+		u"tg"_q,
+		u"ton"_q,
+		u"tel"_q,
+	};
+	static const auto kHostSchemes = std::array{
+		u"http"_q,
+		u"https"_q,
+		u"tonsite"_q,
+	};
+	const auto parsed = QUrl(target);
+	if (!parsed.isValid()) {
+		return false;
+	}
+	const auto scheme = parsed.scheme().toLower();
+	return ranges::contains(kSchemes, scheme)
+		|| (ranges::contains(kHostSchemes, scheme)
+			&& !parsed.host().isEmpty());
+}
+
+void RejectPreparedUrlLink(PreparedLink *result, const QString &target) {
+	result->kind = PreparedLinkKind::RejectedRelative;
+	result->target = target;
+	result->copyText = QString();
+	result->entityType = EntityType::Invalid;
+	result->shown = EntityLinkShown::Full;
+	result->webpageId = 0;
+}
+
+} // namespace
+
+QString ExternalLinkDisplayText(const PreparedLink &link) {
 	if (link.entityType == EntityType::Email) {
 		return link.target;
 	}
@@ -153,7 +186,36 @@ namespace {
 	return good.isValid() ? good.toDisplayString() : link.target;
 }
 
-} // namespace
+std::optional<EntityLinkData> ExternalEntityLinkData(
+		const PreparedLink &link) {
+	if (link.kind != PreparedLinkKind::External || link.target.isEmpty()) {
+		return std::nullopt;
+	}
+	switch (link.entityType) {
+	case EntityType::Url:
+	case EntityType::CustomUrl:
+	case EntityType::Email:
+		return EntityLinkData{
+			.text = !link.copyText.isEmpty() ? link.copyText : link.target,
+			.data = link.target,
+			.type = link.entityType,
+			.shown = link.shown,
+		};
+	default:
+		return std::nullopt;
+	}
+}
+
+QString TooltipForPreparedLink(const PreparedLink &link) {
+	if (link.kind != PreparedLinkKind::External
+		&& link.kind != PreparedLinkKind::InstantViewPage) {
+		return QString();
+	} else if (link.entityType == EntityType::CustomUrl
+		|| link.shown == EntityLinkShown::Partial) {
+		return ExternalLinkDisplayText(link);
+	}
+	return QString();
+}
 
 void NormalizePreparedUrlLink(PreparedLink *result, const QString &target) {
 	if (!result) {
@@ -161,13 +223,23 @@ void NormalizePreparedUrlLink(PreparedLink *result, const QString &target) {
 	}
 	result->fragment = QString();
 	if (target.startsWith(u"mailto:"_q, Qt::CaseInsensitive)) {
-		result->target = NormalizeMailtoTarget(target);
+		const auto email = NormalizeMailtoTarget(target);
+		if (!UrlClickHandler::IsEmail(email)) {
+			RejectPreparedUrlLink(result, target);
+			return;
+		}
+		result->target = email;
 		result->copyText = result->target;
 		result->entityType = EntityType::Email;
 		result->shown = EntityLinkShown::Full;
 		return;
 	}
-	result->target = UrlClickHandler::EncodeForOpening(target);
+	const auto encoded = UrlClickHandler::EncodeForOpening(target);
+	if (!IsAllowedExternalTarget(encoded)) {
+		RejectPreparedUrlLink(result, target);
+		return;
+	}
+	result->target = encoded;
 	result->copyText = result->target;
 	result->entityType = EntityType::Url;
 	result->shown = EntityLinkShown::Full;
@@ -176,10 +248,21 @@ void NormalizePreparedUrlLink(PreparedLink *result, const QString &target) {
 void FinalizePreparedUrlLink(
 		PreparedLink *link,
 		QStringView renderedText) {
-	if (!link || link->entityType != EntityType::Url) {
+	if (!link
+		|| (link->entityType != EntityType::Url
+			&& link->entityType != EntityType::Email)) {
+		return;
+	}
+	if (link->entityType == EntityType::Url
+		&& UrlClickHandler::IsSuspicious(renderedText.toString())) {
+		link->entityType = EntityType::CustomUrl;
 		return;
 	}
 	if (renderedText == QStringView(ExternalLinkDisplayText(*link))) {
+		return;
+	}
+	if (link->entityType == EntityType::Email) {
+		link->shown = EntityLinkShown::Partial;
 		return;
 	}
 	if (UrlClickHandler::EncodeForOpening(renderedText.toString())

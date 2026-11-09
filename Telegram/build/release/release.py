@@ -1,4 +1,5 @@
 import requests
+from tqdm import tqdm
 from pprint import pprint
 
 from telethon import TelegramClient, events, sync
@@ -32,7 +33,7 @@ GH_REPO = "cpartisans/tdesktop"
 GH_REST_URL = f"https://api.github.com/repos/%s" % (GH_REPO)
 
 TG_UPLOAD_CHANNEL = "tdptgFiles"
-TG_UPDATE_CHANNEL = "tdptgFeed"
+TG_UPDATE_CHANNEL = "tdptgfeed2"
 
 # https://github.com/settings/tokens
 GH_TOKEN = config.GH_TOKEN
@@ -102,7 +103,7 @@ def tg_list_files(client, limit):
             doc = media.document
             for attr in doc.attributes:
                 if isinstance(attr, DocumentAttributeFilename):
-                    m = re.match("(\w+?)(\d{7})", attr.file_name)
+                    m = re.fullmatch(r"(td-update-(?:linux-x64|win-x64|win-x86|mac-arm|mac-x64)-)([0-9]+)", attr.file_name)
                     if m:
                         files.append({
                             "name": attr.file_name,
@@ -116,7 +117,17 @@ def tg_list_files(client, limit):
 def tg_upload(client, fn, fpath):
     channel = client.get_entity(TG_UPLOAD_CHANNEL)
     print("Uploading...")
-    file = client.upload_file(fpath)
+    with tqdm(
+        total=os.path.getsize(fpath),
+        desc=fn,
+        unit="B",
+        unit_scale=True,
+        unit_divisor=1024,
+    ) as progress:
+        file = client.upload_file(
+            fpath,
+            progress_callback=lambda sent, total: progress.update(sent - progress.n),
+        )
     file.name = fn
     print("Posting...")
     client.send_file(channel, file)
@@ -192,9 +203,20 @@ def get_available_builds(args):
                     continue
                 if not os.path.isfile(zip_fn):
                     print("Downloading artifacts for %s of %s" % (art_id, r["id"]))
-                    zip_stream = requests.get(dl_url, headers=GH_HDR)
-                    with open(zip_fn, "wb") as f:
-                        f.write(zip_stream.content)
+                    with requests.get(dl_url, headers=GH_HDR, stream=True) as zip_stream:
+                        zip_stream.raise_for_status()
+                        total = int(zip_stream.headers.get("Content-Length", 0)) or None
+                        with open(zip_fn + ".part", "wb") as f, tqdm(
+                            total=total,
+                            desc=os.path.basename(zip_fn),
+                            unit="B",
+                            unit_scale=True,
+                            unit_divisor=1024,
+                        ) as progress:
+                            for chunk in zip_stream.iter_content(chunk_size=64 * 1024):
+                                f.write(chunk)
+                                progress.update(len(chunk))
+                    os.replace(zip_fn + ".part", zip_fn)
                 if not os.path.isfile(zip_fn):
                     continue
                 with zipfile.ZipFile(zip_fn) as zip:
@@ -260,11 +282,11 @@ def get_file_data(art_id):
 """
 
 PREFIX = {
-    "tlinuxupd": "linux", 
-    "tx64upd": "win64",
-    "tupdate": "win",
-    "tarmacupd": "armac",
-    "tmacupd": "mac"
+    "td-update-linux-x64-": "linux",
+    "td-update-win-x64-": "win64",
+    "td-update-win-x86-": "win",
+    "td-update-mac-arm-": "armac",
+    "td-update-mac-x64-": "mac",
 }
 
 def do_list(args):
@@ -275,7 +297,7 @@ def do_list(args):
     for build in builds.values():
         for art_id, files in build["artifacts"].items():
             for fn in files:
-                m = re.match("(\w+?)(\d{7})", fn)
+                m = re.fullmatch(r"(td-update-(?:linux-x64|win-x64|win-x86|mac-arm|mac-x64)-)([0-9]+)", fn)
                 if m:
                     artifacts.append({
                         "ID": art_id,

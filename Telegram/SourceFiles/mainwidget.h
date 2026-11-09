@@ -85,6 +85,7 @@ struct SectionShow;
 enum class Column;
 class HistoryHider;
 struct SeparateId;
+struct SavedChat;
 } // namespace Window
 
 namespace Calls {
@@ -98,6 +99,7 @@ class Changelogs;
 } // namespace Core
 
 extern const char kForceComposeSearchOneColumn[];
+extern const char kOptionUseNewChatView[];
 
 class MainWidget final
 	: public Ui::RpWidget
@@ -115,7 +117,6 @@ public:
 	[[nodiscard]] Window::SeparateId windowId() const;
 	[[nodiscard]] bool isPrimary() const;
 	[[nodiscard]] bool isMainSectionShown() const;
-	[[nodiscard]] bool isThirdSectionShown() const;
 
 	[[nodiscard]] Dialogs::RowDescriptor resolveChatNext(
 		Dialogs::RowDescriptor from) const;
@@ -127,7 +128,7 @@ public:
 	void showAnimated(QPixmap oldContentCache, bool back = false);
 
 	void activate();
-	void handleStartFiles(QStringList interprets, QStringList paths);
+	void handleStartFiles(QStringList paths);
 
 	void windowShown();
 
@@ -143,6 +144,7 @@ public:
 		const SectionShow &params);
 	void updateColumnLayout();
 	bool stackIsEmpty() const;
+	[[nodiscard]] std::vector<Window::SavedChat> chatStackForSave() const;
 	bool showBackFromStack(const SectionShow &params);
 	void orderWidgets();
 	QPixmap grabForShowAnimation(const Window::SectionSlideParams &params);
@@ -170,6 +172,9 @@ public:
 		not_null<Data::Thread*> thread,
 		not_null<const QMimeData*> data,
 		bool forumResolved = false);
+	void textDrop(
+		not_null<Data::Thread*> thread,
+		not_null<const QMimeData*> data);
 
 	void sendBotCommand(Bot::SendCommandRequest request);
 	void hideSingleUseKeyboard(FullMsgId replyToId);
@@ -266,7 +271,8 @@ private:
 	void exportTopBarHeightUpdated();
 
 	Window::SectionSlideParams prepareShowAnimation(
-		bool willHaveTopBarShadow);
+		bool willHaveTopBarShadow,
+		bool fromBottom);
 	void showNewSection(
 		std::shared_ptr<Window::SectionMemento> memento,
 		const SectionShow &params);
@@ -275,9 +281,10 @@ private:
 	Window::SectionSlideParams prepareThirdSectionAnimation(Window::SectionWidget *section);
 
 	// All this methods use the prepareShowAnimation().
-	Window::SectionSlideParams prepareMainSectionAnimation(Window::SectionWidget *section);
+	Window::SectionSlideParams prepareMainSectionAnimation(
+		Window::SectionWidget *section,
+		bool fromBottom);
 	Window::SectionSlideParams prepareHistoryAnimation(PeerId historyPeerId);
-	Window::SectionSlideParams prepareDialogsAnimation();
 
 	bool saveSectionInStack(
 		const SectionShow &params,

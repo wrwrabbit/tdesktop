@@ -17,13 +17,16 @@ apps:
     plugs:
       - audio-playback
       - audio-record
+      - bluez
       - camera
       - hardware-observe
       - home
+      - login-session-observe
       - network
       - network-bind
       - network-status
       - removable-media
+      - u2f-devices
     slots:
       - mpris
 
@@ -38,17 +41,14 @@ parts:
     source-type: git
     parse-info: [usr/share/metainfo/org.telegram.desktop.metainfo.xml]
     build-environment:
-      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state -s
-    build-snaps:
-      - cmake
+      - LDFLAGS: ${LDFLAGS:+$LDFLAGS} -Wl,--push-state,--no-as-needed,-ldav1d,--pop-state
     build-packages:
       - libboost-regex-dev
       - libheif-dev
       - libjxl-dev
-      - libssl-dev
+      - liblz4-dev
       - libxcb-keysyms1-dev
       - libxcb-record0-dev
-      - libxcb-screensaver0-dev
     cmake-generator: Ninja
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
@@ -71,6 +71,7 @@ parts:
       craftctl set version="$version"
     override-build: |
       craftctl default
+      "$CRAFT_PART_SRC/Telegram/build/minidebug.sh" "$CRAFT_PART_INSTALL/usr/bin/Telegram"
       mv "$CRAFT_PART_INSTALL"/usr/bin/{Telegram,telegram-desktop}
 
       APP_ID=org.telegram.desktop
@@ -91,10 +92,11 @@ parts:
       - minizip
       - mozjpeg
       - openal
-      - protobuf
+      - openssl
       - qt
       - rnnoise
       - tde2e
+      - tdesktop_rust
       - webrtc
 
   pkgs:
@@ -106,7 +108,6 @@ parts:
       - libopenh264-7
       - libxcb-cursor0
       - libxcb-record0
-      - libxcb-screensaver0
     stage:
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gstreamer-1.0/libgstde265.so
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/gstreamer-1.0/libgstfdkaac.so
@@ -119,12 +120,11 @@ parts:
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libopenh264.so*
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-cursor.so*
       - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-record.so*
-      - ./usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/libxcb-screensaver.so*
 
   patches:
     source: https://github.com/desktop-app/patches.git
     source-depth: 1
-    source-commit: e481284d692dbd556ff1f40006ae774d10a16b9e
+    source-commit: a59fc82462fb2987e9f0ee1498e2db694410ae81
     plugin: nil
     override-pull: |
       craftctl default
@@ -135,7 +135,7 @@ parts:
   ada:
     source: https://github.com/ada-url/ada.git
     source-depth: 1
-    source-tag: v3.2.4
+    source-tag: v3.2.9
     plugin: cmake
     cmake-generator: Ninja
     cmake-parameters:
@@ -165,7 +165,7 @@ parts:
   ffmpeg:
     source: https://github.com/FFmpeg/FFmpeg.git
     source-depth: 1
-    source-branch: n6.1.1
+    source-branch: n6.1.6
     plugin: autotools
     build-packages:
       - nasm
@@ -365,6 +365,24 @@ parts:
       - -DALSOFT_BACKEND_PIPEWIRE=OFF
     prime: [-./*]
 
+  openssl:
+    source: https://github.com/openssl/openssl.git
+    source-depth: 1
+    source-tag: openssl-3.5.9
+    plugin: make
+    build-packages:
+      - perl
+    override-build: |
+      sed -i 's/$cmd $cmdflags -c -o/$cmd $cmdflags -g0 -c -o/' Configurations/unix-Makefile.tmpl
+      ./config \
+        --prefix=/usr \
+        --openssldir=/etc/ssl \
+        --libdir=lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR \
+        no-shared no-tests no-dso
+      make -j"${CRAFT_PARALLEL_BUILD_COUNT}"
+      make DESTDIR="$CRAFT_PART_INSTALL" install_sw
+    prime: [-./*]
+
   nv-codec-headers:
     source: https://github.com/FFmpeg/nv-codec-headers.git
     source-depth: 1
@@ -375,22 +393,10 @@ parts:
       - LIBDIR=lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR
     prime: [-./*]
 
-  protobuf:
-    source: https://github.com/protocolbuffers/protobuf.git
-    source-depth: 1
-    source-tag: v30.2
-    plugin: cmake
-    cmake-generator: Ninja
-    cmake-parameters:
-      - -DCMAKE_BUILD_TYPE=Release
-      - -DCMAKE_INSTALL_PREFIX=/usr
-      - -Dprotobuf_BUILD_TESTS=OFF
-    prime: [-./*]
-
   qt:
     source: https://github.com/qt/qt5.git
     source-depth: 1
-    source-tag: v6.11.1
+    source-tag: v6.11.2
     source-submodules:
       - qtbase
       - qtdeclarative
@@ -400,7 +406,6 @@ parts:
       - qtwayland
     plugin: cmake
     build-packages:
-      - libssl-dev
       - libxcb-cursor-dev
       - libxcb-glx0-dev
       - libxcb-icccm4-dev
@@ -421,16 +426,19 @@ parts:
       - -DINSTALL_LIBDIR=/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR
       - -DBUILD_SHARED_LIBS=OFF
       - -DQT_QPA_PLATFORMS="wayland;xcb"
+      - -DFEATURE_brotli=OFF
       - -DFEATURE_eglfs=OFF
       - -DINPUT_openssl=linked
     override-pull: |
       craftctl default
       QT="$(grep 'set(QT_REPO_MODULE_VERSION' qtbase/.cmake.conf | sed -r 's/.*"(.*)".*/\1/')"
       find $CRAFT_STAGE/patches/qtbase_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtbase apply
+      find $CRAFT_STAGE/patches/qtsvg_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtsvg apply
       find $CRAFT_STAGE/patches/qtwayland_${QT} -type f -print0 | sort -z | xargs -r0 git -C qtwayland apply
     prime: [-./*]
     after:
       - mozjpeg
+      - openssl
       - patches
 
   rnnoise:
@@ -458,7 +466,6 @@ parts:
     plugin: cmake
     build-packages:
       - gperf
-      - libssl-dev
     cmake-generator: Ninja
     cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
@@ -466,17 +473,68 @@ parts:
       - -DCMAKE_INSTALL_LIBDIR=lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR
       - -DTD_E2E_ONLY=ON
     prime: [-./*]
+    after:
+      - openssl
+
+  tdesktop_rust:
+    source: ''
+    plugin: rust
+    build-environment:
+      - LD_LIBRARY_PATH: ''
+      - CARGO_BUILD_JOBS: ${CRAFT_PARALLEL_BUILD_COUNT}
+      - CARGO_PROFILE_RELEASE_OPT_LEVEL: 3
+      - CARGO_PROFILE_RELEASE_LTO: 'off'
+      - CARGO_PROFILE_RELEASE_PANIC: unwind
+    rust-channel: 1.96.1
+    override-build: |
+      cargo init --lib --vcs none --name tdesktop_rust
+      printf 'pub use ::tlottie;\npub use ::wallet_engine;\n' > src/lib.rs
+      cargo add --path ../../tlottie/src --features c-api
+      cargo add --path ../../wallet-engine/src
+      cargo rustc --lib --release \
+        --crate-type staticlib --crate-type cdylib \
+        -- --print native-static-libs
+      LIBDIR="$CRAFT_PART_INSTALL/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR"
+      INCLUDEDIR="$CRAFT_PART_INSTALL/usr/include"
+      mkdir -p "$LIBDIR" "$INCLUDEDIR/tlottie" "$INCLUDEDIR/wallet_engine"
+      objcopy --strip-debug target/release/libtdesktop_rust.a "$LIBDIR/libtdesktop_rust.a"
+      cp ../../tlottie/src/include/tlottie.h "$INCLUDEDIR/tlottie/tlottie.h"
+      cargo run --manifest-path ../../wallet-engine/src/bindgen/cpp/bindgen/Cargo.toml --locked -- \
+        --library --out-dir "$INCLUDEDIR/wallet_engine" \
+        target/release/libtdesktop_rust.so
+    after:
+      - tlottie
+      - wallet-engine
+    prime: [-./*]
+
+  tlottie:
+    source: https://github.com/dkaraush/tlottie.git
+    source-depth: 1
+    source-commit: 92df98dc209bc39b1e567ec74a8c86a0af5239de
+    plugin: nil
+    prime: [-./*]
+
+  wallet-engine:
+    source: https://github.com/i582/wallet-engine.git
+    source-depth: 1
+    source-commit: e59e0d89d7ee90c388bf36e3334c5b276f396697
+    plugin: nil
+    override-pull: |
+      craftctl default
+      git apply "$CRAFT_STAGE/patches/wallet-engine.patch"
+    prime: [-./*]
+    after:
+      - patches
 
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: 26068e29bfa8d74a9dc9c8f7f94172fafbc262b8
+    source-commit: 020feec5c040fdae2cf752c2c2be62ddde7c236d
     plugin: cmake
     build-packages:
       - libopenh264-dev
       - libopus-dev
       - libpipewire-0.3-dev
-      - libssl-dev
       - libvpx-dev
     cmake-generator: Ninja
     cmake-parameters:
@@ -486,3 +544,4 @@ parts:
     after:
       - ffmpeg
       - mozjpeg
+      - openssl

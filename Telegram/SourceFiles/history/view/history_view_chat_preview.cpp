@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_chat_preview.h"
 
+#include "apiwrap.h"
 #include "base/unixtime.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
@@ -19,7 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_saved_sublist.h"
 #include "data/data_session.h"
 #include "data/data_thread.h"
+#include "data/data_user.h"
 #include "history/view/reactions/history_view_reactions_button.h"
+#include "history/view/history_view_about_view.h"
 #include "history/view/history_view_corner_buttons.h"
 #include "history/view/history_view_list_widget.h"
 #include "history/history.h"
@@ -77,10 +80,12 @@ private:
 	void setupMarkRead();
 	void setupBackground();
 	void setupHistory();
+	void setupAboutView();
 	void updateInnerVisibleArea();
 
 	// ListDelegate delegate.
 	Context listContext() override;
+	AboutView *listAboutView() override;
 	bool listScrollTo(int top, bool syntetic = true) override;
 	void listCancelRequest() override;
 	void listDeleteRequest() override;
@@ -144,6 +149,7 @@ private:
 	void listAddTranslatedItems(
 		not_null<TranslateTracker*> tracker) override;
 	not_null<Window::SessionController*> listWindow() override;
+	Window::SessionController *listWindowOrNull() override;
 	not_null<QWidget*> listEmojiInteractionsParent() override;
 	not_null<const Ui::ChatStyle*> listChatStyle() override;
 	rpl::producer<bool> listChatWideValue() override;
@@ -200,6 +206,7 @@ private:
 	Info::Profile::Badge _badge;
 
 	QPointer<ListWidget> _inner;
+	std::unique_ptr<AboutView> _aboutView;
 	std::unique_ptr<CornerButtons> _cornerButtons;
 	rpl::event_stream<ChatPreviewAction> _actions;
 
@@ -525,8 +532,15 @@ void Item::setupHistory() {
 	using Type = Ui::ElasticScroll::OverscrollType;
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
 
+	const auto inner = _inner.data();
+	Tgw::ListScroll::WatchInput(
+		_scroll.get(),
+		crl::guard(inner, [=] { Tgw::ListScroll::Input(inner); }),
+		nullptr,
+		false);
 	_inner->scrollKeyEvents(
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+		Tgw::ListScroll::Input(_inner.data());
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
@@ -553,11 +567,43 @@ void Item::setupHistory() {
 
 	_inner->refreshViewer();
 
+	setupAboutView();
+
 	_inner->setAttribute(Qt::WA_TransparentForMouseEvents);
 
 	crl::on_main(this, [=] {
 		_inner->setFocus();
 	});
+}
+
+void Item::setupAboutView() {
+	if (_replies || _sublist) {
+		return;
+	}
+	const auto user = _peer->asUser();
+	if (!user || user->isContact()) {
+		return;
+	}
+	_session->api().requestPeerSettings(user);
+	user->barSettingsValue() | rpl::on_next([=] {
+		if (_aboutView
+			|| user->isContact()
+			|| user->phoneCountryCode().isEmpty()) {
+			return;
+		}
+		_aboutView = std::make_unique<AboutView>(
+			_history,
+			static_cast<ElementDelegate*>(_inner.data()));
+		_aboutView->refresh();
+		_aboutView->refreshRequests() | rpl::on_next([=] {
+			if (_aboutView->refresh() && _inner) {
+				_inner->resizeToWidth(_scroll->width(), _scroll->height());
+			}
+		}, _aboutView->lifetime());
+		if (_inner) {
+			_inner->resizeToWidth(_scroll->width(), _scroll->height());
+		}
+	}, lifetime());
 }
 
 void Item::paintEvent(QPaintEvent *e) {
@@ -573,6 +619,10 @@ void Item::updateInnerVisibleArea() {
 
 Context Item::listContext() {
 	return Context::ChatPreview;
+}
+
+AboutView *Item::listAboutView() {
+	return _aboutView.get();
 }
 
 bool Item::listScrollTo(int top, bool syntetic) {
@@ -816,6 +866,10 @@ not_null<Window::SessionController*> Item::listWindow() {
 	Unexpected("Item::listWindow.");
 }
 
+Window::SessionController *Item::listWindowOrNull() {
+	return nullptr;
+}
+
 not_null<QWidget*> Item::listEmojiInteractionsParent() {
 	return this;
 }
@@ -976,6 +1030,13 @@ ChatPreview MakeChatPreview(
 		topic->destroyed() | rpl::on_next([weak] {
 			if (const auto strong = weak.get()) {
 				LOG(("Preview hidden for a destroyed topic."));
+				strong->hideMenu(true);
+			}
+		}, menu->lifetime());
+	} else if (const auto sublist = thread->asSublist()) {
+		const auto weak = base::make_weak(menu);
+		sublist->destroyed() | rpl::on_next([weak] {
+			if (const auto strong = weak.get()) {
 				strong->hideMenu(true);
 			}
 		}, menu->lifetime());

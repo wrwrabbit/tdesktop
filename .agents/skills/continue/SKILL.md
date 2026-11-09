@@ -1,0 +1,835 @@
+---
+name: continue
+description: Continue autonomous Telegram Desktop development from the shared ai-tdesktop repository. Use when the user invokes $continue or /continue with a batch specification (named tasks, projects, a described theme, the active task, the inbox, or explicitly all pending tasks), or asks Codex to work through a specified part of the AI queue. Resumes this checkout's active task first, freezes exactly the specified batch, includes and consolidates follow-ups discovered from it, and defers everything else; without a specification it only reports the queue and asks for one.
+---
+
+# Continue AI Work
+
+When running in Grok Build, read `.grok/ai-workflow-adapter.md` completely
+before any other host-specific delegation rule and apply its substitutions.
+
+Before assigning workers, read [phase effort](../../shared/phase-effort.md)
+and apply its scope-based effort selection and host mappings. On Codex, also
+read [child completion and recovery](../../shared/codex-delegation.md) and
+apply it to every worker below, including inbox, split, routing, and
+consolidation workers. Include that reference in each publication-owning or
+orchestrating child prompt, even when it must not delegate. Only disposable
+phase leaves receive the phase final-reply contract instead.
+
+Act as the checkout-level scheduler. Choose one invocation mode at startup,
+freeze its task batch, and keep looping only through that batch and follow-ups
+discovered from its results. Do not drain unrelated tasks added while the run
+is in progress. After routing new follow-ups, consolidate compatible unclaimed
+work in a fresh leaf worker. Delegate inbox planning and one-task execution; do
+not plan or implement Telegram changes in this scheduler session.
+
+A run often has nobody at the computer. After the startup report and any
+startup question about the specification, never ask the owner anything and
+never wait for an answer: decide, record the decision in the report, and
+continue. Work that genuinely needs the owner (credentials, money, a server
+change) is set aside and listed in the final report.
+
+This is the default development command and the successor to the old `task`
+and `implement` workflows. Inbox processing runs only when the specification
+asks for the inbox, at most once per invocation, and owns request splitting
+and project routing; `perform-task` owns context, planning, implementation,
+review, Debug build, test-loop, evidence, and final publication.
+
+## Resolve the workspace
+
+Run from a Telegram Desktop checkout. Read `AGENTS.md`, then use the shared
+helper with the host's Python 3 command:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py queue
+```
+
+Use `python` or `py -3` when appropriate. Save `checkout_tag`, `ai_main`,
+`slot_worktree`, and `source_root` from its JSON. Read `ai_main/AGENTS.md`.
+Then read the batch specification (below). Without one, stop here, after only
+this read-only `queue` call, and report and ask as that section says.
+
+Stop before mutating anything when `violations` is nonempty or AI master is
+dirty. Dirty task-scoped AI files are the active checkout's local resumable
+phase state and are expected; resume from them, never discard them. Other
+uncommitted slot changes under `tasks/`, `projects/`, `receipts/`, or this
+checkout's `batches/<checkout_tag>.yaml` are
+disposable leftovers of an interrupted worker; the ignored inbox snapshot and
+published task results retain every durable input needed to redo them.
+Restore those exact tracked paths to the slot branch head, delete their
+untracked files, and continue. Stop instead of cleaning when any other slot
+path changed, and never clean the main worktree or stash anywhere.
+Unpublished clean AI slot commits are incomplete publication; run the
+helper's `publish` command before selecting work. It recognizes a consolidation
+commit and revalidates its aliases and complete dependency graph after every
+rebase before pushing; never publish such a commit manually.
+
+The canonical lifecycle is deliberately small:
+
+- `todo` with `claimed_by: null` is ready shared work;
+- `in-progress` with this `checkout_tag` is this checkout's one active task;
+- `blocked` with this tag is a rare published unfinished boundary;
+- `split-required` with this tag is a published performer result awaiting one
+  scheduler-owned split transaction;
+- `approved` is the only completed terminal state.
+
+After routing, the retired source has no live state: its sealed `split.yaml`
+records all successors and the optional implementation carrier. This is
+terminal history, not another runnable status.
+
+`Start` atomically assigns an unclaimed task and changes it to `in-progress`.
+Normal phase artifacts remain local and uncommitted in the slot worktree.
+`Approve` publishes all final AI artifacts and state in one commit. `Block` is
+permitted only for a genuine exhausted task blocker,
+not for an interrupted agent session. `Split-required` publishes the proposal
+and seals any retained source work for the scheduler transaction. Never publish
+`Claim`, phase checkpoint, or `Resume` commits. Existing claimed `todo` records from the older workflow
+remain startable but do not justify creating new reservations.
+
+Never infer ownership from an inbox receipt. Do not steal work from another
+checkout. Moving an unfinished task to another checkout is a rare explicit
+human reassignment that may restart the task and discard checkout-local phase
+artifacts; it is never automatic scheduler behavior.
+
+Before freezing a new invocation batch when no task is `in-progress`, handle
+each entry in the queue JSON's `pending_consolidations` once. These durable
+markers mean discovery routing published new tasks but its separate
+consolidation pass did not finish. Spawn the consolidation worker described
+below with the source task and batch ids recorded in the marker, then refresh
+the queue. A repeated pre-commit race may remain pending for the next
+invocation; record that marker as attempted and do not spin. Consolidation publishes
+through the checkout's routing worktree (`route-ensure`,
+`consolidate-publish --routing`), so an active task's slot phase files do not
+defer recovery: recover pending markers whenever no other routing or
+consolidation transaction is in flight.
+
+After recovering pending consolidations and before freezing a new batch, route
+this checkout's `own_split_required` task, when any, through the dedicated split
+worker below. Refresh the queue afterward and freeze the resulting replacement
+tasks at the front of the initial batch regardless of the specification; they
+replace checkout work that a specification cannot exclude. Record that startup
+split for the invocation summary. A split-required task is exclusive checkout
+work: do not start, retry, or resume another task while it remains unrouted.
+If its retained source state cannot be transferred safely, stop with that
+state intact rather than skipping it.
+
+## Read the batch specification
+
+The text after `$continue` or `/continue` is the batch specification. It is
+required, and it always restricts: the initial batch is exactly the tasks it
+selects, in the order its wording gives, otherwise in queue order. It may
+select:
+
+- tasks by id, slug, or title;
+- projects, or every task except named ones ("all tasks except projects X and
+  Y");
+- a theme or area described in words ("the three code health ones"), matched
+  against the tasks in the startup snapshot;
+- "the active task": this checkout's `in-progress` task alone;
+- "the inbox": one inbox transaction, then only the tasks its receipt routes;
+- explicitly "all pending tasks": every `own_todo` and `unclaimed_todo` task in
+  the refreshed startup snapshot of canonical master, including tasks still
+  waiting on dependencies. Blocked tasks are not pending.
+
+Projects are branch-bound: a project's tasks are performed on the branch
+named by its slug, and standalone tasks on any branch that is not a live
+project's. The queue JSON's `branch_project` names the project whose branch is
+checked out, or is null. Select only tasks the current branch can start: on a
+project branch, that project's tasks (so "all pending tasks" there means the
+project's pending tasks); elsewhere, standalone tasks. Report every selected
+task the branch cannot start with the branch it needs. A specification that
+names a project whose branch is not checked out stops at startup with that
+report: the owner checks existing project branches out, and the scheduler never
+switches onto or off one. A branch that exists nowhere yet is the exception, see
+[Create a missing project branch](#create-a-missing-project-branch). Several
+checkouts may run the same project at once.
+
+The specification may also ask to rebase the project onto a base branch, such
+as `origin/dev` or `private/alpha`. Record it as `base_rebase` and pass
+`Base: <remote>/<branch>` to the first project task's performer in this
+invocation; later tasks only sync with the project branch.
+
+This checkout's blocked and legacy-reserved tasks join only when the
+specification selects them, by name or by a description they match. A review
+provider choice such as "use your model for review" or "use codex-default for
+review" is not a specification, and neither is a purely procedural argument.
+
+Without a specification, stop after the read-only `queue` call, before
+publishing leftovers, recovering consolidations, routing a split, or touching
+the inbox. Report this checkout's `in-progress`, `split-required`, and blocked
+task ids, the number of unclaimed `todo` tasks, and whether the inbox is
+nonempty, then ask for a specification. A specification that matches no task
+adds no shared tasks: the run handles only the exclusive checkout state below,
+then stops normally with the same report. It never falls back to the whole
+queue or the inbox.
+
+This checkout's `in-progress` task and an own `split-required` task are
+exclusive checkout state, not shared work. The run handles them first even
+when the specification does not name them, because no other task can start
+while they exist, and the startup report names them.
+
+The recorded batch is invocation-local bookkeeping, not a reservation. Start
+only one shared task at a time, finish or exceptionally block it, refresh
+canonical state, then select another recorded id. Always resume this
+checkout's `in-progress` task before other recorded work, unless the user
+expressly asks to stop or reassign it.
+
+### Create a missing project branch
+
+When the specification selects tasks that all belong to one live project, and
+that project's branch exists nowhere, create the branch and continue instead of
+stopping. Nowhere means no local `<slug>` branch and no `refs/heads/<slug>` in
+`git ls-remote --heads` on any remote. A project branch that exists anywhere is
+still the owner's to check out.
+
+Stop with the report above when a remote cannot be reached, when the current
+branch is another live project's, whose commits are not this project's base, or
+when `source-prepare` refuses the checkout. An active or split-required task
+comes first: create the branch once this checkout has finished that work, before
+the next Start.
+
+After `source-prepare` passes, fetch `origin` and `private` and pick the base:
+
+- `origin/dev` or `private/alpha` when `HEAD` is an ancestor of it, so this
+  checkout could fast-forward there. When both qualify, take the one that
+  contains the other, or `origin/dev` when they have diverged.
+- Otherwise the current commit.
+
+Run `git switch --no-track -c <slug> <base>`, run `source-prepare` again to
+bring the submodules to the new commit, and refresh `queue`. Record the slug and
+base for the report. The first `project-push` publishes the branch to `private`.
+
+## Freeze the invocation batch
+
+Use the first clean, refreshed queue snapshot to choose exactly one mode
+before starting, retrying, resuming, or performing a task. Create and record
+these invocation-local values in the scheduler plan:
+
+- `invocation_mode`;
+- ordered `initial_batch_task_ids`;
+- ordered `batch_task_ids`, initially equal to the initial batch;
+- empty `discovered_task_ids`;
+- empty `consolidation_mappings` and `consolidation_receipts`;
+- empty `attempted_blocked`;
+- `split_records`, initialized with any startup split transaction and otherwise
+  empty.
+
+Do not claim the whole batch or publish reservations. The batch's only
+durable trace is the soft mark that `start` publishes (below).
+Queue refreshes update task state but never add ordinary task ids to the
+frozen batch.
+
+### Source-lineage gate
+
+On a project branch, run `source-prepare` (below) before a lineage check that
+precedes a Start, or a Retry or pre-Phase-1 resume without owned source work.
+It fast-forwards the branch to `private/<slug>`, where other checkouts publish
+the project's approved work, so a prerequisite another checkout finished is
+present before the gate looks for it. An active task with owned work resumes
+as it is and meets newer project commits at its own `project-sync`.
+
+Before freezing the batch, inspect every prospective initial task's `task.md`
+and dependencies. For every approved task whose shipped code is a prerequisite,
+run:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py source-lineage \
+  --task <task-id> [--require <explicit-source-task-id> ...]
+```
+
+`depends_on` requirements are included automatically. Pass `--require` for an
+explicit source prerequisite named in `task.md` that old routing failed to put
+in `depends_on`. Unfinished dependencies remain a readiness concern and appear
+separately; this gate checks the history of approved source work. A rewrite can
+fold a prerequisite's commit into later work: when an approved task that
+depends on it still has its own commit on `HEAD`, the gate counts the
+prerequisite as present and names that witness in `witnessed_source_tasks`.
+
+If any prospective task reports `current_satisfies: false` at this startup
+gate, leave it out of the frozen batch and continue with the rest; do not
+switch branches for it. Report the current branch, missing source task ids,
+unavailable commits, and compatible local branches in the run's report, so the
+owner can rebase, bring the commit, switch the checkout, or change scope
+later. Never create or route an integration task, and never cherry-pick,
+rebase, merge, or switch branches at this startup boundary. The exception is an already-active task whose saved
+artifacts prove Phase 1 completed: it has crossed the task boundary, so resume
+the performer and let the after-Phase-1 rule publish the task-local Block.
+
+After the batch is frozen, rerun the same gate immediately before each Start,
+Retry, or pre-Phase-1 resume. A mismatch first found here is recoverable queue
+routing, not a task blocker: while the selected task has not completed Phase 1,
+switch this checkout to a compatible existing local branch and continue the
+same frozen batch. Require a clean source checkout and submodules, no owned or
+disposable task overlay, no exact checkout executable, no source recovery refs
+for work already begun, and verify with `git worktree list --porcelain` that the
+branch is not checked out elsewhere. Apply `source-prepare` (below) to this
+cleanliness gate so stale submodules are updated and registered nested worktrees
+are ignored. Prefer a compatible branch appearing for the most remaining batch
+tasks; preserve recorded batch order. Do not create a branch or cherry-pick,
+rebase, or merge. After `git switch`, refresh `queue`, rerun `source-lineage`,
+`source-prepare` and `source-preflight`, then Start/Retry or resume. Never
+switch onto or off a project branch; `source-lineage` offers only branches the
+task may run on. If no safe compatible local branch exists, leave that task
+for a later invocation, report it, and continue with the rest of the batch.
+
+### Mode 1: resume active work, then the specified tasks
+
+If `own_in_progress` contains this checkout's active task, choose `active`
+mode and record that task id first. Then append what the specification
+selects: the tasks Mode 2 would record from the startup snapshot, or, when it
+asks for the inbox, the tasks routed by Mode 3's single inbox transaction, run
+at startup.
+
+Finish the active task to an approved, genuinely blocked, split-required, or
+global-hard-stop boundary, route any split before continuing, then continue
+through ready recorded tasks one at a time. A specification of just the active
+task produces a one-item active batch.
+
+### Mode 2: run the specified queue tasks
+
+When there is no active or split-required task and the specification selects
+queue tasks, choose `queue` mode. Record exactly the selected ids from the
+startup snapshot, in the specification's order. Record tasks even when their
+dependencies are not yet approved; they may become ready as earlier batch
+members finish. An empty selection stops normally without processing the
+inbox.
+
+Never invoke `process-inbox` unless the specification asks for the inbox, and
+never after the recorded batch drains.
+
+### Mode 3: run what one inbox transaction routes
+
+Choose `inbox` mode when the specification asks for the inbox and no task is
+active; with an active task, Mode 1 runs the same transaction. Queue tasks the
+specification does not also select stay out of the batch, and tasks it does
+select follow the routed ones. Work owned by another checkout is not work this
+checkout can drain and does not enter its batch.
+
+If `inbox_nonempty` is false, record the batch without routed tasks and report
+that the inbox was empty. If it is true, spawn one inbox worker with
+`fork_turns: "none"`.
+
+Give the worker the source checkout path and instruct it to read and use
+`.agents/skills/process-inbox/SKILL.md` completely. It owns exactly one inbox
+transaction, may use the bounded planner delegation required by that skill,
+must not implement tasks, and must return the receipt and created ids.
+
+Wait for the worker to return using the host completion contract, then
+validate the receipt plus refreshed queue before proceeding. Record the
+actionable task ids routed by that receipt, whether newly created or reused,
+after any active task and before queue tasks the specification also selects.
+Never launch a second inbox worker in this invocation. If it cannot publish
+durable AI state, stop with the inbox transaction recoverable.
+
+Inbox content that appears or remains after this startup transaction is left
+untouched for a later invocation that asks for the inbox.
+
+## Drain only the frozen batch
+
+Refresh queue JSON after every delegated operation and state transition. A
+task that appears in a later refresh but is absent from `batch_task_ids` is
+not eligible in this invocation. Do not substitute it when a batch task is
+claimed concurrently, blocked by an external dependency, or otherwise
+unavailable.
+
+After the source-lineage gate passes, prepare the Telegram checkout before
+Start, Retry, or a pre-Phase-1 resume that has no owned source changes:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py source-prepare
+```
+
+This automatically initializes or updates stale submodules recursively to the
+recorded gitlink commits, using a non-force checkout. It preserves local and
+staged changes and never follows remote tips. Source cleanliness checks ignore
+verified registered linked worktrees nested inside the checkout or its
+submodules, including their contents; leave those worktrees untouched. Ordinary
+untracked files, tracked changes and unregistered nested repositories still
+block. Preparation refuses a submodule target that would enter a registered
+worktree, including one hidden by ignore rules. AI main and slot cleanliness
+rules remain unchanged. Queue and `source-preflight` stay read-only.
+
+Before publishing any new canonical `Start` commit, require that preparation
+succeeds. The one exception is the checkout-owned first replacement whose
+`carried_from` field and source `split.yaml` designate it as the implementation
+carrier: start it
+with the retained source state intact, and let the helper revalidate the sealed
+worktree before transferring task refs. Do not require a Telegram executable,
+portable account, desktop, Docker daemon, or
+other instrument before assessment selects it. The performer gates every
+selected instrument before using it and records an unavailable platform or
+stage precisely instead of preventing unrelated task work from starting.
+
+Every `start` below passes `--batch` with the effective batch's remaining
+unfinished task ids in selection order, the task being started first: the
+current `batch_task_ids` after split, consolidation, and discovery rewrites,
+without approved, superseded, split, or retired ids. The helper rewrites this
+checkout's `batches/<checkout_tag>.yaml` with that list inside the same `Start`
+commit. `retry` stays local and leaves the file as the last Start wrote it.
+Reorders and additions take effect at the next Start. The file is a soft mark for viewing every checkout's batch on one
+board, never a reservation: any checkout may still start a listed task, and
+ownership comes only from `claimed_by`. Queue refreshes report it as
+`own_batch`. Never edit it by hand.
+
+### 1. Resume active batch work
+
+If this checkout has an `in-progress` task whose id is in `batch_task_ids`,
+select it and spawn one performer. Its task-scoped dirty AI artifacts are the
+resumption handoff. There must be at most one active task. Stop on an active
+task outside the batch instead of silently expanding the batch or stealing
+ownership.
+
+### 2. Start a carried implementation
+
+Otherwise select the first ready checkout-owned `todo` task in
+`batch_task_ids` whose `carried_from` field names a retired split task. It must
+be the first replacement and match that task's `implementation_carrier`.
+Start it with the normal helper command. The helper verifies the source
+worktree seal, transfers the old task's base/green/run refs, publishes the
+carrier's canonical `Start`, and removes the obsolete refs. If any check fails,
+hard-stop with both the carrier and retained source state intact; do not start
+another batch task around it.
+
+### 3. Retry recorded blocked work
+
+Otherwise select the first ready task in `own_blocked` whose id is in
+`batch_task_ids` and not in `attempted_blocked`. Readiness means every
+dependency is `approved`. Reopen it locally:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py retry \
+  --task <YYYY/MM/DD/slug> [--require <explicit-source-task-id> ...]
+```
+
+This preserves its ownership, source recovery refs, plans, reviews, tests,
+result, and evidence while changing the slot worktree back to local
+`in-progress`. It publishes no `Resume` commit. Spawn its performer at the
+first incomplete validated boundary.
+
+Add the id to `attempted_blocked` only if the performer later publishes a
+genuine new `Block` boundary under the validation below. A test-campaign cap,
+`TEST_FLAW`, blank/missing evidence, or another recoverable harness failure is
+not genuine and does not consume this invocation's blocked retry.
+
+### 4. Start recorded reserved work
+
+Otherwise select the first ready legacy `todo` task already owned by this
+checkout whose id is in `batch_task_ids`, and start it:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py start \
+  --task <YYYY/MM/DD/slug> [--require <explicit-source-task-id> ...] \
+  --batch <YYYY/MM/DD/slug> [<remaining-batch-task-id> ...]
+```
+
+The resulting canonical `Start` commit changes it to `in-progress`. Leave
+legacy reservations with unfinished dependencies untouched and consider later
+ready batch work.
+
+### 5. Start recorded shared work
+
+Otherwise select the first ready unclaimed `todo` task whose id is in
+`batch_task_ids`, using the order recorded at startup. Start it with the same
+helper command. `start` atomically assigns and activates the task, then
+publishes its canonical `Start` commit before source work begins.
+
+A concurrent start may mean another checkout won the task. Never overwrite
+shared state or replace it with a task outside the batch; refresh and continue
+with another recorded id.
+
+### 6. Stop normally
+
+Stop when none of these batch-scoped conditions exist:
+
+- this checkout's active batch task;
+- a ready recorded carried implementation;
+- a ready recorded blocked task not attempted in this invocation;
+- a ready recorded legacy-reserved task;
+- a ready recorded unclaimed task.
+
+Recorded tasks still waiting on dependencies outside the batch, tasks won by
+another checkout, and a blocked task already attempted in this invocation
+remain visible in the final summary but do not cause a busy loop. Tasks added
+by another inbox run, checkout, or user after the startup snapshot are outside
+the batch and wait for the next invocation.
+
+Do not process or wait for the inbox at this point.
+
+Immediately before this normal stop, run the housekeeping command once:
+
+```bash
+python3 .agents/skills/process-inbox/scripts/workspace.py archive-stale
+```
+
+It publishes one canonical `Archive <slug>` commit for every project whose
+tasks are all approved and whose newest task is older than its threshold,
+after rewriting the project's relative links for the deeper path. Skip this
+housekeeping on any global hard stop. Only routing new work to an archived
+project restores it, through the helper's `unarchive` command; nothing
+un-archives on a timer.
+
+## Spawn one performer
+
+Spawn exactly one performer for the selected task with `fork_turns: "none"`
+and a unique tool-valid name. Tell it:
+
+```text
+Use .agents/skills/perform-task/SKILL.md completely.
+Source checkout: <source_root>
+AI slot worktree: <slot_worktree>
+Checkout tag: <checkout_tag>
+Task: <task-id>
+Base: <remote>/<branch>   (only when this task carries the invocation's base_rebase)
+Own this task until it is approved, genuinely blocked, split-required, or
+reaches a global hard stop. You may use the bounded leaf delegation required by
+the skill. Do not select or start another task. Never ask the owner a
+question: decide, record it in work/decisions.md, and continue.
+```
+
+The performer is stateful. Never duplicate it. Wait for its final result using
+the host completion contract. If it stops before a valid boundary, recover
+through its saved target under that contract; do not wait indefinitely for
+another response from an idle or failed turn.
+
+After it returns, require one of:
+
+- source checkout clean at the recorded run tip and task `approved` on
+  canonical AI master;
+- source checkout clean and task exceptionally `blocked` on canonical master,
+  with exact unverified behavior;
+- task `split-required` on canonical AI master with `work/split-proposal.md`
+  and `work/carried-work.json`, leaving every retained source change and task
+  ref sealed for transfer; or
+- a clearly reported global hard stop, leaving the task `in-progress` and all
+  task-scoped local state recoverable for the next invocation.
+
+A rescope result stops task performance and is not retried, approved, blocked,
+or routed as an ordinary discovered follow-up. The performer's publication is
+the durable request for the scheduler-owned transaction below; it is not
+permission to delete source or flatten several successors into one alias.
+
+## Route a split-required result
+
+When a batch performer publishes `split-required`, immediately spawn one fresh
+split worker with `fork_turns: "none"`. Give it `source_root`, `slot_worktree`,
+`checkout_tag`, the source task id, and the current ordered batch. Tell it not
+to delegate and to read
+`.agents/skills/continue/references/split-required-task.md` completely. It may
+inspect Telegram source and edit/publish AI task, project, dependency, and
+receipt state; it must not edit, reset, stash, commit, build, or test Telegram
+source.
+
+Validate its canonical `Split <source-id>` result and refreshed queue. Replace
+the source id in `batch_task_ids` at its existing position with the ordered
+replacement ids, removing duplicates; leave `initial_batch_task_ids` unchanged.
+Append the source, replacements, carrier, and receipt to `split_records`. The
+replacements are part of this invocation because they replace an existing batch
+member, not because later queue refreshes normally expand the frozen batch.
+
+When a carrier exists it must be first, checkout-owned `todo`, and name the
+source in `carried_from`; select it through the carried-implementation step
+before any blocked, reserved, or shared task. Starting it performs the sealed
+source-ref transfer. When no carrier exists, all replacements are ordinary
+unclaimed `todo`. A split publication race is retried normally. A semantic
+conflict, unavailable remote, changed worktree seal, or incoherent carrier is a
+global hard stop with the source result and implementation left recoverable.
+
+Before accepting a canonical test block, read `work/result.md` and
+`work/test.md`. It is genuine only when the verdict is not `TEST_FLAW`, does
+not cite `MAX_TEST_RUNS` or a missing/blank capture as the blocker, and
+`work/test.md` contains `## Recovery exhaustion`; the separately documented
+Computer Use infrastructure-unavailable verdict is the only exception to the
+section requirement. If an older or concurrently finishing performer
+published a boundary that fails this check, immediately `retry` it in this
+same invocation, keep it out of `attempted_blocked`, and spawn one fresh
+performer at the focused test-recovery boundary. Preserve all positive
+evidence and rerun only unmet checks. New performers cannot normally publish
+such a boundary because `workspace.py finish` enforces the same rule; this is
+defense for legacy state.
+
+An interruption or environment stop never becomes a convenience `Block`.
+After a genuine `Block`, add the task id to `attempted_blocked` and continue
+with independent work; for a project task the planner pass below routes
+around it. A source-lineage mismatch first proven after Phase 1 is
+such a genuine task-local Block: continue with batch tasks that do not depend
+on it and whose own lineage gates pass. A pre-Phase-1 lineage stop is not a
+Block or global hard stop; apply the safe mid-queue branch-switch rule above and
+resume the same performer. Dirty source the run cannot account for never
+stops the loop: save it with `workspace.py wip-save --reason "<what is
+unknown>"`, which commits it to a new side branch
+`wip/<branch>/<checkout-tag>/<time>` (tdesktop on `private`, submodules on
+their `origin`) and leaves the checkout clean, name that branch in the report,
+and continue. A file-lock build failure that remains after `perform-task`
+exhausts the shared exact-checkout recovery is retried with a growing delay.
+Only a server scheme mismatch (the server rejects the client's constructors,
+for example `INPUT_CONSTRUCTOR_INVALID`: the owner must update the scheme), a
+missing golden test account that cannot be recreated unattended, an unsafe
+publication conflict, or a comparable safety failure stops the loop.
+
+The missing `test_TelegramForcePortable` golden account is the only
+portable-folder global stop. All live/real folder combinations must be
+reconciled by `perform-task` according to the shared test-loop protocol.
+Computer Use being unavailable because macOS is locked is never a scheduler
+stop; the performer must continue with the in-binary overlay driver and
+artifact-based assessment.
+
+## Route discovered follow-ups
+
+After every canonical `Approve` or `Block`, read `work/result.md`. Route
+whenever it lacks `work/discovered-routed.md` and either says
+`Discovered: present` or carries a non-`none` `Unverified:` value. Route a
+project task's result every time, even without either: its routing worker is
+also the project's planner (below). Routing runs
+beside task selection, not before it: spawn the worker, then continue
+selecting and starting recorded batch work immediately. Keep at most one
+routing worker in flight, and never reach the invocation's normal stop while
+any routing or consolidation is unlanded.
+Both are unfinished work leaving the pipeline; the only difference is that
+`Discovered:` names work nobody has started and `Unverified:` names behavior that
+already shipped without proof. An approved task whose unverified behavior was
+never routed is exactly how coverage debt becomes invisible, so the marker file
+gates both.
+
+Spawn one disposable routing worker with `fork_turns: "none"`. Tell it to read
+the routing, splitting, task-path, artifact, validation, and publication rules
+in `.agents/skills/process-inbox/SKILL.md`, but not to call `prepare`,
+`finalize`, or `abort`. Its immutable input is the result, not the inbox. It
+must not edit Telegram source, start tasks, or implement work. Give it the
+current ordered `batch_task_ids` for the pending consolidation marker.
+
+The worker edits and publishes through the checkout's routing worktree, never
+the slot: it starts from `workspace.py route-ensure` (which creates and syncs
+the `routing/<tag>` worktree), writes every artifact there, and publishes with
+`workspace.py route-publish --source-task <id> --path <path> ...`, which
+stages exactly the named paths, commits `Route follow-ups from <id>`, and
+rebases onto canonical master before pushing. The slot worktree stays
+untouched, so an active performer's local phase state never conflicts. After a
+crash, an unpublished routing commit is resumed by rerunning
+`route-publish --source-task <id>` with no paths.
+
+The worker must deduplicate existing tasks, create independently testable
+unclaimed `todo` tasks and justified project updates, write a discovery
+receipt, and write the source task's routing marker. When it creates at least
+one task, it must also write `work/consolidation-pending.md` under the source
+task, recording the source id, newly created ids, and the post-routing batch:
+the scheduler's current ordered `batch_task_ids` followed by the newly created
+ids in routing order with duplicates removed. The marker is part of the routing
+commit and makes the separate pass resumable after a crash. It stages only
+those paths, commits
+`Route follow-ups from <source-task-id>`, and publishes with the workspace
+helper. Retry ordinary concurrent-master races; preserve a semantic conflict
+or unavailable-remote slot commit and stop.
+
+Never route discovered work whose sole purpose is moving an existing commit to
+another branch: no backport, forward-port, cherry-pick, rebase, merge, or
+branch-sync task. Record that request or observation in the discovery receipt
+only, naming the source task and desired branch when known. A real product
+follow-up may depend on the source task, but `depends_on` carries that lineage;
+do not create an integration companion task.
+
+Use this stable marker shape so a context-free worker can recover it:
+
+```markdown
+# Pending task consolidation
+
+Source: <source-task-id>
+Created:
+- <new-task-id>
+Batch:
+- <ordered-post-routing-batch-task-id>
+```
+
+Project assignment has a strong source-project bias. When the source task has
+a project, assign each discovered task to that
+same project by default, add it to the project index, and name the source task
+in `depends_on` whenever its shipped code or behavior is a prerequisite, even
+when it is already approved. State that code-lineage requirement in the new
+task so it is not attempted on a branch without the project changes.
+
+Detach a discovered task to another project or to `project: null` only when the
+worker proves it remains coherent, implementable, and independently testable
+with the source project's changes absent or reverted. For a defect the test is
+direct: one that reproduces on the project's base branch without the
+project's commits is upstream and goes to standalone work or the project it
+belongs to, and a project task that needs the fix depends on it; anything else
+stays in the project. Touching shared code,
+serving another surface, or having a broader title is not proof: projects
+record feature and code lineage, not exclusive file ownership. The discovery
+receipt must record the concrete independence evidence. If the source project
+is archived, restore it before adding the task. When the source task has no
+project, apply the ordinary project-selection rules from `process-inbox`.
+
+First apply the scope filter, before any disposition. A coverage follow-up
+exists to prove **the source task's own change**, so run the revert test on each entry: if
+reverting that task's diff could not change the outcome, the entry is about
+pre-existing behavior and no coverage task is created for it.
+
+The same filter drops a re-run of portable behavior on a second host. An entry
+naming another platform survives only when the source diff carries one of the
+non-trivial platform-specific mechanisms `pipeline.md` lists for `Unverified:`
+— `#ifdef` or platform-API code, filesystem path semantics,
+process/thread/event-loop ordering, or acceptance criteria stated per platform
+— *and* the entry states a concrete reason to suspect that platform gets it
+wrong. Name that mechanism and that suspicion in the receipt. The bare
+existence of a platform-specific surface is not a suspicion.
+
+Never route a task whose purpose is to confirm that another platform still
+builds or links. Every platform is built and tested before anything merges to
+`dev` or ships, so a build break surfaces there immediately and for free,
+while the task costs hours. This covers a dependency or submodule pin that
+another platform's toolchain consumes, compiler flags and their diagnostics,
+CMake platform branches, and ABI or symbol resolution — however the source
+result worded its `Unverified:` line, and even when a capable host is idle.
+Record it in the discovery receipt only.
+
+Portable C++, localization values, layout and pure logic are verified once on
+any capable host: record the entry as out of scope and create no task. One
+implement task must not spawn a family of verify-on-each-platform successors.
+
+Untested code the run passed on the way, a neighbouring feature, a parameter range the acceptance
+never named, a pre-existing bug the performer noticed: record the observation in
+the receipt and stop there. If it deserves work it must earn its own task on its
+own merits, through the ordinary discovered-follow-up planner and with its own
+justification — never as coverage debt attributed to a task that did not create
+it. This filter is what keeps a codebase far larger than the queue from
+generating coverage work without end.
+
+Entries that survive the filter get exactly one of two dispositions, and the
+receipt records which and why:
+
+- **Routable** when an available checkout or capable host can close the gap.
+  Create an ordinary `type: implement` task naming the exact behavior to
+  establish. It first measures the claim with the adaptive evidence loop. If
+  the behavior deviates, it repairs and re-tests it in the same task. If the
+  behavior already holds and no permanent change is warranted, it may approve
+  as `Outcome: already-satisfied` with no source commit and with the measurement
+  evidence retained.
+
+  This disposition should be rare. `pipeline.md` requires a performer to
+  close any gap its own checkout can measure by adding a test run while it still
+  holds the context, the branch, the overlay and the build, rather than deferring
+  it — so a routable entry means that bar slipped. Route it anyway, because the
+  coverage is genuinely missing and the source run's context is gone, but state
+  plainly in the receipt that the source run could have closed it in context.
+  That sentence is the measurable signal that the pipeline is exporting its own
+  test coverage into the queue; read a run of them as a defect to fix upstream,
+  never as normal throughput.
+- **Infrastructure-limited** when closing it needs something the project does
+  not have — a second account, funded external value, real server-backed cloud
+  state. Record it in the receipt only. Do not create a task that would be
+  unstartable the moment it enters the queue.
+
+Never resolve a surviving entry by deciding the behavior is probably fine. Once
+an entry is in scope, the disposition is about who can verify it and when, never
+about whether it is worth verifying. That rule governs the choice between the two
+dispositions; it does not override the scope filter above, which asks a different
+question — whether this task is the one that owes the measurement at all.
+
+Every discovered task uses `type: implement`; assessment, not routing, chooses
+its review and evidence depth. For a coverage follow-up, write the source
+task's diff into it as its scope boundary, naming that task and what it changed.
+Its acceptance criteria must all pass the revert test against that boundary and
+must not enumerate a parameter range the source task never named. If a prior
+coverage task already measured a deviation, route only the repair with the
+measured expected and actual values; do not create another measurement of the
+same gap.
+
+After the routing lands on canonical master and its discovery receipt
+validates, append only the task ids created from
+that result to `discovered_task_ids` and `batch_task_ids`, preserving routing
+order. This is the only way the frozen batch grows. Apply the same rule
+transitively when a discovered task later reports its own follow-ups.
+Deduplicated references to pre-existing tasks and unrelated tasks observed in
+queue refreshes do not join the batch.
+
+## Plan the project
+
+For a project task the routing worker also plans the project. Tell it the
+project slug and to read the project's `project.md` and `tasks.md`, the source
+result and the results and `work/decisions.md` of the project's earlier tasks
+it needs. Beyond discovered routing it may:
+
+- rewrite an unclaimed `todo` task of the project whose assumptions the result
+  changed, or retire one the result made obsolete by removing its
+  `state.yaml` and appending a `## Retired` section that says why, updating
+  its dependents and the project index. A retired task may be named by a
+  split or alias record: it resolves to no successor, and a dependency on it
+  counts as met;
+- add the tasks the result revealed;
+- route around a `Block`: another approach, a smaller task, or an `improve`
+  task (an `## Objective` section) for a threshold the code could not meet;
+- when the project has no open tasks left, compare the results with
+  `project.md` and plan the next round: the next part to migrate, a
+  differential test against the old implementation, an `improve` task; or
+  conclude that nothing left moves the project forward and record
+  `Project: complete` in the discovery receipt.
+
+`route-publish` refuses a revision of a task another checkout started since
+the worker read it, a revision of retired history, and a result that breaks
+the dependency, alias or split graphs; drop that revision and publish the
+rest. A graph problem already on master, in records the publication does not
+touch, is printed as a warning and does not block it.
+
+A planner pass interrupted before it published leaves its source result
+without `work/discovered-routed.md`. A planner pass covers the whole project,
+so only the latest one matters: for a project selection, at startup and again
+before the batch is judged empty, route the project's most recently finished
+task (its newest `Approve` or `Block` commit) when it lacks that marker. Tasks the
+planner creates join the batch like discovered tasks, so a project run keeps
+going until its planner records `Project: complete` and the batch drains.
+
+## Consolidate pending tasks after discovery
+
+Whenever discovery routing publishes `work/consolidation-pending.md`, run one
+fresh consolidation pass once that routing has landed; it runs beside the next
+task, publishing through the routing worktree with
+`consolidate-publish --routing`, with at most one consolidation in flight. Do not run it for a
+receipt-only routing or a routing that only reused existing tasks. Do not reuse
+the performer or routing worker: spawn one disposable worker with
+`fork_turns: "none"`, instruct it not to delegate, and give it `source_root`,
+`slot_worktree`, `checkout_tag`, the pending marker, and effective batch ids.
+Use the current frozen `batch_task_ids` when one exists; only recovery before a
+new batch is frozen uses the marker's Batch list. The marker always supplies the
+source task and newly created ids after scheduler context is lost.
+
+Tell it to read
+`.agents/skills/continue/references/consolidate-pending-tasks.md` completely and
+own exactly one queue-wide consolidation pass. The worker may edit and publish
+AI task, project, and receipt state, but must not touch Telegram source, build,
+test, claim, start, approve, or block work. Wait and validate it like the routing
+worker; keep its task-description scan and merge reasoning out of the scheduler
+context.
+
+A no-merge result still publishes `work/consolidation-complete.md` and removes
+the pending marker, so it cannot be repeated after a restart. A pre-commit race
+leaves the pending marker intact; refresh the queue, record it as attempted for
+this invocation, and continue without treating the optimization as a blocker.
+If the worker created a commit that cannot be published safely, preserve it and
+hard-stop exactly as for discovery routing.
+
+Process any older pending marker whenever no consolidation is in flight, then
+the marker created by the newest routing, in publication order. Attempt each
+marker at most once per invocation.
+
+For each published old-to-new mapping, rewrite `batch_task_ids` by placing the
+replacement at the earliest position occupied by any of its sources and removing
+the other source ids and duplicate replacement ids. Do not add a replacement
+when none of its sources was in the batch. Apply the same replacement and
+deduplication to `discovered_task_ids`; leave `initial_batch_task_ids` unchanged
+as the startup record. Append the mapping and receipt to the invocation-local
+consolidation records, refresh canonical state, and only then select more work.
+
+## Report
+
+Return one compact summary: the specification, invocation mode, any project
+branch created and its base, initial
+batch ids, discovered ids added to the batch, inbox receipt if processed,
+tasks approved, exceptionally blocked tasks with exact unverified behavior and retry status, recorded tasks
+left queued, unrelated new tasks deferred to the next invocation, routed
+discoveries, split-required sources with ordered replacements and carriers,
+infrastructure-limited coverage gaps recorded but not routed,
+consolidation no-merge results or receipts, old-to-new mappings, the net
+task-count saving, archived projects, any discarded interrupted-worker leftovers,
+elapsed time, and why the loop stopped. Make any global hard stop or unsafe
+state unmistakable. Never include source or AI commit hashes; task ids are the
+only durable locators.

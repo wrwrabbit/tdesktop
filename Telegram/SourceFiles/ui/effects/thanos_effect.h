@@ -32,11 +32,13 @@ public:
 	[[nodiscard]] bool animating() const;
 
 	[[nodiscard]] rpl::producer<> allDone() const;
+	[[nodiscard]] static bool FailedOnce();
 
 	void setGeometry(QRect rect);
 	void raise();
 
 	[[nodiscard]] static bool Supported();
+	[[nodiscard]] static bool WindowVisible(QWidget *window);
 	// Runs the (potentially slow, 10–300ms) QRhi capability probe
 	// synchronously on the main thread and caches the result. Safe to
 	// call multiple times. If not called, `Supported()` will lazily
@@ -48,12 +50,14 @@ private:
 	void ensureSurface();
 	void showSurface();
 	void hideSurface();
+	void finishNow();
 	[[nodiscard]] QWidget *surfaceWidget() const;
 
 	const not_null<QWidget*> _parent;
 
 	std::unique_ptr<RpWidgetWrap> _surface;
-	[[maybe_unused]] ThanosEffectRenderer *_renderer = nullptr;
+	ThanosEffectRenderer *_renderer = nullptr;
+	bool _shown = false;
 
 	Ui::Animations::Basic _animation;
 

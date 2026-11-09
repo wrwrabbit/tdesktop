@@ -13,11 +13,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "lang/lang_keys.h"
 #include "platform/win/windows_app_user_model_id.h"
+#include "platform/win/windows_taskbar_buttons.h"
 #include "platform/win/tray_win.h"
+#include "platform/win/wallet_protection_win.h"
 #include "platform/platform_integration.h"
 #include "platform/platform_specific.h"
+#include "mainwindow.h"
 #include "tray.h"
-#include "styles/style_window.h"
+#include "window/window_controller.h"
+
 
 #include <QtCore/QAbstractNativeEventFilter>
 #include <private/qguiapplication_p.h>
@@ -26,8 +30,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <propkey.h>
 
 namespace Platform {
+namespace {
+
+constexpr auto kPowerBroadcastDebounce = crl::time(1000);
+
+} // namespace
 
 void WindowsIntegration::init() {
+	RegisterWalletProtectionProvider();
+	_powerBroadcastTimer.setCallback([=] {
+		if (_powerState == PowerState::SuspendNotified) {
+			_powerState = PowerState::SuspendSettled;
+		} else if (_powerState == PowerState::AutomaticResumeNotified) {
+			_powerState = PowerState::AutomaticResumeSettled;
+		} else if (_powerState == PowerState::UserResumeNotified) {
+			_powerState = PowerState::Awake;
+		}
+	});
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 	using namespace QNativeInterface::Private;
 	const auto native = qApp->nativeInterface<QWindowsApplication>();
@@ -38,6 +57,8 @@ void WindowsIntegration::init() {
 	QCoreApplication::instance()->installNativeEventFilter(this);
 	_taskbarCreatedMsgId = RegisterWindowMessage(L"TaskbarButtonCreated");
 }
+
+WindowsIntegration::~WindowsIntegration() = default;
 
 ITaskbarList3 *WindowsIntegration::taskbarList() const {
 	return _taskbarList.get();
@@ -134,25 +155,48 @@ void WindowsIntegration::refreshCustomJumpList() {
 	added = true;
 }
 
+void WindowsIntegration::setupTaskbarButtons(HWND window) {
+	const auto controller = Core::App().activePrimaryWindow();
+	if (!controller
+		|| reinterpret_cast<HWND>(controller->widget()->winId()) != window) {
+		return;
+	}
+	if (!_taskbarButtons || _taskbarButtons->window() != window) {
+		_taskbarButtons = std::make_unique<TaskbarButtons>(
+			_taskbarList.get(),
+			window);
+	}
+	_taskbarButtons->buttonsCreated();
+}
+
 bool WindowsIntegration::processEvent(
 		HWND hWnd,
 		UINT msg,
 		WPARAM wParam,
 		LPARAM lParam,
 		LRESULT *result) {
-	if (msg && msg == _taskbarCreatedMsgId && !_taskbarList) {
-		_taskbarList = base::WinRT::TryCreateInstance<ITaskbarList3>(
-			CLSID_TaskbarList,
-			CLSCTX_ALL);
+	if (msg && msg == _taskbarCreatedMsgId) {
+		if (!_taskbarList) {
+			_taskbarList = base::WinRT::TryCreateInstance<ITaskbarList3>(
+				CLSID_TaskbarList,
+				CLSCTX_ALL);
+			if (_taskbarList) {
+				createCustomJumpList();
+			}
+		}
 		if (_taskbarList) {
-			createCustomJumpList();
+			setupTaskbarButtons(hWnd);
 		}
 	}
 
+	// WHY: no WM_ENDSESSION case on purpose. Quitting from this filter destroys
+	// the windows while QWindowsContext::windowsProc still uses their
+	// QWindowsWindow; Qt's session manager emits aboutToQuit after that use.
 	switch (msg) {
-	case WM_ENDSESSION:
-		Core::Sandbox::NotifySystemShuttingDown();
-		Core::Quit();
+	case WM_COMMAND:
+		if (HIWORD(wParam) == THBN_CLICKED && _taskbarButtons) {
+			_taskbarButtons->buttonClicked(LOWORD(wParam));
+		}
 		break;
 
 	case WM_TIMECHANGE:
@@ -169,12 +213,39 @@ bool WindowsIntegration::processEvent(
 		}
 		break;
 
+	case WM_POWERBROADCAST:
+		if (wParam == PBT_APMSUSPEND) {
+			if (_powerState != PowerState::SuspendNotified) {
+				Core::App().notifySystemSleep();
+			}
+			_powerState = PowerState::SuspendNotified;
+			_powerBroadcastTimer.callOnce(kPowerBroadcastDebounce);
+		} else if (wParam == PBT_APMRESUMEAUTOMATIC) {
+			if (_powerState == PowerState::Awake
+				|| _powerState == PowerState::AutomaticResumeSettled
+				|| _powerState == PowerState::UserResumeNotified) {
+				Core::App().notifySystemSleep();
+			}
+			_powerState = PowerState::AutomaticResumeNotified;
+			_powerBroadcastTimer.callOnce(kPowerBroadcastDebounce);
+		} else if (wParam == PBT_APMRESUMESUSPEND) {
+			if (_powerState == PowerState::Awake) {
+				Core::App().notifySystemSleep();
+			}
+			_powerState = PowerState::UserResumeNotified;
+			_powerBroadcastTimer.callOnce(kPowerBroadcastDebounce);
+		}
+		break;
+
 	case WM_SETTINGCHANGE:
 		RefreshTaskbarThemeValue();
 #if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
 		Core::App().settings().setSystemDarkMode(Platform::IsDarkMode());
 #endif // Qt < 6.5.0
 		Core::App().tray().updateIconCounters();
+		if (_taskbarButtons) {
+			_taskbarButtons->refreshTheme();
+		}
 		if (_jumpList) {
 			refreshCustomJumpList();
 		}

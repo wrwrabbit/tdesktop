@@ -16,11 +16,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user_names.h"
 #include "dialogs/dialogs_key.h"
 #include "base/flags.h"
+#include "base/weak_ptr.h"
 
 namespace Data {
 class Forum;
+class Thread;
 struct BotCommand;
 struct BusinessDetails;
+struct WalletCard;
 } // namespace Data
 
 namespace Api {
@@ -42,7 +45,7 @@ struct StarRefProgram {
 struct BotVerifierSettings {
 	DocumentId iconId = 0;
 	QString company;
-	QString customDescription;
+	TextWithEntities customDescription;
 	bool canModifyDescription = false;
 
 	explicit operator bool() const {
@@ -68,6 +71,9 @@ struct BotInfo {
 	[[nodiscard]] Data::Forum *forum() const;
 	[[nodiscard]] std::unique_ptr<Data::Forum> takeForumData();
 
+	void setInlineReturnTo(Dialogs::EntryState state);
+	[[nodiscard]] Dialogs::EntryState inlineReturnTo() const;
+
 	QString description;
 	QString inlinePlaceholder;
 	std::vector<Data::BotCommand> commands;
@@ -85,7 +91,6 @@ struct BotInfo {
 	QColor botAppColorBodyNight = QColor(0, 0, 0, 0);
 
 	QString startToken;
-	Dialogs::EntryState inlineReturnTo;
 
 	ChatAdminRights groupAdminRights;
 	ChatAdminRights channelAdminRights;
@@ -113,6 +118,9 @@ struct BotInfo {
 
 private:
 	std::unique_ptr<Data::Forum> _forum;
+	Dialogs::EntryState _inlineReturnTo;
+	// A topic or sublist can be freed without a destroyed() event.
+	base::weak_ptr<Data::Thread> _inlineReturnThread;
 
 };
 
@@ -206,7 +214,6 @@ public:
 	[[nodiscard]] bool isScam() const;
 	[[nodiscard]] bool isFake() const;
 	[[nodiscard]] bool isPremium() const;
-	[[nodiscard]] bool isBotInlineGeo() const;
 	[[nodiscard]] bool isBot() const;
 	[[nodiscard]] bool isSupport() const;
 	[[nodiscard]] bool isInaccessible() const;
@@ -238,7 +245,6 @@ public:
 	[[nodiscard]] Data::StarsRating starsRating() const;
 
 	[[nodiscard]] bool canShareThisContact() const;
-	[[nodiscard]] bool canAddContact() const;
 
 	// In Data::Session::processUsers() we check only that.
 	// When actually trying to share contact we perform
@@ -250,6 +256,8 @@ public:
 	[[nodiscard]] QString editableUsername() const;
 	[[nodiscard]] const std::vector<QString> &usernames() const;
 	[[nodiscard]] bool isUsernameEditable(QString username) const;
+
+	[[nodiscard]] bool isOldWalletBot() const;
 
 	void setBotVerifyDetails(Ui::BotVerifyDetails details);
 	void setBotVerifyDetailsIcon(DocumentId iconId);
@@ -289,9 +297,15 @@ public:
 	[[nodiscard]] int peerGiftsCount() const;
 	void setPeerGiftsCount(int count);
 
-	[[nodiscard]] bool hasPrivateForwardName() const;
-	[[nodiscard]] QString privateForwardName() const;
-	void setPrivateForwardName(const QString &name);
+	// Disengaged means no source has answered about this user yet; engaged
+	// and empty means a source answered and this user has no wallet; engaged
+	// and non-empty is the canonical raw address. Every write is an answer,
+	// never a nullopt: answers come from wallet.getUserAddresses.
+	[[nodiscard]] const std::optional<QString> &gramAddress() const;
+	void setGramAddress(QString address);
+
+	[[nodiscard]] const Data::WalletCard *walletCard() const;
+	void setWalletCard(std::optional<Data::WalletCard> card);
 
 	[[nodiscard]] bool hasActiveStories() const;
 	[[nodiscard]] bool hasUnreadStories() const;
@@ -306,6 +320,9 @@ public:
 	[[nodiscard]] ChannelId personalChannelId() const;
 	[[nodiscard]] MsgId personalChannelMessageId() const;
 	void setPersonalChannel(ChannelId channelId, MsgId messageId);
+
+	[[nodiscard]] ChannelId linkedCommunityId() const;
+	void setLinkedCommunityId(ChannelId id);
 
 	[[nodiscard]] UserId botManagerId() const;
 	void setBotManagerId(UserId managerId);
@@ -351,12 +368,14 @@ private:
 	std::unique_ptr<Data::BusinessDetails> _businessDetails;
 	std::vector<Data::UnavailableReason> _unavailableReasons;
 	QString _phone;
-	QString _privateForwardName;
+	std::optional<QString> _gramAddress;
 	std::unique_ptr<Ui::BotVerifyDetails> _botVerifyDetails;
+	std::unique_ptr<Data::WalletCard> _walletCard;
 	Data::StarsRating _starsRating;
 
 	ChannelId _personalChannelId = 0;
 	MsgId _personalChannelMessageId = 0;
+	ChannelId _linkedCommunityId = 0;
 	UserId _botManagerId = 0;
 
 	uint64 _accessHash = 0;
@@ -370,7 +389,9 @@ private:
 
 namespace Data {
 
-void ApplyUserUpdate(not_null<UserData*> user, const MTPDuserFull &update);
+void ApplyUserUpdate(
+	not_null<UserData*> user,
+	const MTPDuserFull &update);
 
 [[nodiscard]] StarRefProgram ParseStarRefProgram(
 	const MTPStarRefProgram *program);

@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_pts_waiter.h"
 #include "data/data_location.h"
 #include "data/data_chat_participant_status.h"
+#include "data/data_community.h"
 #include "data/data_peer_bot_commands.h"
 #include "data/data_user_names.h"
 
@@ -88,6 +89,9 @@ enum class ChannelDataFlag : uint64 {
 	HasStarsPerMessage = (1ULL << 43),
 	StarsPerMessageKnown = (1ULL << 44),
 	HasActiveVideoStream = (1ULL << 45),
+	Community = (1ULL << 46),
+	CommunityCollapsed = (1ULL << 47),
+	HasWelcomeMessages = (1ULL << 48),
 
 	// shift values!
 	PTG_Verified = (1ull << 60),
@@ -261,7 +265,7 @@ public:
 		return flags() & Flag::Left;
 	}
 	[[nodiscard]] bool amIn() const {
-		return !isForbidden() && !haveLeft();
+		return !isForbidden() && !haveLeft() && !isCommunity();
 	}
 	[[nodiscard]] bool addsSignature() const {
 		return flags() & Flag::Signatures;
@@ -314,6 +318,9 @@ public:
 	[[nodiscard]] bool starsPerMessageKnown() const {
 		return flags() & Flag::StarsPerMessageKnown;
 	}
+	[[nodiscard]] bool hasWelcomeMessages() const {
+		return flags() & Flag::HasWelcomeMessages;
+	}
 	[[nodiscard]] bool useSubsectionTabs() const;
 
 	[[nodiscard]] static ChatRestrictionsInfo KickedRestrictedRights(
@@ -354,6 +361,12 @@ public:
 	}
 	[[nodiscard]] bool isMonoforum() const {
 		return flags() & Flag::Monoforum;
+	}
+	[[nodiscard]] bool isCommunity() const {
+		return flags() & Flag::Community;
+	}
+	[[nodiscard]] bool collapsedInDialogs() const {
+		return flags() & Flag::CommunityCollapsed;
 	}
 	[[nodiscard]] bool hasUsername() const {
 		return flags() & Flag::Username;
@@ -475,6 +488,16 @@ public:
 	void setMonoforumLink(ChannelData *link);
 	[[nodiscard]] ChannelData *monoforumLink() const;
 	[[nodiscard]] bool monoforumDisabled() const;
+
+	void setLinkedCommunityId(ChannelId id);
+	[[nodiscard]] ChannelId linkedCommunityId() const;
+
+	[[nodiscard]] Data::CommunityInfo *communityInfo() const {
+		return _communityInfo.get();
+	}
+	[[nodiscard]] not_null<Data::CommunityInfo*> ensuredCommunityInfo();
+	[[nodiscard]] bool canManageLinkedPeers() const;
+	[[nodiscard]] bool communityAnyoneCanAddPeers() const;
 
 	void ptsInit(int32 pts) {
 		_ptsWaiter.init(pts);
@@ -623,8 +646,8 @@ private:
 	RestrictionFlags _defaultRestrictions;
 	AdminRightFlags _adminRights;
 	RestrictionFlags _restrictions;
-	TimeId _restrictedUntil;
-	TimeId _subscriptionUntilDate;
+	TimeId _restrictedUntil = 0;
+	TimeId _subscriptionUntilDate = 0;
 
 	std::vector<Data::UnavailableReason> _unavailableReasons;
 	std::unique_ptr<InvitePeek> _invitePeek;
@@ -632,6 +655,8 @@ private:
 
 	ChannelData *_discussionLink = nullptr;
 	ChannelData *_monoforumLink = nullptr;
+	ChannelId _linkedCommunityId = 0;
+	std::unique_ptr<Data::CommunityInfo> _communityInfo;
 	bool _discussionLinkKnown = false;
 
 	int _peerGiftsCount = 0;
@@ -666,5 +691,9 @@ void ApplyChannelUpdate(
 void ApplyChannelUpdate(
 	not_null<ChannelData*> channel,
 	const MTPDchannelFull &update);
+
+void ApplyCommunityUpdate(
+	not_null<ChannelData*> channel,
+	const MTPDcommunityFull &update);
 
 } // namespace Data

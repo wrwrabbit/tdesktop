@@ -47,6 +47,8 @@ class Row;
 class IndexedList;
 class MainList;
 
+extern const char kOptionDialogsUnreadOnTop[];
+
 [[nodiscard]] BadgesState BadgesForUnread(
 	const UnreadState &state,
 	CountInBadge count = CountInBadge::Default,
@@ -105,7 +107,6 @@ public:
 	}
 	RowsByLetter *chatListLinks(FilterId filterId);
 	const RowsByLetter *chatListLinks(FilterId filterId) const;
-	[[nodiscard]] int posInChatList(FilterId filterId) const;
 	not_null<Row*> addToChatList(
 		FilterId filterId,
 		not_null<MainList*> list);
@@ -200,9 +201,9 @@ private:
 	virtual void changedChatListPinHook();
 	void pinnedIndexChanged(FilterId filterId, int was, int now);
 	[[nodiscard]] uint64 computeSortPosition(FilterId filterId) const;
+	[[nodiscard]] bool hasUnreadUnmutedForSort() const;
 
 	void setChatListExistence(bool exists);
-	not_null<Row*> mainChatListLink(FilterId filterId) const;
 	Row *maybeMainChatListLink(FilterId filterId) const;
 
 	const not_null<Data::Session*> _owner;

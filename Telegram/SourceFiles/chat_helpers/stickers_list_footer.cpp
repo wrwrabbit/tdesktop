@@ -387,7 +387,7 @@ void StickersListFooter::enumerateIcons(
 	const auto emojiId = AllEmojiSectionSetId();
 	const auto right = width();
 	for (auto i = 0, count = int(_icons.size()); i != count; ++i) {
-		auto &icon = _icons[i];
+		const auto &icon = _icons[i];
 		const auto width = (icon.setId == emojiId)
 			? _subiconsWidthAnimation.value(_subiconsExpanded
 				? _subiconsWidth
@@ -679,9 +679,12 @@ void StickersListFooter::paint(
 void StickersListFooter::paintSelectionBg(
 		QPainter &p,
 		const ExpandingContext &context) const {
-	auto selxrel = _iconsLeft + qRound(_iconState.selectionX.current());
-	auto selx = selxrel - qRound(_iconState.x.current());
-	const auto selw = qRound(_iconState.selectionWidth.current());
+	const auto selectionX
+		= int(base::SafeRound(_iconState.selectionX.current()));
+	auto selxrel = _iconsLeft + selectionX;
+	auto selx = selxrel - int(base::SafeRound(_iconState.x.current()));
+	const auto selw
+		= int(base::SafeRound(_iconState.selectionWidth.current()));
 	if (rtl()) {
 		selx = width() - selx - selw;
 	}
@@ -849,8 +852,10 @@ void StickersListFooter::mousePressEvent(QMouseEvent *e) {
 	} else {
 		_pressed = _selected;
 		_iconsMouseDown = _iconsMousePos;
-		_iconState.draggingStartX = qRound(_iconState.x.current());
-		_subiconState.draggingStartX = qRound(_subiconState.x.current());
+		const auto iconX = int(base::SafeRound(_iconState.x.current()));
+		const auto subiconX = int(base::SafeRound(_subiconState.x.current()));
+		_iconState.draggingStartX = iconX;
+		_subiconState.draggingStartX = subiconX;
 	}
 }
 
@@ -879,7 +884,7 @@ void StickersListFooter::checkDragging(ScrollState &state) {
 				+ state.draggingStartX,
 			0,
 			state.max);
-		if (newX != qRound(state.x.current())) {
+		if (newX != int(base::SafeRound(state.x.current()))) {
 			state.x = anim::value(newX, newX);
 			state.animationStart = 0;
 			state.animation.stop();
@@ -929,7 +934,7 @@ bool StickersListFooter::finishDragging(ScrollState &state) {
 		state.draggingStartX + _iconsMouseDown.x() - _iconsMousePos.x(),
 		0,
 		state.max);
-	if (newX != qRound(state.x.current())) {
+	if (newX != int(base::SafeRound(state.x.current()))) {
 		state.x = anim::value(newX, newX);
 		state.animationStart = 0;
 		state.animation.stop();
@@ -967,7 +972,7 @@ void StickersListFooter::scrollByWheelEvent(
 			? e->pixelDelta().y()
 			: e->angleDelta().y());
 	const auto use = [&](ScrollState &state) {
-		const auto now = qRound(state.x.current());
+		const auto now = int(base::SafeRound(state.x.current()));
 		const auto used = now - delta;
 		const auto next = std::clamp(used, 0, state.max);
 		delta = next - used;
@@ -1137,7 +1142,8 @@ void StickersListFooter::refreshIconsGeometry(
 	_iconState.animation.stop();
 	if (_icons.size() > 1
 		&& _icons[1].setId == EmojiSectionSetId(EmojiSection::People)) {
-		_singleWidth = (width() - _iconsLeft - _iconsRight) / _icons.size();
+		_singleWidth = (width() - _iconsLeft - _iconsRight)
+			/ int(_icons.size());
 	} else {
 		_singleWidth = st().iconWidth;
 	}
@@ -1227,6 +1233,7 @@ void StickersListFooter::validateIconWebmAnimation(
 		const StickerIcon &icon) {
 	icon.ensureMediaCreated();
 	if (icon.webm
+		|| icon.webm.isBad()
 		|| !icon.sticker
 		|| !HasWebmThumbnail(
 			icon.set ? icon.set->thumbnailType() : StickerType(),
@@ -1304,7 +1311,7 @@ void StickersListFooter::paintSetIcon(
 			p.translate(-center);
 		}
 	}
-	if (icon.sticker) {
+	if (icon.sticker || icon.premiumRequired) {
 		prepareSetIcon(context, info, now, paused);
 		p.drawImage(info.adjustedLeft, _iconsTop, _setIconCache);
 	} else {
@@ -1329,19 +1336,37 @@ void StickersListFooter::prepareSetIcon(
 	_setIconCache.fill(Qt::transparent);
 	auto p = Painter(&_setIconCache);
 	paintSetIconToCache(p, context, info, now, paused);
-	if (!_icons[info.index].sticker) {
-		return;
-	}
-	// Rounding the corners.
+	const auto &icon = _icons[info.index];
 	auto hq = PainterHighQualityEnabler(p);
-	p.setCompositionMode(QPainter::CompositionMode_Source);
-	p.setBrush(Qt::NoBrush);
-	auto pen = QPen(Qt::transparent);
-	pen.setWidth(style::ConvertScaleExact(4.));
-	p.setPen(pen);
 	const auto area = st().iconArea;
 	auto rect = QRect(_areaPosition, QSize(area, area));
-	p.drawRoundedRect(rect, st::emojiPanRadius, st::emojiPanRadius);
+	if (icon.sticker) {
+		// Rounding the corners.
+		p.setCompositionMode(QPainter::CompositionMode_Source);
+		p.setBrush(Qt::NoBrush);
+		auto pen = QPen(Qt::transparent);
+		pen.setWidth(style::ConvertScaleExact(4.));
+		p.setPen(pen);
+		p.drawRoundedRect(rect, st::emojiPanRadius, st::emojiPanRadius);
+	}
+	if (!icon.premiumRequired) {
+		return;
+	}
+	const auto &lock = st::emojiPremiumLock;
+	const auto size = std::max(lock.width(), lock.height())
+		+ 2 * st::lineWidth;
+	const auto badge = QRect(
+		rect.x() + (rtl() ? 0 : rect.width() - size),
+		rect.y() + rect.height() - size,
+		size,
+		size);
+	// The lock is cut through the icon, so it shows the panel behind.
+	p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+	p.setPen(Qt::NoPen);
+	p.setBrush(st().headerFg);
+	p.drawEllipse(badge);
+	p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+	lock.paintInCenter(p, badge);
 }
 
 void StickersListFooter::paintSetIconToCache(

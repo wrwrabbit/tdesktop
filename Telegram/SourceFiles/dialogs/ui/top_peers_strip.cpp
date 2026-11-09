@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/dynamic_image.h"
 #include "ui/painter.h"
 #include "ui/unread_badge_paint.h"
+#include "ui/unread_counter_format.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
 
@@ -220,7 +221,7 @@ void TopPeersStrip::stripWheelEvent(QWheelEvent *e) {
 			return;
 		}
 	}
-	const auto vertical = qAbs(fullDelta.x()) < qAbs(fullDelta.y());
+	const auto vertical = std::abs(fullDelta.x()) < std::abs(fullDelta.y());
 	if (_scrollingLock == Qt::Orientation() && phase != Qt::NoScrollPhase) {
 		_scrollingLock = vertical ? Qt::Vertical : Qt::Horizontal;
 	}
@@ -379,6 +380,9 @@ void TopPeersStrip::stripMouseReleaseEvent(QMouseEvent *e) {
 	_lastMousePosition = e->globalPos();
 	const auto guard = gsl::finally([&] {
 		_mouseDownPosition = std::nullopt;
+
+		// Opening a chat from _clicks could start dragging reentrantly.
+		_dragging = false;
 	});
 
 	const auto pressed = clearPressed();
@@ -397,7 +401,7 @@ int TopPeersStrip::clearPressed() {
 	const auto pressed = std::exchange(_pressed, -1);
 	if (pressed >= 0) {
 		Assert(pressed < _entries.size());
-		auto &entry = _entries[pressed];
+		const auto &entry = _entries[pressed];
 		if (entry.ripple) {
 			entry.ripple->lastStop();
 		}
@@ -850,9 +854,7 @@ void TopPeersStrip::paintUserpic(
 		if (entry.badgeString.isEmpty()) {
 			entry.badgeString = !entry.badge
 				? u" "_q
-				: (entry.badge < 1000)
-				? QString::number(entry.badge)
-				: (QString::number(entry.badge / 1000) + 'K');
+				: FormatUnreadCounterShort(entry.badge);
 		}
 		auto st = Ui::UnreadBadgeStyle();
 		st.selected = selected;

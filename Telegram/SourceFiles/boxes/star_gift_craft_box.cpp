@@ -673,7 +673,8 @@ void ShowSelectGiftBox(
 		Fn<void(GiftForCraft)> chosen,
 		std::vector<GiftForCraft> selected,
 		Fn<void()> boxClosed,
-		bool firstSlot) {
+		bool firstSlot,
+		bool allowResale = true) {
 	struct Entry {
 		Data::SavedStarGift gift;
 		GiftButton *button = nullptr;
@@ -752,10 +753,14 @@ void ShowSelectGiftBox(
 		state->craftLifetime.destroy();
 
 		state->craft = std::move(info);
-		if (state->resale.giftId) {
+		if (!allowResale || state->resale.giftId) {
 			show();
 		}
 	});
+
+	if (!allowResale) {
+		return;
+	}
 
 	state->resaleLifetime = Data::ResaleGiftsSlice(
 		session,
@@ -907,7 +912,7 @@ void ShowSelectGiftBox(
 		attr.radial->setGeometry(0, 0, single, single);
 
 		btn->setClickedCallback([=] {
-			auto &a = state->attrs[idx];
+			const auto &a = state->attrs[idx];
 			if (state->tooltip) {
 				state->tooltip->toggleAnimated(false);
 			}
@@ -997,7 +1002,7 @@ void ShowSelectGiftBox(
 			: single;
 
 		for (auto i = 0; i != 8; ++i) {
-			auto &attr = state->attrs[i];
+			const auto &attr = state->attrs[i];
 			if (i < count) {
 				const auto inRow1 = (i < row1);
 				const auto rowItems = inRow1 ? row1 : row2;
@@ -1164,7 +1169,6 @@ void Craft(
 			inputs.push_back(
 				Api::InputSavedStarGiftId(gift.manageId, gift.unique));
 		}
-		const auto weak = base::make_weak(controller);
 		const auto session = &controller->session();
 		session->api().request(MTPpayments_CraftStarGift(
 			MTP_vector<MTPInputSavedStarGift>(inputs)
@@ -1177,7 +1181,7 @@ void Craft(
 				const auto action = (slug == input.unique->slug)
 					? Data::GiftUpdate::Action::Upgraded
 					: Data::GiftUpdate::Action::Delete;
-				controller->session().data().notifyGiftUpdate({
+				session->data().notifyGiftUpdate({
 					.id = input.manageId,
 					.slug = input.unique->slug,
 					.action = action,
@@ -1695,10 +1699,24 @@ void ShowGiftCraftInfoBox(
 		box->addButton(tr::lng_gift_craft_start_button(), [=] {
 			const auto auctions = &controller->session().giftAuctions();
 			const auto show = crl::guard(box, [=] {
-				ShowGiftCraftBox(
-					controller,
-					{ GiftForCraft{ gift, savedId } },
-					false);
+				const auto initial = GiftForCraft{ gift, savedId };
+				if (gift->giftAddress.isEmpty()) {
+					ShowGiftCraftBox(controller, { initial }, false);
+				} else {
+					ShowSelectGiftBox(
+						controller,
+						gift->initialGiftId,
+						crl::guard(controller, [=](GiftForCraft primary) {
+							ShowGiftCraftBox(
+								controller,
+								{ primary, initial },
+								false);
+						}),
+						{ initial },
+						[] {},
+						true,
+						false);
+				}
 				box->closeBox();
 			});
 			if (auctions->attributes(gift->initialGiftId)) {

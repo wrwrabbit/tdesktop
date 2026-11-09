@@ -199,13 +199,9 @@ QString MessageAccessibilityName(
 				lt_count,
 				poll->totalVoters));
 		} else if (const auto contact = media->sharedContact()) {
-			auto contactName = contact->firstName;
-			if (!contact->lastName.isEmpty()) {
-				if (!contactName.isEmpty()) {
-					contactName += u" "_q;
-				}
-				contactName += contact->lastName;
-			}
+			const auto contactName = langFullName(
+				contact->firstName,
+				contact->lastName);
 			if (!contactName.isEmpty()) {
 				mediaParts.push_back(contactName);
 			}
@@ -883,14 +879,7 @@ QString MessageSubItemValue(
 		if (!contact) {
 			return {};
 		}
-		auto name = contact->firstName;
-		if (!contact->lastName.isEmpty()) {
-			if (!name.isEmpty()) {
-				name += u" "_q;
-			}
-			name += contact->lastName;
-		}
-		return name;
+		return langFullName(contact->firstName, contact->lastName);
 	}
 	case MessageSubItem::ContactPhone: {
 		const auto media = data->media();
@@ -1173,6 +1162,24 @@ std::vector<MessageSubItem> ActiveMessageSubItems(
 		}
 	}
 	return result;
+}
+
+HistoryItem *AccessibilityItemAtIndex(
+		int index,
+		const std::vector<Element*> &elements,
+		int barIndex) {
+	// The unread bar row maps to no item: a focused bar is cached as
+	// a null item with a nonnegative index, so it can never be
+	// mistaken for the message it is anchored to when rows shift.
+	if (index < 0 || (barIndex >= 0 && index == barIndex)) {
+		return nullptr;
+	}
+	const auto elementIndex = (barIndex >= 0 && index > barIndex)
+		? (index - 1)
+		: index;
+	return (elementIndex < int(elements.size()))
+		? elements[elementIndex]->data().get()
+		: nullptr;
 }
 
 } // namespace HistoryView

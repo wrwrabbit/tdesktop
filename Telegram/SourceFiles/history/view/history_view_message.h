@@ -26,6 +26,7 @@ struct ReactionId;
 namespace Ui {
 struct BubbleRounding;
 class RoundCheckbox;
+struct TornEdgeCache;
 } // namespace Ui
 
 namespace HistoryView {
@@ -65,14 +66,24 @@ struct PsaTooltipState : RuntimeComponent<PsaTooltipState, Element> {
 	mutable bool buttonVisible = true;
 };
 
+struct HiddenSenderTooltip
+: RuntimeComponent<HiddenSenderTooltip, Element> {
+	mutable QRect linkRect;
+	mutable int cachedWidth = -1;
+};
+
 struct InstantViewMediaRuntime
 : RuntimeComponent<InstantViewMediaRuntime, Element> {
 	QString pageUrl;
+	QSize forcedSize;
+	Media *forcedFor = nullptr;
+	double mediaPixelScale = 1.;
 };
 
 struct HistoryMessageRichPage
 : RuntimeComponent<HistoryMessageRichPage, Element> {
 	HistoryMessageRichPage();
+	[[nodiscard]] QMargins edgeSkips() const;
 
 	struct Host final : Iv::Markdown::MediaBlockHost {
 		base::weak_ptr<Message> owner;
@@ -91,17 +102,35 @@ struct HistoryMessageRichPage
 
 	Iv::Markdown::MarkdownArticle article;
 	Iv::Markdown::MarkdownArticleThinkingPaintCache thinkingPaintCache;
+	std::unique_ptr<Ui::TornEdgeCache> tornEdges;
 	rpl::lifetime highlightReadyLifetime;
 	int paletteVersion = -1;
+	TimeId registeredFormattedDateUpdate = 0;
+	// Probing at the max width again would undo the final bubble layout.
+	mutable int textualWidth = 0;
+	mutable uint16 demandedTextWidth = 0;
+	bool hasUnsupportedBlocks = false;
 	mutable ClickHandlerPtr handler;
 	mutable std::optional<Iv::Markdown::MarkdownArticleHorizontalScrollHit> handlerHorizontalScrollHit;
 	mutable QPoint handlerHorizontalScrollPoint;
 	mutable bool handlerHorizontalScrollActive = false;
 	mutable ClickHandlerPtr handlerHorizontalScrollPressed;
+	mutable int handlerCodeHeaderSegmentIndex = -1;
 	mutable std::optional<Iv::Markdown::PreparedLink> handlerPreparedLink;
 	mutable Iv::Markdown::MediaActivation handlerMediaActivation;
 	mutable Iv::Markdown::PreparedPlaceholderBlockId handlerPlaceholderId;
 	mutable QPoint handlerPlaceholderPoint;
+	mutable Iv::Markdown::PreparedPlaceholderBlockId pressedPlaceholderId;
+	mutable ClickHandlerPtr pressedPlaceholderHandler;
+	mutable Iv::Markdown::MarkdownArticleButtonRowHit handlerButtonRow;
+	mutable ClickHandlerPtr handlerButtonRowHandler;
+	mutable Iv::Markdown::MarkdownArticleButtonRowHit pressedButtonRow;
+	mutable ClickHandlerPtr pressedButtonRowHandler;
+	mutable std::optional<Iv::Markdown::PreparedEditListItemSource>
+		handlerTaskItem;
+	mutable std::optional<QPoint> handlerInlineButtonPoint;
+	mutable ClickHandlerPtr handlerInlineButtonHandler;
+	mutable ClickHandlerPtr pressedInlineButtonHandler;
 };
 
 enum class BadgeRole : uchar {
@@ -176,7 +205,10 @@ public:
 		QPoint point,
 		StateRequest request) const override;
 	void updatePressed(QPoint point) override;
-	bool consumeHorizontalScroll(QPoint position, int delta) override;
+	bool consumeHorizontalScroll(
+		QPoint position,
+		int delta,
+		Qt::ScrollPhase phase) override;
 	[[nodiscard]] bool canConsumeHorizontalScroll(
 		QPoint position,
 		int delta) const override;
@@ -204,6 +236,8 @@ public:
 		const MessageSelection &selection) const override;
 	TextSelection selectionFromQuote(
 		const SelectedQuote &quote) const override;
+	HighlightYRange richQuoteHighlightYRange(
+		const Ui::ChatPaintRichQuote &quote) const override;
 	TextSelection adjustSelection(
 		TextSelection selection,
 		TextSelectType type) const override;
@@ -253,15 +287,14 @@ public:
 	[[nodiscard]] bool toggleSelectionByHandlerClick(
 		const ClickHandlerPtr &handler) const override;
 	[[nodiscard]] bool allowTextSelectionByHandler(
-		const ClickHandlerPtr &handler) const override;
+		const ClickHandlerPtr &handler,
+		bool fromTouch) const override;
 	[[nodiscard]] int infoWidth() const override;
 	[[nodiscard]] int bottomInfoFirstLineWidth() const override;
 	[[nodiscard]] bool bottomInfoIsWide() const override;
 	[[nodiscard]] bool isSignedAuthorElided() const override;
 
 	void itemDataChanged() override;
-
-	VerticalRepaintRange verticalRepaintRange() const override;
 
 	void applyGroupAdminChanges(
 		const base::flat_set<UserId> &changes) override;
@@ -347,6 +380,10 @@ private:
 		Painter &p,
 		QRect &trect,
 		const PaintContext &context) const;
+	void paintEphemeralBadge(
+		Painter &p,
+		QRect &trect,
+		const PaintContext &context) const;
 	void paintTopicButton(
 		Painter &p,
 		QRect &trect,
@@ -415,6 +452,10 @@ private:
 		StateRequest request) const;
 
 	void updateMediaInBubbleState();
+	void updateRichPageInBubbleState();
+	[[nodiscard]] auto countRichPageBubbleEdges() const
+	-> Iv::Markdown::MarkdownArticleBubbleEdges;
+	[[nodiscard]] bool richPageInfoRow() const;
 	QRect countGeometry() const;
 	[[nodiscard]] Ui::BubbleRounding countMessageRounding() const;
 	[[nodiscard]] Ui::BubbleRounding countBubbleRounding(
@@ -427,6 +468,8 @@ private:
 	bool hasVisibleText() const override;
 	[[nodiscard]] int visibleTextLength() const;
 	[[nodiscard]] int visibleMediaTextLength() const;
+	[[nodiscard]] int bottomInfoHeight() const;
+	[[nodiscard]] bool usesMessageInfoLayout() const;
 	[[nodiscard]] bool needInfoDisplay() const;
 	[[nodiscard]] bool invertMedia() const;
 	[[nodiscard]] bool hasFastReply() const;
@@ -445,6 +488,7 @@ private:
 	void refreshInfoSkipBlock(HistoryItem *textItem);
 	[[nodiscard]] int monospaceMaxWidth() const;
 	[[nodiscard]] int bubbleTextWidth(int bubbleWidth) const;
+	[[nodiscard]] int richPageDemandedTextWidth() const;
 	[[nodiscard]] int bubbleTextualWidth() const;
 
 	void ensureSummarizeButton() const;
@@ -478,8 +522,8 @@ private:
 	void psaTooltipToggled(bool shown) const;
 	void invalidateTextDependentCache() override;
 
-	bool textAppearValidate(not_null<TextAppearing*> appearing);
-	bool textAppearCheckLine(not_null<TextAppearing*> appearing);
+	bool textAppearValidate();
+	bool textAppearCheckLine();
 	void textAppearStartWidthAnimation(not_null<TextAppearing*> appearing);
 	void textAppearStartHeightAnimation(
 		not_null<TextAppearing*> appearing,
@@ -493,6 +537,8 @@ private:
 	[[nodiscard]] int rightBadgeWidth() const;
 	void validateFromNameText(PeerData *from) const;
 	void ensureFromNameStatusLink(not_null<PeerData*> peer) const;
+	[[nodiscard]] EmojiStatusId fromNameStatusId(
+		not_null<PeerData*> from) const;
 
 	mutable std::unique_ptr<RightAction> _rightAction;
 	mutable ClickHandlerPtr _fastReplyLink;

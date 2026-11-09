@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_regex.h"
 
 #include "fakepasscode/lang/fakepasscode_translator.h"
+#include "lang_auto_counts.h" // kKeysCount, kTagsCount.
 
 namespace Lang {
 namespace {

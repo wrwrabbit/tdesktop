@@ -15,6 +15,7 @@
 
 #include <styles/style_layers.h>
 #include <styles/style_boxes.h>
+#include "styles/style_choose_date_time.h"
 
 #include <lang_auto.h>
 
@@ -169,7 +170,7 @@ static ChooseTimeoutBoxDescriptor ChooseTimeoutBox(
             state->labelMinutes->moveToLeft(left, st::scheduleDateTop, width);
             left += state->labelMinutes->width();
             state->minutes->moveToLeft(left, st::scheduleDateTop, width);
-            left += state->hours->width();
+            left += state->minutes->width();
             state->labelSecond->moveToLeft(left, st::scheduleDateTop, width);
             left += state->labelSecond->width();
             state->seconds->moveToLeft(left, st::scheduleDateTop, width);

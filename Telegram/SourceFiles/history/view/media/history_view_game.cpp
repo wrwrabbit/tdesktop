@@ -56,13 +56,17 @@ QSize Game::countOptimalSize() {
 
 	const auto item = _parent->data();
 	if (!_openl && item->isRegular()) {
-		const auto row = 0;
-		const auto column = 0;
-		_openl = std::make_shared<ReplyMarkupClickHandler>(
-			&item->history()->owner(),
-			row,
-			column,
-			item->fullId());
+		if (item->hideInlineKeyboard()) {
+			item->setHasHiddenLinks(true);
+		} else {
+			const auto row = 0;
+			const auto column = 0;
+			_openl = std::make_shared<ReplyMarkupClickHandler>(
+				&item->history()->owner(),
+				row,
+				column,
+				item->fullId());
+		}
 	}
 
 	auto title = TextUtilities::SingleLine(_data->title);
@@ -108,7 +112,9 @@ QSize Game::countOptimalSize() {
 	auto titleMinHeight = _title.isEmpty() ? 0 : lineHeight;
 	// enable any count of lines in game description / message
 	auto descMaxLines = 4096;
-	auto descriptionMinHeight = _description.isEmpty() ? 0 : qMin(_description.minHeight(), descMaxLines * lineHeight);
+	auto descriptionMinHeight = _description.isEmpty()
+		? 0
+		: std::min(_description.minHeight(), descMaxLines * lineHeight);
 
 	if (!_title.isEmpty()) {
 		accumulate_max(maxWidth, _title.maxWidth());
@@ -446,7 +452,9 @@ bool Game::toggleSelectionByHandlerClick(const ClickHandlerPtr &p) const {
 	return _attach && _attach->toggleSelectionByHandlerClick(p);
 }
 
-bool Game::allowTextSelectionByHandler(const ClickHandlerPtr &p) const {
+bool Game::allowTextSelectionByHandler(
+		const ClickHandlerPtr &p,
+		bool fromTouch) const {
 	return (p == _openl);
 }
 

@@ -45,8 +45,12 @@ foreach(_src ${_shader_sources})
         set(_glsl_ver "310es,430")
     else()
         file(READ ${_src} _src_contents)
-        string(FIND "${_src_contents}" "texelFetch" _has_texelfetch)
-        if(NOT _has_texelfetch EQUAL -1)
+        # GLSL 100 es and 120 have neither texelFetch nor unsigned integers.
+        string(REGEX MATCH
+            "texelFetch|[^A-Za-z0-9_]u(int|vec[234])[^A-Za-z0-9_]"
+            _needs_glsl_300
+            "${_src_contents}")
+        if(_needs_glsl_300)
             set(_glsl_ver "300es,150")
         else()
             set(_glsl_ver "100es,120,150")
@@ -81,6 +85,9 @@ endif()
 if (NOT "${_qrc_new}" STREQUAL "${_qrc_old}")
     file(WRITE "${_qrc_path}" "${_qrc_new}")
 endif()
+# target_prepare_qrc() skips build-tree paths, so declare the .qsb sources.
+set_source_files_properties("${_qrc_path}" PROPERTIES
+    QRC_GENERATED_FROM "${_shader_sources}")
 add_custom_target(compile_shaders DEPENDS ${_qsb_outputs})
 nice_target_sources(Telegram ${_qsb_out_dir}
 PRIVATE

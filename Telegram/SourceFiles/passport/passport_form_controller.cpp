@@ -1240,7 +1240,7 @@ rpl::producer<EditDocumentCountry> FormController::preferredLanguage(
 		if (countryCode.isEmpty()) {
 			return QString();
 		}
-		auto &langs = _passportConfig.languagesByCountryCode;
+		const auto &langs = _passportConfig.languagesByCountryCode;
 		const auto i = langs.find(countryCode);
 		return (i == end(langs)) ? QString() : i->second;
 	};
@@ -1785,6 +1785,10 @@ void FormController::loadFile(File &file) {
 	const auto key = FileKey{ file.id };
 	const auto i = _fileLoaders.find(key);
 	if (i != _fileLoaders.end()) {
+		return;
+	}
+	if (file.size < 0 || file.size > Storage::kMaxFileInMemory) {
+		fileLoadFail(key);
 		return;
 	}
 	file.downloadStatus.set(LoadStatus::Status::InProgress, 0);
@@ -2591,7 +2595,7 @@ bool FormController::parseForm(const MTPaccount_AuthorizationForm &result) {
 		_form.values.emplace(type, std::move(parsed));
 	}
 	if (const auto url = data.vprivacy_policy_url()) {
-		_form.privacyPolicyUrl = qs(*url);
+		_form.privacyPolicyUrl = ValidateUrl(qs(*url));
 	}
 	for (const auto &required : data.vrequired_types().v) {
 		const auto row = CollectRequestedRow(required);

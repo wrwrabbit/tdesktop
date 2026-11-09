@@ -68,6 +68,19 @@ bool langFirstNameGoesSecond() {
 	return fullname.indexOf(kLastName) < fullname.indexOf(kFirstName);
 }
 
+QString langFullName(
+		const QString &firstName,
+		const QString &lastName) {
+	if (firstName.isEmpty()) {
+		return lastName;
+	} else if (lastName.isEmpty()) {
+		return firstName;
+	}
+	return langFirstNameGoesSecond()
+		? (lastName + u' ' + firstName)
+		: (firstName + u' ' + lastName);
+}
+
 QString langDayOfMonth(const QDate &date) {
 	auto day = date.day();
 	return langDateMaybeWithYear(date, [&](int month, int year) {
@@ -121,25 +134,6 @@ QString langDayOfMonthShort(const QDate &date) {
 			MonthSmall(month)(tr::now),
 			lt_day,
 			QString::number(day));
-	});
-}
-
-QString langMonthOfYear(int month, int year) {
-	return (month > 0 && month <= 12)
-		? tr::lng_month_year(
-			tr::now,
-			lt_month,
-			MonthSmall(month)(tr::now),
-			lt_year,
-			QString::number(year))
-		: u"MONTH_ERR"_q;
-}
-
-QString langMonth(const QDate &date) {
-	return langDateMaybeWithYear(date, [](int month, int year) {
-		return langMonthOfYear(month, year);
-	}, [](int month, int year) {
-		return MonthSmall(month)(tr::now);
 	});
 }
 

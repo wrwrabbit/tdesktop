@@ -84,11 +84,6 @@ rpl::producer<bool> DetailedSettingsButton::toggledChanges() const {
 	return _toggle->checkedChanges();
 }
 
-rpl::producer<not_null<QEvent*>>
-DetailedSettingsButton::clickAreaEvents() const {
-	return events();
-}
-
 void DetailedSettingsButton::setToggleLocked(bool locked) {
 	_toggleLocked = locked;
 	_toggle->setLocked(locked);
@@ -186,7 +181,7 @@ int DetailedSettingsButton::firstDescriptionLineBottom() const {
 	const auto top = (_descriptionTop > 0)
 		? _descriptionTop
 		: descriptionTopValue();
-	return top + qMax(
+	return top + std::max(
 		_style.description.style.lineHeight,
 		_style.description.style.font->height);
 }

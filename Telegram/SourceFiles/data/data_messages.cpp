@@ -25,8 +25,8 @@ void MessagesList::Slice::merge(
 
 	messages.merge(std::begin(moreMessages), std::end(moreMessages));
 	range = {
-		qMin(range.from, moreNoSkipRange.from),
-		qMax(range.till, moreNoSkipRange.till)
+		std::min(range.from, moreNoSkipRange.from),
+		std::max(range.till, moreNoSkipRange.till)
 	};
 }
 
@@ -157,33 +157,6 @@ void MessagesList::removeOne(MessagePosition messageId) {
 	}
 }
 
-void MessagesList::removeLessThan(MessagePosition messageId) {
-	auto removed = 0;
-	for (auto i = begin(_slices); i != end(_slices);) {
-		if (i->range.till <= messageId) {
-			removed += i->messages.size();
-			i = _slices.erase(i);
-			continue;
-		} else if (i->range.from <= messageId) {
-			_slices.modify(i, [&](Slice &slice) {
-				slice.range.from = MinMessagePosition;
-				auto from = begin(slice.messages);
-				auto till = ranges::lower_bound(slice.messages, messageId);
-				if (from != till) {
-					removed += till - from;
-					slice.messages.erase(from, till);
-				}
-			});
-			break;
-		} else {
-			break;
-		}
-	}
-	if (removed && _count) {
-		*_count -= removed;
-	}
-}
-
 void MessagesList::invalidate() {
 	_slices.clear();
 	_count = std::nullopt;
@@ -264,8 +237,8 @@ MessagesResult MessagesList::queryFromSlice(
 	auto position = ranges::lower_bound(slice.messages, query.aroundId);
 	auto haveBefore = int(position - begin(slice.messages));
 	auto haveEqualOrAfter = int(end(slice.messages) - position);
-	auto before = qMin(haveBefore, query.limitBefore);
-	auto equalOrAfter = qMin(haveEqualOrAfter, query.limitAfter + 1);
+	auto before = std::min(haveBefore, query.limitBefore);
+	auto equalOrAfter = std::min(haveEqualOrAfter, query.limitAfter + 1);
 	auto ids = std::vector<MessagePosition>(position - before, position + equalOrAfter);
 	result.messageIds.merge(ids.begin(), ids.end());
 	if (slice.range.from == MinMessagePosition) {

@@ -25,6 +25,7 @@
 #include "styles/style_layers.h"
 #include "styles/style_passport.h"
 #include "styles/style_boxes.h"
+#include "styles/style_passcode_box.h"
 #include "fakepasscode/log/fake_log.h"
 #include "fakepasscode/settings.h"
 
@@ -76,7 +77,7 @@ void FakePasscodeHWLockBox::paintEvent(QPaintEvent* e) {
 
     int32 w = st::boxWidth - st::boxPadding.left() * 1.5;
 
-    if (!_oldError.isEmpty()) {
+    if (!_oldError.isEmpty()) { 
         p.setPen(st::boxTextFgError);
         p.drawText(QRect(st::boxPadding.left(), _oldPasscode->y() + _oldPasscode->height(), w, st::passcodeTextLine), _oldError, style::al_left);
     }

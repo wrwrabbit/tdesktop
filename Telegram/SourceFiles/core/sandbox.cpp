@@ -8,10 +8,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 
 #include "base/platform/base_platform_info.h"
+#include "base/platform/base_platform_process.h"
 #include "platform/platform_specific.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "storage/localstorage.h"
+#include "tgw/tgw_runtime.h"
 #include "window/notifications_manager.h"
 #include "window/window_controller.h"
 #include "core/crash_reports.h"
@@ -29,7 +31,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "base/qthelp_regex.h"
 #include "ui/ui_utility.h"
+#include "ui/window_palette.h"
 #include "ui/effects/animations.h"
+#include "ui/style/style_core_palette.h"
 
 #include "fakepasscode/verify/verify_updater.h"
 #ifdef Q_OS_MAC
@@ -39,24 +43,78 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QLockFile>
 #include <QtGui/QSessionManager>
 #include <QtGui/QScreen>
-#include <QtGui/qpa/qplatformscreen.h>
 
 namespace Core {
 namespace {
+
+constexpr auto kLocalClientBufferLimit = 1024 * 1024;
 
 base::options::toggle OptionDeadlockDetector({
 	.id = kOptionDeadlockDetector,
 	.name = "Deadlock Detector",
 	.description = "Check once every 30 seconds that main thread is still responsive.",
-	.restartRequired = true,
 });
+
+constexpr auto kCleanupIpcTimeout = 10 * crl::time(1000);
+constexpr auto kCleanupQuitTimeout = 30 * crl::time(1000);
+
+[[nodiscard]] QChar HexDigit(ushort value) {
+	value &= 0x000F;
+	return QChar::fromLatin1((value >= 10) ? ('a' + (value - 10)) : ('0' + value));
+}
+
+[[nodiscard]] ushort HexDigitValue(QChar ch) {
+	const auto code = ch.unicode();
+	return ((code >= uchar('a'))
+		? (code - uchar('a') + 10)
+		: (code - uchar('0'))) & 0x000F;
+}
+
+[[nodiscard]] QString EscapeTo7bit(const QString &value) {
+	auto result = QString();
+	result.reserve(value.size() * 2);
+	for (const auto ch : value) {
+		const auto code = ch.unicode();
+		if (code < 32
+			|| code > 127
+			|| ch == QChar('%')
+			|| ch == QChar(';')) {
+			result.append('%');
+			result.append(HexDigit(code >> 12));
+			result.append(HexDigit(code >> 8));
+			result.append(HexDigit(code >> 4));
+			result.append(HexDigit(code));
+		} else {
+			result.append(ch);
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QString EscapeFrom7bit(const QString &value) {
+	auto result = QString();
+	result.reserve(value.size());
+	for (auto i = 0; i != value.size(); ++i) {
+		const auto ch = value.at(i);
+		if (ch == QChar('%') && (i + 4 < value.size())) {
+			result.append(QChar(ushort(
+				(HexDigitValue(value.at(i + 1)) << 12)
+				| (HexDigitValue(value.at(i + 2)) << 8)
+				| (HexDigitValue(value.at(i + 3)) << 4)
+				| HexDigitValue(value.at(i + 4)))));
+			i += 4;
+		} else {
+			result.append(ch);
+		}
+	}
+	return result;
+}
 
 } // namespace
 
 const char kOptionDeadlockDetector[] = "deadlock-detector";
 
 bool Sandbox::QuitOnStartRequested = false;
-bool Sandbox::SystemShuttingDown = false;
 
 Sandbox::Sandbox(int &argc, char **argv)
 : QApplication(argc, argv)
@@ -67,17 +125,24 @@ Sandbox::Sandbox(int &argc, char **argv)
 }
 
 int Sandbox::start() {
-	if (!Core::UpdaterDisabled()) {
-		_updateChecker = std::make_unique<Core::UpdateChecker>();
-	}
-	_verifyUpdater = std::make_unique<PTG::VerifyUpdater>();
-
 	{
 		const auto d = QFile::encodeName(QDir(cWorkingDir()).absolutePath());
 		char h[33] = { 0 };
 		hashMd5Hex(d.constData(), d.size(), h);
 		_localServerName = Platform::SingleInstanceLocalServerName(h);
 	}
+
+	if (cLaunchMode() == LaunchModeCleanup) {
+		const auto result = stopRunningInstance();
+		psCleanup();
+		closeApplication();
+		return result;
+	}
+
+	if (!Core::UpdaterDisabled()) {
+		_updateChecker = std::make_unique<Core::UpdateChecker>();
+	}
+	_verifyUpdater = std::make_unique<PTG::VerifyUpdater>();
 
 	{
 		const auto d = QFile::encodeName(cExeDir() + cExeName());
@@ -134,27 +199,9 @@ int Sandbox::start() {
 
 	crl::on_main(this, [=] { checkForQuit(); });
 	connect(this, &QCoreApplication::aboutToQuit, [=] {
-		// On Windows, Qt emits aboutToQuit synchronously from its
-		// WM_ENDSESSION handler (QWindowsContext::windowsProc). Running
-		// closeApplication() there destroys QWindows mid-dispatch and
-		// later WM_ENDSESSION messages delivered to other top-level
-		// HWNDs crash on virtual dispatch through stale QWindow*. Detect
-		// that path and defer cleanup to the next main-loop tick so Qt
-		// finishes delivering shutdown messages on still-live windows.
-		// On a normal quit (Ctrl+Q etc.) aboutToQuit fires from the
-		// exec() epilogue after the event loop has exited and queued
-		// events would not run, so we keep the synchronous teardown.
-		if (SystemShuttingDown) {
-			QMetaObject::invokeMethod(this, [=] {
-				customEnterFromEventLoop([&] {
-					closeApplication();
-				});
-			}, Qt::QueuedConnection);
-		} else {
-			customEnterFromEventLoop([&] {
-				closeApplication();
-			});
-		}
+		customEnterFromEventLoop([&] {
+			closeApplication();
+		});
 	});
 
 	// https://github.com/telegramdesktop/tdesktop/issues/948
@@ -174,22 +221,62 @@ int Sandbox::start() {
 	return exec();
 }
 
-void Sandbox::NotifySystemShuttingDown() {
-	SystemShuttingDown = true;
+int Sandbox::stopRunningInstance() {
+	LOG(("Cleanup: connecting to %1...").arg(_localServerName));
+	_localSocket.connectToServer(_localServerName);
+	if (!_localSocket.waitForConnected(int(kCleanupIpcTimeout))) {
+		if (_localSocket.error() == QLocalSocket::ServerNotFoundError) {
+			LOG(("Cleanup: no running instance found."));
+			return 0;
+		}
+		LOG(("Cleanup: connect error %1.").arg(_localSocket.error()));
+		return 1;
+	}
+	if (!Platform::LocalSocketPeerAllowed(_localSocket.socketDescriptor())) {
+		LOG(("Cleanup: untrusted socket peer."));
+		return 1;
+	}
+	_localSocket.write("CMD:quit;");
+	if (!_localSocket.waitForBytesWritten(int(kCleanupIpcTimeout))) {
+		LOG(("Cleanup: could not send the quit command."));
+		return 1;
+	}
+	auto response = QByteArray();
+	const auto deadline = crl::now() + kCleanupIpcTimeout;
+	while (!response.contains(';')) {
+		const auto timeout = deadline - crl::now();
+		if (timeout <= 0 || !_localSocket.waitForReadyRead(int(timeout))) {
+			LOG(("Cleanup: no response to the quit command."));
+			return 1;
+		}
+		response.append(_localSocket.readAll());
+	}
+	const auto match = QRegularExpression(u"RES:(\\d+)_(\\d+);"_q).match(
+		QString::fromLatin1(response));
+	if (!match.hasMatch()) {
+		LOG(("Cleanup: bad response to the quit command."));
+		return 1;
+	}
+	const auto processId = match.capturedView(1).toULongLong();
+	LOG(("Cleanup: waiting for process %1 to quit...").arg(processId));
+	if (!Platform::WaitForProcessExit(processId, kCleanupQuitTimeout)) {
+		LOG(("Cleanup: the process did not quit in time."));
+		return 1;
+	}
+	LOG(("Cleanup: the running instance quit."));
+	return 0;
 }
 
 void Sandbox::QuitWhenStarted() {
 	if (!QApplication::instance() || !Instance()._started) {
 		QuitOnStartRequested = true;
-	} else {
-		// Use exit(0) instead of quit() to avoid recursive
-		// [NSApp terminate:] on macOS. Since Qt 6.0, quit() routes
-		// through QCocoaIntegration::quit() -> [NSApp terminate:],
-		// which when called from within applicationShouldTerminate:
-		// causes a nested terminate that leads to exit() being called
-		// directly, bypassing normal cleanup. exit(0) properly exits
-		// event loops without going through the platform plugin.
-		QCoreApplication::exit(0);
+	} else if (!Tgw::Runtime::IsExitPrevent(QuitWhenStarted)) {
+		// WHY: quit() on macOS since Qt 6.0 routes through [NSApp terminate:],
+		// and since Qt 6.7 even exit() emits aboutToQuit synchronously, which
+		// destroys windows mid-dispatch. So exit(0), deferred one loop tick.
+		InvokeQueued(&Instance(), [] {
+			QCoreApplication::exit(0);
+		});
 	}
 }
 
@@ -202,10 +289,18 @@ void Sandbox::launchApplication() {
 		}
 		setupScreenScale();
 
-		if (OptionDeadlockDetector.value()) {
+		rpl::single(
+			rpl::empty
+		) | rpl::then(
+			OptionDeadlockDetector.changes()
+		) | rpl::on_next([=] {
 			using DeadlockDetector::PingThread;
-			_deadlockDetector = std::make_unique<PingThread>(this);
-		}
+			// The test agent always wants a stuck main thread to crash with a
+			// report instead of hanging silently, so force it on for -testagent.
+			_deadlockDetector = (OptionDeadlockDetector.value() || cTestAgent())
+				? std::make_unique<PingThread>(this)
+				: nullptr;
+		}, _lifetime);
 
 		_application = std::make_unique<Application>();
 
@@ -238,13 +333,12 @@ void Sandbox::setupScreenScale() {
 	logEnv("QT_USE_PHYSICAL_DPI");
 	logEnv("QT_FONT_DPI");
 
-	const auto useRatio = std::clamp(qCeil(ratio), 1, 3);
+	const auto useRatio = std::clamp(int(std::ceil(ratio)), 1, 3);
 	style::SetDevicePixelRatio(useRatio);
 
 	const auto screen = Sandbox::primaryScreen();
 	const auto dpi = screen->logicalDotsPerInch();
-	const auto basePair = screen->handle()->logicalBaseDpi();
-	const auto base = (basePair.first + basePair.second) * 0.5;
+	const auto base = style::BaseDpi();
 	const auto screenScaleExact = dpi / base;
 	const auto screenScale = int(base::SafeRound(screenScaleExact * 20)) * 5;
 	LOG(("Primary screen DPI: %1, Base: %2.").arg(dpi).arg(base));
@@ -270,10 +364,11 @@ Sandbox::~Sandbox() {
 
 bool Sandbox::event(QEvent *e) {
 	if (e->type() == QEvent::Quit) {
-		if (Quitting()) {
+		if (!Quitting()) {
+			Quit(QuitReason::QtQuitEvent);
+		} else if (!Tgw::Runtime::IsExitPrevent(QuitWhenStarted)) {
 			return QCoreApplication::event(e);
 		}
-		Quit(QuitReason::QtQuitEvent);
 		e->ignore();
 		return false;
 	} else if (e->type() == QEvent::Close) {
@@ -287,6 +382,12 @@ bool Sandbox::event(QEvent *e) {
 }
 
 void Sandbox::socketConnected() {
+	if (!Platform::LocalSocketPeerAllowed(_localSocket.socketDescriptor())) {
+		LOG(("Socket %1 has an untrusted peer, quitting..."
+			).arg(_localServerName));
+		_localSocket.disconnectFromServer();
+		return Quit();
+	}
 	LOG(("Socket connected, this is not the first application instance, sending show command..."));
 	_secondInstance = true;
 
@@ -295,7 +396,9 @@ void Sandbox::socketConnected() {
 		commands += u"XDG_ACTIVATION_TOKEN:"_q + qgetenv("XDG_ACTIVATION_TOKEN").toBase64() + ';';
 	}
 	for (const auto &url : cRefStartUrls()) {
-		commands += u"OPEN:"_q + url.toString(QUrl::FullyEncoded) + ';';
+		commands += u"OPEN:"_q
+			+ EscapeTo7bit(url.toString(QUrl::FullyEncoded))
+			+ ';';
 	}
 	if (cQuit()) {
 		commands += u"CMD:quit;"_q;
@@ -431,7 +534,14 @@ void Sandbox::socketDisconnected() {
 void Sandbox::newInstanceConnected() {
 	DEBUG_LOG(("Sandbox Info: new local socket connected"));
 	for (auto client = _localServer.nextPendingConnection(); client; client = _localServer.nextPendingConnection()) {
-		_localClients.push_back(LocalClient(client, QByteArray()));
+		if (!Platform::LocalSocketPeerAllowed(client->socketDescriptor())) {
+			LOG(("Sandbox Warning: local socket client of another user "
+				"rejected."));
+			client->close();
+			client->deleteLater();
+			continue;
+		}
+		_localClients.push_back(LocalClient{ .socket = client });
 		connect(
 			client,
 			&QLocalSocket::readyRead,
@@ -445,53 +555,142 @@ void Sandbox::newInstanceConnected() {
 
 void Sandbox::readClients() {
 	// This method can be called before Application is constructed.
+
+	// execExternal() may run a nested event loop (X11 window activation),
+	// where _localClients is changed, so iterate a copy of the sockets.
+	const auto sockets = _localClients
+		| ranges::views::transform(&LocalClient::socket)
+		| ranges::to_vector;
+	const auto findClient = [&](QLocalSocket *socket) -> LocalClient* {
+		const auto i = ranges::find(
+			_localClients,
+			socket,
+			&LocalClient::socket);
+		return (i != _localClients.end()) ? &*i : nullptr;
+	};
 	QList<QUrl> startUrls;
-	for (LocalClients::iterator i = _localClients.begin(), e = _localClients.end(); i != e; ++i) {
-		i->second.append(i->first->readAll());
-		if (i->second.size()) {
-			bool activationRequired = false;
-			QString cmds(QString::fromLatin1(i->second));
+	struct Reply {
+		QLocalSocket *socket = nullptr;
+		bool activationRequired = false;
+	};
+	auto replies = std::vector<Reply>();
+	for (const auto socket : sockets) {
+		const auto client = findClient(socket);
+		if (!client) {
+			continue;
+		}
+		client->buffer.append(socket->readAll());
+		if (client->buffer.size() > kLocalClientBufferLimit) {
+			LOG(("Sandbox Error: local socket client buffer overflow."));
+			client->buffer.clear();
+			socket->abort(); // emits disconnected, so client is gone now
+			continue;
+		}
+		if (client->buffer.size()) {
+			QString cmds(QString::fromLatin1(client->buffer));
 			int32 from = 0, l = cmds.length();
+			auto records = QStringList();
 			for (int32 to = cmds.indexOf(QChar(';'), from); to >= from; to = (from < l) ? cmds.indexOf(QChar(';'), from) : -1) {
-				auto cmd = base::StringViewMid(cmds, from, to - from);
-				if (cmd.startsWith(u"CMD:"_q)) {
-					const auto processId = QApplication::applicationPid();
-					const auto windowId = execExternal(cmds.mid(from + 4, to - from - 4));
-					const auto response = u"RES:%1_%2;"_q.arg(processId).arg(windowId).toLatin1();
-					i->first->write(response.data(), response.size());
-				} else if (cmd.startsWith(u"XDG_ACTIVATION_TOKEN:"_q)) {
-					qputenv("XDG_ACTIVATION_TOKEN", QByteArray::fromBase64(cmds.mid(from + 21, to - from - 21).toLatin1()));
-				} else if (cmd.startsWith(u"OPEN:"_q)) {
-					startUrls.append(cmds.mid(from + 5, to - from - 5).mid(0, 8192));
-					if (!activationRequired) {
-						activationRequired = StartUrlRequiresActivate(startUrls.back().toString());
-					}
-				} else if (cmd.startsWith(u"CTRL:"_q)) {
-					const auto payload = HandleExternalControl(
-						cmds.mid(from + 5, to - from - 5));
-					const auto response = QByteArray("DATA:")
-						+ payload.toBase64()
-						+ ';';
-					i->first->write(response);
-				} else {
-					LOG(("Sandbox Error: unknown command %1 passed in local socket").arg(cmd.toString()));
-				}
+				records.push_back(cmds.mid(from, to - from));
 				from = to + 1;
 			}
 			if (from > 0) {
-				i->second = i->second.mid(from);
+				client->buffer = client->buffer.mid(from);
 			}
-			const auto processId = QApplication::applicationPid();
-			const auto windowId = activationRequired
-				? execExternal("show")
-				: 0;
-			const auto response = u"RES:%1_%2;"_q.arg(processId).arg(windowId).toLatin1();
-			i->first->write(response.data(), response.size());
+			const auto externalUrlWas = client->externalUrlReceived;
+			auto hasOpen = false;
+			for (const auto &cmd : records) {
+				if (cmd.startsWith(u"OPEN:"_q)) {
+					hasOpen = true;
+					break;
+				}
+			}
+			auto urls = QList<QUrl>();
+			for (const auto &cmd : records) {
+				if (cmd.startsWith(u"CMD:"_q)) {
+					if (hasOpen) {
+						continue;
+					}
+					const auto processId = QApplication::applicationPid();
+					const auto windowId = execExternal(cmd.mid(4));
+					const auto response = u"RES:%1_%2;"_q.arg(processId).arg(windowId).toLatin1();
+					socket->write(response.data(), response.size());
+				} else if (cmd.startsWith(u"XDG_ACTIVATION_TOKEN:"_q)) {
+					qputenv("XDG_ACTIVATION_TOKEN", QByteArray::fromBase64(cmd.mid(21).toLatin1()));
+				} else if (cmd.startsWith(u"OPEN:"_q)) {
+					urls.append(EscapeFrom7bit(cmd.mid(5)).mid(0, 8192));
+				} else if (cmd.startsWith(u"CTRL:"_q)) {
+					if (hasOpen) {
+						continue;
+					}
+					const auto payload = HandleExternalControl(cmd.mid(5));
+					const auto response = QByteArray("DATA:")
+						+ payload.toBase64()
+						+ ';';
+					socket->write(response);
+				} else {
+					LOG(("Sandbox Error: unknown command %1 passed in local socket").arg(cmd));
+				}
+			}
+			// A link launch carries a single non-file url and a send-files
+			// launch carries only local paths, so a connection mixing both
+			// means the sender failed to escape the record separator and a
+			// crafted url smuggled extra records. Once such a connection
+			// shows a non-file url its local paths are dropped for good.
+			// A nested readClients() could have set the flag meanwhile.
+			const auto alive = findClient(socket);
+			auto externalUrlReceived = externalUrlWas
+				|| (alive && alive->externalUrlReceived);
+			for (const auto &url : urls) {
+				if (!url.isLocalFile()) {
+					externalUrlReceived = true;
+				}
+			}
+			if (alive) {
+				alive->externalUrlReceived = externalUrlReceived;
+			}
+			auto activationRequired = false;
+			for (const auto &url : urls) {
+				if (externalUrlReceived && url.isLocalFile()) {
+					LOG(("Sandbox Warning: local file dropped, "
+						"the same launch carries an external url: %1"
+						).arg(url.toString()));
+					continue;
+				}
+				startUrls.append(url);
+				if (!activationRequired) {
+					// WHY: without Application the passcode state is unknown.
+					activationRequired = !Core::IsAppLaunched()
+						|| StartUrlRequiresActivate(url.toString());
+				}
+			}
+			replies.push_back({ socket, activationRequired });
 		}
 	}
 	cRefStartUrls() << base::take(startUrls);
-	if (_application) {
-		_application->checkStartUrls();
+	const auto activated = _application
+		? _application->checkStartUrlsActivating()
+		: QPointer<QWidget>();
+	auto windowId = std::optional<uint64>();
+	const auto activate = [&] {
+		if (!windowId) {
+			if (const auto window = activated.data()) {
+				windowId = Platform::ActivationWindowId(window);
+				base::Platform::ActivateThisProcessWindow(window->winId());
+			} else {
+				windowId = execExternal("show");
+			}
+		}
+		return *windowId;
+	};
+	const auto processId = QApplication::applicationPid();
+	for (const auto &reply : replies) {
+		if (!findClient(reply.socket)) {
+			continue;
+		}
+		const auto id = reply.activationRequired ? activate() : 0;
+		const auto response = u"RES:%1_%2;"_q.arg(processId).arg(id).toLatin1();
+		reply.socket->write(response.data(), response.size());
 	}
 }
 
@@ -499,7 +698,7 @@ void Sandbox::removeClients() {
 	DEBUG_LOG(("Sandbox Info: remove clients slot called, clients %1"
 		).arg(_localClients.size()));
 	for (auto i = _localClients.begin(), e = _localClients.end(); i != e;) {
-		if (i->first->state() != QLocalSocket::ConnectedState) {
+		if (i->socket->state() != QLocalSocket::ConnectedState) {
 			DEBUG_LOG(("Sandbox Info: removing client"));
 			i = _localClients.erase(i);
 			e = _localClients.end();
@@ -539,7 +738,8 @@ void Sandbox::checkForEmptyLoopNestingLevel() {
 	// after. That means we already have exited the nesting loop and
 	// there must not be any postponed calls with that nesting level.
 	if (_loopNestingLevel == _eventNestingLevel) {
-		Assert(_postponedCalls.empty()
+		Assert(_postponedCallsDeferred
+			|| _postponedCalls.empty()
 			|| _postponedCalls.back().loopNestingLevel < _loopNestingLevel);
 		Assert(!_previousLoopNestingLevels.empty());
 
@@ -587,31 +787,40 @@ void Sandbox::registerEnterFromEventLoop() {
 	}
 }
 
-bool Sandbox::notifyOrInvoke(QObject *receiver, QEvent *e) {
-	if (e->type() == base::InvokeQueuedEvent::Type()) {
-		static_cast<base::InvokeQueuedEvent*>(e)->invoke();
-		return true;
-	}
-	return QApplication::notify(receiver, e);
-}
-
 bool Sandbox::notify(QObject *receiver, QEvent *e) {
 	if (QThread::currentThreadId() != _mainThreadId) {
-		return notifyOrInvoke(receiver, e);
+		return QApplication::notify(receiver, e);
 	}
 
 	const auto wrap = createEventNestingLevel();
 	if (e->type() == QEvent::UpdateRequest) {
 		const auto weak = QPointer<QObject>(receiver);
 		_widgetUpdateRequests.fire({});
+		// WHY: main queue tasks drained above entered from the event loop at
+		// this level, else paint events below would run postponed calls
+		// right after themselves, while Qt still uses the painted widget.
+		checkForEmptyLoopNestingLevel();
 		if (!weak) {
 			return true;
 		}
 	}
-	return notifyOrInvoke(receiver, e);
+	if (e->type() == QEvent::Paint
+		&& Ui::HasWindowPalettes()
+		&& receiver->isWidgetType()) {
+		// WHY: stock widgets read the one main palette at paint, so a window
+		// with its own palette gets it swapped into the main palette's slots
+		// for exactly the duration of each of its widgets' paint events.
+		const auto scope = style::main_palette::Override(
+			Ui::WindowPaletteFor(static_cast<QWidget*>(receiver)));
+		return QApplication::notify(receiver, e);
+	}
+	return QApplication::notify(receiver, e);
 }
 
 void Sandbox::processPostponedCalls(int level) {
+	if (_postponedCallsDeferred) {
+		return;
+	}
 	while (!_postponedCalls.empty()) {
 		auto &last = _postponedCalls.back();
 		if (last.loopNestingLevel != level) {
@@ -621,6 +830,32 @@ void Sandbox::processPostponedCalls(int level) {
 		_postponedCalls.pop_back();
 		taken.callable();
 	}
+}
+
+void Sandbox::drainPostponedCalls() {
+	Expects(QThread::currentThreadId() == _mainThreadId);
+
+	if (!cTestAgent()) {
+		return;
+	}
+	const auto wasDeferred = std::exchange(_postponedCallsDeferred, true);
+	const auto guard = gsl::finally([&] {
+		_postponedCallsDeferred = wasDeferred;
+	});
+	while (!_postponedCalls.empty()) {
+		auto taken = std::move(_postponedCalls.back());
+		_postponedCalls.pop_back();
+		taken.callable();
+	}
+}
+
+void Sandbox::setPostponedCallsDeferred(bool deferred) {
+	Expects(QThread::currentThreadId() == _mainThreadId);
+
+	if (!cTestAgent()) {
+		return;
+	}
+	_postponedCallsDeferred = deferred;
 }
 
 bool Sandbox::nativeEventFilter(
@@ -649,7 +884,7 @@ void Sandbox::closeApplication() {
 
 	_localServer.close();
 	for (const auto &localClient : base::take(_localClients)) {
-		localClient.first->close();
+		localClient.socket->close();
 	}
 	_localClients.clear();
 

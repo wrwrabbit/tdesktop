@@ -337,6 +337,9 @@ void AddBusinessRecipientsSelector(
 			data.allButExcluded = (value == kAllExcept);
 		});
 	});
+	lifetime.add([=] {
+		group->setChangedCallback(nullptr);
+	});
 }
 
 int ShortcutsCount(not_null<Main::Session*> session) {
@@ -380,10 +383,6 @@ rpl::producer<int> ShortcutMessagesCountValue(
 	) | rpl::map([=] {
 		return ShortcutMessagesCount(session, name);
 	});
-}
-
-bool ShortcutExists(not_null<Main::Session*> session, const QString &name) {
-	return ShortcutMessagesCount(session, name) > 0;
 }
 
 rpl::producer<bool> ShortcutExistsValue(

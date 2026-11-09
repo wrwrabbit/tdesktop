@@ -77,21 +77,11 @@ struct custom_is_fast_copy_type<Window::Notifications::ChangeType> : std::true_t
 
 } // namespace base
 
-namespace base::options {
-
-template <typename Type>
-class option;
-
-using toggle = option<bool>;
-
-} // namespace base::options
-
 namespace Window::Notifications {
 
 extern const char kOptionCustomNotification[];
 extern const char kOptionGNotification[];
-extern base::options::toggle OptionGNotification;
-
+extern const char kOptionMacModernNotifications[];
 extern const char kOptionHideReplyButton[];
 
 class Manager;
@@ -122,6 +112,12 @@ public:
 	void clearIncomingFromTopic(not_null<Data::ForumTopic*> topic);
 	void clearIncomingFromSublist(not_null<Data::SavedSublist*> sublist);
 	void clearIncomingFromHistory(not_null<History*> history);
+	void clearReadFromTopic(
+		not_null<Data::ForumTopic*> topic,
+		MsgId readTillId);
+	void clearReadFromSublist(
+		not_null<Data::SavedSublist*> sublist,
+		MsgId readTillId);
 	void clearFromSession(not_null<Main::Session*> session);
 	void clearFromItem(not_null<HistoryItem*> item);
 	void clearAll();
@@ -148,6 +144,7 @@ public:
 
 private:
 	struct Waiter;
+	struct Alert;
 
 	struct SkipState {
 		enum Value {
@@ -188,6 +185,12 @@ private:
 	};
 
 	void clearForThreadIf(Fn<bool(not_null<Data::Thread*>)> predicate);
+	void clearReadIncoming(
+		not_null<Data::Thread*> thread,
+		Fn<bool(not_null<HistoryItem*>)> read);
+	void rememberShownIncoming(
+		not_null<Data::Thread*> thread,
+		not_null<HistoryItem*> item);
 
 	[[nodiscard]] SkipState skipNotification(
 		Data::ItemNotification notification) const;
@@ -220,7 +223,10 @@ private:
 
 	base::flat_map<
 		not_null<Data::Thread*>,
-		base::flat_map<crl::time, PeerData*>> _whenAlerts;
+		base::flat_multi_map<crl::time, Alert>> _whenAlerts;
+	base::flat_map<
+		not_null<Data::Thread*>,
+		base::flat_set<MsgId>> _shownIncoming;
 
 	mutable base::flat_map<
 		SentNotificationId,
@@ -344,6 +350,9 @@ public:
 		not_null<HistoryItem*> item,
 		const QByteArray &option,
 		bool hideContent);
+	[[nodiscard]] static ContextId ItemContextId(not_null<HistoryItem*> item);
+	[[nodiscard]] static ContextId SublistContextId(
+		not_null<Data::SavedSublist*> sublist);
 
 	[[nodiscard]] TextWithEntities addTargetAccountName(
 		TextWithEntities title,

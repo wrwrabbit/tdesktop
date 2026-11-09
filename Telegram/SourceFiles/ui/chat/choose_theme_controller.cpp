@@ -52,10 +52,10 @@ struct Preview {
 
 [[nodiscard]] Preview GeneratePreview(
 		not_null<Ui::ChatTheme*> theme,
-		const std::shared_ptr<Ui::DynamicImage> &takenUserpic) {
+		const std::shared_ptr<Ui::DynamicImage> &takenUserpic,
+		QSize size = st::chatThemePreviewSize) {
 	const auto &background = theme->background();
 	const auto &colors = background.colors;
-	const auto size = st::chatThemePreviewSize;
 	auto prepared = background.prepared;
 	const auto paintPattern = [&](QPainter &p, bool inverted) {
 		if (prepared.isNull()) {

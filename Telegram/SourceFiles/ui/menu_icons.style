@@ -63,12 +63,12 @@ menuIconEarn: icon {{ "menu/earn", menuIconColor }};
 menuIconCancelFee: icon {{ "menu/cancel_fee", menuIconColor }};
 menuIconCreatePoll: icon {{ "menu/create_poll", menuIconColor }};
 menuIconCreateTodoList: icon {{ "menu/select", menuIconColor }};
-/*
 menuIconArticle: icon {{ "/menu/article_rich-24x24", menuIconColor }};
-*/
 menuIconQrCode: icon {{ "menu/qr_code", menuIconColor }};
 menuIconExpand: icon {{ "menu/expand", menuIconColor }};
 menuIconCollapse: icon {{ "menu/collapse", menuIconColor }};
+menuIconZoomIn: icon {{ "/menu/zoom_in-24x24", menuIconColor }};
+menuIconZoomOut: icon {{ "/menu/zoom_out-24x24", menuIconColor }};
 menuIconToMainMenu: icon {{ "menu/move_to_menu", menuIconColor }};
 menuIconFromMainMenu: icon {{ "menu/move_from_menu", menuIconColor }};
 menuIconAddAccount: icon {{ "menu/add_account", menuIconColor }};
@@ -118,7 +118,7 @@ menuIconChannel: icon {{ "menu/channel", menuIconColor }};
 menuIconStoriesSavedSection: icon {{ "menu/stories_saved_section", menuIconColor }};
 menuIconStoriesArchiveSection: icon {{ "menu/stories_archive_section", menuIconColor }};
 menuIconStoriesSave: icon {{ "menu/stories_save", menuIconColor }};
-menuIconStoriesArchive: icon {{ "menu/stories_archive", menuIconColor }};
+menuIconStoriesArchive: icon {{ "menu/archive", menuIconColor }};
 menuIconArchiveOpen: icon {{ "menu/archive_open", menuIconColor }};
 menuIconGroups: icon {{ "menu/groups", menuIconColor }};
 menuIconSavedMessages: icon {{ "menu/saved_messages", menuIconColor }};
@@ -155,17 +155,12 @@ menuIconShowAll: icon {{ "menu/all_media", menuIconColor }};
 menuIconReplace: icon {{ "chat/input_replace", menuIconColor }};
 menuIconAbove: icon {{ "menu/link_above", menuIconColor }};
 menuIconBelow: icon {{ "menu/link_below", menuIconColor }};
-menuIconTableColumnLeft: icon {{ "mini_forward-flip_horizontal", menuIconColor }};
-menuIconTableColumnRight: icon {{ "mini_forward", menuIconColor }};
-menuIconTableSubmenuRowAbove: menuIconAbove;
-menuIconTableSubmenuRowBelow: menuIconBelow;
-menuIconTableSubmenuColumnLeft: menuIconTableColumnLeft;
-menuIconTableSubmenuColumnRight: menuIconTableColumnRight;
 menuIconTableSubmenuDelete: menuIconDelete;
 menuIconEnlarge: icon {{ "menu/link_enlarge", menuIconColor }};
 menuIconShrink: icon {{ "menu/link_shrink", menuIconColor }};
 menuIconUserShow: icon {{ "menu/name_show", menuIconColor }};
 menuIconUserHide: icon {{ "menu/name_hide", menuIconColor }};
+menuIconUserHideDisabled: icon {{ "menu/name_hide", windowSubTextFg }};
 menuIconCaptionShow: icon {{ "menu/caption_show", menuIconColor }};
 menuIconCaptionHide: icon {{ "menu/caption_hide", menuIconColor }};
 menuIconAsTopics: icon {{ "menu/mode_topics", menuIconColor }};
@@ -191,6 +186,7 @@ menuIconUniqueProfile: icon {{ "settings/premium/features/feature_profile_cover"
 menuIconNftWear: icon {{ "menu/nft_wear", menuIconColor }};
 menuIconNftTakeOff: icon {{ "menu/nft_takeoff", menuIconColor }};
 menuIconShortcut: icon {{ "menu/shortcut", menuIconColor }};
+menuIconKeysLegend: icon {{ "menu/keyboard", menuIconColor }};
 menuIconHourglass: icon {{ "menu/hourglass", menuIconColor }};
 menuIconPayment: icon {{ "payments/payment_card", menuIconColor }};
 menuIconOrderPrice: icon {{ "menu/order_price", menuIconColor }};
@@ -205,7 +201,10 @@ menuIconRatingRefund: icon {{ "menu/rating_refund-24x24", menuIconColor }};
 menuIconAuctionDrop: icon {{ "menu/auction_drop", menuIconColor }};
 menuIconStarsRefund: icon {{ "menu/auction_refund", menuIconColor }};
 menuIconStarsCarryover: icon {{ "menu/auction_carry", menuIconColor }};
-menuIconTon: icon{{ "payments/ton_emoji-18x18", menuIconColor, point(3px, 2px) }};
+menuIconTon: icon {
+	{ "payments/ton_emoji_body-18x18", windowActiveTextFg, point(3px, 2px) },
+	{ "payments/ton_emoji_shine-18x18", windowFgActive, point(3px, 2px) },
+};
 menuIconReorder: icon{{ "menu/reorder-24x24", menuIconColor }};
 menuIconCraftTraits: icon{{ "menu/craft_random-24x24", menuIconColor }};
 menuIconCraftChance: icon{{ "menu/craft_chance-24x24", menuIconColor }};
@@ -215,10 +214,12 @@ menuIconTagEdit: icon{{ "menu/tag_edit-24x24", menuIconColor }};
 menuIconDownloadOff: icon {{ "menu/download_off-24x24", menuIconColor }};
 menuIconShareOff: icon {{ "menu/share_off-24x24", menuIconColor }};
 menuIconShareOn: icon {{ "menu/share_on-24x24", menuIconColor }};
+menuIconCommunity: icon {{ "menu/community-24x24", menuIconColor }};
+menuIconPendingRequests: icon {{ "menu/pending_requests-24x24", menuIconColor }};
+menuIconRemovedUsers: icon {{ "menu/removed_users-24x24", menuIconColor }};
+menuIconWelcomeMessage: icon {{ "menu/welcome_message-24x24", menuIconColor }};
 menuIconStar: icon {{ "menu/star", menuIconColor }};
 
-menuIconTTLAny: icon {{ "menu/auto_delete_plain", menuIconColor }};
-menuIconTTLAnyTextPosition: point(11px, 22px);
 menuIconTTL: icon {{ "menu/auto_delete", menuIconColor }};
 
 menuIconMuteForAny: icon {{ "menu/mute_for_plain", menuIconColor }};
@@ -248,7 +249,7 @@ mediaMenuIconShowAll: icon {{ "menu/all_media", mediaviewMenuFg }};
 mediaMenuIconProfile: icon {{ "menu/profile", mediaviewMenuFg }};
 mediaMenuIconReport: icon {{ "menu/report", mediaviewMenuFg }};
 mediaMenuIconSaveStory: icon {{ "menu/stories_save", mediaviewMenuFg }};
-mediaMenuIconArchiveStory: icon {{ "menu/stories_archive", mediaviewMenuFg }};
+mediaMenuIconArchiveStory: icon {{ "menu/archive", mediaviewMenuFg }};
 mediaMenuIconStealthLocked: icon {{ "menu/stealth_locked", mediaviewMenuFg }};
 mediaMenuIconStealth: icon {{ "menu/stealth", mediaviewMenuFg }};
 mediaMenuIconStats: icon {{ "menu/stats", mediaviewMenuFg }};
@@ -260,12 +261,17 @@ mediaMenuIconInfo: icon {{ "menu/info", mediaviewMenuFg }};
 mediaMenuIconBlock: icon {{ "menu/block", mediaviewMenuFg }};
 
 mediaMenuIconFlip: icon {{ "menu/flip", mediaviewMenuFg }};
+mediaMenuIconEdit: icon {{ "menu/edit", mediaviewMenuFg }};
+mediaMenuIconNightMode: icon {{ "menu/night_mode", mediaviewMenuFg }};
+mediaMenuIconFont: icon {{ "menu/fonts", mediaviewMenuFg }};
 mediaMenuIconTextStylePlain: icon {{ "menu/text_style_plain-22x22", mediaviewMenuFg, point(0px, 2px) }};
 mediaMenuIconTextStyleFramed: icon {{ "menu/text_style_framed-22x22", mediaviewMenuFg, point(0px, 2px) }};
 mediaMenuIconTextStyleSemiTransparent: icon {{ "menu/text_style_semi-22x22", mediaviewMenuFg, point(0px, 2px) }};
+mediaMenuIconTextStyleOpaque: icon {{ "menu/text_style_opaque-22x22", mediaviewMenuFg, point(0px, 2px) }};
 
 menuIconDeleteAttention: icon {{ "menu/delete", menuIconAttentionColor }};
 menuIconLeaveAttention: icon {{ "menu/leave", menuIconAttentionColor }};
+menuIconCommunityRemoveAttention: icon {{ "menu/community_remove-24x24", menuIconAttentionColor }};
 menuIconDisableAttention: icon {{ "menu/disable", menuIconAttentionColor }};
 menuIconReportAttention: icon {{ "menu/report", menuIconAttentionColor }};
 menuIconRestoreAttention: icon {{ "menu/restore", menuIconAttentionColor }};
@@ -303,6 +309,4 @@ mediaSpeedVeryFastActive: icon {{ "player/speed/audiospeed_menu_1.7", mediaviewT
 mediaSpeedSuperFast: icon {{ "player/speed/audiospeed_menu_2.0", mediaviewMenuFg }};
 mediaSpeedSuperFastActive: icon {{ "player/speed/audiospeed_menu_2.0", mediaviewTextLinkFg }};
 
-menuIconMakeBig: icon {{ "player/player_fullscreen", menuIconColor }};
-menuIconMakeSmall: icon {{ "player/player_minimize", menuIconColor }};
 menuIconChangeOrder: icon {{ "player/player_order", menuIconColor }};

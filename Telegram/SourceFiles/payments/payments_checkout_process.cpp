@@ -19,10 +19,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/local_url_handlers.h" // TryConvertUrlToLocal.
 #include "core/file_utilities.h" // File::OpenUrl.
 #include "core/core_cloud_password.h" // Core::CloudPasswordState
+#include "core/application.h"
 #include "core/click_handler_types.h"
+#include "core/core_screenshot_protection.h"
 #include "lang/lang_keys.h"
 #include "apiwrap.h"
 #include "api/api_cloud_password.h"
+#include "webview/webview_dialog.h"
 #include "window/themes/window_theme.h"
 
 #include <QJsonDocument>
@@ -254,6 +257,11 @@ std::optional<PaidInvoice> CheckoutProcess::InvoicePaid(
 }
 
 void CheckoutProcess::ClearAll() {
+	if (Webview::InsideBlockingPopup()) {
+		// See the comment in CheckoutProcess::close().
+		Webview::RunWhenBlockingPopupFinished([] { ClearAll(); });
+		return;
+	}
 	Processes.clear();
 }
 
@@ -329,6 +337,11 @@ CheckoutProcess::CheckoutProcess(
 		handleFormUpdate(update);
 	}, _lifetime);
 
+	Core::App().screenshotProtection().addContentReason(
+		_panel->widget(),
+		_screenshotProtection.value(),
+		_panel->lifetime());
+
 	_panel->savedMethodChosen(
 	) | rpl::on_next([=](QString id) {
 		_form->chooseSavedMethod(id);
@@ -394,8 +407,14 @@ void CheckoutProcess::handleFormUpdate(const FormUpdate &update) {
 		showForm();
 		const auto submitted = (_submitState == SubmitState::Validating);
 		_submitState = SubmitState::Validated;
-		if (submitted) {
+		if (!submitted) {
+			return;
+		}
+		const auto &options = _form->shippingOptions();
+		if (options.list.empty()) {
 			panelSubmit();
+		} else if (options.selectedId.isEmpty()) {
+			chooseShippingOption();
 		}
 	}, [&](const PaymentMethodUpdate &data) {
 		showForm();
@@ -419,7 +438,10 @@ void CheckoutProcess::handleFormUpdate(const FormUpdate &update) {
 			rpl::single(_form->invoice().provider));
 		_sendFormFailed = false;
 		_sendFormPending = true;
-		if (!_panel->showWebview(data.url, false, std::move(bottomText))) {
+		if (!_panel->showWebview(
+				data.url,
+				Ui::WebviewMode::Verification,
+				std::move(bottomText))) {
 			File::OpenUrl(data.url);
 			close();
 		}
@@ -598,6 +620,17 @@ void CheckoutProcess::closeAndReactivate(CheckoutResult result) {
 }
 
 void CheckoutProcess::close() {
+	if (Webview::InsideBlockingPopup()) {
+		// A blocking popup may have been opened from inside a webview
+		// callback, so the frames of that callback, and the closures
+		// owning them, are still on the stack below the popup. Destroying
+		// this process (and with it the panel and the webview) here would
+		// pull the ground from under them, so wait for a clean stack.
+		Webview::RunWhenBlockingPopupFinished(crl::guard(this, [=] {
+			close();
+		}));
+		return;
+	}
 	const auto i = Processes.find(_session);
 	if (i == end(Processes)) {
 		return;
@@ -681,7 +714,9 @@ void CheckoutProcess::panelAcceptTermsAndSubmit() {
 void CheckoutProcess::panelWebviewMessage(
 		const QJsonDocument &message,
 		bool saveInformation) {
-	if (!message.isArray()) {
+	if (_sendFormPending) {
+		return;
+	} else if (!message.isArray()) {
 		LOG(("Payments Error: "
 			"Not an array received in buy_callback arguments."));
 		return;
@@ -780,6 +815,7 @@ void CheckoutProcess::panelEditPhone() {
 }
 
 void CheckoutProcess::showForm() {
+	_screenshotProtection = !_form->invoice().isTest;
 	_panel->showForm(
 		_form->invoice(),
 		_form->information(),
@@ -956,7 +992,10 @@ QVariant CheckoutProcess::panelClickHandlerContext() {
 void CheckoutProcess::performInitialSilentValidation() {
 	const auto &invoice = _form->invoice();
 	const auto &saved = _form->information();
+	// WHY: a flexible invoice makes the server forward the address to the
+	// bot as a shipping query, so validation must wait for the user's Pay.
 	if (invoice.receipt
+		|| invoice.isFlexible
 		|| (invoice.isNameRequested && saved.name.isEmpty())
 		|| (invoice.isEmailRequested && saved.email.isEmpty())
 		|| (invoice.isPhoneRequested && saved.phone.isEmpty())

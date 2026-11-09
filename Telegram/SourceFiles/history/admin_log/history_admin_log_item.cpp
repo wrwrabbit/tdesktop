@@ -100,7 +100,8 @@ std::optional<MTPMessageReplyHeader> PrepareLogReply(
 					| Flag::f_quote
 					| Flag::f_quote_entities
 					| Flag::f_quote_offset
-					| Flag::f_quote_text;
+					| Flag::f_quote_text
+					| Flag::f_quote_rich;
 				return MTP_messageReplyHeader(
 					MTP_flags((data.vflags().v & ~removeFlags)
 						| Flag::f_reply_to_msg_id),
@@ -113,7 +114,8 @@ std::optional<MTPMessageReplyHeader> PrepareLogReply(
 					MTPVector<MTPMessageEntity>(), // quote_entities
 					MTPint(), // quote_offset
 					MTPint(), // todo_item_id
-					MTPbytes()); // poll_option
+					MTPbytes(), // poll_option
+					MTPVector<MTPRichText>()); // quote_rich
 			}
 		}
 		return {};
@@ -226,12 +228,17 @@ uint64 MediaId(const MTPMessage &message) {
 	if (!MediaCanHaveCaption(message)) {
 		return 0;
 	}
-	const auto &media = message.c_message().vmedia();
-	return media
-		? v::match(
-			Data::GetFileReferences(*media).data.begin()->first,
-			[](const auto &d) { return d.id; })
-		: 0;
+	const auto media = message.c_message().vmedia();
+	if (!media) {
+		return 0;
+	}
+	const auto references = Data::GetFileReferences(*media);
+	if (references.data.empty()) {
+		return 0;
+	}
+	return v::match(
+		references.data.begin()->first,
+		[](const auto &data) { return data.id; });
 }
 
 TextWithEntities ExtractEditedText(
@@ -299,6 +306,10 @@ TextWithEntities GenerateAdminChangeText(
 		{ Flag::ManageCall, tr::lng_admin_log_admin_manage_calls },
 		{ Flag::ManageDirect, tr::lng_admin_log_admin_manage_direct },
 		{ Flag::ManageRanks, tr::lng_admin_log_admin_manage_ranks },
+		{
+			Flag::ManageWelcomeMessages,
+			tr::lng_admin_log_admin_manage_welcome_messages,
+		},
 		{ Flag::AddAdmins, tr::lng_admin_log_admin_add_admins },
 		{ Flag::Anonymous, tr::lng_admin_log_admin_remain_anonymous },
 	};
@@ -780,8 +791,18 @@ OwnedItem::OwnedItem(OwnedItem &&other)
 }
 
 OwnedItem &OwnedItem::operator=(OwnedItem &&other) {
-	_data = base::take(other._data);
-	_view = base::take(other._view);
+	if (this != &other) {
+		// destroy() is synchronous and fires itemRemoved, so both members
+		// must already hold the incoming values when it runs. Assigning
+		// _view also destroys the outgoing view, which ~Element requires
+		// to happen before the item it points to is destroyed.
+		const auto old = base::take(_data);
+		_data = base::take(other._data);
+		_view = base::take(other._view);
+		if (old) {
+			old->destroy();
+		}
+	}
 	return *this;
 }
 
@@ -1381,14 +1402,11 @@ void GenerateItems(
 	const auto createChangeLocation = [&](const LogLocation &action) {
 		action.vnew_value().match([&](const MTPDchannelLocation &data) {
 			const auto address = qs(data.vaddress());
-			const auto link = data.vgeo_point().match([&](
-					const MTPDgeoPoint &data) {
-				return tr::link(
-					address,
-					LocationClickHandler::Url(Data::LocationPoint(data)));
-			}, [&](const MTPDgeoPointEmpty &) {
-				return TextWithEntities{ .text = address };
-			});
+			const auto point = Data::LocationPoint::FromMTP(
+				data.vgeo_point());
+			const auto link = point
+				? tr::link(address, LocationClickHandler::Url(*point))
+				: tr::marked(address);
 			const auto text = tr::lng_admin_log_changed_location_chat(
 				tr::now,
 				lt_from,

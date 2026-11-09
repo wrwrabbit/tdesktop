@@ -7,23 +7,327 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "iv/markdown/iv_markdown_prepare_serialize.h"
 
+#include "base/variant.h"
+#include "ui/text/text.h"
+#include "ui/text/text_utilities.h"
+#include "ui/widgets/fields/input_field.h"
+
 #include "styles/style_iv.h"
-#include "styles/style_widgets.h"
 
 #include <QtCore/QByteArray>
 
+#include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace Iv::Markdown {
 namespace {
 
+struct TextOffsetsRun {
+	int64 from = 0;
+	int64 value = 0;
+	bool constant = false;
+};
+
+struct TextOffsetsMap {
+	std::vector<TextOffsetsRun> runs;
+	int64 size = 0;
+};
+
+[[nodiscard]] QString EncodeInlineTextObjectBytes(const QByteArray &value) {
+	return QString::fromUtf8(value.toPercentEncoding());
+}
+
+[[nodiscard]] QByteArray DecodeInlineTextObjectBytes(QStringView value) {
+	return QByteArray::fromPercentEncoding(value.toLatin1());
+}
+
 [[nodiscard]] QString EncodeInlineTextObjectField(const QString &value) {
-	return QString::fromUtf8(value.toUtf8().toPercentEncoding());
+	return EncodeInlineTextObjectBytes(value.toUtf8());
 }
 
 [[nodiscard]] QString DecodeInlineTextObjectField(QStringView value) {
-	return QString::fromUtf8(
-		QByteArray::fromPercentEncoding(value.toLatin1()));
+	return QString::fromUtf8(DecodeInlineTextObjectBytes(value));
+}
+
+[[nodiscard]] QString RichButtonLabelEntityName(EntityType type) {
+	return (type == EntityType::CustomEmoji)
+		? u"custom-emoji"_q
+		: (type == EntityType::FormattedDate)
+		? u"formatted-date"_q
+		: QString();
+}
+
+[[nodiscard]] EntityType RichButtonLabelEntityType(QStringView name) {
+	return (name == u"custom-emoji"_q)
+		? EntityType::CustomEmoji
+		: (name == u"formatted-date"_q)
+		? EntityType::FormattedDate
+		: EntityType::Invalid;
+}
+
+[[nodiscard]] QString SerializeRichButtonLabel(const TextWithEntities &text) {
+	auto result = EncodeInlineTextObjectField(text.text);
+	for (const auto &entity : text.entities) {
+		const auto name = RichButtonLabelEntityName(entity.type());
+		if (name.isEmpty()) {
+			continue;
+		}
+		result += u"|"_q
+			+ name
+			+ u","_q
+			+ QString::number(entity.offset())
+			+ u","_q
+			+ QString::number(entity.length())
+			+ u","_q
+			+ EncodeInlineTextObjectField(entity.data());
+	}
+	return result;
+}
+
+[[nodiscard]] TextWithEntities ParseRichButtonLabel(QStringView data) {
+	const auto parts = data.split(QChar('|'), Qt::KeepEmptyParts);
+	if (parts.empty()) {
+		return {};
+	}
+	auto result = TextWithEntities{
+		DecodeInlineTextObjectField(parts[0]),
+	};
+	const auto size = int(result.text.size());
+	for (auto i = 1, count = int(parts.size()); i != count; ++i) {
+		const auto fields = parts[i].split(QChar(','), Qt::KeepEmptyParts);
+		if (fields.size() != 4) {
+			continue;
+		}
+		auto offsetOk = false;
+		auto lengthOk = false;
+		const auto type = RichButtonLabelEntityType(fields[0]);
+		const auto offset = fields[1].toInt(&offsetOk);
+		const auto length = fields[2].toInt(&lengthOk);
+		if (type == EntityType::Invalid
+			|| !offsetOk
+			|| !lengthOk
+			|| offset < 0
+			|| length <= 0
+			|| offset + length > size) {
+			continue;
+		}
+		result.entities.push_back(EntityInText(
+			type,
+			offset,
+			length,
+			DecodeInlineTextObjectField(fields[3])));
+	}
+	return result;
+}
+
+[[nodiscard]] std::optional<InlineTextObjectButtonData> InlineLinkButtonFor(
+		const EntityInText &entity) {
+	if (entity.type() != EntityType::CustomEmoji) {
+		return std::nullopt;
+	}
+	const auto parsed = ParseInlineTextObjectEntity(entity.data());
+	if (!parsed) {
+		return std::nullopt;
+	}
+	const auto button = std::get_if<InlineTextObjectButtonData>(&parsed->data);
+	return (button && button->link)
+		? std::make_optional(*button)
+		: std::nullopt;
+}
+
+void ReplaceInlineObjectText(
+		TextWithEntities *text,
+		const EntityInText &object,
+		const QString &replacement) {
+	const auto offset = object.offset();
+	const auto delta = int(replacement.size()) - object.length();
+	text->text.replace(offset, object.length(), replacement);
+	for (auto &entity : text->entities) {
+		if (&entity == &object) {
+			continue;
+		} else if (entity.offset() > offset) {
+			entity.shiftRight(delta);
+		} else if (entity.offset() + entity.length() > offset) {
+			entity.shrinkFromRight(-delta);
+		}
+	}
+}
+
+[[nodiscard]] EntitiesInText::iterator ExpandInlineObjectEntities(
+		TextWithEntities *text,
+		EntitiesInText::iterator i,
+		const EntitiesInText &nested) {
+	auto &entities = text->entities;
+	const auto offset = i->offset();
+	auto at = int(i - entities.begin());
+	entities.erase(i);
+	for (const auto &entity : nested) {
+		entities.insert(at++, EntityInText(
+			entity.type(),
+			entity.offset() + offset,
+			entity.length(),
+			entity.data()));
+	}
+	return entities.begin() + at;
+}
+
+[[nodiscard]] int64 TextOffsetAt(const TextOffsetsRun &run, int64 boundary) {
+	return run.constant ? run.value : (run.value + boundary - run.from);
+}
+
+[[nodiscard]] TextOffsetsMap StartTextOffsets(qsizetype size) {
+	auto result = TextOffsetsMap{ .size = size };
+	if (size >= 0 && size < std::numeric_limits<int>::max()) {
+		result.runs.push_back({});
+	}
+	return result;
+}
+
+[[nodiscard]] std::size_t SplitTextOffsets(
+		TextOffsetsMap *map,
+		int64 value) {
+	auto &runs = map->runs;
+	auto till = map->size + 1;
+	auto i = runs.size();
+	for (; i != 0; --i) {
+		const auto &run = runs[i - 1];
+		if (TextOffsetAt(run, till - 1) < value) {
+			break;
+		} else if (TextOffsetAt(run, run.from) < value) {
+			const auto split = TextOffsetsRun{
+				.from = run.from + (value - run.value),
+				.value = value,
+			};
+			runs.insert(begin(runs) + i, split);
+			break;
+		}
+		till = run.from;
+	}
+	return i;
+}
+
+void ReplaceTextOffsets(
+		TextOffsetsMap *map,
+		int64 size,
+		int64 position,
+		int64 length,
+		int64 added) {
+	auto &runs = map->runs;
+	const auto till = position + length;
+	if (runs.empty()) {
+		return;
+	} else if (position < 0
+		|| length < 0
+		|| till > size
+		|| size - length + added >= std::numeric_limits<int>::max()) {
+		runs.clear();
+		return;
+	}
+	const auto moved = length ? (position + 1) : position;
+	const auto from = SplitTextOffsets(map, moved);
+	const auto shifted = SplitTextOffsets(map, till);
+	for (auto i = shifted; i != runs.size(); ++i) {
+		runs[i].value += added - length;
+	}
+	if (from != shifted) {
+		runs[from].value = position + added;
+		runs[from].constant = true;
+		runs.erase(begin(runs) + from + 1, begin(runs) + shifted);
+	}
+}
+
+void FinishTextOffsets(
+		const TextOffsetsMap &map,
+		std::vector<int> *result) {
+	result->clear();
+	const auto &runs = map.runs;
+	if (runs.empty()) {
+		return;
+	}
+	result->reserve(std::size_t(map.size) + 1);
+	for (auto i = begin(runs); i != end(runs); ++i) {
+		const auto till = (i + 1 != end(runs))
+			? (i + 1)->from
+			: (map.size + 1);
+		for (auto boundary = i->from; boundary != till; ++boundary) {
+			result->push_back(int(TextOffsetAt(*i, boundary)));
+		}
+	}
+}
+
+void TrimTextOffsets(
+		std::vector<int> *offsets,
+		const QString &untrimmed,
+		const QString &trimmed) {
+	const auto size = int64(untrimmed.size());
+	const auto length = int64(trimmed.size());
+	const auto kept = ranges::find_if_not(untrimmed, Ui::Text::IsTrimmed);
+	const auto leading = int64(kept - untrimmed.begin());
+	if (offsets->empty()
+		|| offsets->front() != 0
+		|| offsets->back() != size
+		|| !ranges::is_sorted(*offsets)
+		|| leading + length > size
+		|| QStringView(untrimmed).mid(leading, length) != trimmed) {
+		offsets->clear();
+		return;
+	}
+	for (auto &offset : *offsets) {
+		offset = int(std::clamp(offset - leading, int64(), length));
+	}
+}
+
+[[nodiscard]] bool RecordDateReplacement(
+		std::vector<PreparedTextReplacement> *records,
+		int64 size,
+		int64 position,
+		int64 length,
+		int64 added) {
+	const auto till = position + length;
+	if (position < 0
+		|| length < 0
+		|| till > size
+		|| size - length + added > std::numeric_limits<int>::max()) {
+		return false;
+	}
+	auto skipped = length;
+	auto before = 0;
+	auto result = std::vector<PreparedTextReplacement>();
+	result.reserve(records->size() + 1);
+	for (const auto &record : *records) {
+		const auto from = int64(record.position);
+		const auto to = from + record.added;
+		const auto edge = (length > 0)
+			&& !record.added
+			&& (from == position || from == till);
+		if (from >= position && to <= till && !edge) {
+			skipped += record.skipped - record.added;
+		} else if (to <= position) {
+			result.push_back(record);
+			++before;
+		} else if (from >= till && to <= size) {
+			result.push_back({
+				.position = int(from - length + added),
+				.skipped = record.skipped,
+				.added = record.added,
+			});
+		} else {
+			return false;
+		}
+	}
+	if (skipped < 0 || skipped > std::numeric_limits<int>::max()) {
+		return false;
+	}
+	result.insert(
+		begin(result) + before,
+		PreparedTextReplacement{
+			.position = int(position),
+			.skipped = int(skipped),
+			.added = int(added),
+		});
+	*records = std::move(result);
+	return true;
 }
 
 [[nodiscard]] int TextSizeForFormula(const style::TextStyle &textStyle) {
@@ -57,6 +361,27 @@ QString SerializeInlineTextObjectEntity(const InlineTextObjectEntity &object) {
 			+ QString::number(data->height)
 			+ u";"_q
 			+ EncodeInlineTextObjectField(data->replacementText);
+	} break;
+	case InlineTextObjectKind::Button: {
+		const auto data = std::get_if<InlineTextObjectButtonData>(&object.data);
+		if (!data) {
+			return QString();
+		}
+		const auto label = SerializeRichButtonLabel(data->label);
+		return u"iv-markdown:inline-text-object;button;"_q
+			+ EncodeInlineTextObjectField(label)
+			+ u";"_q
+			+ QString::number(int(data->color))
+			+ u";"_q
+			+ QString::number(int(data->type))
+			+ u";"_q
+			+ QString::number(data->link ? 1 : 0)
+			+ u";"_q
+			+ EncodeInlineTextObjectBytes(data->data)
+			+ u";"_q
+			+ QString::number(data->buttonId)
+			+ u";"_q
+			+ QString::number(data->peerTypes.value());
 	} break;
 	}
 	return QString();
@@ -102,8 +427,280 @@ std::optional<InlineTextObjectEntity> ParseInlineTextObjectEntity(
 				.replacementText = DecodeInlineTextObjectField(parts[5]),
 			},
 		};
+	} else if (parts[1] == u"button"_q) {
+		if (parts.size() != 9) {
+			return std::nullopt;
+		}
+		using Color = HistoryMessageMarkupButton::Color;
+		using Type = HistoryMessageMarkupButton::Type;
+		using PeerTypes = InlineBots::PeerTypes;
+		auto colorOk = false;
+		auto typeOk = false;
+		auto buttonIdOk = false;
+		auto peerTypesOk = false;
+		const auto color = parts[3].toInt(&colorOk);
+		const auto type = parts[4].toInt(&typeOk);
+		const auto buttonId = parts[7].toLongLong(&buttonIdOk);
+		const auto peerTypes = parts[8].toUInt(&peerTypesOk);
+		if (!colorOk
+			|| color < 0
+			|| color > int(Color::Success)
+			|| !typeOk
+			|| type < 0
+			|| type >= int(Type::kCount)
+			|| !buttonIdOk
+			|| !peerTypesOk
+			|| peerTypes > uint(
+				std::numeric_limits<PeerTypes::Type>::max())) {
+			return std::nullopt;
+		}
+		const auto label = DecodeInlineTextObjectField(parts[2]);
+		return InlineTextObjectEntity{
+			.kind = InlineTextObjectKind::Button,
+			.data = InlineTextObjectButtonData{
+				.label = ParseRichButtonLabel(label),
+				.data = DecodeInlineTextObjectBytes(parts[6]),
+				.buttonId = buttonId,
+				.type = Type(type),
+				.color = Color(color),
+				.peerTypes = PeerTypes::from_raw(PeerTypes::Type(peerTypes)),
+				.link = (parts[5] == u"1"_q),
+			},
+		};
 	}
 	return std::nullopt;
+}
+
+TextWithEntities ResolveRichButtonLabelDates(
+		TextWithEntities label,
+		const Ui::Text::FormattedDateFactory &dates,
+		std::vector<PreparedTextReplacement> *replacements) {
+	if (replacements) {
+		replacements->clear();
+	}
+	// BlockParser::checkEntities hands a FormattedDate entity its own internal
+	// index, createBlock promotes that index to the block's link index, and
+	// the renderer then paints such a block with the link pen and with an
+	// underlined font, and publishes a FormattedDateClickHandler for it. None
+	// of that belongs to a button label, which reads as one label in one font,
+	// one pen and one click target, so the date is resolved here exactly the
+	// way the parser would resolve it and the entity is dropped before layout.
+	// The list is searched from the front again after every replacement,
+	// because a normalized label orders its entities as a laminar family in
+	// post-order rather than by offset, and a textDate may itself contain a
+	// textCustomEmoji, whose entry the rewrite drops together with the text it
+	// covered — which is what the parser does today when it jumps past the
+	// date it substituted.
+	while (true) {
+		const auto i = ranges::find_if(label.entities, [](
+				const EntityInText &entity) {
+			return (entity.type() == EntityType::FormattedDate);
+		});
+		if (i == label.entities.end()) {
+			return label;
+		}
+		const auto offset = i->offset();
+		const auto length = i->length();
+		const auto till = offset + length;
+		const auto [date, flags] = DeserializeFormattedDateData(i->data());
+		if ((flags == FormattedDateFlags()) || !dates) {
+			label.entities.erase(i);
+			continue;
+		}
+		const auto replacement = dates(date, flags).text;
+		const auto delta = int(replacement.size()) - length;
+		if (replacements
+			&& !RecordDateReplacement(
+				replacements,
+				label.text.size(),
+				offset,
+				length,
+				replacement.size())) {
+			replacements->clear();
+			replacements = nullptr;
+		}
+		label.text.replace(offset, length, replacement);
+		auto entities = EntitiesInText();
+		entities.reserve(label.entities.size());
+		for (const auto &entity : label.entities) {
+			if (&entity == &*i) {
+				continue;
+			}
+			auto updated = entity;
+			if (entity.offset() >= till) {
+				updated.shiftRight(delta);
+			} else if (entity.offset() + entity.length() <= offset) {
+			} else if ((entity.offset() <= offset)
+				&& (entity.offset() + entity.length() >= till)) {
+				updated.shrinkFromRight(-delta);
+			} else {
+				continue;
+			}
+			entities.push_back(updated);
+		}
+		label.entities = std::move(entities);
+	}
+}
+
+void ExpandInlineTextObjects(
+		TextWithEntities *text,
+		bool withIcons,
+		std::vector<int> *offsets) {
+	auto map = offsets ? StartTextOffsets(text->text.size()) : TextOffsetsMap();
+	auto &entities = text->entities;
+	for (auto i = entities.begin(); i != entities.end();) {
+		if (i->type() != EntityType::CustomEmoji) {
+			++i;
+			continue;
+		}
+		const auto object = ParseInlineTextObjectEntity(i->data());
+		if (!object) {
+			++i;
+			continue;
+		}
+		auto nested = EntitiesInText();
+		const auto replacement = v::match(object->data, [](
+				const InlineTextObjectFormulaData &data) {
+			return data.trimmedTex;
+		}, [](const InlineTextObjectIvImageData &data) {
+			return data.replacementText;
+		}, [&](const InlineTextObjectButtonData &data) {
+			nested = data.label.entities;
+			return data.label.text;
+		});
+		const auto offset = i->offset();
+		if (offsets) {
+			ReplaceTextOffsets(
+				&map,
+				text->text.size(),
+				offset,
+				i->length(),
+				replacement.size());
+		}
+		ReplaceInlineObjectText(text, *i, replacement);
+		const auto formula = (object->kind
+			== InlineTextObjectKind::Formula);
+		if (withIcons && formula && !replacement.isEmpty()) {
+			const auto icon = Ui::Text::IconEmoji(
+				&st::ivSummaryMathIcon,
+				replacement);
+			*i = EntityInText(
+				EntityType::CustomEmoji,
+				offset,
+				int(replacement.size()),
+				icon.entities.front().data());
+			++i;
+		} else {
+			i = ExpandInlineObjectEntities(text, i, nested);
+		}
+	}
+	if (offsets) {
+		FinishTextOffsets(map, offsets);
+	}
+}
+
+bool TextHasInlineLinkButton(const TextWithEntities &text) {
+	return ranges::any_of(text.entities, [](const EntityInText &entity) {
+		return InlineLinkButtonFor(entity).has_value();
+	});
+}
+
+std::vector<InlineLinkButtonSpan> ExpandInlineLinkButtons(
+		TextWithEntities *text,
+		RichButtonLabelDates dates,
+		const Ui::Text::FormattedDateFactory &factory,
+		std::vector<PreparedTextReplacement> *replacements,
+		std::vector<PreparedTextReplacement> *labelDates) {
+	auto result = std::vector<InlineLinkButtonSpan>();
+	auto records = std::vector<PreparedTextReplacement>();
+	auto &entities = text->entities;
+	for (auto i = entities.begin(); i != entities.end();) {
+		const auto button = InlineLinkButtonFor(*i);
+		if (!button) {
+			++i;
+			continue;
+		}
+		auto label = (dates == RichButtonLabelDates::Resolve)
+			? ResolveRichButtonLabelDates(
+				button->label,
+				factory,
+				labelDates ? &records : nullptr)
+			: button->label;
+		const auto actionable = (button->type
+			!= HistoryMessageMarkupButton::Type::Disabled);
+		auto data = actionable ? i->data() : QString();
+		const auto offset = i->offset();
+		if (replacements) {
+			replacements->push_back({
+				.position = offset,
+				.skipped = i->length(),
+				.added = int(label.text.size()),
+			});
+		}
+		if (labelDates) {
+			for (const auto &record : records) {
+				labelDates->push_back({
+					.position = offset + record.position,
+					.skipped = record.skipped,
+					.added = record.added,
+				});
+			}
+		}
+		ReplaceInlineObjectText(text, *i, label.text);
+		i = ExpandInlineObjectEntities(text, i, label.entities);
+		if (actionable && !label.text.isEmpty()) {
+			result.push_back({
+				.offset = offset,
+				.length = int(label.text.size()),
+				.data = std::move(data),
+			});
+		}
+	}
+	return result;
+}
+
+TextWithEntities NormalizeRichButtonLabel(
+		TextWithEntities text,
+		std::vector<int> *offsets) {
+	ExpandInlineTextObjects(&text, false, offsets);
+	text.entities.erase(
+		ranges::remove_if(text.entities, [](const EntityInText &entity) {
+			const auto type = entity.type();
+			return (type != EntityType::CustomEmoji)
+				&& (type != EntityType::FormattedDate);
+		}),
+		text.entities.end());
+	for (auto i = text.entities.begin(); i != text.entities.end();) {
+		if (i->type() != EntityType::FormattedDate) {
+			++i;
+			continue;
+		}
+		auto [date, flags] = DeserializeFormattedDateData(i->data());
+		if (date <= 0
+			&& i->data().startsWith(Ui::InputField::kCustomDateTagStart)) {
+			date = int32(i->data().mid(
+				Ui::InputField::kCustomDateTagStart.size()).toInt());
+		}
+		if (date <= 0) {
+			i = text.entities.erase(i);
+			continue;
+		}
+		if (!flags) {
+			flags |= FormattedDateFlag::ShortDate;
+		}
+		*i = EntityInText(
+			EntityType::FormattedDate,
+			i->offset(),
+			i->length(),
+			SerializeFormattedDateData(date, flags));
+		++i;
+	}
+	const auto untrimmed = offsets ? text.text : QString();
+	TextUtilities::Trim(text);
+	if (offsets) {
+		TrimTextOffsets(offsets, untrimmed, text.text);
+	}
+	return text;
 }
 
 QString InlineFormulaCopySource(const QString &source) {

@@ -1,39 +1,36 @@
-import re, sys
+import json
+import sys
 from pathlib import Path
 
-repo_root = Path(__file__).parent.parent.parent
-
-with open(repo_root / 'Telegram/build/release.py') as f:
-    py_src = f.read()
-
-with open(repo_root / '.github/workflows/deploy_finish.yml') as f:
-    yml_src = f.read()
-
-py_labels = set(re.findall(r"'label':\s*'([^']+)'", py_src))
-
-py_remotes = set()
-for raw in re.findall(r"'remote':\s*(.+)", py_src):
-    resolved = re.sub(r"'\s*\+\s*\w+\s*\+\s*'", 'latest', raw.strip())
-    m = re.match(r"'([^']+)'", resolved)
-    if m:
-        py_remotes.add(m.group(1))
-
-yml_labels = set(re.findall(r"label:\s*'([^']+)'", yml_src))
-yml_names = set(re.findall(r"name:\s*'(t[^']+)'", yml_src))
-
+repo_root = Path(__file__).resolve().parents[2]
+build = repo_root / 'Telegram/build'
+assets = json.loads((build / 'release_assets.json').read_text(encoding='utf-8'))
+sources = {
+    'win-x64': (build / 'build.bat').read_text(encoding='utf-8'),
+    'win-x86': (build / 'build.bat').read_text(encoding='utf-8'),
+    'linux-x64': (build / 'build.sh').read_text(encoding='utf-8'),
+    'mac': (build / 'build_mac_release.sh').read_text(encoding='utf-8'),
+}
+version_tokens = {
+    'win-x64': '%PtgAppVersionStr%%V2Suffix%',
+    'win-x86': '%PtgAppVersionStr%%V2Suffix%',
+    'linux-x64': '$PtgAppVersionStr$V2Suffix',
+    'mac': '$VERSION',
+}
 errors = []
-for label in sorted(yml_labels):
-    if label not in py_labels:
-        errors.append(f"Label in deploy_finish.yml but not in release.py: '{label}'")
-for name in sorted(yml_names):
-    if name not in py_remotes:
-        errors.append(f"Asset name in deploy_finish.yml but not in release.py: '{name}'")
-
+names = set()
+for asset in assets:
+    platform = asset['platform']
+    name = f"{asset['prefix']}-{version_tokens[platform]}.{asset['extension']}"
+    alias = f"{asset['prefix']}.latest.{asset['extension']}"
+    if name not in sources[platform]:
+        errors.append(f'Release asset does not match build output: {name}')
+    if alias in names:
+        errors.append(f'Duplicate release alias: {alias}')
+    names.add(alias)
+    if not asset['label'] or not asset['directory']:
+        errors.append(f'Missing release label or directory: {name}')
 if errors:
-    print("CONSISTENCY ERRORS:")
-    for e in errors:
-        print(f"  {e}")
+    print('\n'.join(errors))
     sys.exit(1)
-
-print(f"OK: all {len(yml_labels)} labels and {len(yml_names)} filenames "
-      f"from deploy_finish.yml are present in release.py")
+print(f'OK: {len(assets)} versioned release assets and latest aliases match build outputs')

@@ -13,10 +13,12 @@ namespace TextRecognition {
 struct RectWithText {
 	QString text;
 	QRect rect;
+	std::vector<QRect> glyphs;
 };
 
 struct Result {
 	std::vector<RectWithText> items;
+	QSize coordinateSize;
 	bool success = false;
 
 	inline operator bool() const {

@@ -233,20 +233,6 @@ PeerData *PeerFromInputMTP(
 	});
 }
 
-UserData *UserFromInputMTP(
-		not_null<Session*> owner,
-		const MTPInputUser &input) {
-	return input.match([&](const MTPDinputUser &data) {
-		const auto user = owner->user(data.vuser_id().v);
-		user->setAccessHash(data.vaccess_hash().v);
-		return user.get();
-	}, [&](const MTPDinputUserSelf &data) {
-		return owner->session().user().get();
-	}, [](const auto &data) {
-		return (UserData*)nullptr;
-	});
-}
-
 Ui::ColorCollectible ParseColorCollectible(
 		const MTPDpeerColorCollectible &data) {
 	return {
@@ -464,11 +450,7 @@ void PeerData::paintUserpic(
 	const auto cloud = userpicCloudImage(view);
 	const auto ratio = style::DevicePixelRatio();
 	if (context.shape == Ui::PeerUserpicShape::Auto) {
-		context.shape = (isForum() && !isBot())
-			? Ui::PeerUserpicShape::Forum
-			: isMonoforum()
-			? Ui::PeerUserpicShape::Monoforum
-			: Ui::PeerUserpicShape::Circle;
+		context.shape = userpicShape();
 	}
 	Ui::ValidateUserpicCache(
 		view,
@@ -505,6 +487,9 @@ bool PeerData::useEmptyUserpic(Ui::PeerUserpicView &view) const {
 }
 
 InMemoryKey PeerData::userpicUniqueKey(Ui::PeerUserpicView &view) const {
+	if (const auto broadcast = monoforumBroadcast()) {
+		return broadcast->userpicUniqueKey(view);
+	}
 	return useEmptyUserpic(view)
 		? ensureEmptyUserpic()->uniqueKey()
 		: inMemoryKey(_userpic.location());
@@ -946,6 +931,7 @@ void PeerData::setBarSettings(const MTPPeerSettings &data) {
 }
 
 void PeerData::setBarSettings(PeerBarSettings which) {
+	const auto wasSettings = _barSettings.current();
 	const auto was = hideLinks();
 	_barSettings.set(which);
 	if (was && !hideLinks()) {
@@ -961,6 +947,9 @@ void PeerData::setBarSettings(PeerBarSettings which) {
 				});
 			}
 		}
+	}
+	if (_barSettings.current() != wasSettings) {
+		session().changes().peerUpdated(this, UpdateFlag::BarSettings);
 	}
 }
 
@@ -994,6 +983,14 @@ bool PeerData::hideLinks() const {
 	}
 	const auto settings = barSettings();
 	return !settings || (*settings & PeerBarSetting::ReportSpam);
+}
+
+bool PeerData::hideEmojiStatus() const {
+	if (const auto to = migrateTo()) {
+		return to->hideEmojiStatus();
+	}
+	const auto settings = barSettings();
+	return settings && (*settings & PeerBarSetting::ReportSpam);
 }
 
 QString PeerData::requestChatTitle() const {
@@ -1296,7 +1293,10 @@ not_null<const PeerData*> PeerData::userpicPaintingPeer() const {
 }
 
 Ui::PeerUserpicShape PeerData::userpicShape() const {
-	return isForum() && !isBot()
+	const auto channel = asChannel();
+	return (isForum() && !isBot())
+		? Ui::PeerUserpicShape::Forum
+		: (channel && channel->isCommunity())
 		? Ui::PeerUserpicShape::Forum
 		: isMonoforum()
 		? Ui::PeerUserpicShape::Monoforum
@@ -1686,6 +1686,9 @@ Data::SavedSublist *PeerData::monoforumSublistFor(
 		PeerId sublistPeerId) const {
 	if (!sublistPeerId) {
 		return nullptr;
+	} else if (isSelf()) {
+		return owner().savedMessages().sublistLoaded(
+			owner().peer(sublistPeerId));
 	} else if (const auto monoforum = this->monoforum()) {
 		return monoforum->sublistLoaded(owner().peer(sublistPeerId));
 	}
@@ -1893,8 +1896,23 @@ bool PeerData::canManageRanks() const {
 		return chat->amCreator()
 			|| (chat->adminRights() & ChatAdminRight::ManageRanks);
 	} else if (const auto channel = asChannel()) {
+		if (channel->isCommunity()) {
+			return false;
+		}
 		return channel->amCreator()
 			|| (channel->adminRights() & ChatAdminRight::ManageRanks);
+	}
+	return false;
+}
+
+bool PeerData::canManageWelcomeMessages() const {
+	if (const auto chat = asChat()) {
+		return chat->amCreator()
+			|| (chat->adminRights() & ChatAdminRight::ManageWelcomeMessages);
+	} else if (const auto channel = asChannel()) {
+		return channel->amCreator()
+			|| (channel->adminRights()
+				& ChatAdminRight::ManageWelcomeMessages);
 	}
 	return false;
 }
@@ -2046,6 +2064,17 @@ int PeerData::peerGiftsCount() const {
 	return 0;
 }
 
+void PeerData::setMainProfileTab(Data::ProfileTab tab) {
+	if (_mainProfileTab != tab) {
+		_mainProfileTab = tab;
+		session().changes().peerUpdated(this, UpdateFlag::MainProfileTab);
+	}
+}
+
+Data::ProfileTab PeerData::mainProfileTab() const {
+	return _mainProfileTab;
+}
+
 MTPInputPeer PeerData::input() const {
 	if (const auto user = asUser()) {
 		const auto specific = user->inputUser();
@@ -2137,14 +2166,35 @@ void SetTopPinnedMessageId(
 			0);
 		session.saveSettingsDelayed();
 	}
-	session.storage().add(Storage::SharedMediaAddExisting(
-		peer->id,
-		MsgId(0), // topicRootId
-		PeerId(0), // monoforumPeerId
-		Storage::SharedMediaType::Pinned,
+	ApplyPinnedMessageId(
+		peer,
 		messageId,
-		{ messageId, ServerMaxMsgId }));
-	peer->owner().history(peer)->setHasPinnedMessages(true);
+		MsgId(0), // topicRootId
+		PeerId(0)); // monoforumPeerId
+}
+
+void ApplyPinnedMessageId(
+		not_null<PeerData*> peer,
+		MsgId messageId,
+		MsgId topicRootId,
+		PeerId monoforumPeerId) {
+	auto &session = peer->session();
+	if (const auto item = peer->owner().message(peer->id, messageId)) {
+		item->setIsPinned(true);
+		session.storage().add(Storage::SharedMediaAddSlice(
+			peer->id,
+			MsgId(0), // topicRootId
+			PeerId(0), // monoforumPeerId
+			Storage::SharedMediaType::Pinned,
+			{},
+			{ messageId, ServerMaxMsgId }));
+	} else {
+		session.api().requestPinnedMessagesIfNeeded(
+			peer,
+			messageId,
+			topicRootId,
+			monoforumPeerId);
+	}
 }
 
 FullMsgId ResolveTopPinnedId(
@@ -2249,6 +2299,44 @@ std::optional<uint8> ColorIndexFromColor(const MTPPeerColor *color) {
 	}, [](const auto &) -> std::optional<uint8> {
 		return std::nullopt;
 	});
+}
+
+ProfileTab ParseProfileTab(const MTPProfileTab *tab) {
+	if (!tab) {
+		return ProfileTab::None;
+	}
+	return tab->match([](const MTPDprofileTabPosts &) {
+		return ProfileTab::Posts;
+	}, [](const MTPDprofileTabGifts &) {
+		return ProfileTab::Gifts;
+	}, [](const MTPDprofileTabMedia &) {
+		return ProfileTab::Media;
+	}, [](const MTPDprofileTabFiles &) {
+		return ProfileTab::Files;
+	}, [](const MTPDprofileTabMusic &) {
+		return ProfileTab::Music;
+	}, [](const MTPDprofileTabVoice &) {
+		return ProfileTab::Voice;
+	}, [](const MTPDprofileTabLinks &) {
+		return ProfileTab::Links;
+	}, [](const MTPDprofileTabGifs &) {
+		return ProfileTab::Gifs;
+	});
+}
+
+MTPProfileTab ProfileTabToMTP(ProfileTab tab) {
+	switch (tab) {
+	case ProfileTab::Posts: return MTP_profileTabPosts();
+	case ProfileTab::Gifts: return MTP_profileTabGifts();
+	case ProfileTab::Media: return MTP_profileTabMedia();
+	case ProfileTab::Files: return MTP_profileTabFiles();
+	case ProfileTab::Music: return MTP_profileTabMusic();
+	case ProfileTab::Voice: return MTP_profileTabVoice();
+	case ProfileTab::Links: return MTP_profileTabLinks();
+	case ProfileTab::Gifs: return MTP_profileTabGifs();
+	case ProfileTab::None: break;
+	}
+	Unexpected("Tab in Data::ProfileTabToMTP.");
 }
 
 bool IsBotUserCreatesTopics(not_null<PeerData*> peer) {

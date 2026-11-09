@@ -1,0 +1,72 @@
+---
+description: Continue work from the shared ai-tdesktop queue
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent, AskUserQuestion, TodoWrite
+---
+
+# Continue AI Work
+
+Read `.claude/ai-workflow-adapter.md` and
+`.agents/skills/continue/SKILL.md` completely. Follow the shared skill with the
+Claude adapter's delegation and text-handling substitutions. The arguments
+below are the required batch specification. Without one, stop after the
+read-only `queue` call, report what the shared skill lists, and ask for a
+specification through `AskUserQuestion`. Otherwise choose exactly one
+shared-skill mode and record its frozen task ids: any active task first, then
+exactly the tasks the specification selects, or the tasks one inbox
+transaction routes when it asks for the inbox. "All pending tasks" freezes the
+pending tasks on canonical ai-tdesktop master at startup. Never add unrelated
+tasks observed later in the run. Append and implement only new follow-up
+tasks routed from results produced by this invocation, including their
+transitive discovered follow-ups.
+Preserve the shared skill's source-project inheritance rule; detaching a
+follow-up requires its affirmative independence test. Continue until that
+frozen-and-derived batch reaches the scheduler's normal stop condition or a
+global hard stop.
+
+Apply the shared `split-required` result and routing phase. A performer publishes
+that state; this parent launches one fresh foreground split Agent that reads the
+complete shared split reference, creates and publishes the replacements, and
+retires the source task. Replace the source id in the frozen batch with those
+replacements. When retained implementation exists, start the checkout-owned
+carrier first so the helper transfers its sealed source state; do not reset or
+checkpoint that work.
+
+Apply the shared source-lineage gate in this parent scheduler. Before batch
+freeze, a task missing an approved prerequisite stays out of the batch, with
+the exact branch and compatible-branch report in the run's report. After freeze but before Phase 1,
+the parent may make only the shared safe switch to an existing compatible local
+branch, never onto or off a project branch, and then resume the returned
+performer. After Phase 1, let the performer
+publish a task-local Block and continue non-dependent batch work. Never create,
+route, or execute branch-integration work as a queue task. Creating a project
+branch that exists nowhere is the shared skill's separate step, not one of these
+switches.
+
+Apply the shared skill's pending-task consolidation phase too. Recover an
+older `pending_consolidations` marker or consolidate newly routed tasks in one
+fresh Agent that publishes through the routing worktree, running beside the
+active task per the shared skill's concurrent lane. Give it the effective
+frozen batch, keep its queue scan and merge reasoning outside this scheduler
+context, and require it to read the complete shared consolidation reference.
+Never run consolidation inside the performer or discovery-routing Agent, and
+keep at most one consolidation in flight.
+
+Every inbox worker, performer, split-routing Agent, discovered-task routing
+Agent, and pending-task consolidation Agent must be told in its initial prompt
+to read `.claude/ai-workflow-adapter.md` completely before the applicable shared
+skill or reference. Use the Agent tool for those workers; do not start Claude
+subprocesses through Bash.
+
+Decide the review provider once at startup, per the adapter's review and
+assessment provider: `native` when the arguments ask for the host's own model
+("use your model for review") or not to use Codex, `codex-default` when they
+ask for it ("use codex-default for review"), otherwise `codex`. Put `Review
+provider: <codex|codex-default|native>` in every performer prompt. A review
+provider choice is not a batch specification.
+
+The arguments are the batch specification. They always restrict the batch to
+the tasks they select; ordering words only order those tasks:
+
+```text
+$ARGUMENTS
+```

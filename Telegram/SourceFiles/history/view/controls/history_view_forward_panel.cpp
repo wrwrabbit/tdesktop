@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_media_types.h"
 #include "data/data_forum_topic.h"
 #include "data/data_user.h"
+#include "iv/editor/iv_editor_session.h"
 #include "main/main_session.h"
 #include "ui/chat/forward_options_box.h"
 #include "ui/effects/spoiler_mess.h"
@@ -34,10 +35,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/peer_list_controllers.h"
 #include "data/data_changes.h"
-#include "settings/settings_common.h"
-#include "ui/widgets/buttons.h"
-#include "styles/style_menu_icons.h"
-#include "styles/style_settings.h"
 
 namespace HistoryView::Controls {
 namespace {
@@ -362,88 +359,6 @@ void ClearDraftReplyTo(
 	}
 }
 
-void EditWebPageOptions(
-		std::shared_ptr<ChatHelpers::Show> show,
-		not_null<WebPageData*> webpage,
-		Data::WebPageDraft draft,
-		Fn<void(Data::WebPageDraft)> done) {
-	show->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(u"Link Preview"_q);
-
-		struct State {
-			rpl::variable<Data::WebPageDraft> result;
-			Ui::SettingsButton *large = nullptr;
-			Ui::SettingsButton *small = nullptr;
-		};
-		const auto state = box->lifetime().make_state<State>(State{
-			.result = draft,
-			});
-
-		state->large = Settings::AddButtonWithIcon(
-			box->verticalLayout(),
-			rpl::single(u"Force large media"_q),
-			st::settingsButton,
-			{ &st::menuIconMakeBig });
-		state->large->setClickedCallback([=] {
-			auto copy = state->result.current();
-			copy.forceLargeMedia = true;
-			copy.forceSmallMedia = false;
-			state->result = copy;
-		});
-
-		state->small = Settings::AddButtonWithIcon(
-			box->verticalLayout(),
-			rpl::single(u"Force small media"_q),
-			st::settingsButton,
-			{ &st::menuIconMakeSmall });
-		state->small->setClickedCallback([=] {
-			auto copy = state->result.current();
-			copy.forceSmallMedia = true;
-			copy.forceLargeMedia = false;
-			state->result = copy;
-		});
-
-		state->result.value(
-		) | rpl::on_next([=](const Data::WebPageDraft &draft) {
-			state->large->setColorOverride(draft.forceLargeMedia
-				? st::windowActiveTextFg->c
-				: std::optional<QColor>());
-			state->small->setColorOverride(draft.forceSmallMedia
-				? st::windowActiveTextFg->c
-				: std::optional<QColor>());
-		}, box->lifetime());
-
-		Settings::AddButtonWithIcon(
-			box->verticalLayout(),
-			state->result.value(
-			) | rpl::map([=](const Data::WebPageDraft &draft) {
-				return draft.invert
-					? u"Above message"_q
-					: u"Below message"_q;
-			}),
-			st::settingsButton,
-			{ &st::menuIconChangeOrder }
-		)->setClickedCallback([=] {
-			auto copy = state->result.current();
-			copy.invert = !copy.invert;
-			state->result = copy;
-		});
-
-		box->addButton(tr::lng_settings_save(), [=] {
-			const auto weak = base::make_weak(box.get());
-			auto result = state->result.current();
-			result.manual = true;
-			done(result);
-			if (const auto strong = weak.get()) {
-				strong->closeBox();
-			}
-		});
-		box->addButton(tr::lng_cancel(), [=] {
-			box->closeBox();
-		});
-	}));
-}
-
 bool HasOnlyForcedForwardedInfo(const HistoryItemsList &list) {
 	for (const auto &item : list) {
 		if (const auto media = item->media()) {
@@ -493,12 +408,21 @@ bool CanHideForwardAuthor(
 	if (HasOnlyForcedForwardedInfo(list)) {
 		return false;
 	}
-#ifndef _DEBUG
-	if (HasRichPage(list)) {
+	if (!Iv::Editor::CanAuthorRichMessages(session) && HasRichPage(list)) {
 		return false;
 	}
-#endif
 	return session->premium() || !HasRichPage(list);
+}
+
+bool HideForwardAuthorPremiumRequired(
+		not_null<Main::Session*> session,
+		const HistoryItemsList &list) {
+	return Iv::Editor::CanAuthorRichMessages(session)
+		&& !list.empty()
+		&& !session->premium()
+		&& !HasOnlyForcedForwardedInfo(list)
+		&& HasRichPage(list)
+		&& HasDropForwardedInfoSetting(list);
 }
 
 Data::ForwardOptions NormalizeForwardOptions(

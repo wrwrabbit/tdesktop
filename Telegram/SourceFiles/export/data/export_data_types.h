@@ -14,10 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_birthday.h"
 #include "data/data_peer_id.h"
 
+#include <QtCore/QByteArray>
 #include <QtCore/QSize>
 #include <QtCore/QString>
-#include <QtCore/QByteArray>
 
+#include <map>
 #include <vector>
 
 namespace Export {
@@ -25,6 +26,8 @@ struct Settings;
 namespace Data {
 
 using Utf8String = QByteArray;
+
+inline constexpr auto kNanosInGram = int64(1'000'000'000);
 
 uint8 PeerColorIndex(BareId bareId);
 BareId PeerToBareId(PeerId peerId);
@@ -69,6 +72,7 @@ struct TextPart {
 		Strike,
 		Blockquote,
 		BankCard,
+		TonAddress,
 		Spoiler,
 		CustomEmoji,
 	};
@@ -79,6 +83,326 @@ struct TextPart {
 	[[nodiscard]] static Utf8String UnavailableEmoji() {
 		return "(unavailable)";
 	}
+};
+
+enum class InlineButtonPeerType : uint8 {
+	SameBotPM,
+	PM,
+	Chat,
+	Megagroup,
+	Broadcast,
+	BotPM,
+};
+
+struct InlineButtonAction {
+	enum class Type : uint8 {
+		Url,
+		Auth,
+		WebView,
+		Callback,
+		CallbackWithPassword,
+		Game,
+		Buy,
+		SwitchInline,
+		SwitchInlineSame,
+		UserProfile,
+		CopyText,
+		Disabled,
+	};
+
+	[[nodiscard]] static Utf8String TypeToString(
+		const InlineButtonAction &action);
+
+	Utf8String url;
+	std::optional<Utf8String> forwardText;
+	QByteArray callbackData;
+	Utf8String query;
+	std::optional<std::vector<InlineButtonPeerType>> peerTypes;
+	Utf8String copyText;
+	uint64 userId = 0;
+	int32 buttonId = 0;
+	Type type = Type::Url;
+	bool requiresPassword : 1 = false;
+	bool samePeer : 1 = false;
+};
+
+enum class RichButtonStyle : uint8 {
+	Default,
+	Primary,
+	Success,
+	Danger,
+	Link,
+};
+
+enum class RichButtonAlignment : uint8 {
+	Stretch,
+	Left,
+	Center,
+	Right,
+};
+
+[[nodiscard]] Utf8String InlineButtonPeerTypeToString(
+	InlineButtonPeerType type);
+[[nodiscard]] Utf8String RichButtonStyleToString(RichButtonStyle style);
+[[nodiscard]] Utf8String RichButtonAlignmentToString(
+	RichButtonAlignment alignment);
+
+struct RichButtonPayload {
+	InlineButtonAction action;
+	std::optional<RichButtonStyle> style;
+};
+
+struct RichText {
+	enum class Type : uint8 {
+		Empty,
+		Plain,
+		Concat,
+		Bold,
+		Italic,
+		Underline,
+		Strike,
+		Fixed,
+		Url,
+		Email,
+		Phone,
+		Subscript,
+		Superscript,
+		Marked,
+		Anchor,
+		Math,
+		CustomEmoji,
+		Spoiler,
+		Mention,
+		Hashtag,
+		BotCommand,
+		Cashtag,
+		AutoUrl,
+		AutoEmail,
+		AutoPhone,
+		BankCard,
+		TonAddress,
+		MentionName,
+		FormattedDate,
+		InlineImage,
+		Diff,
+		Button,
+	};
+
+	Utf8String text;
+	Utf8String data;
+	Utf8String customEmojiData;
+	std::vector<RichText> children;
+	std::vector<RichText> oldChildren;
+	std::unique_ptr<RichButtonPayload> button;
+	uint64 id = 0;
+	TimeId date = 0;
+	int width = 0;
+	int height = 0;
+	Type type = Type::Empty;
+	bool relative : 1 = false;
+	bool shortTime : 1 = false;
+	bool longTime : 1 = false;
+	bool shortDate : 1 = false;
+	bool longDate : 1 = false;
+	bool dayOfWeek : 1 = false;
+	bool unsupported : 1 = false;
+};
+
+struct RichCaption {
+	RichText text;
+	RichText credit;
+};
+
+struct RichBlock;
+
+enum class RichTaskState : uint8 {
+	None,
+	Unchecked,
+	Checked,
+};
+
+enum class RichListKind : uint8 {
+	Bullet,
+	Ordered,
+};
+
+enum class RichListItemContent : uint8 {
+	Text,
+	Blocks,
+};
+
+enum class RichQuoteContent : uint8 {
+	Text,
+	Blocks,
+};
+
+struct RichOrderedList {
+	std::optional<Utf8String> type;
+	std::optional<int> start;
+	bool reversed : 1 = false;
+};
+
+struct RichListItem {
+	std::optional<RichText> text;
+	std::vector<RichBlock> blocks;
+	std::optional<Utf8String> num;
+	std::optional<Utf8String> type;
+	std::optional<int> value;
+	RichTaskState taskState = RichTaskState::None;
+	RichListItemContent content = RichListItemContent::Text;
+};
+
+enum class RichTableAlignment : uint8 {
+	Left,
+	Center,
+	Right,
+};
+
+enum class RichTableVerticalAlignment : uint8 {
+	Top,
+	Middle,
+	Bottom,
+};
+
+struct RichTableCell {
+	std::optional<RichText> text;
+	std::optional<int> colspan;
+	std::optional<int> rowspan;
+	RichTableAlignment alignment = RichTableAlignment::Left;
+	RichTableVerticalAlignment verticalAlignment
+		= RichTableVerticalAlignment::Top;
+	bool header : 1 = false;
+};
+
+struct RichTableRow {
+	std::vector<RichTableCell> cells;
+};
+
+struct RichRelatedArticle {
+	Utf8String url;
+	std::optional<Utf8String> title;
+	std::optional<Utf8String> description;
+	std::optional<Utf8String> author;
+	std::optional<uint64> photoId;
+	std::optional<TimeId> publishedDate;
+	uint64 webpageId = 0;
+};
+
+struct RichChannel {
+	enum class Source : uint8 {
+		ChatEmpty,
+		Chat,
+		ChatForbidden,
+		Channel,
+		ChannelForbidden,
+		Community,
+		CommunityForbidden,
+	};
+
+	std::optional<Utf8String> title;
+	std::optional<Utf8String> username;
+	std::optional<int64> accessHash;
+	uint64 id = 0;
+	Source source = Source::ChatEmpty;
+	bool broadcast : 1 = false;
+	bool megagroup : 1 = false;
+	bool monoforum : 1 = false;
+};
+
+struct RichMapPoint {
+	enum class Source : uint8 {
+		GeoPointEmpty,
+		GeoPoint,
+		InputGeoPointEmpty,
+		InputGeoPoint,
+	};
+
+	std::optional<int64> accessHash;
+	std::optional<int> accuracyRadius;
+	float64 latitude = 0.;
+	float64 longitude = 0.;
+	Source source = Source::GeoPointEmpty;
+};
+
+struct RichBlock {
+	enum class Kind : uint8 {
+		Unsupported,
+		Heading,
+		Paragraph,
+		Footer,
+		Thinking,
+		AuthorDate,
+		Code,
+		Divider,
+		Anchor,
+		List,
+		Quote,
+		Photo,
+		Video,
+		Cover,
+		Embed,
+		EmbedPost,
+		Collage,
+		Slideshow,
+		Channel,
+		Audio,
+		File,
+		Math,
+		Table,
+		Details,
+		RelatedArticles,
+		Map,
+		InputMap,
+		ButtonRow,
+		Unknown,
+	};
+
+	RichText text;
+	RichText quoteCaption;
+	RichCaption caption;
+	RichOrderedList orderedList;
+	RichChannel channel;
+	RichMapPoint mapPoint;
+	Utf8String language;
+	Utf8String formula;
+	Utf8String name;
+	Utf8String url;
+	Utf8String author;
+	std::optional<Utf8String> optionalUrl;
+	std::optional<Utf8String> html;
+	std::vector<RichBlock> blocks;
+	std::vector<RichListItem> listItems;
+	std::vector<RichTableRow> tableRows;
+	std::vector<RichRelatedArticle> relatedArticles;
+	std::vector<RichText> buttons;
+	std::optional<uint64> optionalWebpageId;
+	std::optional<uint64> posterPhotoId;
+	std::optional<int> width;
+	std::optional<int> height;
+	uint64 photoId = 0;
+	uint64 documentId = 0;
+	uint64 webpageId = 0;
+	uint64 authorPhotoId = 0;
+	TimeId date = 0;
+	int headingLevel = 0;
+	int zoom = 0;
+	int mapWidth = 0;
+	int mapHeight = 0;
+	Kind kind = Kind::Unknown;
+	RichListKind listKind = RichListKind::Bullet;
+	RichQuoteContent quoteContent = RichQuoteContent::Text;
+	RichButtonAlignment buttonAlignment = RichButtonAlignment::Stretch;
+	bool unsupported : 1 = false;
+	bool fullWidth : 1 = false;
+	bool allowScrolling : 1 = false;
+	bool autoplay : 1 = false;
+	bool loop : 1 = false;
+	bool spoiler : 1 = false;
+	bool open : 1 = false;
+	bool bordered : 1 = false;
+	bool striped : 1 = false;
+	bool compact : 1 = false;
+	bool pullquote : 1 = false;
 };
 
 struct UserpicsInfo {
@@ -127,6 +451,9 @@ struct Image {
 	int height = 0;
 	File file;
 };
+
+// td_export does not link lib_ui, so the svg/svgz reader guard lives here.
+[[nodiscard]] bool IsSvgFormat(const QByteArray &format);
 
 std::pair<QString, QSize> WriteImageThumb(
 	const QString &basePath,
@@ -189,6 +516,14 @@ struct Document {
 	bool isVideoFile = false;
 	bool isAudioFile = false;
 	bool spoilered = false;
+};
+
+struct RichMessage {
+	std::vector<RichBlock> blocks;
+	std::map<uint64, Photo> photos;
+	std::map<uint64, Document> documents;
+	bool rtl : 1 = false;
+	bool part : 1 = false;
 };
 
 struct SharedContact {
@@ -457,6 +792,12 @@ Document ParseDocument(
 	const QString &suggestedFolder,
 	TimeId date);
 
+RichMessage ParseRichMessage(
+	ParseMediaContext &context,
+	const MTPRichMessage &data,
+	const QString &folder,
+	TimeId date);
+
 Media ParseMedia(
 	ParseMediaContext &context,
 	const MTPMessageMedia &data,
@@ -608,6 +949,10 @@ struct ActionSetChatTheme {
 };
 
 struct ActionChatJoinedByRequest {
+};
+
+struct ActionChatJoinedViaCommunity {
+	ChannelId communityId = 0;
 };
 
 struct ActionWebViewDataSent {
@@ -767,6 +1112,26 @@ struct ActionManagedBotCreated {
 	UserId botId = 0;
 };
 
+struct ActionGramTransfer {
+	int64 amount = 0;
+	Utf8String peerAddress;
+	Utf8String transactionId;
+	Utf8String comment;
+	bool commentEncrypted = false;
+};
+
+struct ActionWalletTonConnectRequest {
+	uint64 sessionId = 0;
+	TimeId expires = 0;
+	Utf8String topic;
+	Utf8String traceId;
+	bool accepted = false;
+	bool declined = false;
+};
+
+struct ActionNoPaidMessagesTokenUsed {
+};
+
 struct ServiceAction {
 	std::variant<
 		v::null_t,
@@ -798,6 +1163,7 @@ struct ServiceAction {
 		ActionGroupCallScheduled,
 		ActionSetChatTheme,
 		ActionChatJoinedByRequest,
+		ActionChatJoinedViaCommunity,
 		ActionWebViewDataSent,
 		ActionGiftPremium,
 		ActionTopicCreate,
@@ -827,7 +1193,10 @@ struct ServiceAction {
 		ActionNoForwardsRequest,
 		ActionNewCreatorPending,
 		ActionChangeCreator,
-		ActionManagedBotCreated> content;
+		ActionManagedBotCreated,
+		ActionGramTransfer,
+		ActionWalletTonConnectRequest,
+		ActionNoPaidMessagesTokenUsed> content;
 };
 
 ServiceAction ParseServiceAction(
@@ -903,6 +1272,7 @@ struct HistoryMessageMarkupButton {
 		WebView,
 		SimpleWebView,
 		CopyText,
+		Disabled,
 	};
 
 	static QByteArray TypeToString(const HistoryMessageMarkupButton &);
@@ -937,6 +1307,7 @@ struct Message {
 	ServiceAction action;
 	bool out = false;
 	std::vector<std::vector<HistoryMessageMarkupButton>> inlineButtonRows;
+	std::optional<RichMessage> richMessage;
 
 	File &file();
 	const File &file() const;
@@ -950,6 +1321,7 @@ struct FileOrigin {
 	int32 messageId = 0;
 	int32 storyId = 0;
 	uint64 customEmojiId = 0;
+	bool richMessage : 1 = false;
 };
 
 struct Story {
@@ -1086,6 +1458,7 @@ Utf8String FormatDateTime(
 	QChar timeSeparator = QChar(':'),
 	QChar separator = QChar(' '));
 Utf8String FormatMoneyAmount(int64 amount, const Utf8String &currency);
+Utf8String FormatGramsAmount(int64 nanos);
 Utf8String FormatFileSize(int64 size);
 Utf8String FormatDuration(int64 seconds);
 

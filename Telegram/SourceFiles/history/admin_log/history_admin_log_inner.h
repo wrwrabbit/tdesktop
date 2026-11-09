@@ -13,6 +13,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/admin_log/history_admin_log_filter_value.h"
 #include "history/history_view_highlight_manager.h"
 #include "menu/menu_antispam_validator.h"
+#include "tgw/tgw_scroll.h"
+#include "ui/controls/swipe_handler.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
 #include "ui/widgets/tooltip.h"
@@ -41,6 +43,12 @@ class ChatTheme;
 struct PeerUserpicView;
 struct ChatPaintContext;
 } // namespace Ui
+
+namespace Tgw {
+class ListSelection;
+class WidgetSelection;
+class WidgetTouch;
+} // namespace Tgw
 
 namespace Window {
 class SessionController;
@@ -77,7 +85,9 @@ public:
 	[[nodiscard]] rpl::producer<int> scrollToSignal() const;
 	[[nodiscard]] rpl::producer<> cancelSignal() const;
 	[[nodiscard]] rpl::producer<int> newEventsCountValue() const;
+	[[nodiscard]] Ui::Controls::SwipeHandoff touchSwipeHandoff();
 	void resetNewEventsCount();
+	[[nodiscard]] bool canCopySelected() const;
 
 	[[nodiscard]] not_null<ChannelData*> channel() const {
 		return _channel;
@@ -88,13 +98,18 @@ public:
 	// Set the correct scroll position after being resized.
 	void restoreScrollPosition();
 
-	void resizeToWidth(int newWidth, int minHeight) {
-		_minHeight = minHeight;
-		return RpWidget::resizeToWidth(newWidth);
-	}
+	void resizeToWidth(int newWidth, int minHeight);
 
 	void saveState(not_null<SectionMemento*> memento);
 	void restoreState(not_null<SectionMemento*> memento);
+
+	// Whether the top / bottom edge has no more events to page in.
+	[[nodiscard]] bool loadedAtTop() const {
+		return _upLoaded;
+	}
+	[[nodiscard]] bool loadedAtBottom() const {
+		return _downLoaded;
+	}
 
 	// Empty "flags" means all events.
 	void applyFilter(FilterValue &&value);
@@ -141,6 +156,9 @@ public:
 	void elementShowTooltip(
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback) override;
+	void elementShowHiddenSenderTooltip(
+		FullMsgId itemId,
+		const TextWithEntities &text) override;
 	bool elementAnimationsPaused() override;
 	bool elementHideReply(
 		not_null<const HistoryView::Element*> view) override;
@@ -170,6 +188,7 @@ public:
 		not_null<const HistoryView::Element*> view) override;
 	bool elementHideTopicButton(
 		not_null<const HistoryView::Element*> view) override;
+	HistoryView::GramReadLine *elementGramReadLine() override;
 
 	~InnerWidget();
 
@@ -193,6 +212,9 @@ protected:
 	int resizeGetHeight(int newWidth) override;
 
 private:
+	friend class Tgw::ListScroll;
+	friend class Tgw::ListSelection;
+
 	using Element = HistoryView::Element;
 	enum class Direction {
 		Up,
@@ -241,6 +263,10 @@ private:
 	void suggestRestrictParticipant(
 		not_null<PeerData*> participant,
 		FullMsgId realId);
+	void showUnbanMenu(
+		not_null<Ui::PopupMenu*> parent,
+		not_null<PeerData*> participant);
+	void unbanParticipant(not_null<PeerData*> participant);
 	void restrictParticipant(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo oldRights,
@@ -248,6 +274,10 @@ private:
 	void restrictParticipantDone(
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo rights);
+	void requestBanState(
+		not_null<PeerData*> participant,
+		Fn<void(std::optional<bool> banned)> done);
+	void setParticipantBanned(not_null<PeerData*> participant, bool banned);
 	[[nodiscard]] bool canRestrict() const;
 
 	void requestAdmins();
@@ -265,9 +295,11 @@ private:
 	struct ScrollAnchor {
 		Element *view = nullptr;
 		int delta = 0;
+		Tgw::ScrollSnapshot snapshot;
 	};
 	[[nodiscard]] ScrollAnchor captureScrollAnchor() const;
-	[[nodiscard]] int computeScrollFromAnchor(ScrollAnchor anchor) const;
+	[[nodiscard]] int computeScrollFromAnchor(
+		const ScrollAnchor &anchor) const;
 	void updateSize();
 	void updateMinMaxIds();
 	void updateEmptyText();
@@ -293,6 +325,9 @@ private:
 	void jumpToMessageInLog(
 		not_null<HistoryItem*> item,
 		MessageHighlightId highlight);
+	[[nodiscard]] int jumpTarget(
+		not_null<Element*> view,
+		const MessageHighlightId &highlight) const;
 	OwnedItem createGroupSummaryItem(
 		const DeleteGroup &group,
 		bool expanded);
@@ -365,6 +400,8 @@ private:
 	base::flat_map<not_null<PeerData*>, Ui::PeerUserpicView> _userpicsCache;
 	base::flat_map<FullMsgId, MsgId> _realIdsForReport;
 	base::flat_map<MsgId, not_null<HistoryItem*>> _itemsByRealMsgId;
+	base::flat_map<PeerId, bool> _banStates;
+	PeerData *_showUnbanFor = nullptr;
 
 	// Delete event grouping.
 	struct DisplayEntry {
@@ -382,10 +419,13 @@ private:
 	// Old-edge eventId of each group from the previous pass; sticky boundary.
 	base::flat_set<uint64> _previousDeleteGroupAnchors;
 	base::flat_set<not_null<HistoryItem*>> _expandMarkupItems;
+	Tgw::ScrollFlight _toggleFlight;
 	Ui::Animations::Simple _toggleAnimation;
+	Tgw::ScrollFlight _scrollToFlight;
 	Ui::Animations::Simple _scrollToAnimation;
 	bool _skipScrollRestore = false;
 	bool _skipUnreadEventPrune = false;
+	bool _beingDestroyed = false;
 
 	int _itemsTop = 0;
 	int _itemsWidth = 0;
@@ -446,6 +486,8 @@ private:
 
 	base::Timer _touchSelectTimer;
 	base::Timer _touchScrollTimer;
+	std::unique_ptr<Tgw::WidgetTouch> _widgetTouch;
+	std::unique_ptr<Tgw::WidgetSelection> _widgetSelection;
 
 	// Touch scroll support.
 	bool _touchScroll = false;

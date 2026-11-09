@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_poll.h"
 #include "data/data_web_page.h"
 #include "history/view/history_view_pinned_tracker.h"
+#include "history/view/history_view_reply.h"
 #include "history/history_item.h"
 #include "history/history_item_components.h"
 #include "history/history.h"
@@ -22,10 +23,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/ui_integration.h"
 #include "base/weak_ptr.h"
 #include "apiwrap.h"
+#include "ui/dynamic_image.h"
+#include "ui/effects/spoiler_mess.h"
+#include "ui/power_saving.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/basic_click_handlers.h"
-#include "styles/style_chat.h"
 #include "styles/style_chat_helpers.h"
 
 namespace HistoryView {
@@ -43,74 +46,143 @@ namespace {
 	};
 }
 
+class PreviewImage final : public Ui::DynamicImage {
+public:
+	PreviewImage(QImage source, bool spoiler);
+
+	std::shared_ptr<Ui::DynamicImage> clone() override;
+	QImage image(int size) override;
+	void subscribeToUpdates(Fn<void()> callback) override;
+
+private:
+	QImage _source;
+	QPixmap _pixmap;
+	QImage _frame;
+	QImage _spoilerCache;
+	std::unique_ptr<Ui::SpoilerAnimation> _spoiler;
+	bool _spoilered = false;
+
+};
+
+PreviewImage::PreviewImage(QImage source, bool spoiler)
+: _source(std::move(source))
+, _pixmap(QPixmap::fromImage(_source, Qt::ColorOnly))
+, _spoilered(spoiler) {
+}
+
+std::shared_ptr<Ui::DynamicImage> PreviewImage::clone() {
+	return std::make_shared<PreviewImage>(_source, _spoilered);
+}
+
+void PreviewImage::subscribeToUpdates(Fn<void()> callback) {
+	if (!callback || !_spoilered) {
+		_spoiler = nullptr;
+	} else {
+		_spoiler = std::make_unique<Ui::SpoilerAnimation>(
+			std::move(callback));
+	}
+}
+
+QImage PreviewImage::image(int size) {
+	const auto ratio = style::DevicePixelRatio();
+	const auto full = QSize(size, size) * ratio;
+	const auto to = QRect(0, 0, size, size);
+	if (_frame.size() != full) {
+		_frame = QImage(full, QImage::Format_ARGB32_Premultiplied);
+		_frame.setDevicePixelRatio(ratio);
+	}
+	_frame.fill(Qt::transparent);
+	auto p = QPainter(&_frame);
+	p.drawPixmap(to, _pixmap);
+	if (_spoiler) {
+		FillPreviewSpoiler(
+			p,
+			to,
+			_pixmap,
+			Ui::DefaultImageSpoiler().frame(_spoiler->index(
+				crl::now(),
+				On(PowerSaving::kChatSpoiler))),
+			_spoilerCache);
+	}
+	p.end();
+	return _frame;
+}
+
 [[nodiscard]] Ui::MessageBarContent ContentWithPreview(
 		not_null<HistoryItem*> item,
 		Image *preview,
 		bool spoiler,
 		Fn<void()> repaint) {
 	auto result = ContentWithoutPreview(item, repaint);
-	if (!preview) {
-		static const auto kEmpty = [&] {
-			const auto size = st::historyReplyHeight
-				* style::DevicePixelRatio();
-			auto result = QImage(
-				QSize(size, size),
-				QImage::Format_ARGB32_Premultiplied);
-			result.fill(Qt::transparent);
-			result.setDevicePixelRatio(style::DevicePixelRatio());
-			return result;
-		}();
-		result.preview = kEmpty;
-		result.spoilerRepaint = nullptr;
-	} else {
-		result.preview = Images::Round(
-			preview->original(),
-			ImageRoundRadius::Small);
-		result.spoilerRepaint = spoiler ? repaint : nullptr;
-	}
+	result.preview = std::make_shared<PreviewImage>(
+		(preview
+			? Images::Round(preview->original(), ImageRoundRadius::Small)
+			: QImage()),
+		preview && spoiler);
 	return result;
 }
 
 [[nodiscard]] rpl::producer<Ui::MessageBarContent> ContentByItem(
 		not_null<HistoryItem*> item,
 		Fn<void()> repaint) {
-	return item->history()->session().changes().messageFlagsValue(
-		item,
-		Data::MessageUpdate::Flag::Edited
-	) | rpl::map([=]() -> rpl::producer<Ui::MessageBarContent> {
-		const auto media = item->media();
-		if (!media || !media->hasReplyPreview()) {
-			return rpl::single(ContentWithoutPreview(item, repaint));
-		}
-		constexpr auto kFullLoaded = 2;
-		const auto loadedLevel = [=] {
-			constexpr auto kSomeLoaded = 1;
-			constexpr auto kNotLoaded = 0;
-			const auto preview = media->replyPreview();
-			return media->replyPreviewLoaded()
-				? kFullLoaded
-				: preview
-				? kSomeLoaded
-				: kNotLoaded;
-		};
-		return rpl::single(
-			loadedLevel()
-		) | rpl::then(
-			item->history()->session().downloaderTaskFinished(
-			) | rpl::map(loadedLevel)
-		) | rpl::distinct_until_changed(
-		) | rpl::take_while([=](int loadLevel) {
-			return loadLevel < kFullLoaded;
-		}) | rpl::then(
-			rpl::single(kFullLoaded)
-		) | rpl::map([=] {
-			return ContentWithPreview(
-				item,
-				media->replyPreview(),
-				media->hasSpoiler(),
-				repaint);
-		});
-	}) | rpl::flatten_latest();
+	const auto changes = &item->history()->session().changes();
+	return rpl::make_producer<Ui::MessageBarContent>([=](auto consumer) {
+		auto lifetime = rpl::lifetime();
+		const auto itemLifetime = lifetime.make_state<rpl::lifetime>();
+		changes->messageUpdates(
+			item,
+			Data::MessageUpdate::Flag::Destroyed
+		) | rpl::on_next([=] {
+			itemLifetime->destroy();
+		}, *itemLifetime);
+		changes->messageFlagsValue(
+			item,
+			Data::MessageUpdate::Flag::Edited
+		) | rpl::map([=]() -> rpl::producer<Ui::MessageBarContent> {
+			const auto media = item->media();
+			if (!media || !media->hasReplyPreview()) {
+				return rpl::single(ContentWithoutPreview(item, repaint));
+			}
+			// Media resets free the old object before any Edited is sent.
+			const auto owned = [=] {
+				return (item->media() == media);
+			};
+			constexpr auto kFullLoaded = 2;
+			const auto loadedLevel = [=] {
+				constexpr auto kSomeLoaded = 1;
+				constexpr auto kNotLoaded = 0;
+				const auto current = item->media();
+				const auto preview = current->replyPreview();
+				return current->replyPreviewLoaded()
+					? kFullLoaded
+					: preview
+					? kSomeLoaded
+					: kNotLoaded;
+			};
+			return rpl::single(
+				loadedLevel()
+			) | rpl::then(
+				item->history()->session().downloaderTaskFinished(
+				) | rpl::take_while(owned) | rpl::map(loadedLevel)
+			) | rpl::distinct_until_changed(
+			) | rpl::take_while([=](int loadLevel) {
+				return loadLevel < kFullLoaded;
+			}) | rpl::then(
+				rpl::single(kFullLoaded)
+			) | rpl::take_while(owned) | rpl::map([=] {
+				const auto current = item->media();
+				return ContentWithPreview(
+					item,
+					current->replyPreview(),
+					current->hasSpoilerForPreview(),
+					repaint);
+			});
+		}) | rpl::flatten_latest(
+		) | rpl::on_next([=](Ui::MessageBarContent &&value) {
+			consumer.put_next(std::move(value));
+		}, *itemLifetime);
+		return lifetime;
+	});
 }
 
 [[nodiscard]] rpl::producer<Ui::MessageBarContent> ContentByItemId(
@@ -233,6 +305,7 @@ rpl::producer<HistoryItem*> PinnedBarItemWithCustomButton(
 
 		struct State {
 			bool hasCustomButton = false;
+			HistoryItem *pushed = nullptr;
 			base::has_weak_ptr guard;
 			rpl::lifetime lifetime;
 			FullMsgId resolvedId;
@@ -252,6 +325,7 @@ rpl::producer<HistoryItem*> PinnedBarItemWithCustomButton(
 				return;
 			}
 			state->hasCustomButton = possiblyHasCustomButton;
+			state->pushed = item;
 			consumer.put_next(item.get());
 		};
 
@@ -264,6 +338,7 @@ rpl::producer<HistoryItem*> PinnedBarItemWithCustomButton(
 			state->lifetime.destroy();
 			state->resolvedId = fullId;
 			invalidate_weak_ptrs(&state->guard);
+			const auto had = (base::take(state->pushed) != nullptr);
 
 			const auto messageFlag = [=](not_null<HistoryItem*> item) {
 				using Update = Data::MessageUpdate;
@@ -277,26 +352,44 @@ rpl::producer<HistoryItem*> PinnedBarItemWithCustomButton(
 						state->lifetime.destroy();
 						invalidate_weak_ptrs(&state->guard);
 						state->hasCustomButton = false;
+						state->pushed = nullptr;
 						consumer.put_next(nullptr);
 					} else {
 						pushUnique(update.item);
 					}
 				}, state->lifetime);
+				session->data().itemViewRefreshRequest(
+				) | rpl::filter([=](not_null<const HistoryItem*> refreshed) {
+					return (refreshed == item);
+				}) | rpl::on_next([=] {
+					pushUnique(item);
+				}, state->lifetime);
 				pushUnique(item);
 			};
 			if (const auto item = session->data().message(fullId)) {
 				messageFlag(item);
-				return;
+			} else {
+				const auto resolved = crl::guard(&state->guard, [=] {
+					if (const auto item = session->data().message(fullId)) {
+						messageFlag(item);
+					}
+				});
+				session->api().requestMessageData(
+					session->data().peer(fullId.peer),
+					fullId.msg,
+					resolved);
 			}
-			const auto resolved = crl::guard(&state->guard, [=] {
-				if (const auto item = session->data().message(fullId)) {
-					messageFlag(item);
-				}
-			});
-			session->api().requestMessageData(
-				session->data().peer(fullId.peer),
-				fullId.msg,
-				resolved);
+			if (had && !state->pushed) {
+				// We dropped the subscription that watched the pushed item
+				// for Destroyed and nothing above replaced it, so the
+				// consumer must not be left holding that pointer with nobody
+				// to clear it. Resolving first means an already loaded item
+				// pushes straight over it, and the bar rebuilds its right
+				// button once instead of crossfading a default one in and
+				// back out on every switch.
+				state->hasCustomButton = false;
+				consumer.put_next(nullptr);
+			}
 		}, lifetime);
 		return lifetime;
 	});
@@ -313,6 +406,10 @@ rpl::producer<HistoryItem*> PinnedBarItemWithCustomButton(
 		if ((rows.size() == 1) && (rows.front().size() == 1)) {
 			const auto text = rows.front().front().text;
 			if (!text.isEmpty()) {
+				if (item->hideInlineKeyboard()) {
+					item->setHasHiddenLinks(true);
+					return nullptr;
+				}
 				const auto contextId = item->fullId();
 				const auto callback = [=] {
 					Api::ActivateBotCommand(context(contextId), 0, 0);

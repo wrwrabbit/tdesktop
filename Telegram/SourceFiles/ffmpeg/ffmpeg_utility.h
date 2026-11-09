@@ -33,10 +33,15 @@ class QImage;
 namespace FFmpeg {
 
 inline constexpr auto kPixelBytesSize = 4;
+// See https://github.com/telegramdesktop/tdesktop/issues/7225
+inline constexpr auto kAlignImageBy = 64;
 inline constexpr auto kAVBlockSize = 4096; // 4Kb for ffmpeg blocksize
 
 constexpr auto kUniversalTimeBase = AVRational{ 1, AV_TIME_BASE };
 constexpr auto kNormalAspect = AVRational{ 1, 1 };
+
+extern const char kOptionFFmpegMultiThread[];
+extern const char kOptionFFmpegThreadCount[];
 
 class AvErrorWrap {
 public:
@@ -126,6 +131,11 @@ struct FormatDeleter {
 	void operator()(AVFormatContext *value);
 };
 using FormatPointer = std::unique_ptr<AVFormatContext, FormatDeleter>;
+
+struct FormatSettings {
+	bool ignoreEditList = false;
+};
+
 [[nodiscard]] FormatPointer MakeFormatPointer(
 	void *opaque,
 	int(*read)(void *opaque, uint8_t *buffer, int bufferSize),
@@ -134,7 +144,8 @@ using FormatPointer = std::unique_ptr<AVFormatContext, FormatDeleter>;
 #else
 	int(*write)(void *opaque, uint8_t *buffer, int bufferSize),
 #endif
-	int64_t(*seek)(void *opaque, int64_t offset, int whence));
+	int64_t(*seek)(void *opaque, int64_t offset, int whence),
+	FormatSettings settings = {});
 [[nodiscard]] FormatPointer MakeWriteFormatPointer(
 	void *opaque,
 	int(*read)(void *opaque, uint8_t *buffer, int bufferSize),
@@ -145,6 +156,15 @@ using FormatPointer = std::unique_ptr<AVFormatContext, FormatDeleter>;
 #endif
 	int64_t(*seek)(void *opaque, int64_t offset, int whence),
 	const QByteArray &format);
+
+// Forbids ffmpeg from opening any external resource (network URL or local
+// file) referenced by the media being decoded. All our input is provided
+// through custom IO callbacks, so no protocol is ever needed for the input
+// itself; an empty whitelist stops demuxers like dash / hls from fetching the
+// segment URLs they may reference in the file (which would otherwise leak the
+// user's IP or read arbitrary local files). Call on a freshly allocated
+// context, before avformat_open_input().
+void RestrictToCustomIO(AVFormatContext *format);
 
 struct CodecDeleter {
 	void operator()(AVCodecContext *value);
@@ -180,7 +200,7 @@ using SwscalePointer = std::unique_ptr<SwsContext, SwscaleDeleter>;
 	QSize srcSize,
 	int srcFormat,
 	QSize dstSize,
-	int dstFormat, // This field doesn't take part in caching!
+	int dstFormat,
 	SwscalePointer *existing = nullptr);
 [[nodiscard]] SwscalePointer MakeSwscalePointer(
 	not_null<AVFrame*> frame,
@@ -234,8 +254,11 @@ void LogError(
 [[nodiscard]] QSize TransposeSizeByRotation(QSize size, int rotation);
 [[nodiscard]] QSize CorrectByAspect(QSize size, AVRational aspect);
 
-[[nodiscard]] bool GoodStorageForFrame(const QImage &storage, QSize size);
-[[nodiscard]] QImage CreateFrameStorage(QSize size);
+[[nodiscard]] bool GoodStorageForFrame(
+	const QImage &storage,
+	QSize size,
+	int minBytesPerLine = 0);
+[[nodiscard]] QImage CreateFrameStorage(QSize size, int minBytesPerLine = 0);
 
 void UnPremultiply(QImage &to, const QImage &from);
 void PremultiplyInplace(QImage &image);
