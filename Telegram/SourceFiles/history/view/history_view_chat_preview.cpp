@@ -532,8 +532,15 @@ void Item::setupHistory() {
 	using Type = Ui::ElasticScroll::OverscrollType;
 	_scroll->setOverscrollTypes(Type::Real, Type::Real);
 
+	const auto inner = _inner.data();
+	Tgw::ListScroll::WatchInput(
+		_scroll.get(),
+		crl::guard(inner, [=] { Tgw::ListScroll::Input(inner); }),
+		nullptr,
+		false);
 	_inner->scrollKeyEvents(
 	) | rpl::on_next([=](not_null<QKeyEvent*> e) {
+		Tgw::ListScroll::Input(_inner.data());
 		_scroll->keyPressEvent(e);
 	}, lifetime());
 
@@ -1023,6 +1030,13 @@ ChatPreview MakeChatPreview(
 		topic->destroyed() | rpl::on_next([weak] {
 			if (const auto strong = weak.get()) {
 				LOG(("Preview hidden for a destroyed topic."));
+				strong->hideMenu(true);
+			}
+		}, menu->lifetime());
+	} else if (const auto sublist = thread->asSublist()) {
+		const auto weak = base::make_weak(menu);
+		sublist->destroyed() | rpl::on_next([weak] {
+			if (const auto strong = weak.get()) {
 				strong->hideMenu(true);
 			}
 		}, menu->lifetime());

@@ -71,6 +71,15 @@ constexpr auto kSaveSettingsDelayedTimeout = crl::time(1000);
 
 using ProxyData = MTP::ProxyData;
 
+struct TopButtonMenuState {
+	~TopButtonMenuState() {
+		closing = true;
+	}
+
+	bool closing = false;
+	base::unique_qptr<Ui::PopupMenu> menu;
+};
+
 [[nodiscard]] int ClosestProxyRotationTimeoutSection(int value) {
 	auto result = 0;
 	auto bestDistance = 0;
@@ -304,8 +313,8 @@ void ShareProxy(
 					box,
 					nullptr,
 					qrLink,
-					rpl::single(QString()));
-				box->setTitle(tr::lng_proxy_edit_share_qr_box_title());
+					rpl::single(QString()),
+					tr::lng_proxy_edit_share_qr_box_title());
 			}));
 		} else {
 			ShowProxyQrBox(show, qrLink);
@@ -1132,14 +1141,13 @@ void ProxiesBox::showFinished() {
 
 void ProxiesBox::setupTopButton() {
 	const auto top = addTopButton(st::infoTopBarMenu);
-	const auto menu
-		= top->lifetime().make_state<base::unique_qptr<Ui::PopupMenu>>();
+	const auto state = top->lifetime().make_state<TopButtonMenuState>();
 
 	top->setClickedCallback([=] {
-		*menu = base::make_unique_q<Ui::PopupMenu>(
+		state->menu = base::make_unique_q<Ui::PopupMenu>(
 			top,
 			st::popupMenuWithIcons);
-		const auto raw = menu->get();
+		const auto raw = state->menu.get();
 		const auto addAction = Ui::Menu::CreateAddActionCallback(raw);
 		addAction({
 			.text = tr::lng_proxy_add_from_clipboard(tr::now),
@@ -1157,8 +1165,8 @@ void ProxiesBox::setupTopButton() {
 		raw->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 		top->setForceRippled(true);
 		raw->setDestroyedCallback([=] {
-			if (const auto strong = top.data()) {
-				strong->setForceRippled(false);
+			if (!state->closing) {
+				top->setForceRippled(false);
 			}
 		});
 		raw->popup(
@@ -1918,13 +1926,13 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				? &controller->session().account()
 				: &Core::App().activeAccount();
 			const auto top = box->addTopButton(st::boxTitleMenu);
-			const auto menu = top->lifetime().make_state<
-				base::unique_qptr<Ui::PopupMenu>>();
+			const auto state = top->lifetime().make_state<
+				TopButtonMenuState>();
 			top->setClickedCallback([=] {
-				*menu = base::make_unique_q<Ui::PopupMenu>(
+				state->menu = base::make_unique_q<Ui::PopupMenu>(
 					top,
 					st::popupMenuWithIcons);
-				const auto raw = menu->get();
+				const auto raw = state->menu.get();
 				const auto addAction = Ui::Menu::CreateAddActionCallback(raw);
 				addAction({
 					.text = tr::lng_proxy_edit_share(tr::now),
@@ -1943,8 +1951,8 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				raw->setForcedOrigin(Ui::PanelAnimation::Origin::TopRight);
 				top->setForceRippled(true);
 				raw->setDestroyedCallback([=] {
-					if (const auto strong = top.data()) {
-						strong->setForceRippled(false);
+					if (!state->closing) {
+						top->setForceRippled(false);
 					}
 				});
 				raw->popup(top->mapToGlobal(QPoint(
@@ -2022,16 +2030,12 @@ void ProxiesBoxController::ShowApplyConfirmation(
 				st::defaultPopupMenu);
 			const auto statusLabel = statusWidget.data();
 			addRow(tr::lng_proxy_box_status(), std::move(statusWidget));
-			const auto relayout = [=] {
-				table->resizeToWidth(table->width());
-			};
 			const auto setUnavailable = [=] {
 				state->statusValue = TextWithEntities{
 					tr::lng_proxy_box_table_unavailable(tr::now),
 				};
 				statusLabel->setTextColorOverride(
 					st::proxyRowStatusFgOffline->c);
-				relayout();
 			};
 			const auto runCheck = [=] {
 				if (!weak) {
@@ -2045,7 +2049,6 @@ void ProxiesBoxController::ShowApplyConfirmation(
 					tr::lng_proxy_box_table_checking(tr::now),
 				};
 				statusLabel->setTextColorOverride(st::proxyRowStatusFg->c);
-				relayout();
 				MTP::StartProxyCheck(
 					&account->mtp(),
 					proxy,
@@ -2067,7 +2070,6 @@ void ProxiesBoxController::ShowApplyConfirmation(
 						};
 						statusLabel->setTextColorOverride(
 							st::proxyRowStatusFgAvailable->c);
-						relayout();
 					},
 					[=](Connection *raw) {
 						if (!weak || state->finished) {
@@ -2122,6 +2124,8 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		const auto enableButton = box->addButton(
 			tr::lng_proxy_box_table_button(),
 			[=] {
+				// Starting a web proxy may run a nested loop closing the box.
+				const auto weak = base::make_weak(box);
 				auto &settings = Core::App().settings().proxy();
 				if (settings.indexInList(proxy) < 0) {
 					settings.addToList(proxy);
@@ -2130,7 +2134,9 @@ void ProxiesBoxController::ShowApplyConfirmation(
 					proxy,
 					ProxyData::Settings::Enabled);
 				Local::writeSettings();
-				box->closeBox();
+				if (weak) {
+					box->closeBox();
+				}
 			});
 		enableButton->setFullRadius(true);
 		box->events() | rpl::on_next([=](not_null<QEvent*> e) {

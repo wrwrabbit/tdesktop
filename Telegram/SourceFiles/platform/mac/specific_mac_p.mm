@@ -104,6 +104,7 @@ void SetupDockMenu() {
 - (void) applicationDidBecomeActive:(NSNotification *)aNotification;
 - (void) applicationDidResignActive:(NSNotification *)aNotification;
 - (void) receiveWakeNote:(NSNotification*)note;
+- (void) receiveSleepNote:(NSNotification*)note;
 
 - (void) ignoreApplicationActivationRightNow;
 
@@ -162,6 +163,7 @@ ApplicationDelegate *_sharedDelegate = nil;
 		return;
 	}
 	Core::Sandbox::Instance().customEnterFromEventLoop([&] {
+		Core::App().notifySystemSleep();
 		Core::App().checkLocalTime();
 
 		LOG(("Audio Info: "
@@ -174,12 +176,66 @@ ApplicationDelegate *_sharedDelegate = nil;
 	});
 }
 
+- (void) receiveSleepNote:(NSNotification*)aNotification {
+	if (!Core::IsAppLaunched()) {
+		return;
+	}
+	Core::Sandbox::Instance().customEnterFromEventLoop([&] {
+		Core::App().notifySystemSleep();
+	});
+}
+
 - (void) ignoreApplicationActivationRightNow {
 	_ignoreActivation = true;
 	_ignoreActivationStop.callOnce(kIgnoreActivationTimeoutMs);
 }
 
 @end // @implementation ApplicationDelegate
+
+// Never NSApp's delegate: setDelegate: drops the old one's NSApp observers.
+@interface ApplicationHiddenObserver : NSObject {
+}
+
+- (void) receiveHideNote:(NSNotification*)note;
+- (void) receiveUnhideNote:(NSNotification*)note;
+
+- (rpl::producer<bool>) hiddenChanges;
+
+@end // @interface ApplicationHiddenObserver
+
+namespace {
+
+ApplicationHiddenObserver *_hiddenObserver = nil;
+
+} // namespace
+
+@implementation ApplicationHiddenObserver {
+	rpl::event_stream<bool> _hiddenChanges;
+}
+
+- (void) receiveHideNote:(NSNotification*)aNotification {
+	if (!Core::IsAppLaunched()) {
+		return;
+	}
+	Core::Sandbox::Instance().customEnterFromEventLoop([&] {
+		_hiddenChanges.fire(true);
+	});
+}
+
+- (void) receiveUnhideNote:(NSNotification*)aNotification {
+	if (!Core::IsAppLaunched()) {
+		return;
+	}
+	Core::Sandbox::Instance().customEnterFromEventLoop([&] {
+		_hiddenChanges.fire(false);
+	});
+}
+
+- (rpl::producer<bool>) hiddenChanges {
+	return _hiddenChanges.events();
+}
+
+@end // @implementation ApplicationHiddenObserver
 
 namespace Platform {
 
@@ -191,6 +247,17 @@ void SetApplicationIcon(const QIcon &icon) {
 		image = Q2NSImage(pixmap.toImage());
 	}
 	[[NSApplication sharedApplication] setApplicationIconImage:image];
+}
+
+rpl::producer<bool> ApplicationHiddenValue() {
+	if (!_hiddenObserver) {
+		return rpl::single(false);
+	}
+	return rpl::single(
+		bool([NSApp isHidden])
+	) | rpl::then(
+		[_hiddenObserver hiddenChanges]
+	) | rpl::distinct_until_changed();
 }
 
 } // namespace Platform
@@ -230,6 +297,19 @@ void objc_start() {
 		addObserver: _sharedDelegate
 		selector: @selector(receiveWakeNote:)
 		name: NSWorkspaceDidWakeNotification object: NULL];
+	[[[NSWorkspace sharedWorkspace] notificationCenter]
+		addObserver: _sharedDelegate
+		selector: @selector(receiveSleepNote:)
+		name: NSWorkspaceWillSleepNotification object: NULL];
+	_hiddenObserver = [[ApplicationHiddenObserver alloc] init];
+	[[NSNotificationCenter defaultCenter]
+		addObserver: _hiddenObserver
+		selector: @selector(receiveHideNote:)
+		name: NSApplicationDidHideNotification object: NSApp];
+	[[NSNotificationCenter defaultCenter]
+		addObserver: _hiddenObserver
+		selector: @selector(receiveUnhideNote:)
+		name: NSApplicationDidUnhideNotification object: NSApp];
 
 	crl::on_main([=] { SetupDockMenu(); });
 }
@@ -245,6 +325,16 @@ namespace {
 }
 
 void objc_finish() {
+	if (_hiddenObserver) {
+		[[NSNotificationCenter defaultCenter]
+			removeObserver: _hiddenObserver
+			name: NSApplicationDidHideNotification object: NSApp];
+		[[NSNotificationCenter defaultCenter]
+			removeObserver: _hiddenObserver
+			name: NSApplicationDidUnhideNotification object: NSApp];
+		[_hiddenObserver release];
+		_hiddenObserver = nil;
+	}
 	[_sharedDelegate release];
 	_sharedDelegate = nil;
 	if (_downloadPathUrl) {

@@ -1,8 +1,8 @@
 diff --git a/options_mac.cmake b/options_mac.cmake
-index ad92872..24fc0b2 100644
+index 0953237..bd87ea8 100644
 --- a/options_mac.cmake
 +++ b/options_mac.cmake
-@@ -43,8 +43,13 @@ INTERFACE
+@@ -42,8 +42,13 @@
  if (DESKTOP_APP_SPECIAL_TARGET)
      target_compile_options(common_options
      INTERFACE
@@ -15,5 +15,5 @@ index ad92872..24fc0b2 100644
 +    INTERFACE
 +        -Wl,-S
      )
- endif()
- 
+     if (NOT CMAKE_GENERATOR STREQUAL Xcode)
+         target_compile_options(common_options INTERFACE

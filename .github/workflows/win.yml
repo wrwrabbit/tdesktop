@@ -2,11 +2,13 @@ name: Windows.
 
 on:
   push:
-    # Pushes to the canary branches run only canary.yml, see there.
+    # Pushes to the canary or private-ci branches run their own workflows.
     branches-ignore:
       - public-canary
       - private-canary
       - 'compare/**'
+      - 'private-ci/**'
+      - 'private-ci-*'
     paths-ignore:
       - 'docs/**'
       - '**.md'
@@ -38,13 +40,7 @@ jobs:
     strategy:
       matrix:
         arch: [x64_x86, x64]
-        qt: ["", qt6]
         # generator: ["", "Ninja Multi-Config"]
-        exclude:
-          #- arch: arm64
-          #  qt: ""
-          - arch: x64_x86
-            qt: qt6
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -164,15 +160,17 @@ jobs:
 
       - name: ThirdParty cache.
         id: cache-third-party
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.TBUILD }}\ThirdParty
           key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+          restore-keys: |
+            ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}-checkpoint-
+            ${{ runner.OS }}-${{ runner.arch }}-third-party-
 
       - name: Libraries cache.
         id: cache-libs
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\*
@@ -181,21 +179,60 @@ jobs:
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
+          restore-keys: |
+            ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}-checkpoint-
+            ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
 
       - name: Qt cache.
         id: cache-qt
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-qt-${{ env.CACHE_KEY }}
+          restore-keys: |
+            ${{ runner.OS }}-${{ matrix.arch }}-qt-${{ env.CACHE_KEY }}-checkpoint-
+            ${{ runner.OS }}-${{ matrix.arch }}-qt-
 
       - name: Libraries.
+        id: prepare-libs
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }}
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent
+
+      - name: Free up some disk space.
+        id: cleanup-libs
+        if: ${{ !cancelled() && (steps.prepare-libs.outcome == 'success' || steps.prepare-libs.outcome == 'failure') }}
+        shell: bash
+        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_windows_libraries.py" "$LibrariesPath"
+
+      - name: Save ThirdParty cache.
+        if: ${{ !cancelled() && steps.cleanup-libs.outcome == 'success' && (steps.prepare-libs.outcome == 'failure' || steps.cache-third-party.outputs.cache-hit != 'true') }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ steps.prepare-libs.outcome == 'failure' && format('{0}-checkpoint-{1}-{2}', steps.cache-third-party.outputs.cache-primary-key, github.run_id, github.run_attempt) || steps.cache-third-party.outputs.cache-primary-key }}
+
+      - name: Save Libraries cache.
+        if: ${{ !cancelled() && steps.cleanup-libs.outcome == 'success' && (steps.prepare-libs.outcome == 'failure' || steps.cache-libs.outputs.cache-hit != 'true') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ steps.prepare-libs.outcome == 'failure' && format('{0}-checkpoint-{1}-{2}', steps.cache-libs.outputs.cache-primary-key, github.run_id, github.run_attempt) || steps.cache-libs.outputs.cache-primary-key }}
+
+      - name: Save Qt cache.
+        if: ${{ !cancelled() && steps.cleanup-libs.outcome == 'success' && (steps.prepare-libs.outcome == 'failure' || steps.cache-qt.outputs.cache-hit != 'true') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ steps.prepare-libs.outcome == 'failure' && format('{0}-checkpoint-{1}-{2}', steps.cache-qt.outputs.cache-primary-key, github.run_id, github.run_attempt) || steps.cache-qt.outputs.cache-primary-key }}
 
       - name: Read configuration matrix.
         shell: bash
@@ -211,10 +248,6 @@ jobs:
             esac
             echo "Architecture from matrix: $ARCH"
             ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.arch }}"
-          fi
-
-          if [ -n "${{ matrix.qt }}" ]; then
-            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.qt }}"
           fi
 
           GENERATOR=""
@@ -251,10 +284,6 @@ jobs:
           fi
           echo "TDESKTOP_BUILD_API=$API" >> $GITHUB_ENV
 
-      - name: Free up some disk space.
-        shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
-
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
@@ -263,7 +292,6 @@ jobs:
           call configure.bat ^
           %TDESKTOP_BUILD_GENERATOR% ^
           %TDESKTOP_BUILD_ARCH% ^
-          ${{ matrix.qt }} ^
           -D TDESKTOP_API_TEST=OFF ^
           %TDESKTOP_BUILD_API% ^
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
