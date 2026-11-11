@@ -121,8 +121,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "dialogs/dialogs_key.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "core/ui_integration.h"
 #include "export/export_manager.h"
+#include "minizip/unzip.h"
+
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include "boxes/peers/edit_participants_box.h"
 #include "boxes/peers/edit_peer_info_box.h"
 #include "boxes/peers/manage_community_box.h"
@@ -337,6 +342,7 @@ private:
 	void addDirectMessages();
 	void addToggleTopicClosed();
 	void addExportChat();
+	void addImportChat();
 	void addTranslate();
 	void addReport();
 	void addNewContact();
@@ -1080,6 +1086,18 @@ void Filler::addDirectMessages() {
 			monoforum,
 			Window::SectionShow::Way::Forward);
 	}, &st::menuIconChatDiscuss);
+}
+
+void Filler::addImportChat() {
+	if (PTG::IsFakeActive()) {
+		return;
+	}
+	const auto peer = _peer;
+	const auto navigation = _controller;
+	_addAction(
+		tr::lng_profile_import_chat(tr::now),
+		[=] { PeerMenuImportChat(navigation, peer); },
+		&st::menuIconExport);
 }
 
 void Filler::addExportChat() {
@@ -1985,6 +2003,7 @@ void Filler::fillHistoryActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addImportChat();
 	addTranslate();
 	addReport();
 	addClearHistory();
@@ -2017,6 +2036,7 @@ void Filler::fillProfileActions() {
 	addViewDiscussion();
 	addDirectMessages();
 	addExportChat();
+	addImportChat();
 	addToggleNoForwards();
 	addToggleFolder();
 	addBlockUser();
@@ -2239,6 +2259,380 @@ void Filler::addSetPersonalChannel() {
 	}, &st::menuIconProfile);
 }
 
+constexpr int kImportPartSize = 512 * 1024;
+constexpr auto kImportMaxEntries = 100000;
+constexpr auto kImportMaxFileNameSize = 4096;
+constexpr auto kImportMaxFileSize = uint64(512) * 1024 * 1024;
+
+class ZipArchive final {
+public:
+	explicit ZipArchive(unzFile file)
+	: _file(file) {
+	}
+	ZipArchive(const ZipArchive &other) = delete;
+	ZipArchive &operator=(const ZipArchive &other) = delete;
+	~ZipArchive() {
+		unzClose(_file);
+	}
+
+	[[nodiscard]] unzFile file() const {
+		return _file;
+	}
+
+private:
+	const unzFile _file;
+
+};
+
+struct ImportEntry {
+	QString name;
+	unz64_file_pos position = {};
+	int64 size = 0;
+};
+
+struct ZipScan {
+	std::vector<ImportEntry> entries;
+	bool tooBig = false;
+};
+
+struct ImportState {
+	base::weak_ptr<Main::Session> session;
+	std::shared_ptr<ZipArchive> archive;
+	MTPInputPeer inputPeer;
+	int64 importId = 0;
+	std::vector<ImportEntry> media;
+	size_t mediaIndex = 0;
+};
+
+[[nodiscard]] ZipScan ScanZipEntries(unzFile zf) {
+	auto result = ZipScan();
+	if (unzGoToFirstFile(zf) != UNZ_OK) {
+		return result;
+	}
+	do {
+		auto info = unz_file_info64();
+		if (unzGetCurrentFileInfo64(
+				zf,
+				&info,
+				nullptr,
+				0,
+				nullptr,
+				0,
+				nullptr,
+				0) != UNZ_OK
+			|| int64(info.size_filename) > kImportMaxFileNameSize) {
+			continue;
+		} else if (uint64(info.uncompressed_size) > kImportMaxFileSize
+			|| int(result.entries.size()) >= kImportMaxEntries) {
+			result.tooBig = true;
+			return result;
+		}
+		auto name = std::vector<char>(info.size_filename + 1, 0);
+		auto entry = ImportEntry{ .size = int64(info.uncompressed_size) };
+		if (unzGetCurrentFileInfo64(
+				zf,
+				&info,
+				name.data(),
+				name.size(),
+				nullptr,
+				0,
+				nullptr,
+				0) != UNZ_OK
+			|| unzGetFilePos64(zf, &entry.position) != UNZ_OK
+			|| unzOpenCurrentFile(zf) != UNZ_OK) {
+			continue;
+		}
+		unzCloseCurrentFile(zf);
+		entry.name = QString::fromUtf8(name.data(), int(info.size_filename));
+		result.entries.push_back(std::move(entry));
+	} while (unzGoToNextFile(zf) == UNZ_OK);
+	return result;
+}
+
+[[nodiscard]] std::optional<QByteArray> ReadZipEntry(
+		not_null<ZipArchive*> archive,
+		const ImportEntry &entry) {
+	const auto zf = archive->file();
+	auto position = entry.position;
+	if (unzGoToFilePos64(zf, &position) != UNZ_OK
+		|| unzOpenCurrentFile(zf) != UNZ_OK) {
+		return std::nullopt;
+	}
+	auto data = QByteArray(int(entry.size), Qt::Uninitialized);
+	const auto read = unzReadCurrentFile(zf, data.data(), data.size());
+	const auto closed = unzCloseCurrentFile(zf);
+	if (read != data.size() || closed != UNZ_OK) {
+		return std::nullopt;
+	}
+	return data;
+}
+
+class ImportFileUpload final
+	: public std::enable_shared_from_this<ImportFileUpload> {
+public:
+	ImportFileUpload(
+		std::shared_ptr<ImportState> state,
+		QByteArray data,
+		QString name,
+		Fn<void(MTPInputFile)> done,
+		Fn<void(QString)> fail);
+
+	void sendPart(int index);
+
+private:
+	const std::shared_ptr<ImportState> _state;
+	const QByteArray _data;
+	const QString _name;
+	const Fn<void(MTPInputFile)> _done;
+	const Fn<void(QString)> _fail;
+	const int64 _fileId = 0;
+	const int _total = 0;
+
+};
+
+ImportFileUpload::ImportFileUpload(
+	std::shared_ptr<ImportState> state,
+	QByteArray data,
+	QString name,
+	Fn<void(MTPInputFile)> done,
+	Fn<void(QString)> fail)
+: _state(std::move(state))
+, _data(std::move(data))
+, _name(std::move(name))
+, _done(std::move(done))
+, _fail(std::move(fail))
+, _fileId(base::RandomValue<int64>())
+, _total(std::max(
+	1,
+	int((_data.size() + kImportPartSize - 1) / kImportPartSize))) {
+}
+
+void ImportFileUpload::sendPart(int index) {
+	const auto session = _state->session.get();
+	if (!session) {
+		return;
+	}
+	const auto offset = index * kImportPartSize;
+	const auto chunk = QByteArray::fromRawData(
+		_data.constData() + offset,
+		std::min(kImportPartSize, int(_data.size()) - offset));
+	const auto self = shared_from_this();
+	session->api().request(MTPupload_SaveFilePart(
+		MTP_long(_fileId),
+		MTP_int(index),
+		MTP_bytes(chunk)
+	)).done([=](const MTPBool &) {
+		if (index + 1 < self->_total) {
+			self->sendPart(index + 1);
+		} else {
+			self->_done(MTP_inputFile(
+				MTP_long(self->_fileId),
+				MTP_int(self->_total),
+				MTP_string(self->_name),
+				MTP_string(QString())));
+		}
+	}).fail([=](const MTP::Error &err) {
+		self->_fail(u"upload: "_q + err.type());
+	}).toDC(MTP::uploadDcId(0)).send();
+}
+
+void ImportUploadFile(
+		std::shared_ptr<ImportState> st,
+		QByteArray data,
+		const QString &name,
+		Fn<void(MTPInputFile)> done,
+		Fn<void(QString)> fail) {
+	std::make_shared<ImportFileUpload>(
+		std::move(st),
+		std::move(data),
+		name,
+		std::move(done),
+		std::move(fail))->sendPart(0);
+}
+
+void ImportUploadNextMedia(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail);
+
+void ImportFinalize(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	const auto session = st->session.get();
+	if (!session) {
+		return;
+	}
+	session->api().request(MTPmessages_StartHistoryImport(
+		st->inputPeer,
+		MTP_long(st->importId)
+	)).done([=](const MTPBool &) {
+		done();
+	}).fail([=](const MTP::Error &err) {
+		fail(u"startHistoryImport: "_q + err.type());
+	}).send();
+}
+
+void ImportUploadNextMedia(
+		std::shared_ptr<ImportState> st,
+		Fn<void()> done,
+		Fn<void(QString)> fail) {
+	if (st->mediaIndex >= st->media.size()) {
+		ImportFinalize(st, done, fail);
+		return;
+	}
+	const auto &entry = st->media[st->mediaIndex];
+	const auto name = entry.name;
+	auto data = ReadZipEntry(st->archive.get(), entry);
+	if (!data) {
+		fail(tr::lng_whatsapp_import_zip_damaged(tr::now));
+		return;
+	}
+	ImportUploadFile(st, std::move(*data), name,
+	[=](MTPInputFile uploaded) {
+		const auto media = MTP_inputMediaUploadedDocument(
+			MTP_flags(0),
+			uploaded,
+			MTPInputFile(),
+			MTP_string(u"application/octet-stream"_q),
+			MTP_vector<MTPDocumentAttribute>(
+				1,
+				MTP_documentAttributeFilename(MTP_string(name))),
+			MTP_vector<MTPInputDocument>(0),
+			MTPInputPhoto(),
+			MTP_int(0),
+			MTP_int(0));
+
+		const auto session = st->session.get();
+		if (!session) {
+			return;
+		}
+		session->api().request(MTPmessages_UploadImportedMedia(
+			st->inputPeer,
+			MTP_long(st->importId),
+			MTP_string(name),
+			media
+		)).done([=](const MTPMessageMedia &) {
+			++st->mediaIndex;
+			ImportUploadNextMedia(st, done, fail);
+		}).fail([=](const MTP::Error &err) {
+			fail(u"uploadImportedMedia for %1: "_q.arg(name) + err.type());
+		}).send();
+	}, fail);
+}
+
+void StartWhatsAppImport(
+		not_null<PeerData*> peer,
+		const QString &zipPath) {
+	const auto utf = zipPath.toUtf8();
+	const auto zf = unzOpen64(utf.constData());
+	if (!zf) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_cannot_open_zip(
+			tr::now,
+			lt_path,
+			zipPath));
+		return;
+	}
+	const auto archive = std::make_shared<ZipArchive>(zf);
+
+	auto scan = ScanZipEntries(zf);
+	if (scan.tooBig) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_zip_too_big(tr::now));
+		return;
+	}
+	auto &entries = scan.entries;
+	if (entries.empty()) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_zip_empty(tr::now));
+		return;
+	}
+
+	auto chatIndex = -1;
+	for (auto i = 0; i != int(entries.size()); ++i) {
+		if (entries[i].name == u"_chat.txt"_q) {
+			chatIndex = i;
+			break;
+		}
+	}
+	if (chatIndex < 0) {
+		for (auto i = 0; i != int(entries.size()); ++i) {
+			if (!entries[i].name.endsWith(u".txt"_q, Qt::CaseInsensitive)) {
+				continue;
+			}
+			if (chatIndex >= 0) {
+				chatIndex = -1;
+				break;
+			}
+			chatIndex = i;
+		}
+	}
+	if (chatIndex < 0) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_chat_not_found(tr::now));
+		return;
+	}
+
+	auto chatTxt = ReadZipEntry(archive.get(), entries[chatIndex]);
+	if (!chatTxt) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_zip_damaged(tr::now));
+		return;
+	}
+	auto media = std::vector<ImportEntry>();
+	media.reserve(entries.size() - 1);
+	for (auto i = 0; i != int(entries.size()); ++i) {
+		if (i != chatIndex) {
+			media.push_back(std::move(entries[i]));
+		}
+	}
+
+	const auto st = std::make_shared<ImportState>();
+	st->session = base::make_weak(&peer->session());
+	st->archive = archive;
+	st->inputPeer = peer->input();
+	st->media = std::move(media);
+
+	Ui::Toast::Show(tr::lng_whatsapp_import_uploading_chat(tr::now));
+
+	ImportUploadFile(st, std::move(*chatTxt), u"_chat.txt"_q,
+	[=](MTPInputFile uploaded) {
+		const auto session = st->session.get();
+		if (!session) {
+			return;
+		}
+		session->api().request(MTPmessages_InitHistoryImport(
+			st->inputPeer,
+			uploaded,
+			MTP_int(int(st->media.size()))
+		)).done([=](const MTPmessages_HistoryImport &result) {
+			st->importId = result.match(
+				[](const MTPDmessages_historyImport &d) {
+					return d.vid().v;
+				});
+			Ui::Toast::Show(tr::lng_whatsapp_import_uploading_media(
+				tr::now,
+				lt_count,
+				st->media.size()));
+			ImportUploadNextMedia(st, [=] {
+				Ui::Toast::Show(tr::lng_whatsapp_import_complete(tr::now));
+			}, [=](const QString &err) {
+				Ui::Toast::Show(tr::lng_whatsapp_import_error(
+					tr::now,
+					lt_text,
+					err));
+			});
+		}).fail([=](const MTP::Error &err) {
+			Ui::Toast::Show(tr::lng_whatsapp_import_init_error(
+				tr::now,
+				lt_text,
+				err.type()));
+		}).send();
+	},
+	[=](const QString &err) {
+		Ui::Toast::Show(tr::lng_whatsapp_import_upload_error(
+			tr::now,
+			lt_text,
+			err));
+	});
+}
+
 } // namespace
 
 void PeerMenuExportChat(
@@ -2246,6 +2640,34 @@ void PeerMenuExportChat(
 		not_null<PeerData*> peer) {
 	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
 		Core::App().exportManager().start(peer);
+	});
+}
+
+void PeerMenuImportChat(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer) {
+	const auto weak = base::make_weak(controller);
+	const auto peerId = peer->id;
+	base::call_delayed(st::defaultPopupMenu.showDuration, [=] {
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		FileDialog::GetOpenPath(
+			QPointer<QWidget>(strong->widget().get()),
+			u"Choose WhatsApp ZIP export"_q,
+			u"ZIP files (*.zip)"_q,
+			[=](const FileDialog::OpenResult &result) {
+				const auto strong = weak.get();
+				if (!strong || result.paths.isEmpty()) {
+					return;
+				}
+				const auto peer = strong->session().data().peerLoaded(peerId);
+				if (!peer) {
+					return;
+				}
+				StartWhatsAppImport(peer, result.paths.front());
+			});
 	});
 }
 

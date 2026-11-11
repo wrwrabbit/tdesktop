@@ -33,6 +33,8 @@ PRIVATE
     export/output/export_output_result.h
     export/output/export_output_stats.cpp
     export/output/export_output_stats.h
+    export/output/export_output_whatsapp.cpp
+    export/output/export_output_whatsapp.h
 )
 
 target_include_directories(td_export
@@ -43,5 +45,6 @@ PUBLIC
 target_link_libraries(td_export
 PUBLIC
     desktop-app::lib_base
+    desktop-app::external_minizip
     tdesktop::td_scheme
 )

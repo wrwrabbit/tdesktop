@@ -40,6 +40,7 @@ enum class Format {
 	Html,
 	Json,
 	HtmlAndJson,
+	WhatsApp,
 };
 
 class AbstractWriter {
