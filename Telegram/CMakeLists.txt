@@ -2682,6 +2682,18 @@ PRIVATE
     tray.h
 )
 
+# PTG
+get_target_property(telegram_test_sources Telegram SOURCES)
+list(FILTER telegram_test_sources INCLUDE REGEX "^${src_loc}/test/.*\\.cpp$")
+if (MSVC)
+    set(telegram_test_warning_policy /WX-)
+else()
+    set(telegram_test_warning_policy -Wno-error)
+endif()
+set_property(SOURCE ${telegram_test_sources} APPEND PROPERTY
+    COMPILE_OPTIONS ${telegram_test_warning_policy}
+)
+
 if (APPLE)
     nice_target_sources(Telegram ${src_loc}
     PRIVATE

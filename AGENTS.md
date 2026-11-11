@@ -744,6 +744,27 @@ Choosing between them: if the server must see the request, use (1). If it only
 matters while its owner is alive, use (3) — or (2) when a single request does not
 justify a `Sender` member.
 
+## PTG-specific instructions
+
+- When `IsFakeActive()` is true, hide all PTG-specific UI, including buttons,
+  dialogs, and menu items. Disable the underlying functionality as well. Guard
+  every entry point, including shortcuts and direct invocations.
+- Route all PTG-specific log messages through `FAKE_LOG` so they stay out of
+  standard logs, especially while fake mode is active.
+- When adding PTG code, prefer keeping the existing upstream layout and
+  indentation to reduce merge conflicts. Avoid moving upstream functions just
+  to group related code or reindenting upstream blocks unnecessarily. Change
+  the layout when preserving it would make the code harder to read or maintain.
+- Prefer extending `tdata` in a way that preserves compatibility in both
+  directions. In both cases, preserve non-hidden accounts, the local passcode,
+  and existing upstream functionality and settings.
+  - PTG should launch with upstream Telegram Desktop's `tdata` from the same
+    version or an earlier version supported by upstream. PTG-specific settings
+    should start with their defaults.
+  - Upstream Telegram Desktop should launch with PTG's `tdata` from the same
+    version. Only PTG-specific functionality, settings, and hidden accounts
+    should be unavailable in upstream. Upstream must never load hidden accounts.
+
 ## UI Styling
 
 ### Style Files
