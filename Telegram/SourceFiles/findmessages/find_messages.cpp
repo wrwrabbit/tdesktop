@@ -156,6 +156,7 @@ private:
 		not_null<DocumentData*> document,
 		const QString &caption);
 	void requestManifestPart();
+	void hideManifestMessage();
 	void removeManifestMessage();
 	void decryptAndStart(const QByteArray &bytes, const QString &caption);
 
@@ -339,6 +340,7 @@ void Controller::handleDocument(
 		accessHash = data.vaccess_hash();
 	}, [](const auto &) {
 	});
+	hideManifestMessage();
 	if (!accessHash || _manifestSize <= 0) {
 		removeManifestMessage();
 		fail(u"Could not locate the bot's manifest."_q);
@@ -383,8 +385,20 @@ void Controller::requestManifestPart() {
 	})).toDC(MTP::downloadDcId(_session->mainDcId(), 0)).send();
 }
 
+void Controller::hideManifestMessage() {
+	crl::on_main(_session.get(), [session = _session, id = _manifestId] {
+		if (const auto item = session->data().message(id)) {
+			RemoveLoadedMessages(item->history()->peer, { id.msg });
+		}
+	});
+}
+
 void Controller::removeManifestMessage() {
-	_session->data().histories().deleteMessages({ _manifestId }, true);
+	const auto history = _session->data().history(_manifestId.peer);
+	_session->data().histories().deleteMessages(
+		history,
+		QVector<MTPint>{ MTP_int(_manifestId.msg) },
+		true);
 }
 
 void Controller::decryptAndStart(
