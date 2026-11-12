@@ -11,7 +11,7 @@ module.exports = async ({ github, context, releaseId, version, platforms }) => {
         const name = `${asset.prefix}-${version}.${asset.extension}`;
         const data = await fs.readFile(path.join(asset.directory, name));
         uploads.push({ name, label: asset.label, data });
-        uploads.push({ name: `${asset.prefix}.latest.${asset.extension}`, data });
+        uploads.push({ name: `${asset.latestPrefix}.latest.${asset.extension}`, data });
     }
     for (const asset of uploads) {
         await github.rest.repos.uploadReleaseAsset({

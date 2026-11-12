@@ -22,7 +22,7 @@ names = set()
 for asset in assets:
     platform = asset['platform']
     name = f"{asset['prefix']}-{version_tokens[platform]}.{asset['extension']}"
-    alias = f"{asset['prefix']}.latest.{asset['extension']}"
+    alias = f"{asset['latestPrefix']}.latest.{asset['extension']}"
     if name not in sources[platform]:
         errors.append(f'Release asset does not match build output: {name}')
     if alias in names:
