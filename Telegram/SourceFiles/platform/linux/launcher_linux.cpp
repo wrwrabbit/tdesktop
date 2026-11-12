@@ -147,13 +147,15 @@ bool Launcher::launchUpdater(UpdaterLaunch action) {
 
 	if (action == UpdaterLaunch::PerformUpdate) {
 		_updating = true;
-		if (!justRelaunch) {
-			if (!Core::checkReadyUpdate()) {
-				ReportLaunchError(u"The pending update is no longer ready."_q);
-				return relaunchAfterUpdate(false);
-			} else if (ReadyUpdatePackagePresent(cWorkingDir())) {
-				return installProtectedUpdate();
-			}
+		// Same-version validation still needs the PTG permission token.
+		if (!justRelaunch && !Core::checkReadyUpdate()) {
+			ReportLaunchError(u"The pending update is no longer ready."_q);
+			return relaunchAfterUpdate(false);
+		} else if (!Core::ConsumeUpdateInstallPermission()) {
+			ReportLaunchError(u"Could not consume update install permission."_q);
+			return relaunchAfterUpdate(false);
+		} else if (!justRelaunch && ReadyUpdatePackagePresent(cWorkingDir())) {
+			return installProtectedUpdate();
 		}
 	}
 
