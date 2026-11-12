@@ -444,8 +444,12 @@ int Launcher::exec() {
 
 	if (!UpdaterDisabled() && cRestartingUpdate()) {
 		DEBUG_LOG(("Sandbox Info: executing updater to install update."));
-		if (!ConsumeUpdateInstallPermission()
-			|| !launchUpdater(UpdaterLaunch::PerformUpdate)) {
+		if (
+#if defined Q_OS_WIN || defined Q_OS_MAC
+			// Linux consumes permission after its final readiness check.
+			!ConsumeUpdateInstallPermission() ||
+#endif // Q_OS_WIN || Q_OS_MAC
+			!launchUpdater(UpdaterLaunch::PerformUpdate)) {
 			base::Platform::DeleteDirectory(cWorkingDir() + u"tupdates/temp"_q);
 		}
 	} else if (cRestarting()) {
