@@ -697,15 +697,21 @@ Domain::StartModernResult Domain::startModern(
 			: nullptr;
 		if (!fakeKey || _fakePasscodeKeysEncrypted.empty()) {
 			return StartModernResult::IncorrectPasscode;
-	}
+ 	    }
 		_passcodeKey = fakeKey;
 		_fakeUnlockKey = fakeKey;
+		const auto wasHardwareBound = _keyData->fake.hardwareBound;
+		const auto wasLegacyPasscode = _keyData->legacyPasscode;
 		_keyData->fake.hardwareBound = PTG::IsHWLockEnabled();
 		_keyData->legacyPasscode = _keyData->legacy;
 		_oldVersion = file.version;
 		const auto result = tryFakeStart(localKeyEncrypted, infoEncrypted, _passcodeKeySalt, {});
 		if (result == StartModernResult::Success) {
 			_keyData->openKeyVerified = openKey && openKey->equals(_localKey);
+		} else {
+			// A failed hardware probe must not change the next passcode attempt.
+			_keyData->fake.hardwareBound = wasHardwareBound;
+			_keyData->legacyPasscode = wasLegacyPasscode;
 		}
 		return result;
 	}
