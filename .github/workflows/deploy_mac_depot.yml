@@ -90,10 +90,7 @@ jobs:
       - name: Clone.
         uses: actions/checkout@v7
         with:
-          # Not recursive, see the Windows job: nothing macOS compiles
-          # lives in a nested submodule, and recursing would clone
-          # cppgir from gitlab.com once per arch of this matrix.
-          submodules: true
+          submodules: recursive
           path: ${{ env.REPO_NAME }}
 
       - name: First set up.
@@ -223,7 +220,6 @@ jobs:
       - name: Clone.
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           path: ${{ env.REPO_NAME }}
 
       - name: First set up.
