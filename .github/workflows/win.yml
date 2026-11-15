@@ -204,7 +204,7 @@ jobs:
         id: cleanup-libs
         if: ${{ !cancelled() && (steps.prepare-libs.outcome == 'success' || steps.prepare-libs.outcome == 'failure') }}
         shell: bash
-        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_windows_libraries.py" "$LibrariesPath"
+        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_libraries.py" "$LibrariesPath"
 
       - name: Save ThirdParty cache.
         if: ${{ !cancelled() && steps.cleanup-libs.outcome == 'success' && (steps.prepare-libs.outcome == 'failure' || steps.cache-third-party.outputs.cache-hit != 'true') }}

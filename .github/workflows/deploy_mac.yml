@@ -34,9 +34,7 @@ jobs:
           ./Telegram/build/prepare/mac.sh silent
 
       - name: Free up some disk space.
-        run: |
-          cd Libraries
-          find . -iname "*.dir" -exec rm -rf {} \; || true
+        run: python3 "$REPO_NAME/Telegram/build/cleanup_libraries.py" Libraries
 
       - name: Cache Libraries.
         uses: actions/cache@v4

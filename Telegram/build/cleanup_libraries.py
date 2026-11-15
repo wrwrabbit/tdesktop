@@ -2,19 +2,27 @@ import argparse
 import fnmatch
 import os
 import stat
+import sys
 from pathlib import Path
 
 
 KEPT_SUFFIXES = {'.lib', '.a', '.exe', '.h', '.hpp', '.inc', '.cmake', '.pc', '.patch', '.diff'}
 RUST_SOURCES = {'tlottie', 'wallet-engine', 'tdesktop_rust'}
+MACOS = sys.platform == 'darwin'
 
 
-def keep_file(relative):
+def keep_file(path, relative):
     parts = relative.parts
     if parts[0] in RUST_SOURCES:
         if 'target' in parts[1:-1] or '.git' in parts[1:-1]:
             return False
         return True
+    if MACOS:
+        # The install prefix includes generated sources used by the app build.
+        if parts[0] == 'local' or fnmatch.fnmatchcase(relative.name, 'objects-*'):
+            return True
+        if path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+            return True
     return (
         relative.suffix in KEPT_SUFFIXES
         or any(part in {'include', 'cache_keys', 'patches', 'nv-codec-headers'}
@@ -36,7 +44,7 @@ def cleanup(libraries):
         for name in files:
             path = directory / name
             try:
-                if path.is_symlink() or keep_file(path.relative_to(libraries)):
+                if path.is_symlink() or keep_file(path, path.relative_to(libraries)):
                     continue
                 try:
                     path.unlink()
@@ -60,7 +68,7 @@ def cleanup(libraries):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Clean prepared Windows libraries for CI caching.')
+    parser = argparse.ArgumentParser(description='Clean prepared libraries for CI caching.')
     parser.add_argument('libraries', type=Path)
     args = parser.parse_args()
     if not args.libraries.is_dir():
