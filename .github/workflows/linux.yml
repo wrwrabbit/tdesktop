@@ -223,4 +223,4 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: out/Debug/artifact/
-          retention-days: 1
+          retention-days: 30
