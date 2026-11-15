@@ -218,7 +218,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_windows_libraries.py" "$LibrariesPath"
+        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_libraries.py" "$LibrariesPath"
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'

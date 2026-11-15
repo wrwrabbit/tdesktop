@@ -182,7 +182,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_windows_libraries.py" "$LibrariesPath"
+        run: python3 "$TBUILD/$REPO_NAME/Telegram/build/cleanup_libraries.py" "$LibrariesPath"
 
       - name: Save ThirdParty cache.
         if: steps.cache-third-party.outputs.cache-hit != 'true'
