@@ -1109,7 +1109,9 @@ void Filler::addImportChat() {
 	const auto allowed = user
 		? (!user->isSelf() && !user->isBot() && !user->isServiceUser())
 		: (peer->isChat()
-			|| (peer->isMegagroup() && !peer->isMonoforum()));
+			|| (peer->isMegagroup()
+				&& !peer->isMonoforum()
+				&& !peer->asChannel()->discussionLink()));
 	if (!allowed) {
 		return;
 	}
@@ -2525,6 +2527,35 @@ void ShowImportError(const QString &text) {
 	return text.left(till);
 }
 
+[[nodiscard]] QByteArray ImportAddMarker(
+		const QByteArray &chat,
+		const QString &marker) {
+	const auto text = QString::fromUtf8(chat);
+	const auto expression = QRegularExpression(
+		u"^(\\x{200E}?\\[[^\\]\\n]+\\] |[^\\n]+? - )([^:\\n]+): "_q,
+		QRegularExpression::MultilineOption);
+	auto last = QRegularExpressionMatch();
+	auto all = expression.globalMatch(text);
+	while (all.hasNext()) {
+		last = all.next();
+	}
+	if (!last.hasMatch()) {
+		return QByteArray();
+	}
+	auto prefix = last.captured(1);
+	prefix.remove(QChar(0xFEFF));
+	auto result = text;
+	if (!result.endsWith('\n')) {
+		result += '\n';
+	}
+	result += prefix
+		+ u"Import helper (not real)"_q
+		+ u": "_q
+		+ marker
+		+ '\n';
+	return result.toUtf8();
+}
+
 [[nodiscard]] int FindChatEntry(const std::vector<ImportEntry> &entries) {
 	const auto media = QRegularExpression(u"^[A-Z]{3}-\\d{8}-WA\\d+\\."_q);
 	auto result = -1;
@@ -2738,7 +2769,7 @@ void ImportFinalize(
 void ImportCheckFile(
 		std::shared_ptr<ImportState> st,
 		const QString &head,
-		Fn<void()> done,
+		Fn<void(bool)> done,
 		Fn<void(QString)> fail) {
 	const auto session = st->session.get();
 	if (!session) {
@@ -2746,8 +2777,13 @@ void ImportCheckFile(
 	}
 	session->api().request(MTPmessages_CheckHistoryImport(
 		MTP_string(head)
-	)).done([=](const MTPmessages_HistoryImportParsed &) {
-		done();
+	)).done([=](const MTPmessages_HistoryImportParsed &result) {
+		const auto &data = result.data();
+		if (data.is_group() && st->toUser) {
+			fail(tr::lng_whatsapp_import_error_type_user(tr::now));
+		} else {
+			done(data.is_pm() && !st->toUser);
+		}
 	}).fail([=](const MTP::Error &err) {
 		fail(ImportErrorText(err, st->toUser, u"checkHistoryImport"_q));
 	}).handleFloodErrors().send();
@@ -3303,16 +3339,16 @@ void StartPreparedImport(
 		closeBox();
 		ShowImportError(text);
 	};
-	const auto upload = [=] {
+	const auto upload = [=](QByteArray data) {
 		ShowImportProgressBox(peer, st);
 
-		ImportUploadFile(st, chat, u"_chat.txt"_q,
+		ImportUploadFile(st, data, u"_chat.txt"_q,
 		[=](MTPInputFile uploaded) {
 			const auto session = st->session.get();
 			if (!session || st->cancelled) {
 				return;
 			}
-			st->doneBytes += int64(chat.size());
+			st->doneBytes += int64(data.size());
 			st->currentBytes = 0;
 			session->api().request(MTPmessages_InitHistoryImport(
 				st->inputPeer,
@@ -3351,8 +3387,35 @@ void StartPreparedImport(
 				u"upload of chat text"_q));
 		});
 	};
-	ImportCheckFile(st, ImportHead(chat), [=] {
-		ImportCheckPeer(st, upload, ShowImportError);
+	const auto proceed = [=](QByteArray data) {
+		ImportCheckPeer(st, [=] {
+			upload(data);
+		}, ShowImportError);
+	};
+	ImportCheckFile(st, ImportHead(chat), [=](bool pm) {
+		if (!pm) {
+			proceed(chat);
+			return;
+		}
+		const auto marker = u"technical message, not real"_q;
+		auto marked = ImportAddMarker(chat, marker);
+		const auto failType = [] {
+			ShowImportError(tr::lng_whatsapp_import_error_type_group(tr::now));
+		};
+		if (marked.isEmpty()) {
+			failType();
+			return;
+		}
+		const auto markedHead = QString::fromUtf8(
+			ImportAddMarker(ImportHead(chat).toUtf8(), marker));
+		ImportCheckFile(st, markedHead, [=](bool stillPm) {
+			if (stillPm) {
+				failType();
+				return;
+			}
+			st->totalBytes += int64(marked.size()) - int64(chat.size());
+			proceed(marked);
+		}, ShowImportError);
 	}, ShowImportError);
 }
 
