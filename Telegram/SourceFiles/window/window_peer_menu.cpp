@@ -3419,6 +3419,194 @@ void StartPreparedImport(
 	}, ShowImportError);
 }
 
+constexpr auto kImportScanMessages = 10000;
+constexpr auto kImportScanPage = 100;
+constexpr auto kImportRepeatWaitSeconds = 10;
+
+struct ImportScanState {
+	base::weak_ptr<Main::Session> session;
+	MTPInputPeer inputPeer;
+	int scanned = 0;
+	int offsetId = 0;
+	bool cancelled = false;
+	base::weak_qptr<Ui::BoxContent> box;
+	rpl::variable<QString> text;
+};
+
+[[nodiscard]] bool MessageIsImported(const MTPMessage &message) {
+	return message.match([](const MTPDmessage &data) {
+		return data.vfwd_from()
+			&& data.vfwd_from()->match([](const MTPDmessageFwdHeader &fwd) {
+				return fwd.is_imported();
+			});
+	}, [](const auto &) {
+		return false;
+	});
+}
+
+void ImportScanNext(
+		std::shared_ptr<ImportScanState> st,
+		Fn<void(bool)> done,
+		Fn<void()> fail) {
+	const auto session = st->session.get();
+	if (!session || st->cancelled) {
+		return;
+	}
+	session->api().request(MTPmessages_GetHistory(
+		st->inputPeer,
+		MTP_int(st->offsetId),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_int(kImportScanPage),
+		MTP_int(0),
+		MTP_int(0),
+		MTP_long(0)
+	)).done([=](const MTPmessages_Messages &result) {
+		if (st->cancelled) {
+			return;
+		}
+		const auto list = result.match(
+			[](const MTPDmessages_messagesNotModified &)
+				-> const QVector<MTPMessage> * {
+				return nullptr;
+			}, [](const auto &data) {
+				return &data.vmessages().v;
+			});
+		if (!list || list->isEmpty()) {
+			done(false);
+			return;
+		}
+		auto lowest = 0;
+		for (const auto &message : *list) {
+			if (MessageIsImported(message)) {
+				done(true);
+				return;
+			}
+			const auto id = int(IdFromMessage(message).bare);
+			if (id > 0 && (!lowest || id < lowest)) {
+				lowest = id;
+			}
+		}
+		st->scanned += list->size();
+		if (!lowest
+			|| (st->offsetId && lowest >= st->offsetId)
+			|| list->size() < kImportScanPage
+			|| st->scanned >= kImportScanMessages) {
+			done(false);
+			return;
+		}
+		st->offsetId = lowest;
+		st->text = tr::lng_whatsapp_import_scanning(
+			tr::now,
+			lt_done,
+			QString::number(st->scanned));
+		ImportScanNext(st, done, fail);
+	}).fail([=](const MTP::Error &error) {
+		FAKE_LOG(("WhatsApp import: scan failed: %1").arg(error.type()));
+		if (!st->cancelled) {
+			fail();
+		}
+	}).send();
+}
+
+void ShowImportRepeatWarning(
+		not_null<Window::SessionController*> controller,
+		Fn<void()> proceed) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(
+			tr::lng_whatsapp_import_repeat_title(tr::now)));
+		box->setCloseByEscape(false);
+		box->setCloseByOutsideClick(false);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(
+				box,
+				tr::lng_whatsapp_import_repeat_text(tr::now),
+				st::boxLabel),
+			st::boxRowPadding);
+
+		struct State {
+			int left = kImportRepeatWaitSeconds;
+			base::Timer timer;
+		};
+		const auto state = box->lifetime().make_state<State>();
+		const auto label = box->lifetime().make_state<
+			rpl::variable<QString>>();
+		const auto textFor = [=] {
+			return state->left > 0
+				? tr::lng_whatsapp_import_repeat_wait(
+					tr::now,
+					lt_time,
+					QString::number(state->left))
+				: tr::lng_whatsapp_import_repeat_confirm(tr::now);
+		};
+		*label = textFor();
+		const auto button = box->addButton(label->value(), [=] {
+			if (state->left > 0) {
+				return;
+			}
+			box->closeBox();
+			proceed();
+		});
+		button->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+		state->timer.setCallback([=] {
+			if (state->left > 0 && --state->left == 0) {
+				state->timer.cancel();
+				button->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+			}
+			*label = textFor();
+		});
+		state->timer.callEach(1000);
+		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+	}));
+}
+
+void CheckImportedBeforeStart(
+		not_null<Window::SessionController*> controller,
+		not_null<PeerData*> peer,
+		Fn<void()> proceed) {
+	const auto weak = base::make_weak(controller);
+	const auto st = std::make_shared<ImportScanState>();
+	st->session = base::make_weak(&peer->session());
+	st->inputPeer = peer->input();
+	st->text = tr::lng_whatsapp_import_scanning(
+		tr::now,
+		lt_done,
+		QString::number(0));
+	st->box = controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(
+			tr::lng_whatsapp_import_scanning_title(tr::now)));
+		box->setCloseByEscape(false);
+		box->setCloseByOutsideClick(false);
+		box->addRow(
+			object_ptr<Ui::FlatLabel>(box, st->text.value(), st::boxLabel),
+			st::boxRowPadding);
+		box->addButton(tr::lng_cancel(), [=] {
+			st->cancelled = true;
+			box->closeBox();
+		});
+	}));
+	const auto closeBox = [=] {
+		if (const auto box = st->box.get()) {
+			box->closeBox();
+		}
+	};
+	ImportScanNext(st, [=](bool found) {
+		closeBox();
+		const auto strong = weak.get();
+		if (!strong) {
+			return;
+		}
+		if (found) {
+			ShowImportRepeatWarning(strong, proceed);
+		} else {
+			proceed();
+		}
+	}, [=] {
+		closeBox();
+		ShowImportError(tr::lng_whatsapp_import_scan_failed(tr::now));
+	});
+}
+
 } // namespace
 
 void PeerMenuExportChat(
@@ -3444,21 +3632,29 @@ void PeerMenuImportChat(
 			ShowImportError(error);
 			return;
 		}
-		FileDialog::GetOpenPath(
-			QPointer<QWidget>(strong->widget().get()),
-			u"Choose WhatsApp ZIP or Telegram JSON export"_q,
-			u"Chat exports (*.zip *.json)"_q,
-			[=](const FileDialog::OpenResult &result) {
-				const auto strong = weak.get();
-				if (!strong || result.paths.isEmpty()) {
-					return;
-				}
-				const auto peer = strong->session().data().peerLoaded(peerId);
-				if (!peer) {
-					return;
-				}
-				StartWhatsAppImport(peer, result.paths.front());
-			});
+		const auto choose = [=] {
+			const auto strong = weak.get();
+			if (!strong) {
+				return;
+			}
+			FileDialog::GetOpenPath(
+				QPointer<QWidget>(strong->widget().get()),
+				u"Choose WhatsApp ZIP or Telegram JSON export"_q,
+				u"Chat exports (*.zip *.json)"_q,
+				[=](const FileDialog::OpenResult &result) {
+					const auto strong = weak.get();
+					if (!strong || result.paths.isEmpty()) {
+						return;
+					}
+					const auto peer = strong->session().data().peerLoaded(
+						peerId);
+					if (!peer) {
+						return;
+					}
+					StartWhatsAppImport(peer, result.paths.front());
+				});
+		};
+		CheckImportedBeforeStart(strong, peer, choose);
 	});
 }
 

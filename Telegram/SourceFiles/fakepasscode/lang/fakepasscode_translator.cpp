@@ -213,6 +213,13 @@ namespace PTG
         {"lng_whatsapp_import_progress_speed", "{speed}/с, осталось примерно {time}"},
         {"lng_whatsapp_import_progress_finishing", "Завершение импорта..."},
         {"lng_whatsapp_import_cancelled", "Импорт отменён."},
+        {"lng_whatsapp_import_scanning_title", "Проверка чата"},
+        {"lng_whatsapp_import_scanning", "Поиск ранее импортированных сообщений. Проверено {done} сообщений..."},
+        {"lng_whatsapp_import_scan_failed", "Не удалось проверить историю чата на прошлые импорты. Попробуйте позже."},
+        {"lng_whatsapp_import_repeat_title", "В этот чат уже импортировали"},
+        {"lng_whatsapp_import_repeat_text", "В этом чате найдены ранее импортированные сообщения. Повторный импорт может ИЗМЕНИТЬ ДАТУ ОТПРАВКИ сообщений в этом чате, и это нельзя отменить. Продолжайте, только если абсолютно уверены."},
+        {"lng_whatsapp_import_repeat_wait", "Всё равно импортировать ({time})"},
+        {"lng_whatsapp_import_repeat_confirm", "Всё равно импортировать"},
         {0, nullptr}
     };
     static_assert(LangRuTranslation[sizeof(LangRuTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -424,6 +431,13 @@ namespace PTG
         {"lng_whatsapp_import_progress_speed", "{speed}/с, засталося прыкладна {time}"},
         {"lng_whatsapp_import_progress_finishing", "Завяршэнне імпарту..."},
         {"lng_whatsapp_import_cancelled", "Імпарт скасаваны."},
+        {"lng_whatsapp_import_scanning_title", "Праверка чата"},
+        {"lng_whatsapp_import_scanning", "Пошук раней імпартаваных паведамленняў. Правушана {done} паведамленняў..."},
+        {"lng_whatsapp_import_scan_failed", "Не ўдалося праверыць гісторыю чата на мінулыя імпарты. Паспрабуйце пазней."},
+        {"lng_whatsapp_import_repeat_title", "У гэты чат ужо імпартавалі"},
+        {"lng_whatsapp_import_repeat_text", "У гэтым чаце знойдзены раней імпартаваныя паведамленні. Паўторны імпарт можа ЗМЯНІЦЬ ДАТУ АДПРАЎКІ паведамленняў у гэтым чаце, і гэта нельга адмяніць. Працягвайце, толькі калі абсалютна ўпэўнены."},
+        {"lng_whatsapp_import_repeat_wait", "Усё роўна імпартаваць ({time})"},
+        {"lng_whatsapp_import_repeat_confirm", "Усё роўна імпартаваць"},
         {0, nullptr}
     };
     static_assert(LangByTranslation[sizeof(LangByTranslation) / sizeof(LangRecord) - 1].key == 0);
@@ -633,6 +647,13 @@ namespace PTG
         {"lng_whatsapp_import_progress_speed", "{speed}/s, pozostało około {time}"},
         {"lng_whatsapp_import_progress_finishing", "Kończenie importu..."},
         {"lng_whatsapp_import_cancelled", "Import anulowany."},
+        {"lng_whatsapp_import_scanning_title", "Sprawdzanie czatu"},
+        {"lng_whatsapp_import_scanning", "Szukanie wcześniej zaimportowanych wiadomości. Sprawdzono {done} wiadomości..."},
+        {"lng_whatsapp_import_scan_failed", "Nie udało się sprawdzić historii czatu pod kątem wcześniejszych importów. Spróbuj później."},
+        {"lng_whatsapp_import_repeat_title", "Do tego czatu już importowano"},
+        {"lng_whatsapp_import_repeat_text", "W tym czacie znaleziono wcześniej zaimportowane wiadomości. Ponowny import może ZMIENIĆ DATĘ WYSŁANIA wiadomości w tym czacie i nie da się tego cofnąć. Kontynuuj tylko jeśli masz absolutną pewność."},
+        {"lng_whatsapp_import_repeat_wait", "Importuj mimo to ({time})"},
+        {"lng_whatsapp_import_repeat_confirm", "Importuj mimo to"},
         {0, nullptr}
     };
     static_assert(LangPlTranslation[sizeof(LangPlTranslation) / sizeof(LangRecord) - 1].key == 0);
