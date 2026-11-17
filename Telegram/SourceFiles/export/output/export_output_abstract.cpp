@@ -24,6 +24,17 @@ QString NormalizePath(const Settings &settings) {
 	QDir folder(settings.path);
 	const auto path = folder.absolutePath();
 	auto result = path.endsWith('/') ? path : (path + '/');
+	if (settings.format == Format::WhatsApp) {
+		const auto add = [&](int i) {
+			return QString("WhatsAppExport_tmp")
+				+ (i ? QString::number(i) : QString());
+		};
+		auto index = 0;
+		while (QDir(result + add(index)).exists()) {
+			++index;
+		}
+		return result + add(index) + '/';
+	}
 	if (!folder.exists() && !settings.forceSubPath) {
 		return result;
 	}

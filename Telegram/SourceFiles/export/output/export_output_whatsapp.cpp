@@ -1,6 +1,7 @@
 #include "export/output/export_output_whatsapp.h"
 
 #include "export/output/export_output_result.h"
+#include "export/output/export_output_stats.h"
 #include "export/data/export_data_types.h"
 
 #include <QtCore/QDateTime>
@@ -13,26 +14,92 @@ namespace Output {
 namespace {
 
 QByteArray FormatWhatsAppDate(TimeId date) {
-	if (!date) {
-		return QByteArray();
-	}
 	const auto value = QDateTime::fromSecsSinceEpoch(date);
-	return QString("[%1.%2.%3, %4:%5:%6]"
+	return QString("%1.%2.%3, %4:%5"
 	).arg(value.date().day(), 2, 10, QChar('0')
 	).arg(value.date().month(), 2, 10, QChar('0')
-	).arg(value.date().year() % 100, 2, 10, QChar('0')
+	).arg(value.date().year(), 4, 10, QChar('0')
 	).arg(value.time().hour(), 2, 10, QChar('0')
 	).arg(value.time().minute(), 2, 10, QChar('0')
-	).arg(value.time().second(), 2, 10, QChar('0')
 	).toUtf8();
 }
 
-QByteArray FlattenText(const std::vector<Data::TextPart> &data) {
+QString FormatMediaDate(TimeId date) {
+	return QDateTime::fromSecsSinceEpoch(date).toString(u"yyyyMMdd"_q);
+}
+
+QString MediaPrefix(const Data::Message &message) {
+	if (std::get_if<Data::Photo>(&message.media.content)) {
+		return u"IMG"_q;
+	}
+	if (const auto document = std::get_if<Data::Document>(
+			&message.media.content)) {
+		if (document->isSticker) {
+			return u"STK"_q;
+		} else if (document->isVoiceMessage) {
+			return u"PTT"_q;
+		} else if (document->isAudioFile) {
+			return u"AUD"_q;
+		} else if (document->isVideoFile
+			|| document->isVideoMessage
+			|| document->isAnimated) {
+			return u"VID"_q;
+		}
+	}
+	return u"DOC"_q;
+}
+
+QByteArray WrapLine(const QByteArray &line, const QByteArray &mark) {
+	const auto size = int(line.size());
+	auto from = 0;
+	auto till = size;
+	while (from < till && (line[from] == ' ' || line[from] == '\t')) {
+		++from;
+	}
+	while (till > from && (line[till - 1] == ' ' || line[till - 1] == '\t')) {
+		--till;
+	}
+	if (from == till) {
+		return line;
+	}
+	return line.left(from)
+		+ mark
+		+ line.mid(from, till - from)
+		+ mark
+		+ line.mid(till);
+}
+
+QByteArray WrapText(const QByteArray &text, const QByteArray &mark) {
+	if (mark == "```") {
+		return mark + text + mark;
+	}
+	auto lines = text.split('\n');
+	for (auto &line : lines) {
+		line = WrapLine(line, mark);
+	}
+	return lines.join('\n');
+}
+
+QByteArray MarkFor(Data::TextPart::Type type) {
+	using Type = Data::TextPart::Type;
+	switch (type) {
+	case Type::Bold: return "*";
+	case Type::Italic: return "_";
+	case Type::Strike: return "~";
+	case Type::Code: return "`";
+	case Type::Pre: return "```";
+	default: return QByteArray();
+	}
+}
+
+QByteArray JoinText(const std::vector<Data::TextPart> &data) {
 	auto result = QByteArray();
 	for (const auto &part : data) {
-		result.append(part.text);
+		const auto text = QByteArray(part.text).replace('\r', "");
+		const auto mark = MarkFor(part.type);
+		result.append(mark.isEmpty() ? text : WrapText(text, mark));
 	}
-	return result.replace('\r', "").replace('\n', " ");
+	return result;
 }
 
 QByteArray SenderName(
@@ -51,6 +118,16 @@ QByteArray SenderName(
 	return "User " + Data::NumberToString(Data::PeerToBareId(fromId));
 }
 
+QByteArray DialogDisplayName(const Data::DialogInfo &dialog) {
+	auto result = dialog.name;
+	if (!dialog.lastName.isEmpty()) {
+		result = result.isEmpty()
+			? dialog.lastName
+			: (result + ' ' + dialog.lastName);
+	}
+	return result;
+}
+
 QString SanitizeFileName(const QString &name) {
 	auto result = name;
 	for (auto &ch : result) {
@@ -63,7 +140,30 @@ QString SanitizeFileName(const QString &name) {
 	return result.isEmpty() ? u"chat"_q : result;
 }
 
+QString UniqueZipPath(const QString &folder, const QString &name) {
+	auto result = folder + name + u".zip"_q;
+	auto index = 0;
+	while (QFile::exists(result)) {
+		result = folder + name + u" ("_q + QString::number(++index) + u").zip"_q;
+	}
+	return result;
+}
+
 } // namespace
+
+WhatsAppWriter::~WhatsAppWriter() {
+	removeWorkFolder();
+}
+
+void WhatsAppWriter::removeWorkFolder() {
+	if (_settings.path.isEmpty()) {
+		return;
+	}
+	auto folder = QDir(_settings.path);
+	if (folder.dirName().startsWith(u"WhatsAppExport_tmp"_q)) {
+		folder.removeRecursively();
+	}
+}
 
 Result WhatsAppWriter::start(
 		const Settings &settings,
@@ -77,38 +177,16 @@ Result WhatsAppWriter::start(
 	if (!QDir().mkpath(_settings.path)) {
 		return Result(Result::Type::FatalError, _settings.path);
 	}
+	auto parent = QDir(_settings.path);
+	if (!parent.cdUp()) {
+		return Result(Result::Type::FatalError, _settings.path);
+	}
+	_outputPath = parent.absolutePath() + '/';
 	return Result::Success();
 }
 
-Result WhatsAppWriter::writeTextFile(
-		const QString &relativeName,
-		const QByteArray &content) {
-	auto file = File(_settings.path + unique(relativeName), _stats);
-	return file.writeBlock(content);
-}
-
-QString WhatsAppWriter::unique(const QString &relativePath) const {
-	return File::PrepareRelativePath(_settings.path, relativePath);
-}
-
 Result WhatsAppWriter::writePersonal(const Data::PersonalInfo &data) {
-	const auto &info = data.user.info;
-	auto block = QByteArray();
-	block.append("Account information\n\n");
-	block.append("Name: ").append(info.firstName);
-	if (!info.lastName.isEmpty()) {
-		block.append(' ').append(info.lastName);
-	}
-	block.append('\n');
-	block.append("Phone: ").append(
-		Data::FormatPhoneNumber(info.phoneNumber)).append('\n');
-	if (!data.user.username.isEmpty()) {
-		block.append("Username: @").append(data.user.username).append('\n');
-	}
-	if (!data.bio.isEmpty()) {
-		block.append("Bio: ").append(data.bio).append('\n');
-	}
-	return writeTextFile("AccountInformation.txt", block);
+	return Result::Success();
 }
 
 Result WhatsAppWriter::writeUserpicsStart(const Data::UserpicsInfo &data) {
@@ -150,24 +228,11 @@ Result WhatsAppWriter::writeProfileMusicEnd() {
 }
 
 Result WhatsAppWriter::writeContactsList(const Data::ContactsList &data) {
-	auto block = QByteArray("Contacts\n\n");
-	for (const auto index : Data::SortedContactsIndices(data)) {
-		const auto &contact = data.list[index];
-		block.append(contact.name()).append(" - ").append(
-			Data::FormatPhoneNumber(contact.phoneNumber)).append('\n');
-	}
-	return writeTextFile("Contacts.txt", block);
+	return Result::Success();
 }
 
 Result WhatsAppWriter::writeSessionsList(const Data::SessionsList &data) {
-	auto block = QByteArray("Active sessions\n\n");
-	for (const auto &session : data.list) {
-		block.append(session.applicationName).append(' ').append(
-			session.applicationVersion).append(" - ").append(
-			session.deviceModel).append(", ").append(
-			session.platform).append('\n');
-	}
-	return writeTextFile("Sessions.txt", block);
+	return Result::Success();
 }
 
 Result WhatsAppWriter::writeOtherData(const Data::File &data) {
@@ -175,25 +240,23 @@ Result WhatsAppWriter::writeOtherData(const Data::File &data) {
 }
 
 Result WhatsAppWriter::writeDialogsStart(const Data::DialogsInfo &data) {
-	return QDir().mkpath(_settings.path + "chats")
-		? Result::Success()
-		: Result(Result::Type::FatalError, _settings.path);
+	return Result::Success();
 }
 
 Result WhatsAppWriter::writeDialogStart(const Data::DialogInfo &data) {
 	Expects(!_zipChatEntryOpen);
 
-	if (!QDir().mkpath(_settings.path + "chats")) {
-		return Result(Result::Type::FatalError, _settings.path);
-	}
-
 	_dialog = data;
 	_pendingMedia.clear();
+	_mediaCounter = 0;
 	_zip.emplace();
 
+	const auto chatFileName = (u"WhatsApp Chat with "_q
+		+ SanitizeFileName(QString::fromUtf8(DialogDisplayName(data)))
+		+ u".txt"_q).toUtf8();
 	zip_fileinfo zfi = { { 0, 0, 0, 0, 0, 0 }, 0, 0, 0 };
 	_zip->openNewFile(
-		"_chat.txt",
+		chatFileName.constData(),
 		&zfi,
 		nullptr,
 		0,
@@ -215,24 +278,31 @@ Result WhatsAppWriter::writeDialogSlice(const Data::MessagesSlice &data) {
 		if (Data::SkipMessageByDate(message, _settings)) {
 			continue;
 		}
+		const auto &file = message.file();
+		const auto hasFile = !file.relativePath.isEmpty();
+		const auto text = JoinText(message.text);
+		if (!hasFile && text.isEmpty()) {
+			continue;
+		}
 		const auto sender = SenderName(message.fromId, data.peers);
 		block.append(FormatWhatsAppDate(message.date));
-		block.append(' ').append(sender).append(": ");
+		block.append(" - ").append(sender).append(": ");
 
-		const auto &file = message.file();
-		if (!file.relativePath.isEmpty()) {
+		if (hasFile) {
 			const auto diskPath = _settings.path + file.relativePath;
-			const auto archiveName = SanitizeFileName(
-				QFileInfo(file.relativePath).fileName());
+			const auto suffix = QFileInfo(file.relativePath).suffix();
+			const auto archiveName = QString("%1-%2-WA%3"
+			).arg(MediaPrefix(message)
+			).arg(FormatMediaDate(message.date)
+			).arg(++_mediaCounter, 4, 10, QChar('0'))
+				+ (suffix.isEmpty() ? QString() : (QChar('.') + suffix));
 			_pendingMedia.push_back({ diskPath, archiveName });
-			block.append("<attached: ").append(
-				archiveName.toUtf8()).append('>');
-			const auto text = FlattenText(message.text);
+			block.append(archiveName.toUtf8()).append(" (file attached)");
 			if (!text.isEmpty()) {
-				block.append(' ').append(text);
+				block.append('\n').append(text);
 			}
 		} else {
-			block.append(FlattenText(message.text));
+			block.append(text);
 		}
 		block.append('\n');
 	}
@@ -240,6 +310,9 @@ Result WhatsAppWriter::writeDialogSlice(const Data::MessagesSlice &data) {
 		return Result::Success();
 	}
 	_zip->writeInFile(block.constData(), block.size());
+	if (_stats) {
+		_stats->incrementBytes(block.size());
+	}
 	return (_zip->error() == ZIP_OK)
 		? Result::Success()
 		: Result(Result::Type::FatalError, _settings.path);
@@ -277,14 +350,20 @@ Result WhatsAppWriter::writeDialogEnd() {
 		return Result(Result::Type::FatalError, _settings.path);
 	}
 
-	const auto name = SanitizeFileName(QString::fromUtf8(_dialog.name));
-	const auto relative = u"chats/"_q + name + u".zip"_q;
-	const auto path = _settings.path + unique(relative);
+	const auto name = SanitizeFileName(
+		QString::fromUtf8(DialogDisplayName(_dialog)));
+	const auto path = UniqueZipPath(
+		_outputPath,
+		u"WhatsApp Chat with "_q + name);
 	auto out = QFile(path);
 	const auto result = _zip->result();
 	if (!out.open(QIODevice::WriteOnly)
 		|| out.write(result) != result.size()) {
 		return Result(Result::Type::FatalError, path);
+	}
+	_lastZipPath = path;
+	if (_stats) {
+		_stats->incrementFiles();
 	}
 
 	_zip.reset();
@@ -298,11 +377,12 @@ Result WhatsAppWriter::writeDialogsEnd() {
 }
 
 Result WhatsAppWriter::finish() {
+	removeWorkFolder();
 	return Result::Success();
 }
 
 QString WhatsAppWriter::mainFilePath() {
-	return _settings.path;
+	return _lastZipPath.isEmpty() ? _outputPath : _lastZipPath;
 }
 
 } // namespace Output

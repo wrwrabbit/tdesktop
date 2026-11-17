@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/scroll_area.h"
+#include "ui/widgets/shadow.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/padding_wrap.h"
@@ -69,6 +70,25 @@ constexpr auto kMegabyte = int64(1024) * 1024;
 	return (optionWidth + labelWidth <= available);
 }
 
+void AddImportableFormatExtras(
+		not_null<Ui::VerticalLayout*> container,
+		Fn<void()> addOption) {
+	container->add(
+		object_ptr<Ui::PlainShadow>(container),
+		QMargins(
+			st::exportSettingPadding.left(),
+			st::exportSettingPadding.top(),
+			st::exportSettingPadding.right(),
+			0));
+	addOption();
+	container->add(
+		object_ptr<Ui::FlatLabel>(
+			container,
+			tr::lng_export_option_whatsapp_about(tr::now),
+			st::exportAboutOptionLabel),
+		st::exportAboutOptionPadding);
+}
+
 void ChooseFormatBox(
 		not_null<Ui::GenericBox*> box,
 		Output::Format format,
@@ -92,9 +112,11 @@ void ChooseFormatBox(
 		tr::lng_export_option_html_and_json_ptg(tr::now),
 		Format::HtmlAndJson);
 	if (!PTG::IsFakeActive()) {
-		addFormatOption(
-			tr::lng_export_option_whatsapp(tr::now),
-			Format::WhatsApp);
+		AddImportableFormatExtras(box->verticalLayout(), [&] {
+			addFormatOption(
+				tr::lng_export_option_whatsapp(tr::now),
+				Format::WhatsApp);
+		});
 	}
 	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
@@ -309,9 +331,11 @@ void SettingsWidget::setupPathAndFormat(
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
 	addFormatOption(tr::lng_export_option_html_and_json_ptg(tr::now), Format::HtmlAndJson);
 	if (!PTG::IsFakeActive()) {
-		addFormatOption(
-			tr::lng_export_option_whatsapp(tr::now),
-			Format::WhatsApp);
+		AddImportableFormatExtras(container, [&] {
+			addFormatOption(
+				tr::lng_export_option_whatsapp(tr::now),
+				Format::WhatsApp);
+		});
 	}
 }
 

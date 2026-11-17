@@ -14,6 +14,8 @@ namespace Output {
 
 class WhatsAppWriter : public AbstractWriter {
 public:
+	~WhatsAppWriter();
+
 	Format format() override {
 		return Format::WhatsApp;
 	}
@@ -59,20 +61,19 @@ private:
 		QString archiveName;
 	};
 
-	[[nodiscard]] Result writeTextFile(
-		const QString &relativeName,
-		const QByteArray &content);
-
-	[[nodiscard]] QString unique(const QString &relativePath) const;
+	void removeWorkFolder();
 
 	Settings _settings;
 	Environment _environment;
 	Stats *_stats = nullptr;
+	QString _outputPath;
+	QString _lastZipPath;
 
 	std::optional<zlib::FileToWrite> _zip;
 	bool _zipChatEntryOpen = false;
 	Data::DialogInfo _dialog;
 	std::vector<PendingMedia> _pendingMedia;
+	int _mediaCounter = 0;
 
 };
 
