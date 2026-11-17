@@ -1108,10 +1108,13 @@ void Filler::addImportChat() {
 	const auto user = peer->asUser();
 	const auto allowed = user
 		? (!user->isSelf() && !user->isBot() && !user->isServiceUser())
-		: (peer->isChat()
-			|| (peer->isMegagroup()
-				&& !peer->isMonoforum()
-				&& !peer->asChannel()->discussionLink()));
+		: peer->isChat()
+		? (peer->asChat()->amCreator() || peer->asChat()->hasAdminRights())
+		: (peer->isMegagroup()
+			&& !peer->isMonoforum()
+			&& !peer->asChannel()->discussionLink()
+			&& (peer->asChannel()->amCreator()
+				|| peer->asChannel()->hasAdminRights()));
 	if (!allowed) {
 		return;
 	}
