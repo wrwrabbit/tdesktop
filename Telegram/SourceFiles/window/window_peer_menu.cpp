@@ -3599,7 +3599,15 @@ void CheckImportedBeforeStart(
 		if (found) {
 			ShowImportRepeatWarning(strong, proceed);
 		} else {
-			proceed();
+			strong->show(Ui::MakeConfirmBox({
+				.text = tr::lng_whatsapp_import_warning_text(),
+				.confirmed = [=](Fn<void()> close) {
+					close();
+					proceed();
+				},
+				.confirmText = tr::lng_whatsapp_import_warning_confirm(),
+				.title = tr::lng_whatsapp_import_warning_title(),
+			}));
 		}
 	}, [=] {
 		closeBox();

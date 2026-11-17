@@ -1997,6 +1997,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_whatsapp_import_progress_speed" = "{speed}/s, about {time} left";
 "lng_whatsapp_import_progress_finishing" = "Finishing the import...";
 "lng_whatsapp_import_cancelled" = "Import cancelled.";
+"lng_whatsapp_import_warning_title" = "Import chat";
+"lng_whatsapp_import_warning_text" = "Imported messages are hard to roll back afterwards. If this chat was imported before, the dates of its messages may change.";
+"lng_whatsapp_import_warning_confirm" = "Continue";
 "lng_whatsapp_import_scanning_title" = "Checking chat";
 "lng_whatsapp_import_scanning" = "Looking for previously imported messages. Checked {done} messages...";
 "lng_whatsapp_import_scan_failed" = "Could not check the chat history for previous imports. Try again later.";
