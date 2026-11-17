@@ -10,6 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "export/output/export_output_html_and_json.h"
 #include "export/output/export_output_html.h"
 #include "export/output/export_output_json.h"
+#include "export/output/export_output_whatsapp.h"
+#include "export/output/export_output_stats.h"
+#include "export/output/export_output_result.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QDate>
@@ -21,6 +24,17 @@ QString NormalizePath(const Settings &settings) {
 	QDir folder(settings.path);
 	const auto path = folder.absolutePath();
 	auto result = path.endsWith('/') ? path : (path + '/');
+	if (settings.format == Format::WhatsApp) {
+		const auto add = [&](int i) {
+			return QString("WhatsAppExport_tmp")
+				+ (i ? QString::number(i) : QString());
+		};
+		auto index = 0;
+		while (QDir(result + add(index)).exists()) {
+			++index;
+		}
+		return result + add(index) + '/';
+	}
 	if (!folder.exists() && !settings.forceSubPath) {
 		return result;
 	}
@@ -50,6 +64,7 @@ std::unique_ptr<AbstractWriter> CreateWriter(Format format) {
 	case Format::Html: return std::make_unique<HtmlWriter>();
 	case Format::Json: return std::make_unique<JsonWriter>();
 	case Format::HtmlAndJson: return std::make_unique<HtmlAndJsonWriter>();
+	case Format::WhatsApp: return std::make_unique<WhatsAppWriter>();
 	}
 	Unexpected("Format in Export::Output::CreateWriter.");
 }

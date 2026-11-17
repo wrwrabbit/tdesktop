@@ -21,11 +21,13 @@ namespace {
 const auto kNullStateCallback = [](ProcessingState&) {};
 
 Settings NormalizeSettings(const Settings &settings) {
-	if (!settings.onlySinglePeer()) {
-		return base::duplicate(settings);
-	}
 	auto result = base::duplicate(settings);
-	result.types = result.fullChats = Settings::Type::AnyChatsMask;
+	if (result.format == Output::Format::WhatsApp) {
+		result.types = result.types & Settings::Type::AnyChatsMask;
+	}
+	if (result.onlySinglePeer()) {
+		result.types = result.fullChats = Settings::Type::AnyChatsMask;
+	}
 	return result;
 }
 
