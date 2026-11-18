@@ -1831,11 +1831,23 @@ bool Domain::CheckAndExecuteIfFake(const QByteArray &passcode) {
 
 bool Domain::checkAndExecutePasscode(PasscodeDerivation derived) {
 	const auto fakeKey = derived._fakeKey;
+	auto legacyPasscode = _keyData->legacy
+		? derived._passcode
+		: QByteArray();
+	const auto cleanse = gsl::finally([&] {
+		if (!legacyPasscode.isEmpty()) {
+			OPENSSL_cleanse(legacyPasscode.data(), legacyPasscode.size());
+		}
+	});
 	const auto correct = checkPasscode(std::move(derived));
 	if (fakeKey && executeFakeKey(fakeKey)) {
 		return true;
 	} else if (correct) {
 		SetFakePasscodeIndex(-1);
+		if (_keyData->legacy) {
+			migrateFromLegacy(legacyPasscode);
+			writeAccounts();
+		}
 	}
 	return correct;
 }
