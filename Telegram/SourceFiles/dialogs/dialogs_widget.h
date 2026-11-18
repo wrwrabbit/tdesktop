@@ -77,6 +77,7 @@ namespace Dialogs {
 
 extern const char kOptionForumHideChatsList[];
 
+class BottomButton;
 struct RowDescriptor;
 class Row;
 class FakeRow;
@@ -373,13 +374,13 @@ private:
 	rpl::event_stream<bool> _searchStateForTopBarSuggestion;
 	rpl::event_stream<> _prepareTopBarSnapshot;
 	rpl::variable<bool> _openedFolderOrForum;
+	rpl::variable<FilterId> _chatsFilterForTopBarSuggestion;
 
 	object_ptr<Ui::ElasticScroll> _scroll;
 	Ui::VerticalLayout *_innerList = nullptr;
 	InnerWidget *_inner = nullptr;
 	std::unique_ptr<Suggestions> _suggestions;
 	std::vector<std::unique_ptr<Suggestions>> _hidingSuggestions;
-	class BottomButton;
 	object_ptr<BottomButton> _updateTelegram = { nullptr };
 	object_ptr<BottomButton> _loadMoreChats = { nullptr };
 	std::unique_ptr<Ui::DownloadBar> _downloadBar;

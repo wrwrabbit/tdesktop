@@ -1994,8 +1994,8 @@ void History::checkLastMessage() {
 
 void History::addItemsToLists(
 		const std::vector<not_null<HistoryItem*>> &items) {
-	std::deque<not_null<UserData*>> *lastAuthors = nullptr;
-	base::flat_set<not_null<PeerData*>> *markupSenders = nullptr;
+	auto lastAuthors = (std::deque<not_null<UserData*>>*)nullptr;
+	auto markupSenders = (base::flat_set<not_null<PeerData*>>*)nullptr;
 	if (peer->isChat()) {
 		lastAuthors = &peer->asChat()->lastAuthors;
 		markupSenders = &peer->asChat()->markupSenders;
@@ -3484,8 +3484,13 @@ bool History::shouldBeInChatList() const {
 			return true;
 		}
 	}
+	const auto last = lastMessage();
 	return !lastMessageKnown()
-		|| (lastMessage() != nullptr);
+		|| (last != nullptr && !isNewPeerMessage(last));
+}
+
+bool History::isNewPeerMessage(not_null<HistoryItem*> item) const {
+	return (item == _newPeerPhotoChange) || (item == _newPeerNameChange);
 }
 
 void History::unknownMessageDeleted(MsgId messageId) {
@@ -4219,6 +4224,7 @@ void History::checkNewPeerMessages() {
 	if (name && !_newPeerNameChange) {
 		_newPeerNameChange = add(tr::lng_new_contact_updated_name, name);
 	}
+	updateChatListExistence();
 }
 
 void History::insertMessageToBlocks(not_null<HistoryItem*> item) {

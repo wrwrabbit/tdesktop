@@ -349,10 +349,11 @@ public:
 	}
 	void sendAction(const SendAction &action);
 	void finishForwarding(const SendAction &action);
-	void forwardMessages(
+	FullMsgId forwardMessages(
 		Data::ResolvedForwardDraft &&draft,
 		SendAction action,
-		FnMut<void()> &&successCallback = nullptr);
+		FnMut<void()> &&successCallback = nullptr,
+		Fn<void(const MessageIdsList&)> sentCallback = nullptr);
 	void shareContact(
 		const QString &phone,
 		const QString &firstName,
@@ -596,10 +597,6 @@ private:
 		PeerId monoforumPeerId,
 		SharedMediaType type,
 		Api::SearchResult &&parsed);
-	void globalMediaDone(
-		SharedMediaType type,
-		FullMsgId messageId,
-		Api::GlobalMediaResult &&parsed);
 
 	void sendSharedContact(
 		const QString &phone,

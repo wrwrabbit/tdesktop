@@ -1,3 +1,20 @@
+7.4.4 (13.11.26)
+
+- Bug fixes and other minor improvements.
+
+7.4.3 (12.11.26)
+
+- Bug fixes and other minor improvements.
+
+7.4.2 (10.11.26)
+
+- Bug fixes and other minor improvements.
+
+7.4.1 (06.11.26)
+
+- Fix crash on launch on some Windows systems.
+- Bug fixes and other minor improvements.
+
 7.4 (05.11.26)
 
 - HTML widgets in bots.

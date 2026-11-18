@@ -345,6 +345,18 @@ void AppendPngChunk(
 		uInt(png.size() - from))));
 }
 
+[[nodiscard]] bool ValidPngDepth(uchar type, uchar depth) {
+	const auto packed = (depth == 1) || (depth == 2) || (depth == 4);
+	switch (type) {
+	case 0: return packed || (depth == 8) || (depth == 16);
+	case 3: return packed || (depth == 8);
+	case 2:
+	case 4:
+	case 6: return (depth == 8) || (depth == 16);
+	}
+	return false;
+}
+
 // The rows before the damage, of a PNG that png_intact_rows() measured.
 [[nodiscard]] QByteArray IntactPng(const QByteArray &bytes, size_t rows) {
 	const auto header = bytes.mid(kPngHeaderOffset, kPngHeaderSize);
@@ -363,10 +375,12 @@ void AppendPngChunk(
 	auto compressed = QByteArray();
 	auto at = qsizetype(kPngSignature.size());
 	while (at + kPngChunkFrame <= bytes.size()) {
-		const auto size = qsizetype(ReadUInt32(bytes, at));
-		if (size > bytes.size() - at - kPngChunkFrame) {
+		const auto length = ReadUInt32(bytes, at);
+		const auto left = bytes.size() - at - kPngChunkFrame;
+		if (uint64(length) > uint64(left)) {
 			break;
 		}
+		const auto size = qsizetype(length);
 		const auto chunk = bytes.mid(at + 4, 4);
 		if (chunk == "IEND") {
 			break;
@@ -460,7 +474,11 @@ void AppendPngChunk(
 	const auto size = QSizeF(
 		ReadUInt32(bytes, kPngHeaderOffset),
 		ReadUInt32(bytes, kPngHeaderOffset + 4));
-	if (!ValidImageSize(size) || (ImageBytes(size) > budget)) {
+	const auto header = bytes.mid(kPngHeaderOffset, kPngHeaderSize);
+	if (!ValidImageSize(size)
+		|| (ImageBytes(size) > budget)
+		|| (header.size() != kPngHeaderSize)
+		|| !ValidPngDepth(uchar(header[9]), uchar(header[8]))) {
 		return {};
 	}
 	auto image = QImage(size.toSize(), QImage::Format_ARGB32_Premultiplied);
