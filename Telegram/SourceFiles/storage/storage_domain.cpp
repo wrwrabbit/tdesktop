@@ -1771,7 +1771,6 @@ void Domain::RemoveFakePasscode(size_t index) {
 	_verificationNonce = 0;
     FAKE_LOG(qsl("Remove passcode %1").arg(index));
     _fakePasscodes.erase(_fakePasscodes.begin() + index);
-    _fakePasscodeKeysEncrypted.erase(_fakePasscodeKeysEncrypted.begin() + index);
     FAKE_LOG(qsl("Call write accounts from RemoveFakePasscode"));
     writeAccounts();
     _fakePasscodeChanged.fire({});
