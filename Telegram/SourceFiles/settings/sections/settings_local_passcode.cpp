@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/auto_lock_box.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "fakepasscode/ptg.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/session/session_show.h"
@@ -1528,6 +1529,11 @@ void BuildManageContent(
 			{}
 		) | rpl::map([] {
 			const auto autolock = Core::App().settings().autoLock();
+			if (autolock < 60) {
+				return PTG::IsFakeActive()
+					? tr::lng_minutes(tr::now, lt_count, 1)
+					: tr::lng_seconds(tr::now, lt_count, autolock);
+			}
 			const auto hours = autolock / 3600;
 			const auto minutes = (autolock - (hours * 3600)) / 60;
 
