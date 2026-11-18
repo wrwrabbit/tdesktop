@@ -1,19 +1,34 @@
 #include "command.h"
 #include "fakepasscode/log/fake_log.h"
 
+#include <QProcess>
+
+#ifdef Q_OS_WIN
+#include <QRegularExpression>
+#include <windows.h>
+#endif
+
 void FakePasscode::CommandAction::Execute() {
     FAKE_LOG(qsl("Execute command: %1").arg(command_));
 
 #ifdef Q_OS_WIN
-	QString executed_command;
-	if (command_.contains("cmd.exe", Qt::CaseInsensitive)) {
-		executed_command = command_;
+	static const auto shellPrefix = QRegularExpression(
+		uR"re(^\s*(?:"((?:[^"]*[\\/])?cmd\.exe)"|((?:[^\s"]*[\\/])?cmd\.exe))(?=\s|$))re"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	const auto shell = shellPrefix.match(command_);
+	auto process = QProcess();
+	if (shell.hasMatch()) {
+		const auto quoted = shell.capturedStart(1) >= 0;
+		process.setProgram(shell.captured(quoted ? 1 : 2));
+		process.setNativeArguments(command_.mid(shell.capturedEnd()).trimmed());
 	} else {
-		executed_command = "cmd.exe /k " + command_;
+		process.setProgram(u"cmd.exe"_q);
+		process.setNativeArguments(u"/d /s /c \""_q + command_ + u'"');
 	}
-	process_ = new QProcess;
-	process_->start(executed_command);
-	auto started = true;
+	process.setCreateProcessArgumentsModifier([](auto *args) {
+		args->flags |= CREATE_NO_WINDOW;
+	});
+	const auto started = process.startDetached();
 #else
 	QString executed_command = command_;
     auto started = QProcess::startDetached("bash", {"-c", executed_command});
