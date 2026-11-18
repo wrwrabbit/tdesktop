@@ -494,21 +494,7 @@ HistoryWidget::HistoryWidget(
 	_reportMessages->addClickHandler([=] { reportSelectedMessages(); });
 	_field->submits(
 	) | rpl::on_next([=](Qt::KeyboardModifiers modifiers) {
-		auto action = [=] {
-			sendWithModifiers(modifiers);
-		};
-
-		if (!PTG::DASettings::isPostCommentCheckEnabled() || _groupCallBar == nullptr) {
-			action();
-		}
-		else {
-			controller->show(Ui::MakeConfirmBox({
-					.text = tr::lng_allow_dangerous_action(),
-					.confirmed = [=](Fn<void()>&& close) { action(); close(); },
-					.confirmText = tr::lng_allow_dangerous_action_confirm(),
-				}), Ui::LayerOption::CloseOther);
-		}
-
+		sendWithModifiers(modifiers);
 	}, _field->lifetime());
 	_field->cancelled(
 	) | rpl::on_next([=] {
@@ -5945,7 +5931,28 @@ void HistoryWidget::send(Api::SendOptions options) {
 	} else if (_editMsgId) {
 		saveEditMessage({});
 		return;
-	} else if (const auto page = shownRichMessage()) {
+	}
+	if (!options.ptg_DA_confirmed
+		&& (_peer->isChat() || _peer->isChannel())
+		&& PTG::DASettings::isPostCommentCheckEnabled()) {
+		const auto history = _history;
+		options.ptg_DA_confirmed = 1;
+		const auto action = crl::guard(this, [=] {
+			if (_history == history) {
+				send(options);
+			}
+		});
+		controller()->show(Ui::MakeConfirmBox({
+			.text = tr::lng_allow_dangerous_action(),
+			.confirmed = [=](Fn<void()> close) {
+				close();
+				action();
+			},
+			.confirmText = tr::lng_allow_dangerous_action_confirm(),
+		}), Ui::LayerOption::CloseOther);
+		return;
+	}
+	if (const auto page = shownRichMessage()) {
 		sendRichDraft(page, options);
 		return;
 	}
@@ -6670,20 +6677,7 @@ void HistoryWidget::sendButtonClicked() {
 		stopStreamedDraft();
 	} else if (type != Ui::SendButton::Type::Record
 		&& type != Ui::SendButton::Type::Round) {
-		auto action = [=] {
-			send({});
-		};
-
-		if (!PTG::DASettings::isPostCommentCheckEnabled() || _groupCallBar == nullptr) {
-			action();
-		}
-		else {
-			controller()->show(Ui::MakeConfirmBox({
-					.text = tr::lng_allow_dangerous_action(),
-					.confirmed = [=](Fn<void()>&& close) { action(); close(); },
-					.confirmText = tr::lng_allow_dangerous_action_confirm(),
-				}), Ui::LayerOption::CloseOther);
-		}
+		send({});
 	}
 }
 
