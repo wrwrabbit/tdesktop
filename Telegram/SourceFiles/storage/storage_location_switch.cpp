@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QThread>
 
 namespace Storage {
@@ -219,6 +220,27 @@ bool ApplyPendingSwitch() {
 
 	const auto sourceTdata = QDir::cleanPath(sourceWorkingDir) + u"/tdata"_q;
 	const auto targetTdata = QDir::cleanPath(targetWorkingDir) + u"/tdata"_q;
+	const auto resolvedPath = [](const QString &path) {
+		const auto info = QFileInfo(path);
+		const auto canonical = info.canonicalFilePath();
+		return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+	};
+	const auto sourcePath = resolvedPath(sourceTdata);
+	const auto targetPath = resolvedPath(targetTdata);
+	const auto sameDirectory = sourcePath.compare(
+		targetPath,
+#ifdef Q_OS_WIN
+		Qt::CaseInsensitive
+#else
+		Qt::CaseSensitive
+#endif
+	) == 0;
+	if (sameDirectory) {
+		QFile::remove(flagPath);
+		cForceWorkingDir(targetWorkingDir);
+		FAKE_LOG(("LocationSwitch: source and target resolve to the same tdata, keeping existing data."));
+		return true;
+	}
 	FAKE_LOG(("LocationSwitch: source='%1' target='%2' sourceTdata='%3' (exists:%4) targetTdata='%5'").arg(
 		sourceWorkingDir, targetWorkingDir,
 		sourceTdata, Logs::b(QDir(sourceTdata).exists()),
