@@ -722,7 +722,7 @@ void LocalPasscodeEnter::setupContent() {
 			local.prepareOpen(utf8),
 			crl::guard(this, [=](Storage::PasscodeDerivation &&derived) {
 				const auto &local = controller()->session().domain().local();
-				if (!local.checkPasscode(std::move(derived))) {
+				if (!local.checkRealOrFakePasscode(std::move(derived))) {
 					setDeriving(false);
 					cSetPasscodeBadTries(cPasscodeBadTries() + 1);
 					cSetPasscodeLastTry(crl::now());

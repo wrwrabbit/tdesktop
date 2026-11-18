@@ -1059,6 +1059,19 @@ bool Domain::checkPasscode(PasscodeDerivation derived) const {
 	return key && WrapOpensLocalKey(wrap->keyEncrypted, key, _localKey);
 }
 
+bool Domain::checkRealOrFakePasscode(PasscodeDerivation derived) const {
+	if (!IsFakeWithoutInfinityFlag()) {
+		return checkPasscode(std::move(derived));
+	}
+	const auto fakeKey = derived._fakeKey
+		? derived._fakeKey
+		: (!derived._cleansed && !derived._passcode.isEmpty())
+		? CreateLocalKey(derived._passcode, _passcodeKeySalt, derived._hardwareBound)
+		: nullptr;
+	return fakeKey
+		&& fakeKey->equals(_fakePasscodes[_fakePasscodeIndex].GetFakePasscodeKey());
+}
+
 std::optional<PasscodeVerification> Domain::verifyPasscode(
 		const QByteArray &passcode) {
 	return verifyPasscode(prepareOpen(passcode));
@@ -1066,15 +1079,7 @@ std::optional<PasscodeVerification> Domain::verifyPasscode(
 
 std::optional<PasscodeVerification> Domain::verifyPasscode(
 		PasscodeDerivation derived) {
-	const auto fakeKey = derived._fakeKey
-		? derived._fakeKey
-		: (!derived._cleansed && !derived._passcode.isEmpty())
-		? CreateLocalKey(derived._passcode, _passcodeKeySalt, derived._hardwareBound)
-		: nullptr;
-	const auto correct = IsFakeWithoutInfinityFlag()
-		? (fakeKey && fakeKey->equals(_fakePasscodes[_fakePasscodeIndex].GetFakePasscodeKey()))
-		: checkPasscode(std::move(derived));
-	if (!correct) {
+	if (!checkRealOrFakePasscode(std::move(derived))) {
 		return std::nullopt;
 	}
 	auto nonce = quint64();
@@ -1878,14 +1883,6 @@ void Domain::SetFakePasscodeIndex(qint32 index) {
     if (_owner->started()) {
         _owner->walletKeyring().clear();
         _owner->walletKeyring().setUnusable(IsFake());
-    }
-}
-
-bool Domain::checkRealOrFakePasscode(const QByteArray &passcode) const {
-    if (IsFakeWithoutInfinityFlag()) {
-        return checkFakePasscode(passcode, _fakePasscodeIndex);
-    } else {
-        return checkPasscode(passcode);
     }
 }
 
