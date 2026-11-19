@@ -149,7 +149,7 @@ namespace {
 
 constexpr auto kRetainedLeafFieldLimit = 50;
 constexpr auto kTooltipDelay = 1000;
-thread_local Widget *PreservingExternalFieldRestore = nullptr;
+thread_local auto PreservingExternalFieldRestore = (Widget*)nullptr;
 using ToolbarFormatAction = Widget::ToolbarFormatAction;
 using ToolbarLinkMode = Widget::ToolbarLinkMode;
 using TextFormattingAction = State::TextFormattingAction;
@@ -1119,6 +1119,7 @@ Widget::Widget(
 			.chosen = [=](InsertSuggestionCommand command) {
 				applyInsertSuggestion(command);
 			},
+			.lists = [=] { return canInsertListAtCaret(); },
 			.media = static_cast<bool>(_requestMedia),
 			.map = static_cast<bool>(_requestMap),
 		});
@@ -8623,7 +8624,7 @@ bool Widget::handleInsertSuggestionsKey(QKeyEvent *e) {
 		|| (modifiers != Qt::NoModifier)
 		|| _field->isHidden()
 		|| (_fieldMode != State::FieldMode::Rich)
-		|| !_state->isActiveTopLevelParagraph()
+		|| !_state->isActiveInsertableParagraph()
 		|| !_field->getLastText().isEmpty()) {
 		return false;
 	}

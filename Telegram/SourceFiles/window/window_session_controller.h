@@ -112,6 +112,7 @@ using GifPauseReasons = ChatHelpers::PauseReasons;
 
 class SectionMemento;
 class SectionWidget;
+class Columns;
 class Controller;
 class FiltersMenu;
 class ChatPreviewManager;
@@ -381,6 +382,7 @@ private:
 	void joinVoiceChatFromLink(
 		not_null<PeerData*> peer,
 		const PeerByLinkInfo &info);
+	void openBotMenuApp(not_null<UserData*> bot);
 
 	void applyBoost(
 		not_null<ChannelData*> channel,
@@ -399,6 +401,7 @@ private:
 	QString _contactToken;
 	Fn<void(not_null<PeerData*>)> _contactTokenDone;
 	PeerData *_waitingDirectChannel = nullptr;
+	UserData *_waitingBotMenuApp = nullptr;
 
 	History *_showingRepliesHistory = nullptr;
 	MsgId _showingRepliesRootId = 0;
@@ -434,6 +437,7 @@ public:
 	[[nodiscard]] rpl::producer<> imeCompositionStarts() const;
 	[[nodiscard]] not_null<MainWidget*> content() const;
 	[[nodiscard]] Adaptive &adaptive() const;
+	[[nodiscard]] Columns &columns() const;
 	[[nodiscard]] ChatHelpers::EmojiInteractions &emojiInteractions() const {
 		return *_emojiInteractions;
 	}
@@ -866,6 +870,7 @@ private:
 	std::deque<ChatEntryHistoryItem> _chatEntryHistory;
 	int _chatEntryHistoryPosition = -1;
 	bool _filtersActivated = false;
+	bool _extendingForThirdSection = false;
 
 	rpl::variable<Dialogs::EntryState> _dialogsEntryState;
 	// A topic or sublist can be freed without a destroyed() event.

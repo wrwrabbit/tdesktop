@@ -199,6 +199,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "webrtc/webrtc_environment.h"
 #include "window/notifications_manager.h"
 #include "window/window_adaptive.h"
+#include "window/window_columns.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
 #include "window/window_slide_animation.h"
@@ -4035,17 +4036,21 @@ bool HistoryWidget::updateReplaceMediaButton() {
 	const auto hideDuration = st::historyReplaceMedia.ripple.hideDuration;
 	_replaceMedia->setClickedCallback([=] {
 		base::call_delayed(hideDuration, this, [=] {
-			EditCaptionBox::StartMediaReplace(
-				controller(),
-				{ _history->peer->id, _editMsgId },
-				_field->getTextWithTags(),
-				suggestOptions(),
-				_mediaEditManager.spoilered(),
-				_mediaEditManager.invertCaption(),
-				crl::guard(_list, [=] { cancelEdit(); }));
+			startMediaReplace();
 		});
 	});
 	return true;
+}
+
+void HistoryWidget::startMediaReplace() {
+	EditCaptionBox::StartMediaReplace(
+		controller(),
+		{ _history->peer->id, _editMsgId },
+		_field->getTextWithTags(),
+		suggestOptions(),
+		_mediaEditManager.spoilered(),
+		_mediaEditManager.invertCaption(),
+		crl::guard(_list, [=] { cancelEdit(); }));
 }
 
 void HistoryWidget::updateFieldSubmitSettings() {
@@ -6612,7 +6617,11 @@ void HistoryWidget::finishAnimating() {
 void HistoryWidget::chooseAttach(
 		std::optional<bool> overrideSendImagesAsPhotos) {
 	if (_editMsgId) {
-		controller()->showToast(tr::lng_edit_caption_attach(tr::now));
+		if (_replaceMedia) {
+			startMediaReplace();
+		} else {
+			controller()->showToast(tr::lng_edit_caption_attach(tr::now));
+		}
 		return;
 	}
 
@@ -7464,11 +7473,11 @@ bool HistoryWidget::pushTabbedSelectorToThirdSection(
 	} else if (!Data::CanSendAnyOf(
 			thread,
 			Data::TabbedPanelSendRestrictions())) {
-		Core::App().settings().setTabbedReplacedWithInfo(true);
+		controller()->columns().setTabbedReplacedWithInfo(true);
 		controller()->showPeerInfo(thread, params.withThirdColumn());
 		return false;
 	}
-	Core::App().settings().setTabbedReplacedWithInfo(false);
+	controller()->columns().setTabbedReplacedWithInfo(false);
 	controller()->resizeForThirdSection();
 	controller()->showSection(
 		std::make_shared<ChatHelpers::TabbedMemento>(),
@@ -7517,7 +7526,7 @@ void HistoryWidget::toggleTabbedSelectorMode() {
 	if (_tabbedPanel) {
 		if (controller()->canShowThirdSection()
 			&& !controller()->adaptive().isOneColumn()) {
-			Core::App().settings().setTabbedSelectorSectionEnabled(true);
+			controller()->columns().setTabbedSelectorSectionEnabled(true);
 			Core::App().saveSettingsDelayed();
 			pushTabbedSelectorToThirdSection(
 				_history,
@@ -10743,25 +10752,6 @@ void HistoryWidget::processReply() {
 			_processingReplyTo.messageId.msg,
 			processContinue());
 		return;
-#if 0 // Now we can "reply" to old legacy group messages.
-	} else if (_processingReplyItem->history() == _migrated) {
-		if (_processingReplyItem->isService()) {
-			controller()->showToast(tr::lng_reply_cant(tr::now));
-		} else {
-			const auto itemId = _processingReplyItem->fullId();
-			controller()->show(
-				Ui::MakeConfirmBox({
-					.text = tr::lng_reply_cant_forward(),
-					.confirmed = crl::guard(this, [=] {
-						controller()->content()->setForwardDraft(
-							_history,
-							{ .ids = { 1, itemId } });
-					}),
-					.confirmText = tr::lng_selected_forward(),
-				}));
-		}
-		return processCancel();
-#endif
 	} else if (!_processingReplyItem->isRegular()
 		&& !CanReplyToEphemeral(_processingReplyItem)) {
 		return processCancel();

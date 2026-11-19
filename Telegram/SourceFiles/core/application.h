@@ -173,8 +173,9 @@ public:
 
 	// Windows interface.
 	bool hasActiveWindow(not_null<Main::Session*> session) const;
-	[[nodiscard]] bool savingPositionFor(
+	[[nodiscard]] bool isWindowInSettings(
 		not_null<Window::Controller*> window) const;
+	void reseedWindowInSettings();
 	[[nodiscard]] Window::Controller *findWindow(
 		not_null<QWidget*> widget) const;
 	[[nodiscard]] Window::Controller *activeWindow() const;
@@ -400,6 +401,9 @@ private:
 	void createTray();
 	void updateWindowTitles();
 	void setLastActiveWindow(Window::Controller *window);
+	void setWindowInSettings(Window::Controller *window);
+	[[nodiscard]] Window::Controller *nextPrimaryWindow(
+		not_null<Window::Controller*> closing) const;
 	void showAccount(not_null<Main::Account*> account);
 	void processCreatedWindow(not_null<Window::Controller*> window);
 	void refreshApplicationIcon(Main::Session *session);
