@@ -154,6 +154,7 @@ public:
 	[[nodiscard]] PasscodeDerivation prepareNewWrap(
 		const QByteArray &passcode) const;
 	[[nodiscard]] bool checkPasscode(PasscodeDerivation derived) const;
+	[[nodiscard]] bool checkRealOrFakePasscode(PasscodeDerivation derived) const;
 	[[nodiscard]] std::optional<PasscodeVerification> verifyPasscode(
 		const QByteArray &passcode);
 	[[nodiscard]] std::optional<PasscodeVerification> verifyPasscode(
@@ -192,7 +193,6 @@ public:
 
 	[[nodiscard]] bool checkPasscode(const QByteArray &passcode) const;
 	[[nodiscard]] bool checkFakePasscode(const QByteArray &passcode, size_t fakeIndex) const;
-	[[nodiscard]] bool checkRealOrFakePasscode(const QByteArray &passcode) const;
 	[[nodiscard]] bool checkAndExecutePasscode(PasscodeDerivation derived);
 	void setPasscode(const QByteArray &passcode);
 	void finishPasscodeUnlock();

@@ -2681,22 +2681,21 @@ void ChatWidget::sendTextWithTags(
 		}
 	}
 
-	// Check PTG DA
-	if (!options.ptg_DA_confirmed 
+	if (!options.ptg_DA_confirmed
+		&& (_peer->isChat() || _peer->isChannel())
 		&& PTG::DASettings::isPostCommentCheckEnabled()) {
-		const auto withDAApproved = [=]() {
-			auto copy = options;
-			copy.ptg_DA_confirmed = 1;
-			send(copy);
-		};
+		options.ptg_DA_confirmed = 1;
+		const auto action = crl::guard(this, [=] {
+			sendTextWithTags(textWithTags, useCurrentWebPageDraft, options, done);
+		});
 		controller()->show(Ui::MakeConfirmBox({
-				.text = tr::lng_allow_dangerous_action(),
-				.confirmed = [withDAApproved = withDAApproved](Fn<void()>&& close) mutable {
-					withDAApproved();
-					close();
-				},
-				.confirmText = tr::lng_allow_dangerous_action_confirm(),
-			}), Ui::LayerOption::CloseOther);
+			.text = tr::lng_allow_dangerous_action(),
+			.confirmed = [=](Fn<void()> close) {
+				close();
+				action();
+			},
+			.confirmText = tr::lng_allow_dangerous_action_confirm(),
+		}), Ui::LayerOption::CloseOther);
 		return;
 	}
 
@@ -2997,9 +2996,23 @@ void ChatWidget::sendBotStartCommand() {
 		updateControlsVisibility();
 		return;
 	}
-	session().api().sendBotStart(controller()->uiShow(), _peer->asUser());
-	updateControlsVisibility();
-	updateControlsGeometry();
+	const auto action = crl::guard(this, [=] {
+		session().api().sendBotStart(controller()->uiShow(), _peer->asUser());
+		updateControlsVisibility();
+		updateControlsGeometry();
+	});
+	if (PTG::DASettings::isStartBotCheckEnabled()) {
+		controller()->show(Ui::MakeConfirmBox({
+			.text = tr::lng_allow_dangerous_action(),
+			.confirmed = [=](Fn<void()> close) {
+				close();
+				action();
+			},
+			.confirmText = tr::lng_allow_dangerous_action_confirm(),
+		}), Ui::LayerOption::CloseOther);
+		return;
+	}
+	action();
 }
 
 bool ChatWidget::clearMaybeSendStart() {

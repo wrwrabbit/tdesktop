@@ -15,23 +15,55 @@
 
 using namespace FakePasscode;
 
+namespace {
+
+void LoadBlockedUsers(
+		not_null<Main::Session*> session,
+		int offset = 0,
+		std::vector<PeerId> peers = {}) {
+	FAKE_CRITICAL_REQUEST(session) session->api().request(MTPcontacts_GetBlocked(
+		MTP_flags(0),
+		MTP_int(offset),
+		MTP_int(100)
+	)).done([=](const MTPcontacts_Blocked &result) mutable {
+		auto total = 0;
+		auto received = 0;
+		result.match([&](const auto &data) {
+			session->data().processUsers(data.vusers());
+			session->data().processChats(data.vchats());
+			for (const auto &blocked : data.vblocked().v) {
+				blocked.match([&](const MTPDpeerBlocked &item) {
+					peers.push_back(peerFromMTP(item.vpeer_id()));
+				});
+			}
+			received = int(data.vblocked().v.size());
+		});
+		result.match([&](const MTPDcontacts_blockedSlice &data) {
+			total = data.vcount().v;
+		}, [&](const MTPDcontacts_blocked &) {
+			total = offset + received;
+		});
+		if (received && offset + received < total) {
+			LoadBlockedUsers(session, offset + received, std::move(peers));
+			return;
+		}
+		for (const auto id : peers) {
+			session->api().blockedPeers().unblock(
+				session->data().peer(id),
+				nullptr,
+				true);
+		}
+	}).fail([] {
+		FAKE_LOG(qsl("Could not load blocked users for unblock action."));
+	}).send();
+}
+
+} // namespace
+
 void UnblockUsersAction::ExecuteAccountAction(int index, Main::Account* account, const ToggleAction&) {
     FAKE_LOG(qsl("Executing UnblockUsersAction on account %1.").arg(index));
 
-    auto& data_session = account->maybeSession()->data();
-    auto& api = account->session().api();
-    auto& blockedPeers = api.blockedPeers();
-
-    auto subscription = blockedPeers.slice()
-        | rpl::on_next([&](const Api::BlockedPeers::Slice& slice) {
-        for (const auto& item : slice.list) {
-            auto userId = item.id;
-
-            auto peer = data_session.peer(userId);
-            api.blockedPeers().unblock(peer);
-
-        }
-    });
+	LoadBlockedUsers(&account->session());
 }
 
 ActionType UnblockUsersAction::GetType() const {
