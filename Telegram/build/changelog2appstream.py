@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import sys
+sys.exit(0)
+
 import re
 import datetime
 from xml.etree import ElementTree as ET
