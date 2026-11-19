@@ -53,9 +53,21 @@ jobs:
         shell: cmd
 
     steps:
+      - name: Free space on the runner.
+        shell: pwsh
+        run: |
+          $drive = $env:SystemDrive.TrimEnd(':')
+          Get-PSDrive -Name $drive
+          if ($env:ANDROID_HOME -and (Test-Path -LiteralPath $env:ANDROID_HOME)) {
+            Remove-Item -LiteralPath $env:ANDROID_HOME -Recurse -Force -ErrorAction Continue
+          }
+          Get-PSDrive -Name $drive
+
       - name: Prepare directories.
         run: |
           mkdir %userprofile%\TBuild\Libraries
+          compact.exe /c /s:"%USERPROFILE%\TBuild" /q
+          if errorlevel 1 echo ::warning::Could not enable NTFS compression for TBuild.
           mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
           echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
@@ -78,6 +90,12 @@ jobs:
           echo "SDK=$SDK" >> $GITHUB_ENV
 
           sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          cat > "$RUNNER_TEMP/windows-ci.cmake" <<'EOF'
+          if (CMAKE_VERSION VERSION_GREATER_EQUAL 4.5)
+              cmake_diagnostic(SET CMD_NON_TARGET_DIRECTIVE WARN)
+          endif()
+          EOF
 
           echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
           echo "$SDK" >> CACHE_KEY.txt
@@ -286,8 +304,12 @@ jobs:
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
+        env:
+          UseMultiToolTask: 'true'
+          EnforceProcessCountAcrossBuilds: 'true'
+          MultiProcMaxCount: '2'
         run: |
-          cd %TBUILD%\%REPO_NAME%\Telegram
+          cd /d "%TBUILD%\%REPO_NAME%\Telegram" || exit /b 1
 
           call configure.bat ^
           %TDESKTOP_BUILD_GENERATOR% ^
@@ -297,12 +319,19 @@ jobs:
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D "CMAKE_PROJECT_TOP_LEVEL_INCLUDES:FILEPATH=%RUNNER_TEMP%\windows-ci.cmake" ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
-          -D DESKTOP_APP_NO_PDB=ON ^
+          -D DESKTOP_APP_ENABLE_LTO=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
-          %TDESKTOP_BUILD_DEFINE%
-          
-          cmake --build ..\out --config Debug --parallel
+          %TDESKTOP_BUILD_DEFINE% || exit /b 1
+
+          set "_LINK_=/DEBUG:NONE"
+          cmake --build ..\out --config Debug --target Telegram --parallel 2
+
+      - name: Report free disk space on failure.
+        if: failure()
+        shell: pwsh
+        run: Get-PSDrive -Name $env:SystemDrive.TrimEnd(':')
 
       - name: Verify installer build.
         if: env.ONLY_CACHE == 'false' && matrix.arch != 'arm64'
